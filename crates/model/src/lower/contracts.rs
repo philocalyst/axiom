@@ -13,9 +13,10 @@ use crate::book::{
     TemplateProgram, TemplateQuantity, Terms, TermsState,
 };
 use crate::declare::World;
-use crate::errors::{Word, duplicate};
+use crate::errors::Word;
 use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
+use crate::problem::{Noun, Problem, Twice};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -47,12 +48,8 @@ pub(crate) fn contracts<'a, 's>(
             let node = &file[reference];
             let name = world.book.names.intern(node.name.0);
             if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
-                diags.push(duplicate(
-                    "contract",
-                    Word::of(file, node.name.0),
-                    Some(world.book.contracts[first].loc),
-                    None,
-                ));
+                let (word, first) = (Word::of(file, node.name.0), Some(world.book.contracts[first].loc));
+                diags.push(Problem::Duplicate { noun: Noun::Contract, word, first }.diagnostic());
                 continue;
             }
             let id = world.book.contracts.push(empty_contract(name, item.loc, world.book.roots.me));
@@ -270,11 +267,7 @@ fn contract_loan<'s>(
         return Some(None);
     };
     if let Some(duplicate) = written.next() {
-        diags.push(
-            Diagnostic::error("duplicate-contract-loan", "a contract has one loan definition")
-                .label(duplicate.loc, "a second loan cannot replace the first")
-                .context(prop.loc, "the first loan is here"),
-        );
+        diags.push(Problem::Twice { what: Twice::ContractLoan, again: duplicate.loc, first: prop.loc }.diagnostic());
         return None;
     }
 
@@ -402,11 +395,7 @@ fn contract_loan<'s>(
         match nested.name.0 {
             "prepay" => {
                 if let Some(first) = prepay_loc {
-                    diags.push(
-                        Diagnostic::error("duplicate-loan-prepay", "a loan has one prepayment rule")
-                            .label(nested.loc, "a second rule cannot replace the first")
-                            .context(first, "the first rule is here"),
-                    );
+                    diags.push(Problem::Twice { what: Twice::LoanPrepay, again: nested.loc, first }.diagnostic());
                     return None;
                 }
                 prepay_loc = Some(nested.loc);
@@ -451,11 +440,7 @@ fn loan_resets<'s>(
         return Some(None);
     };
     if let Some(second) = resets.next() {
-        diags.push(
-            Diagnostic::error("duplicate-loan-resets", "a loan has one reset rule")
-                .label(second.0.loc, "a second reset cannot replace the first")
-                .context(first.0.loc, "the first reset is here"),
-        );
+        diags.push(Problem::Twice { what: Twice::LoanResets, again: second.0.loc, first: first.0.loc }.diagnostic());
         return None;
     }
 
@@ -1071,11 +1056,7 @@ fn contract_days(
             _ => continue,
         };
         if let Some(previous) = seen.insert(prop.name.0, prop.loc) {
-            diags.push(
-                Diagnostic::error("duplicate-contract-date", "a contract date is written twice")
-                    .label(prop.loc, "written again here")
-                    .context(previous, "first written here"),
-            );
+            diags.push(Problem::Twice { what: Twice::ContractDate, again: prop.loc, first: previous }.diagnostic());
             valid = false;
             continue;
         }
@@ -1164,11 +1145,7 @@ fn grace_property(
         return Some(None);
     };
     if let Some(second) = written.next() {
-        diags.push(
-            Diagnostic::error("duplicate-contract-grace", "a contract has one grace interval")
-                .label(second.loc, "a second interval cannot replace the first")
-                .context(first.loc, "the first interval is here"),
-        );
+        diags.push(Problem::Twice { what: Twice::ContractGrace, again: second.loc, first: first.loc }.diagnostic());
         return None;
     }
     let span = span_property(file, props, "grace", diags)?;
@@ -1336,11 +1313,7 @@ fn contract_area<'s>(
             continue;
         }
         if let Some(first) = first_loc {
-            diags.push(
-                Diagnostic::error("contract-area-duplicate", "a contract's area is declared twice")
-                    .label(prop.loc, "remove this repeated area")
-                    .context(first, "the first area is here"),
-            );
+            diags.push(Problem::Twice { what: Twice::ContractArea, again: prop.loc, first }.diagnostic());
             return Err(());
         }
         first_loc = Some(prop.loc);
@@ -1416,11 +1389,7 @@ fn contract_deposit<'s>(
             continue;
         }
         if let Some(first) = first_loc {
-            diags.push(
-                Diagnostic::error("contract-deposit-duplicate", "a contract has one deposit")
-                    .label(prop.loc, "remove this repeated deposit")
-                    .context(first, "the first deposit is here"),
-            );
+            diags.push(Problem::Twice { what: Twice::ContractDeposit, again: prop.loc, first }.diagnostic());
             return Err(());
         }
         first_loc = Some(prop.loc);

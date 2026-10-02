@@ -11,9 +11,10 @@ use axiom_syntax::{ExprKind, File, ItemKind, Key, Param as Written, ParamRow as 
 
 use crate::book::{Param, ParamRow};
 use crate::declare::World;
-use crate::errors::{Word, article, duplicate};
+use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
 use crate::names::Scoped;
+use crate::problem::{Noun, Problem};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -51,7 +52,8 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
             let sym = world.book.names.intern(name);
             let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
             if let Some((_, first)) = earlier {
-                diags.push(duplicate("param", Word::of(file, name), Some(first.loc), None));
+                let (word, first) = (Word::of(file, name), Some(first.loc));
+                diags.push(Problem::Duplicate { noun: Noun::Param, word, first }.diagnostic());
                 continue;
             }
 

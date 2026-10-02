@@ -8,9 +8,10 @@ use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
 use axiom_syntax::{DeclKind, ExprKind, ItemKind};
 
 use crate::book::{At, Kind, Purpose, PurposeRoot, System};
-use crate::errors::{Word, duplicate, unknown};
+use crate::errors::Word;
 use crate::kinds;
 use crate::names::Scoped;
+use crate::problem::{Noun, Problem, Reads, unresolved};
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
 
@@ -76,12 +77,8 @@ pub(crate) fn declare_sites<'a, 's>(
                 continue;
             }
             if let Some(&first) = seen.get(&(site.home, text)) {
-                diags.push(duplicate(
-                    "purpose",
-                    Word::of(file, text),
-                    drafts.get(first).and_then(|purpose| purpose.loc),
-                    None,
-                ));
+                let (word, earlier) = (Word::of(file, text), drafts.get(first).and_then(|purpose| purpose.loc));
+                diags.push(Problem::Duplicate { noun: Noun::Purpose, word, first: earlier }.diagnostic());
                 draft_of.push(first);
                 continue;
             }
@@ -132,21 +129,10 @@ pub(crate) fn declare_sites<'a, 's>(
         let scope = scopes.of(*home);
         match index.resolve(names, scope, parent.0) {
             Ok(parent_id) => parents[child] = Some(parent_id.index()),
-            Err(axion_miss) => {
-                let diagnostic = match axion_miss {
-                    crate::book::Miss::Unknown { suggestion } => unknown(
-                        "unknown-purpose",
-                        "purpose",
-                        Word::of(file, parent.0),
-                        suggestion.map(|sym| names.name(sym)),
-                    ),
-                    crate::book::Miss::Ambiguous(ids) => {
-                        let candidates: Vec<_> = ids.iter().map(|id| names.name(drafts[id.index()].name)).collect();
-                        Diagnostic::error("ambiguous-purpose", format!("purpose `{}` is ambiguous", parent.0))
-                            .label(file.loc(parent.0), format!("could name {}", candidates.join(" or ")))
-                    }
-                };
-                diags.push(diagnostic);
+            Err(miss) => {
+                let describe = |id: Id<Purpose>| names.name(drafts[id.index()].name).to_string();
+                let word = Word::of(file, parent.0);
+                diags.push(unresolved(miss, Noun::Purpose, word, names, Reads::Name, describe));
                 parents[child] = Some(root_ids[3].index());
             }
         }

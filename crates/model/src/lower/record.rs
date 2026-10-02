@@ -20,6 +20,7 @@ use crate::journal::{
     WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
+use crate::problem::{CodeUse, Problem, Twice};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -111,69 +112,25 @@ impl CodeIndex {
         }
     }
 
+    /// The transaction `code` names, or why it names none, said the way `used` asks.
     fn resolve<'s>(
         &self,
         world: &mut World<'s>,
         code: ast::Code<'s>,
-        loc: Loc,
+        at: Loc,
+        used: CodeUse,
         diags: &mut Vec<Diagnostic>,
     ) -> Option<Id<Txn>> {
         let symbol = world.book.names.intern(code.name());
-        match self.by_code.get(&symbol).copied() {
-            Some(CodeTarget::Unique { txn, .. }) => Some(txn),
+        let problem = match self.by_code.get(&symbol).copied() {
+            Some(CodeTarget::Unique { txn, .. }) => return Some(txn),
             Some(CodeTarget::Ambiguous { first, second }) => {
-                diags.push(
-                    Diagnostic::error("ambiguous-against", "this code names more than one earlier transaction")
-                        .label(loc, format!("`{}` is not a unique transaction reference", code.name()))
-                        .label(first, "one matching transaction is here")
-                        .label(second, "another matching transaction is here")
-                        .help("give the original transaction a code used nowhere else"),
-                );
-                None
+                Problem::AmbiguousCode { used, code: code.name(), at, first, second }
             }
-            None => {
-                diags.push(
-                    Diagnostic::error("unknown-against", "this code names no earlier transaction")
-                        .label(loc, format!("`{}` has not named a transaction yet", code.name()))
-                        .help("put this code on an earlier transaction or one of its flows"),
-                );
-                None
-            }
-        }
-    }
-
-    fn resolve_claim<'s>(
-        &self,
-        world: &mut World<'s>,
-        code: ast::Code<'s>,
-        loc: Loc,
-        diags: &mut Vec<Diagnostic>,
-    ) -> Option<Id<Txn>> {
-        let symbol = world.book.names.intern(code.name());
-        match self.by_code.get(&symbol).copied() {
-            Some(CodeTarget::Unique { txn, .. }) => Some(txn),
-            Some(CodeTarget::Ambiguous { first, second }) => {
-                diags.push(
-                    Diagnostic::error(
-                        "ambiguous-claim-reference",
-                        "this code identifies more than one earlier transaction",
-                    )
-                    .label(loc, "a claim waiver must identify one source transaction")
-                    .label(first, "one matching transaction is here")
-                    .label(second, "another matching transaction is here")
-                    .help("use a code that appears on only one earlier transaction"),
-                );
-                None
-            }
-            None => {
-                diags.push(
-                    Diagnostic::error("unknown-claim-reference", "this code identifies no earlier claim transaction")
-                        .label(loc, "no prior transaction has this code")
-                        .help("put the code on the earlier `owes` transaction"),
-                );
-                None
-            }
-        }
+            None => Problem::UnknownCode { used, code: code.name(), at },
+        };
+        diags.push(problem.diagnostic());
+        None
     }
 }
 
@@ -871,11 +828,8 @@ fn lower_occurrence<'a, 's>(
         let input = inputs.iter().position(|input| staged.book.name(input.name) == leg.end.name.0);
         if let Some(input_at) = input {
             if bound[input_at] {
-                diags.push(
-                    Diagnostic::error("contract-input-duplicate", "this contract input is supplied twice")
-                        .label(leg.loc, "remove the repeated binding")
-                        .context(inputs[input_at].loc, "the input is declared here"),
-                );
+                let first = inputs[input_at].loc;
+                diags.push(Problem::Twice { what: Twice::ContractInput, again: leg.loc, first }.diagnostic());
                 continue;
             }
             if !file[leg.tail].is_empty() {
@@ -967,11 +921,8 @@ fn lower_occurrence<'a, 's>(
         let (template_at, template_leg) = match matching {
             Some((template_at, leg_at)) => {
                 if replaced_legs.contains(&(template_at, leg_at)) {
-                    diags.push(
-                        Diagnostic::error("contract-occurrence-leg-duplicate", "this template leg is overridden twice")
-                            .label(leg.loc, "keep one replacement for this end")
-                            .context(templates[template_at].legs[leg_at].flow.loc, "the template leg is declared here"),
-                    );
+                    let first = templates[template_at].legs[leg_at].flow.loc;
+                    diags.push(Problem::Twice { what: Twice::TemplateLeg, again: leg.loc, first }.diagnostic());
                     continue;
                 }
                 replaced_legs.push((template_at, leg_at));
@@ -985,9 +936,7 @@ fn lower_occurrence<'a, 's>(
                 // remainder.
                 if let Some((_, first_loc)) = added_ends.iter().find(|(place, _)| *place == endpoint.place) {
                     diags.push(
-                        Diagnostic::error("contract-occurrence-leg-duplicate", "this additional end is written twice")
-                            .label(leg.loc, "keep one replacement for this end")
-                            .context(*first_loc, "the first replacement is here"),
+                        Problem::Twice { what: Twice::AdditionalEnd, again: leg.loc, first: *first_loc }.diagnostic(),
                     );
                     continue;
                 }
@@ -2074,7 +2023,7 @@ fn lower_claim_change<'a, 's>(
     }
 
     let reference_loc = file.loc(code.name());
-    let Some(target) = code_index.resolve_claim(world, code, reference_loc, diags) else {
+    let Some(target) = code_index.resolve(world, code, reference_loc, CodeUse::ClaimWaiver, diags) else {
         return;
     };
     let source = &world.book.txns[target];
@@ -2571,7 +2520,7 @@ fn lower_measure<'s>(
             }
             ClauseKind::Code(code) => codes.push(world.book.names.intern(code.name())),
             ClauseKind::Against(code) => {
-                against = code_index.resolve(world, code, clause.at, diags);
+                against = code_index.resolve(world, code, clause.at, CodeUse::Against, diags);
             }
             _ => diags.push(
                 Diagnostic::error("measure-tail", "this tail clause does not apply to a measure")
@@ -3248,7 +3197,7 @@ fn lower_tail<'s>(
             }
             ClauseKind::Since(day) => tail.detail.since = Some(day),
             ClauseKind::Against(code) => {
-                tail.detail.against = code_index.resolve(world, code, clause.at, diags);
+                tail.detail.against = code_index.resolve(world, code, clause.at, CodeUse::Against, diags);
                 tail.valid &= tail.detail.against.is_some();
             }
             ClauseKind::Until(_) => {

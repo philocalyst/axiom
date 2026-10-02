@@ -2,12 +2,14 @@
 //! runtime. The parser owns surface syntax; this module owns only name binding
 //! and lowering into `sync::{Format,Pattern,CodeRule,Source}`.
 
+use axiom_core::diag::closest;
 use axiom_core::{DateLayout, Diagnostic, Id, Interner, Loc, Map, Sym};
 use axiom_syntax as ast;
 
 use crate::book::{Book, CodeRule, CodeScope, Role};
 use crate::declare::World;
 use crate::errors::Word;
+use crate::problem::{Noun, Problem};
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
 use crate::sync::{
@@ -47,10 +49,10 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
             let source = &file[id];
             let name = world.book.names.intern(source.name.0);
             if let Some(first) = by_name.get(&(site.home, name)) {
+                let word = Word::of(file, source.name.0);
                 diags.push(
-                    Diagnostic::error("duplicate-pattern", format!("pattern `{}` is declared twice", source.name.0))
-                        .label(file.loc(source.name.0), "declared again here")
-                        .context(first.loc, "first declared here"),
+                    Problem::DeclaredTwice { noun: Noun::Pattern, word, first: Some(first.loc), advice: None }
+                        .diagnostic(),
                 );
                 continue;
             }
@@ -175,11 +177,12 @@ fn resolve_named(
 ) -> Result<Id<Pattern>, Diagnostic> {
     let scope = scopes.of(from);
     let Some(sym) = names.get(name.0) else {
-        let suggestion = axiom_core::diag::closest(
-            name.0,
-            named.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
+        let visible =
+            named.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name));
+        let nearest = closest(name.0, visible);
+        return Err(
+            Problem::Unknown { noun: Noun::Pattern, word: Word::of(file, name.0), nearest, unused: &[] }.diagnostic()
         );
-        return Err(crate::errors::unknown("unknown-pattern", "pattern", Word::of(file, name.0), suggestion));
     };
     let nearest = named
         .iter()
@@ -444,10 +447,10 @@ fn lower_formats<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut 
             let source = &file[id];
             let name = world.book.names.intern(source.name.0);
             if let Some(first) = by_name.get(&(site.home, name)) {
+                let word = Word::of(file, source.name.0);
                 diags.push(
-                    Diagnostic::error("duplicate-format", format!("format `{}` is declared twice", source.name.0))
-                        .label(file.loc(source.name.0), "declared again here")
-                        .context(first.loc, "first declared here"),
+                    Problem::DeclaredTwice { noun: Noun::Format, word, first: Some(first.loc), advice: None }
+                        .diagnostic(),
                 );
                 continue;
             }
@@ -778,10 +781,9 @@ fn lower_sources<'s>(
             let sync = &file[id];
             let name = world.book.names.intern(sync.name.0);
             if let Some(first) = declared.get(&(site.home, name)) {
+                let word = Word::of(file, sync.name.0);
                 diags.push(
-                    Diagnostic::error("duplicate-sync", format!("sync `{}` is declared twice", sync.name.0))
-                        .label(file.loc(sync.name.0), "declared again here")
-                        .context(*first, "first declared here"),
+                    Problem::DeclaredTwice { noun: Noun::Sync, word, first: Some(*first), advice: None }.diagnostic(),
                 );
                 continue;
             }
@@ -905,12 +907,14 @@ fn resolve_format(
     name: ast::Name<'_>,
 ) -> Result<Id<Format>, Diagnostic> {
     let scope = scopes.of(from);
+    let unknown = |noun| {
+        let visible =
+            (formats.iter()).filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name));
+        let nearest = closest(name.0, visible);
+        Problem::Unknown { noun, word: Word::of(file, name.0), nearest, unused: &[] }.diagnostic()
+    };
     let Some(sym) = names.get(name.0) else {
-        let suggestion = axiom_core::diag::closest(
-            name.0,
-            formats.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
-        );
-        return Err(crate::errors::unknown("unknown-format", "format", Word::of(file, name.0), suggestion));
+        return Err(unknown(Noun::Format));
     };
     let candidates: Vec<_> = formats
         .iter()
@@ -918,11 +922,7 @@ fn resolve_format(
         .map(|candidate| (scope.rank(candidate.home), candidate.id, candidate.loc))
         .collect();
     let Some(rank) = candidates.iter().map(|(rank, _, _)| *rank).min() else {
-        let suggestion = axiom_core::diag::closest(
-            name.0,
-            formats.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
-        );
-        return Err(crate::errors::unknown("unknown-format", "visible format", Word::of(file, name.0), suggestion));
+        return Err(unknown(Noun::VisibleFormat));
     };
     let mut best = candidates.iter().filter(|(other_rank, _, _)| *other_rank == rank);
     let (_, id, first_loc) = *best.next().expect("the minimum rank came from a candidate");

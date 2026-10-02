@@ -21,6 +21,7 @@ use crate::book::Input;
 use crate::declare::World;
 use crate::errors::Word;
 use crate::law::Ty;
+use crate::problem::{Noun, Problem};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -318,12 +319,9 @@ fn inputs<'s>(
         };
         let symbol = world.book.names.intern(name.0);
         if let Some(first) = seen.get(&symbol) {
-            diags.push(
-                Diagnostic::error("duplicate-input", format!("input `{}` is declared twice", name.0))
-                    .label(prop.loc, "declared again here")
-                    .context(*first, "first declared here")
-                    .help("keep one declaration so every occurrence has one binding"),
-            );
+            let advice = Some("keep one declaration so every occurrence has one binding");
+            let word = Word { text: name.0, loc: prop.loc };
+            diags.push(Problem::DeclaredTwice { noun: Noun::Input, word, first: Some(*first), advice }.diagnostic());
             continue;
         }
         seen.insert(symbol, prop.loc);

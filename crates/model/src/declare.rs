@@ -11,9 +11,10 @@ use crate::book::{
     Asset, At, Basis, Book, Books, Class, Commodity, Entity, Kind, KindRoots, Lookup, Place, Prop, Purpose, Role,
     Roots, Share, Sort, System,
 };
-use crate::errors::{Word, unknown};
+use crate::errors::Word;
 use crate::kinds::{self, NativeKinds};
 use crate::names::{Names, Scoped};
+use crate::problem::{Noun, Problem, Reads, unresolved};
 use crate::props::PropTable;
 use crate::resolve::End;
 use crate::scope::{Home, Scopes};
@@ -538,7 +539,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let symbol = decl.name.0;
             if let Some(&first) = commodity_by_name.get(symbol) {
-                diags.push(duplicate_decl("commodity", symbol, file.loc(symbol), commodities[first].loc));
+                diags.push(declared_twice(Noun::Commodity, Word::of(file, symbol), commodities[first].loc));
                 continue;
             }
             let kind = resolve_kind(
@@ -604,7 +605,9 @@ pub(crate) fn declare<'a, 's>(
             commodity_by_name.get(word.text).copied().or_else(|| {
                 let suggestion =
                     axiom_core::diag::closest(word.text, commodity_by_name.keys().copied()).map(|near| near as &str);
-                diags.push(unknown("unknown-commodity", "base commodity", word, suggestion));
+                diags.push(
+                    Problem::Unknown { noun: Noun::BaseCommodity, word, nearest: suggestion, unused: &[] }.diagnostic(),
+                );
                 None
             })
         })
@@ -634,7 +637,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let path = decl.name.0;
             if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
-                diags.push(duplicate_decl("entity", path, file.loc(path), Some(first_file.loc(first.name.0))));
+                diags.push(declared_twice(Noun::Entity, Word::of(file, path), Some(first_file.loc(first.name.0))));
                 continue;
             }
             let doc = item.doc.map(|doc| names.intern(doc.0));
@@ -853,7 +856,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let path = decl.name.0;
             if let Some(&first) = declared_account_paths.get(path) {
-                diags.push(duplicate_decl("account", path, file.loc(path), Some(first)));
+                diags.push(declared_twice(Noun::Account, Word::of(file, path), Some(first)));
                 continue;
             }
             declared_account_paths.insert(path, file.loc(path));
@@ -940,7 +943,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let path = decl.name.0;
             if let Some(&first) = asset_names.get(path) {
-                diags.push(duplicate_decl("asset", path, file.loc(path), Some(assets[first].loc)));
+                diags.push(declared_twice(Noun::Asset, Word::of(file, path), Some(assets[first].loc)));
                 continue;
             }
             let kind = resolve_kind(
@@ -1406,13 +1409,8 @@ fn is_path_child(parent: &str, child: &str) -> bool {
         && child.as_bytes().get(parent.len()) == Some(&b'/')
 }
 
-fn duplicate_decl(kind: &str, name: &str, again: Loc, first: Option<Loc>) -> Diagnostic {
-    let mut diagnostic = Diagnostic::error("duplicate-declaration", format!("{kind} `{name}` is declared twice"))
-        .label(again, "declared again here");
-    if let Some(first) = first {
-        diagnostic = diagnostic.context(first, "first declared here");
-    }
-    diagnostic
+fn declared_twice(noun: Noun, word: Word, first: Option<Loc>) -> Diagnostic {
+    Problem::DeclaredTwice { noun, word, first, advice: None }.diagnostic()
 }
 
 #[cfg(test)]
@@ -1450,21 +1448,9 @@ fn resolve_kind<'s>(
     let loc = file.loc(word.0);
     let kind = match kinds.index.resolve(names, scopes.of(home), word.0) {
         Ok(kind) => kind,
-        Err(crate::book::Miss::Unknown { suggestion }) => {
-            diags.push(unknown(
-                "unknown-kind",
-                "kind",
-                Word { text: word.0, loc },
-                suggestion.map(|sym| names.name(sym)),
-            ));
-            return fallback;
-        }
-        Err(crate::book::Miss::Ambiguous(ids)) => {
-            let candidates: Vec<_> = ids.iter().map(|&id| names.name(kinds.tree[id].name)).collect();
-            diags.push(
-                Diagnostic::error("ambiguous-kind", format!("kind `{}` is ambiguous", word.0))
-                    .label(loc, format!("could mean {}", candidates.join(" or "))),
-            );
+        Err(miss) => {
+            let describe = |id| names.name(kinds.tree[id].name).to_string();
+            diags.push(unresolved(miss, Noun::Kind, Word { text: word.0, loc }, names, Reads::Mean, describe));
             return fallback;
         }
     };
@@ -1495,21 +1481,9 @@ fn resolve_purpose<'s>(
 ) -> Option<Id<Purpose>> {
     match purposes.index.resolve(names, scopes.of(home), name) {
         Ok(purpose) => Some(purpose),
-        Err(crate::book::Miss::Unknown { suggestion }) => {
-            diags.push(unknown(
-                "unknown-purpose",
-                "purpose",
-                Word { text: name, loc },
-                suggestion.map(|sym| names.name(sym)),
-            ));
-            None
-        }
-        Err(crate::book::Miss::Ambiguous(ids)) => {
-            let candidates: Vec<_> = ids.iter().map(|&id| names.name(purposes.tree[id].name)).collect();
-            diags.push(
-                Diagnostic::error("ambiguous-purpose", format!("purpose `{name}` is ambiguous"))
-                    .label(loc, format!("could mean {}", candidates.join(" or "))),
-            );
+        Err(miss) => {
+            let describe = |id| names.name(purposes.tree[id].name).to_string();
+            diags.push(unresolved(miss, Noun::Purpose, Word { text: name, loc }, names, Reads::Mean, describe));
             None
         }
     }
@@ -1555,16 +1529,10 @@ fn resolve_owner_shares<'a, 's>(
         match expr.kind {
             ExprKind::Name(name) => match entities.resolve(names, scopes.of(home), name.0) {
                 Ok(entity) => resolved.push((entity, None, expr.loc)),
-                Err(crate::book::Miss::Unknown { suggestion }) => {
-                    let suggestion = suggestion.map(|sym| names.name(sym));
-                    diags.push(unknown("unknown-owner", "owner", Word { text: name.0, loc: expr.loc }, suggestion));
-                }
-                Err(crate::book::Miss::Ambiguous(ids)) => {
-                    let candidates: Vec<_> = ids.iter().map(|&id| format!("entity #{}", id.index())).collect();
-                    diags.push(
-                        Diagnostic::error("ambiguous-owner", format!("owner `{}` is ambiguous", name.0))
-                            .label(expr.loc, format!("could mean {}", candidates.join(" or "))),
-                    );
+                Err(miss) => {
+                    let describe = |id: Id<Entity>| format!("entity #{}", id.index());
+                    let word = Word { text: name.0, loc: expr.loc };
+                    diags.push(unresolved(miss, Noun::Owner, word, names, Reads::Mean, describe));
                 }
             },
             ExprKind::Pct(number) => {

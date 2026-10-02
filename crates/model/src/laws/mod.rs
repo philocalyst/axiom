@@ -14,6 +14,7 @@ mod order;
 mod types;
 mod vars;
 
+use axiom_core::diag::closest;
 use axiom_core::{Days, Diagnostic, Id, Set};
 use axiom_syntax::{self as ast, DeclKind, ExprId, ItemKind, Trigger as Written};
 
@@ -22,10 +23,11 @@ use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
 use crate::book::{Also, AlsoOn, Amount, Implied, Input, Kind, Sign, Sort, System, TemplateAmount};
 use crate::declare::World;
-use crate::errors::{Word, suggest, unknown};
+use crate::errors::Word;
 use crate::journal::Select as LotSelect;
 use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
 use crate::names::Rank as NameRank;
+use crate::problem::{Noun, Problem};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -66,7 +68,7 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
                         DeclKind::Asset => world
                             .book
                             .asset(word.text)
-                            .ok_or_else(|| unknown_named(world, "asset", word))
+                            .ok_or_else(|| world.missing_asset(word))
                             .map(|asset| (Owner::Asset(asset), Ty::Asset, asset.index() as u32)),
                         DeclKind::Purpose => world.purpose(source.home, word).map(|purpose| {
                             // Purpose laws govern purpose-bearing flows, but
@@ -178,18 +180,14 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
                     .label(loc, "this is the law's own name"),
             ),
             [] => {
-                let word = Word { text, loc };
-                let diagnostic = unknown("unknown-law", "law", word, None);
-                let keys: Vec<_> = table
-                    .keys(names)
-                    .filter(|key| {
-                        table
-                            .candidates(names, key)
-                            .iter()
-                            .any(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
-                    })
-                    .collect();
-                diags.push(suggest(diagnostic, loc, text, keys));
+                let visible = table.keys(names).filter(|key| {
+                    (table.candidates(names, key).iter())
+                        .any(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
+                });
+                let nearest = closest(text, visible);
+                diags.push(
+                    Problem::Unknown { noun: Noun::Law, word: Word { text, loc }, nearest, unused: &[] }.diagnostic(),
+                );
             }
             targets => {
                 let mut diagnostic =
@@ -623,17 +621,6 @@ fn push(world: &mut World, law: Law) -> Id<Law> {
     let id = world.book.laws.push(law);
     world.book.lookup.laws.insert(&mut world.book.names, name, NameRank::Path, id);
     id
-}
-
-fn unknown_named(world: &World<'_>, noun: &str, word: Word<'_>) -> Diagnostic {
-    let (code, known): (&'static str, Vec<&str>) = match noun {
-        "asset" => ("unknown-asset", world.book.assets.values().map(|asset| world.book.name(asset.name)).collect()),
-        "contract" => {
-            ("unknown-contract", world.book.contracts.values().map(|contract| world.book.name(contract.name)).collect())
-        }
-        _ => ("unknown-name", Vec::new()),
-    };
-    suggest(unknown(code, noun, word, None), word.loc, word.text, known)
 }
 
 /// Laws written inside declarations that cannot own them.

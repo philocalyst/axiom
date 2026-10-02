@@ -23,6 +23,7 @@ use crate::book::{
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
 use crate::law::{Ty, Value};
+use crate::problem::{Problem, Twice};
 use crate::scope::Home;
 use crate::values::describe;
 
@@ -524,11 +525,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
         self.word(&["of"])?;
         let word = self.name("an asset")?;
         let Some(asset) = self.world.book.asset(word.text) else {
-            let suggestion = axiom_core::diag::closest(
-                word.text,
-                self.world.book.assets.iter().map(|(_, asset)| self.world.book.name(asset.name)),
-            );
-            return Err(crate::errors::unknown("unknown-asset", "asset", word, suggestion));
+            return Err(self.world.missing_asset(word));
         };
         Ok(At { value: asset, loc: word.loc })
     }
@@ -589,9 +586,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
         let wanted = format!("a type: {}", list(&TYPES.map(|ty| ty.0)));
         let ty = self.arg(&wanted, ty)?;
         if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text) {
-            return Err(Diagnostic::error("reserved-property", format!("`{}` is a built-in property", name.text))
-                .label(name.loc, "choose another name")
-                .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them"));
+            return Err(Problem::BuiltInProperty { word: name }.diagnostic());
         }
         Ok(Assign::Has(Has { name: self.world.book.names.intern(name.text), ty, loc: Some(name.loc) }))
     }
@@ -864,11 +859,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let key = (target_key(target.target), has.name, statement.date);
             if let Some(first) = seen.get(&key).copied() {
-                diags.push(
-                    Diagnostic::error("duplicate-property-change", "this property changes twice on the same day")
-                        .label(line.loc, "change written again here")
-                        .context(first, "first change written here"),
-                );
+                diags.push(Problem::Twice { what: Twice::PropertyChange, again: line.loc, first }.diagnostic());
                 continue;
             }
             seen.insert(key, line.loc);
@@ -1188,11 +1179,7 @@ fn native_system_currencies<'a, 's>(
                 continue;
             };
             if let Some(first) = seen.insert(system, item.loc) {
-                diags.push(
-                    Diagnostic::error("duplicate-system-currency", "this system sets its currency twice")
-                        .label(item.loc, "currency set again here")
-                        .context(first, "first set here"),
-                );
+                diags.push(Problem::Twice { what: Twice::SystemCurrency, again: item.loc, first }.diagnostic());
                 continue;
             }
             let word = Word::of(file, unit.0);
@@ -1225,11 +1212,7 @@ pub(crate) fn system_rates<'a, 's>(
                 continue;
             };
             if let Some(first) = seen.insert(system, item.loc) {
-                diags.push(
-                    Diagnostic::error("duplicate-system-rates", "this system sets its rate policy twice")
-                        .label(item.loc, "rate policy set again here")
-                        .context(first, "first set here"),
-                );
+                diags.push(Problem::Twice { what: Twice::SystemRates, again: item.loc, first }.diagnostic());
                 continue;
             }
             let policy = match policy {
@@ -1273,14 +1256,8 @@ fn read_has_lines<'s>(
             }
         };
         if is_builtin_line(world.book.name(has.name)) || FIELD_WORDS.contains(&world.book.name(has.name)) {
-            diags.push(
-                Diagnostic::error(
-                    "reserved-property",
-                    format!("`{}` is a built-in property", world.book.name(has.name)),
-                )
-                .label(has.loc.unwrap_or(line.loc), "choose another name")
-                .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them"),
-            );
+            let word = Word { text: world.book.name(has.name), loc: has.loc.unwrap_or(line.loc) };
+            diags.push(Problem::BuiltInProperty { word }.diagnostic());
             continue;
         }
         if own.iter().any(|earlier: &Has| earlier.name == has.name) {

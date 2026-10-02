@@ -7,8 +7,9 @@ use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Tree};
 use axiom_syntax::{DeclKind, ItemKind};
 
 use crate::book::{Class, Kind, Miss, Sort, System};
-use crate::errors::{Candidate, Word, duplicate, not_used, unknown};
+use crate::errors::{Candidate, Word};
 use crate::names::Scoped;
+use crate::problem::{Noun, Problem, Unused};
 use crate::scope::{Home, Scopes};
 
 /// The kind tree built from the promoted S5 declaration nodes. `declarations`
@@ -94,12 +95,15 @@ pub(crate) fn declare_sites<'a, 's>(
             let name = decl.name.0;
             written.push((file, decl, site.home));
             if let Some(&first) = duplicate_of.get(&(site.home, name)) {
-                diags.push(duplicate("kind", Word::of(file, name), drafts[first].loc, None));
+                let (word, earlier) = (Word::of(file, name), drafts[first].loc);
+                diags.push(Problem::Duplicate { noun: Noun::Kind, word, first: earlier }.diagnostic());
                 draft_of.push(first);
                 continue;
             }
             if let Some(first) = ROOTS.iter().position(|&(root, _)| root == name) {
-                diags.push(duplicate("kind", Word::of(file, name), None, None));
+                diags.push(
+                    Problem::Duplicate { noun: Noun::Kind, word: Word::of(file, name), first: None }.diagnostic(),
+                );
                 duplicate_of.insert((site.home, name), first);
                 draft_of.push(first);
                 continue;
@@ -237,13 +241,12 @@ pub(crate) fn unresolved(
     };
     match miss {
         Miss::Unknown { suggestion } => {
-            let mut diagnostic = unknown("unknown-kind", "kind", word, suggestion.map(|sym| names.name(sym)));
-            for &hidden in kinds.names.candidates(names, word.text) {
-                if let Some(system) = system_path(hidden) {
-                    diagnostic = not_used(diagnostic, "kind", word.text, system);
-                }
-            }
-            diagnostic
+            let unused: Vec<_> = (kinds.names.candidates(names, word.text).iter())
+                .filter_map(|&hidden| system_path(hidden))
+                .map(|system| Unused { name: word.text, system })
+                .collect();
+            let nearest = suggestion.map(|sym| names.name(sym));
+            Problem::Unknown { noun: Noun::Kind, word, nearest, unused: &unused }.diagnostic()
         }
         Miss::Ambiguous(ids) => {
             let candidates: Vec<Candidate> = ids
@@ -266,7 +269,7 @@ pub(crate) fn unresolved(
                     }
                 })
                 .collect();
-            crate::errors::ambiguous("ambiguous-kind", "kinds", word, &candidates)
+            Problem::Ambiguous { noun: Noun::Kind, word, candidates: &candidates }.diagnostic()
         }
     }
 }

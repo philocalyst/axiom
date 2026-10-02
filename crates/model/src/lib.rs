@@ -28,6 +28,7 @@ mod names_tests;
 mod params;
 mod paths;
 mod prices;
+mod problem;
 mod props;
 mod purposes;
 mod resolve;
