@@ -67,6 +67,10 @@ purpose sale : capital
   of asset
 param cpi
   2026 100
+param fee-rate
+  2026-01-01 2%
+  2026-03-10 5%
+  2026-05-01 9%
 entity me : person
 entity acme : org
 entity shop : org
@@ -153,6 +157,16 @@ def computed(rng, forms, header_unit="USD"):
         return f"{rng.choice([5, 10, 12, 25, 50])}% of {base} {header_unit}"
     forms["amount:computed-fraction"] += 1
     return f"{rng.choice(['1/3', '1/4', '2/5'])} of {base} {header_unit}"
+
+
+def declared(rng, forms, header_unit="USD"):
+    """A computed amount of a declaration (a template): the journal's forms, or a param that changes with the day."""
+    if rng.random() < 0.5:
+        return computed(rng, forms, header_unit)
+    forms["amount:computed-param"] += 1
+    if rng.random() < 0.5:
+        return f"fee-rate * {rng.randint(200, 3_000)} {header_unit}"
+    return f"cpi * {rng.randint(1, 9)} {header_unit}"
 
 
 # ─── Statements ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -388,6 +402,7 @@ class Contract:
         self.day, self.every, self.start = day, every, start
         self.legs, self.inputs, self.has_items = [], [], False
         self.until = 6
+        self.first = start
 
 
 def due_days(contract, book):
@@ -406,7 +421,7 @@ def contract(book):
     day = rng.choice([1, 5, 15, 28])
     start_month = rng.choice([1, 2])
     start = f"2026-{start_month:02d}-{day:02d}"
-    shape = rng.choices(["fixed", "about", "buy", "loan", "twice", "weekly"], [10, 2, 2, 3, 1, 1])[0]
+    shape = rng.choices(["fixed", "about", "buy", "loan", "twice", "weekly"], [10, 2, 4, 3, 1, 1])[0]
     c = Contract(name, direction, holding, day, "monthly", start)
     lines = [f"contract {name} with {party}"]
     if shape == "loan":
@@ -419,6 +434,7 @@ def contract(book):
         lines.append(f"  monthly on {day} from {holding}")
         lines.append(f"  from 2026-02-{day:02d}")
         c.loan = True
+        c.first = f"2026-02-{day:02d}"
     else:
         amount_text = f"{rng.randint(500, 3_000)} USD"
         if shape == "fixed":
@@ -445,6 +461,8 @@ def contract(book):
             c.until = 4
         if shape != "buy":
             c.legs = template_legs(rng, forms, lines, party)
+        elif rng.random() < 0.5:
+            exchange_template(rng, forms, lines)
         if rng.random() < 0.18 and shape in ("fixed", "twice"):
             lines.append("  rising 3% yearly" if rng.random() < 0.6 else "  indexed to cpi yearly")
             forms["contract:escalation"] += 1
@@ -478,7 +496,7 @@ def template_legs(rng, forms, lines, party):
     if rng.random() < 0.7:
         choices = ["savings", "bonus", "reserve"]
         rng.shuffle(choices)
-        kinds = rng.sample(["amount", "share", "rest", "pending", "target", "all", "computed", "tail"], rng.randint(1, 3))
+        kinds = rng.sample(["amount", "share", "rest", "pending", "target", "all", "computed", "tail", "unknown"], rng.randint(1, 3))
         for kind, end in zip(kinds, choices):
             if kind == "amount":
                 qty, key = f"{rng.randint(50, 400)} USD", "leg:amount"
@@ -493,7 +511,9 @@ def template_legs(rng, forms, lines, party):
             elif kind == "all":
                 qty, key = "all", "leg:all"
             elif kind == "computed":
-                qty, key = computed(rng, forms), "leg:computed"
+                qty, key = declared(rng, forms), "leg:computed"
+            elif kind == "unknown":
+                qty, key = "? USD", "promise-leg:unknown"
             else:
                 qty, key = f"{rng.randint(20, 90)} USD #{rng.choice(['fees', 'fun'])}", "leg:amount"
             if kind == "rest" and any(m[1] == "rest" for m in made):
@@ -507,8 +527,58 @@ def template_legs(rng, forms, lines, party):
             forms["item:" + {"": "carve", "+ ": "add", "- ": "less"}[sign]] += 1
             forms["item:header"] += 1
             forms["item:purpose"] += 1
-            lines.append(f"  {sign}{rng.randint(1, 30)} USD #{rng.choice(['fees', 'fun'])}")
+            if sign and rng.random() < 0.3:
+                forms["item:computed"] += 1
+                qty = declared(rng, forms)
+            else:
+                qty = f"{rng.randint(1, 30)} USD"
+            lines.append(f"  {sign}{qty} #{rng.choice(['fees', 'fun'])}")
     return made
+
+
+def combo(book, c, lines, forms):
+    """An occurrence that says several things at once: another amount, a leg replaced, a leg added, items."""
+    rng = book.rng
+    lines[0] += f" {rng.randint(300, 3_500)} USD"
+    forms["occ:amount"] += 1
+    taken = [m[0] for m in c.legs]
+    if c.legs:
+        how = rng.choice(["amount", "pending"])
+        qty = f"{rng.randint(20, 400)} USD" if how == "amount" else f"({rng.randint(20, 300)} USD)"
+        lines.append(f"  {c.legs[0][0]} {qty}")
+        forms["occ:replace-leg"] += 1
+        forms["occ-leg:" + how] += 1
+    free = [end for end in ("bonus", "reserve", "savings") if end not in taken]
+    if free:
+        lines.append(f"  {rng.choice(free)} {rng.randint(10, 200)} USD")
+        forms["occ:add-leg"] += 1
+    for _ in range(rng.randint(1, 2)):
+        sign = rng.choice(["+ ", "- "])
+        forms["item:" + {"+ ": "add", "- ": "less"}[sign]] += 1
+        forms["occ:item"] += 1
+        lines.append(f"  {sign}{rng.randint(1, 40)} USD #{rng.choice(['fees', 'fun'])}")
+    forms["occ:combo"] += 1
+
+
+def shifted(c, due, rng):
+    """The day a promise's occurrence is written on when it is not its due day: a few days early or late."""
+    year, month, day = (int(part) for part in due.split("-"))
+    offsets = [offset for offset in (-3, -2, -1, 1, 2, 3)
+               if 1 <= day + offset <= 28 and (due != c.first or offset > 0) and (c.until == 6 or offset < 0)]
+    return f"{year}-{month:02d}-{day + rng.choice(offsets):02d}" if offsets else due
+
+
+def exchange_template(rng, forms, lines):
+    """What a promise to buy may carry under its exchange header: a share of it, and items in its spend unit."""
+    if rng.random() < 0.5:
+        forms["leg:share"] += 1
+        forms["exchange-template:leg"] += 1
+        lines.append(f"  {rng.choice(['savings', 'bonus'])} {rng.choice([5, 10, 30])}%")
+    for _ in range(rng.randint(0, 2)):
+        sign = rng.choice(["+ ", "- "])
+        forms["item:" + {"+ ": "add", "- ": "less"}[sign]] += 1
+        forms["exchange-template:item"] += 1
+        lines.append(f"  {sign}{rng.randint(1, 30)} USD #{rng.choice(['fees', 'fun'])}")
 
 
 def occurrences(book, c, shape):
@@ -521,12 +591,17 @@ def occurrences(book, c, shape):
         days = [d for d in days if d >= f"2026-02-{c.day:02d}"]
     rng.shuffle(days)
     for due in days[: rng.randint(0, 3)]:
-        weights = [3, 3, 2, 6 if c.legs else 0, 3, 3, 8 if c.inputs else 0, 2]
-        kind = rng.choices(["plain", "amount", "computed", "legs", "add-leg", "items", "input", "tail"], weights)[0]
+        weights = [3, 3, 2, 6 if c.legs else 0, 3, 3, 8 if c.inputs else 0, 2, 0 if shape == "loan" else 5]
+        kind = rng.choices(["plain", "amount", "computed", "legs", "add-leg", "items", "input", "tail", "combo"], weights)[0]
         first_leg = c.legs[0][0] if c.legs else None
-        lines = [f"{due} {c.name}"]
+        written = due
+        if rng.random() < 0.3:
+            written = shifted(c, due, rng)
+            if written != due:
+                forms["occ:off-due"] += 1
+        lines = [f"{written} {c.name}"]
         if shape == "buy":
-            kind = rng.choice(["plain", "buy", "buy"])
+            kind = rng.choice(["plain", "buy", "buy", "items", "tail"])
         if kind == "buy":
             lines[0] += f" {rng.randint(1, 4)}.{rng.randint(0, 9)} VTI"
             forms["occ:amount"] += 1
@@ -537,13 +612,13 @@ def occurrences(book, c, shape):
             lines[0] += " " + computed(rng, forms)
             forms["occ:computed-amount"] += 1
         elif kind == "legs" and first_leg:
-            how = rng.choice(["amount", "pending", "target", "rest", "rest", "all", "computed"])
+            how = rng.choice(["amount", "pending", "target", "rest", "rest", "all", "computed", "unknown"])
             qty = {"amount": f"{rng.randint(20, 500)} USD", "pending": f"({rng.randint(20, 300)} USD)",
                    "target": f"= {rng.randint(40_000, 90_000)} USD", "rest": "...", "all": "all",
-                   "computed": computed(rng, forms)}[how]
+                   "computed": computed(rng, forms), "unknown": "? USD"}[how]
             lines.append(f"  {first_leg} {qty}")
             forms["occ:replace-leg"] += 1
-            forms["leg:" + ("computed" if how == "computed" else how)] += 1
+            forms["occ-leg:" + how] += 1
         elif kind in ("add-leg", "legs"):
             end = rng.choice(["bonus", "reserve", "savings"])
             if end not in [m[0] for m in c.legs]:
@@ -561,9 +636,17 @@ def occurrences(book, c, shape):
         elif kind == "input" and c.inputs:
             lines.append(f"  water = {rng.randint(40, 300)} USD")
             forms["occ:input"] += 1
+        elif kind == "combo":
+            combo(book, c, lines, forms)
         elif kind == "tail":
-            lines[0] += " " + rng.choice(['"a note"', "#fun", book.code(), "#fees ^t" + str(rng.randint(1, 999))])
+            clause = rng.choice(['"a note"', "#fun", book.code(), "#fees ^t" + str(rng.randint(1, 999)), "for 2026-03",
+                                 "for last month", "for 2026-03-01..2026-03-31", "via acme", "for acme", "!", '! "ok"'])
+            lines[0] += " " + clause
             forms["occ:tail"] += 1
+            if clause.startswith("for ") and clause != "for acme":
+                forms["occ:tail-recognition"] += 1
+            if clause.startswith("!"):
+                forms["occ:tail-waive"] += 1
         else:
             forms["occ:plain"] += 1
         if c.inputs and kind != "input" and rng.random() < 0.5:
