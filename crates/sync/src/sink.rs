@@ -32,17 +32,15 @@ pub(crate) fn merge_at<'a>(
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     match sink {
         Sink::Journal => items(output, |day| layout.file_for(day), file, read),
-        Sink::File(pattern) => items(
-            output,
-            |day| {
-                let (year, month, _) = day.ymd();
-                pattern.replace("{year}", &format!("{year:04}")).replace("{month}", &format!("{month:02}"))
-            },
-            file,
-            read,
-        ),
+        Sink::File(pattern) => items(output, |day| file_of(pattern, day), file, read),
         Sink::Param { name, path } => rows(name, path, output, file, read),
     }
+}
+
+/// The file an item of `day` goes to, when a sink's path has a `{year}` and a `{month}` to split it by.
+fn file_of(pattern: &str, day: Day) -> String {
+    let (year, month, _) = day.ymd();
+    pattern.replace("{year}", &format!("{year:04}")).replace("{month}", &format!("{month:02}"))
 }
 
 /// Existing files that `merge` may inspect for this output. The planner uses
@@ -50,10 +48,7 @@ pub(crate) fn merge_at<'a>(
 pub(crate) fn target_paths(sink: Sink<'_>, output: &str, layout: &Layout) -> Vec<String> {
     let paths = match sink {
         Sink::Journal => dated_targets(output, |day| layout.file_for(day)),
-        Sink::File(pattern) => dated_targets(output, |day| {
-            let (year, month, _) = day.ymd();
-            pattern.replace("{year}", &format!("{year:04}")).replace("{month}", &format!("{month:02}"))
-        }),
+        Sink::File(pattern) => dated_targets(output, |day| file_of(pattern, day)),
         Sink::Param { path, .. } => vec![path.to_string()],
     };
     let mut unique = std::collections::BTreeSet::new();
@@ -75,55 +70,102 @@ fn items<'a>(
     file: FileId,
     read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
-    let lines: Vec<&str> = output.split_inclusive('\n').collect();
-    let (found, _) = scan(&lines, Folder::default());
+    let printed = Printed::new(output, file);
+    let (found, _) = scan(&printed.lines, Folder::default());
     let (mut inserts, mut problems) = (Vec::new(), Vec::new());
     let mut present: Map<String, Map<(Day, String), usize>> = Map::default();
-    let mut offset_line = 0;
-    let mut byte_offset = 0;
     for item in &found {
-        while offset_line < item.head {
-            byte_offset += lines[offset_line].len();
-            offset_line += 1;
-        }
-        let item_offset = byte_offset;
-        let dated = item.day.filter(|_| !lines[item.head].starts_with("opening"));
-        let Some(day) = dated else {
-            let headline = "the output has a line that does not start with a date".to_string();
-            problems.push(
-                Diagnostic::error("undated-line", headline)
-                    .label(line_loc(lines[item.head], file, item_offset), "expected a date such as 2026-03-05")
-                    .help("print full dates: sync files each line by its day"),
-            );
-            continue;
+        let (day, path) = match printed.filed(item, &path_of) {
+            Ok(filed) => filed,
+            Err(bad) => {
+                problems.extend(bad);
+                continue;
+            }
         };
-        let path = path_of(day);
-        if !is_project_path(&path) {
-            problems.push(Diagnostic::error(
-                "sync-path-outside-project",
-                format!("`{path}` is not a project-relative file path"),
-            ));
-            continue;
-        }
-        let item_body = body(&lines, item);
-        let source = lines[item.head..item.end].concat();
-        if let Err(bad) = validate_item_source_at(&path, &source, file, item_offset) {
-            problems.extend(bad);
-            continue;
-        }
         let there =
             present.entry(path.clone()).or_insert_with(|| subjects_in(read(&path).as_deref().unwrap_or(""), &path));
-        match there.get_mut(&(day, subject(&lines, item))) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => inserts.push(Insert { path, day, form: Form::Item(item_body) }),
+        if is_new(there, &(day, subject(&printed.lines, item))) {
+            inserts.push(Insert { path, day, form: Form::Item(body(&printed.lines, item)) });
         }
     }
     if problems.is_empty() { Ok(inserts) } else { Err(problems) }
 }
 
-/// Where line `at` of what a command printed is, without its line ending.
-fn line_loc(line: &str, file: FileId, start: usize) -> Loc {
-    Loc::new(file, start as u32, (start + line.trim_end().len()) as u32)
+/// What a command printed, line by line.
+struct Printed<'o> {
+    lines: Vec<&'o str>,
+    /// Where each line starts, in bytes.
+    starts: Vec<usize>,
+    file: FileId,
+}
+
+impl<'o> Printed<'o> {
+    fn new(output: &'o str, file: FileId) -> Printed<'o> {
+        let lines: Vec<&str> = output.split_inclusive('\n').collect();
+        let starts = lines
+            .iter()
+            .scan(0, |end, line| {
+                let start = *end;
+                *end += line.len();
+                Some(start)
+            })
+            .collect();
+        Printed { lines, starts, file }
+    }
+
+    /// Where line `at` is, without its line ending.
+    fn loc(&self, at: usize) -> Loc {
+        let start = self.starts[at];
+        Loc::new(self.file, start as u32, (start + self.lines[at].trim_end().len()) as u32)
+    }
+
+    /// The day an item is filed under, and the file that day goes to; or what is wrong with it.
+    fn filed(&self, item: &Item, path_of: &impl Fn(Day) -> String) -> Result<(Day, String), Vec<Diagnostic>> {
+        let head = self.lines[item.head];
+        let Some(day) = item.day.filter(|_| !head.starts_with("opening")) else {
+            let headline = "the output has a line that does not start with a date";
+            return Err(vec![
+                Diagnostic::error("undated-line", headline)
+                    .label(self.loc(item.head), "expected a date such as 2026-03-05")
+                    .help("print full dates: sync files each line by its day"),
+            ]);
+        };
+        let path = path_of(day);
+        if !is_project_path(&path) {
+            return Err(vec![outside_project(&path)]);
+        }
+        let source = self.lines[item.head..item.end].concat();
+        validate_item_source_at(&path, &source, self.file, self.starts[item.head])?;
+        Ok((day, path))
+    }
+
+    /// The year or day a row is filed under; or what is wrong with it.
+    fn keyed(&self, at: usize, name: &str, path: &str) -> Result<(Day, String), Vec<Diagnostic>> {
+        let (line, row) = (self.lines[at], self.lines[at].trim());
+        let Some(key) = row_key(row) else {
+            let headline = "the output has a row that does not start with a year or a date";
+            let label = "expected `2026`, `2026-03` or `2026-03-05` here";
+            return Err(vec![Diagnostic::error("bad-row", headline).label(self.loc(at), label)]);
+        };
+        let offset = self.starts[at] + line.find(row).unwrap_or(0);
+        validate_row_at(path, name, row, self.file, offset)?;
+        Ok(key)
+    }
+}
+
+fn outside_project(path: &str) -> Diagnostic {
+    Diagnostic::error("sync-path-outside-project", format!("`{path}` is not a project-relative file path"))
+}
+
+/// Whether `key` is not yet in the file: if the file has one more than the output has used, that one is.
+fn is_new(present: &mut Map<(Day, String), usize>, key: &(Day, String)) -> bool {
+    match present.get_mut(key) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            false
+        }
+        _ => true,
+    }
 }
 
 /// How many items each day and subject have in a file.
@@ -173,10 +215,7 @@ fn rows<'a>(
     read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     if !is_project_path(path) {
-        return Err(vec![Diagnostic::error(
-            "sync-path-outside-project",
-            format!("`{path}` is not a project-relative file path"),
-        )]);
+        return Err(vec![outside_project(path)]);
     }
     let existing = read(path).and_then(|text| row_keys(text.as_ref(), name)).ok_or_else(|| {
         vec![
@@ -188,34 +227,20 @@ fn rows<'a>(
     for key in existing {
         *present.entry(key).or_default() += 1;
     }
-    let lines: Vec<&str> = output.split_inclusive('\n').collect();
+    let printed = Printed::new(output, file);
     let (mut inserts, mut problems) = (Vec::new(), Vec::new());
-    let mut byte_offset = 0;
-    for (at, line) in lines.iter().enumerate() {
-        let line_offset = byte_offset;
-        byte_offset += line.len();
+    for (at, line) in printed.lines.iter().enumerate() {
         let row = line.trim();
         if row.is_empty() || row.starts_with("//") {
             continue;
         }
-        let Some(key) = row_key(row) else {
-            let headline = "the output has a row that does not start with a year or a date".to_string();
-            let label = "expected `2026`, `2026-03` or `2026-03-05` here";
-            problems.push(Diagnostic::error("bad-row", headline).label(line_loc(line, file, line_offset), label));
-            continue;
-        };
-        let row_offset = line_offset + line.find(row).unwrap_or(0);
-        if let Err(bad) = validate_row_at(path, name, row, file, row_offset) {
-            problems.extend(bad);
-            continue;
-        }
-        match present.get_mut(&key) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => inserts.push(Insert {
-                path: path.to_string(),
-                day: key.0,
-                form: Form::Row { param: name.to_string(), text: row.to_string() },
-            }),
+        match printed.keyed(at, name, path) {
+            Ok(key) if is_new(&mut present, &key) => {
+                let form = Form::Row { param: name.to_string(), text: row.to_string() };
+                inserts.push(Insert { path: path.to_string(), day: key.0, form });
+            }
+            Ok(_) => {}
+            Err(bad) => problems.extend(bad),
         }
     }
     if problems.is_empty() { Ok(inserts) } else { Err(problems) }
