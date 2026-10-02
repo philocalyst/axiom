@@ -10,11 +10,16 @@
 //!
 //! A short `until` or `due` date needs no context: it is the first such day on
 //! or after the day of the line it is written on.
+//!
+//! What a place gives is [`Folder`], and whoever writes dates into these files
+//! asks it, so that no one else decides what a short date means: `heading`
+//! reads a heading line, `complete` a date as the parser would, and `shorten`
+//! writes one as briefly as the place allows.
 
-use axiom_core::{Day, Diagnostic, Loc};
+use axiom_core::{Day, Diagnostic, FileId, Loc};
 
 use crate::ast::*;
-use crate::lex::{Punct, Tok, Token};
+use crate::lex::{Lexer, Punct, Tok, Token};
 use crate::malformed::not_a_date;
 use crate::parser::{Parse, Parser};
 
@@ -25,29 +30,56 @@ pub const MONTHS: [&str; 12] = [
     "July", "August", "September", "October", "November", "December",
 ];
 
-/// The context a heading line gives the lines below it: `2026` is a year and
-/// `2026-03` a month of it. `line` starts at the heading's first byte and may
-/// run on, so that this reads exactly what a pre-scan of a piece finds and no
-/// more; it is `None` for every other line.
-pub(crate) fn heading(line: &[u8]) -> Option<Folder> {
-    let digits = |from: usize, count: usize| {
-        let text = line.get(from..from + count)?;
-        text.iter().all(u8::is_ascii_digit).then(|| text.iter().fold(0, |sum, &b| sum * 10 + i32::from(b - b'0')))
-    };
-    let year = digits(0, 4)?;
-    let (month, end) = match line.get(4) {
-        Some(b'-') => (Some(digits(5, 2)?), 7),
-        _ => (None, 4),
-    };
-    // Nothing may follow but blanks and a comment, which needs a blank before it.
-    let blanks = line[end..].iter().take_while(|&&b| matches!(b, b' ' | b'\t')).count();
-    match line[end + blanks..] {
-        [] | [b'\n' | b'\r', ..] => {}
-        [b'/', b'/', ..] if blanks > 0 => {}
-        _ => return None,
+impl Folder {
+    /// The context a heading line gives the lines below it: `2026` is a year and
+    /// `2026-03` a month of it. `line` starts at the heading's first byte and may
+    /// run on, so that this reads exactly what a pre-scan of a piece finds and no
+    /// more; it is `None` for every other line.
+    pub fn heading(line: &[u8]) -> Option<Folder> {
+        let digits = |from: usize, count: usize| {
+            let text = line.get(from..from + count)?;
+            text.iter().all(u8::is_ascii_digit).then(|| text.iter().fold(0, |sum, &b| sum * 10 + i32::from(b - b'0')))
+        };
+        let year = digits(0, 4)?;
+        let (month, end) = match line.get(4) {
+            Some(b'-') => (Some(digits(5, 2)?), 7),
+            _ => (None, 4),
+        };
+        // Nothing may follow but blanks and a comment, which needs a blank before it.
+        let blanks = line[end..].iter().take_while(|&&b| matches!(b, b' ' | b'\t')).count();
+        match line[end + blanks..] {
+            [] | [b'\n' | b'\r', ..] => {}
+            [b'/', b'/', ..] if blanks > 0 => {}
+            _ => return None,
+        }
+        Day::from_ymd(year, month.unwrap_or(1) as u32, 1)?;
+        Some(Folder { year: Some(year), month: month.map(|month| month as u8) })
     }
-    Day::from_ymd(year, month.unwrap_or(1) as u32, 1)?;
-    Some(Folder { year: Some(year), month: month.map(|month| month as u8) })
+
+    /// The day a written date means here, read as the parser reads it: `2026-01-15`
+    /// whole, `01-15` where the year is known, `15` where the month is too.
+    pub fn complete(self, written: &str) -> Option<Day> {
+        let mut lexer = Lexer::new(written, FileId::default());
+        lexer.load(0, written.len());
+        match (lexer.bump().tok, lexer.peek().tok) {
+            (Tok::Date(day), Tok::Eol) => Some(day),
+            (Tok::MonthDay(month, day), Tok::Eol) => Day::from_ymd(self.year?, month.into(), day.into()),
+            (Tok::Number(_), Tok::Eol) if written.len() <= 2 => {
+                Day::from_ymd(self.year?, self.month?.into(), written.parse().ok()?)
+            }
+            _ => None,
+        }
+    }
+
+    /// `day` as briefly as this context allows: what [`complete`](Folder::complete) reads back.
+    pub fn shorten(self, day: Day) -> String {
+        let (year, month, of_month) = day.ymd();
+        match (self.year == Some(year), self.month.map(u32::from) == Some(month)) {
+            (true, true) => format!("{of_month:02}"),
+            (true, false) => format!("{month:02}-{of_month:02}"),
+            _ => day.to_string(),
+        }
+    }
 }
 
 impl<'s> Parser<'s> {

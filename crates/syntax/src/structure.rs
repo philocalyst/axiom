@@ -10,7 +10,6 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::dates::heading;
 use crate::lex::{Punct, Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported, list_words};
@@ -126,7 +125,7 @@ impl<'s> Parser<'s> {
             }
             Tok::Month(_) | Tok::Number(_) | Tok::MonthDay(..) => {
                 // A line of only a year or a month says what the lines below it are in.
-                if let Some(folder) = heading(&self.src.as_bytes()[line.body..line.end]) {
+                if let Some(folder) = Folder::heading(&self.src.as_bytes()[line.body..line.end]) {
                     self.warn_ignored_doc(line);
                     self.folder = folder;
                     return Ok(());

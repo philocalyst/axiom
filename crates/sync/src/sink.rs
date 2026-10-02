@@ -6,9 +6,10 @@
 use std::borrow::Cow;
 
 use axiom_core::{Day, Diagnostic, FileId, Loc, Map};
+use axiom_syntax::Folder;
 
 use crate::paths::is_project_path;
-use crate::write::{Context, Item, Layout, row_key, row_keys, scan, validate_item_source_at, validate_row_at};
+use crate::write::{Item, Layout, row_key, row_keys, scan, validate_item_source_at, validate_row_at};
 use crate::{Form, Insert};
 
 /// Internal adapter from the model sink declaration to the shared merger.
@@ -61,7 +62,7 @@ pub(crate) fn target_paths(sink: Sink<'_>, output: &str, layout: &Layout) -> Vec
 
 fn dated_targets(output: &str, path_of: impl Fn(Day) -> String) -> Vec<String> {
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
-    scan(&lines, Context::default())
+    scan(&lines, Folder::default())
         .0
         .into_iter()
         .filter_map(|item| item.day.filter(|_| !lines[item.head].starts_with("opening")).map(|day| path_of(day)))
@@ -75,7 +76,7 @@ fn items<'a>(
     read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
-    let (found, _) = scan(&lines, Context::default());
+    let (found, _) = scan(&lines, Folder::default());
     let (mut inserts, mut problems) = (Vec::new(), Vec::new());
     let mut present: Map<String, Map<(Day, String), usize>> = Map::default();
     let mut offset_line = 0;
@@ -129,7 +130,7 @@ fn line_loc(line: &str, file: FileId, start: usize) -> Loc {
 fn subjects_in(text: &str, path: &str) -> Map<(Day, String), usize> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let mut counts = Map::default();
-    for item in scan(&lines, Context::of_path(path)).0 {
+    for item in scan(&lines, Folder::of(path)).0 {
         if let Some(day) = item.day {
             *counts.entry((day, subject(&lines, &item))).or_default() += 1;
         }

@@ -59,7 +59,6 @@ use axiom_core::{Diagnostic, FileId, Loc, par};
 use memchr::{memchr, memchr_iter, memrchr};
 
 use crate::ast::Piece;
-use crate::dates::heading;
 use crate::lines::{Tabs, unattached_doc};
 use crate::parser::Parser;
 use crate::refs::{MAX_LOCAL_NODES, MAX_PIECES};
@@ -203,7 +202,7 @@ impl Scan {
         let first_is_digit = text.first().is_some_and(u8::is_ascii_digit);
         let mut scan = Scan { items: 1, dated: usize::from(first_is_digit), heading: None };
         if first_is_digit {
-            scan.heading = heading(text);
+            scan.heading = Folder::heading(text);
         }
         for newline in memchr_iter(b'\n', text) {
             match text.get(newline + 1) {
@@ -212,7 +211,7 @@ impl Scan {
                     // A whole date is not a heading, and is what nearly every dated line starts with.
                     let line = &text[newline + 1..];
                     if !(line.get(4) == Some(&b'-') && line.get(7) == Some(&b'-')) {
-                        scan.heading = heading(line).or(scan.heading);
+                        scan.heading = Folder::heading(line).or(scan.heading);
                     }
                 }
                 Some(b' ' | b'\t' | b'\r' | b'\n') | None => {}
