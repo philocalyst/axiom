@@ -59,9 +59,7 @@ pub struct Plan<'b, 's> {
     /// around them could solve them. Flows the fold resolves (`=`, `all`) are
     /// the ledger's to remember, for they depend on the balance.
     pub(crate) amounts: Map<Id<Flow>, Amounts>,
-    /// The first day of each place and commodity whose balance depends on an
-    /// amount that could not be solved, and the flow to blame.
-    pub(crate) unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
+    pub(crate) unsolved: Unsolved,
     /// What reading the events and solving reported: every ledger starts with them.
     problems: Vec<Diagnostic>,
     pub(crate) known: Known,
@@ -111,33 +109,14 @@ impl<'b, 's> Plan<'b, 's> {
         let sides = Sides::of(book);
         let solution = infer::solve(book, &events, &sides);
         problems.extend(solution.problems);
-        let unsolved = solution.unsolved.iter().flat_map(|&id| {
-            let flow = &book.flows[id];
-            [((flow.from, flow.out.unit), (flow.day, id)), ((flow.to, flow.arrive.unit), (flow.day, id))]
-        });
-        let mut blocked: Map<_, (Day, Id<Flow>)> = Map::default();
-        for (key, first) in unsolved {
-            blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
-        }
         let laws: Box<[LawFacts]> = book.laws.values().map(|law| LawFacts::of(book, law)).collect();
         let watch = Watch::of(book, &laws);
-        let places = (0..book.places.len() as u32).map(Id::new);
-        let held = places.flat_map(|place| {
-            containing(book, place).filter_map(move |subject| match subject {
-                Subject::Entity(entity) => Some((entity, place)),
-                _ => None,
-            })
-        });
-        let kind_places = kind_places(book);
         let owners = Owners::of(book, &mut problems);
-        let (temporal, temporal_dates, daily_temporal) = temporal_queries(book, &owners);
-        let mut occurrence_txns: Vec<_> =
-            book.txns.iter().filter_map(|(id, txn)| txn.occurrence.is_some().then_some(id)).collect();
-        occurrence_txns.sort_unstable_by_key(|&id| (book.txns[id].day, id));
+        let (temporal, daily_temporal) = temporal_queries(book, &owners);
         let mut plan = Plan {
             book,
             amounts: solution.amounts,
-            unsolved: blocked,
+            unsolved: blocked_balances(book, &solution.unsolved),
             problems,
             known: Known::of(book),
             sides,
@@ -145,18 +124,18 @@ impl<'b, 's> Plan<'b, 's> {
             readers: facts::readers(book, &laws),
             purpose_readers: facts::purpose_readers(book),
             watch,
-            members: Groups::build(book.entities.len(), held),
+            members: entity_places(book),
             asset_places: asset_places(book),
             owners,
-            kind_places,
-            occurrence_txns: occurrence_txns.into_boxed_slice(),
+            kind_places: kind_places(book),
+            occurrence_txns: occurrence_txns(book),
             period_start: timeline::start(book, &events),
             last_fact: timeline::last_fact(book, &events),
             events,
             laws,
             timed: Box::default(),
             temporal: temporal.into_boxed_slice(),
-            temporal_dates: temporal_dates.into_boxed_slice(),
+            temporal_dates: change_dates(book),
             daily_temporal,
         };
         let (world, mut values) = (World::new(book, &plan.watch), Vec::new());
@@ -299,17 +278,50 @@ fn allocate_owners(owners: &[OwnerShare], amount: Qty) -> impl Iterator<Item = (
     )
 }
 
-fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, Vec<Day>, bool) {
+/// The first day of each place and commodity whose balance depends on an amount that could not be solved, and
+/// the flow to blame.
+pub(crate) type Unsolved = Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>;
+
+/// The balances that depend on the flows whose amounts could not be solved.
+fn blocked_balances(book: &Book, unsolved: &[Id<Flow>]) -> Unsolved {
+    let ends = unsolved.iter().flat_map(|&id| {
+        let flow = &book.flows[id];
+        [((flow.from, flow.out.unit), (flow.day, id)), ((flow.to, flow.arrive.unit), (flow.day, id))]
+    });
+    let mut blocked = Unsolved::default();
+    for (key, first) in ends {
+        blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
+    }
+    blocked
+}
+
+/// The places each entity holds.
+fn entity_places(book: &Book) -> Groups<Entity, Id<Place>> {
+    let places = (0..book.places.len() as u32).map(Id::new);
+    let held = places.flat_map(|place| {
+        containing(book, place).filter_map(move |subject| match subject {
+            Subject::Entity(entity) => Some((entity, place)),
+            _ => None,
+        })
+    });
+    Groups::build(book.entities.len(), held)
+}
+
+/// The transactions that keep a scheduled contract occurrence, by day.
+fn occurrence_txns(book: &Book) -> Box<[Id<Txn>]> {
+    let mut txns: Vec<_> = book.txns.iter().filter_map(|(id, txn)| txn.occurrence.is_some().then_some(id)).collect();
+    txns.sort_unstable_by_key(|&id| (book.txns[id].day, id));
+    txns.into_boxed_slice()
+}
+
+/// The expressions some law inspects across time, one for each owner of its subject, and whether any depends
+/// on a value that can change each day.
+fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, bool) {
     let mut queries = Vec::new();
     let mut daily = false;
     for rule in book.rules.all() {
         let law = &book.laws[rule.law];
-        let owners = match rule.subject {
-            Subject::Place(place) => ownership.place(place),
-            Subject::Entity(entity) => ownership.entity(entity),
-            Subject::Asset(asset) => ownership.place(book.assets[asset].place),
-            Subject::Contract(contract) => ownership.entity(book.contracts[contract].owner),
-        };
+        let owners = subject_owners(book, ownership, rule.subject);
         for (id, node) in law.nodes.iter() {
             let Op::Call(func @ (Func::Peak | Func::Low | Func::Days), args) = &node.op else {
                 continue;
@@ -346,7 +358,21 @@ fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, Vec<Day>, b
         (query.key.law.index(), subject, query.key.owner.index(), query.key.call.index())
     });
     queries.dedup_by_key(|query| query.key);
+    (queries, daily)
+}
 
+/// The effective owners of what a rule is about.
+fn subject_owners<'o>(book: &Book, ownership: &'o Owners, subject: Subject) -> &'o [OwnerShare] {
+    match subject {
+        Subject::Place(place) => ownership.place(place),
+        Subject::Entity(entity) => ownership.entity(entity),
+        Subject::Asset(asset) => ownership.place(book.assets[asset].place),
+        Subject::Contract(contract) => ownership.entity(book.contracts[contract].owner),
+    }
+}
+
+/// The days a dated value starts or ends, which must be sampled even when the journal has no fact that day.
+fn change_dates(book: &Book) -> Box<[Day]> {
     let mut dates = Vec::new();
     for (_, place) in book.places.iter() {
         add_prop_dates(&mut dates, &place.props);
@@ -375,7 +401,7 @@ fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, Vec<Day>, b
     dates.extend(book.prices.quotes().iter().map(|quote| quote.day));
     dates.sort_unstable();
     dates.dedup();
-    (queries, dates, daily)
+    dates.into_boxed_slice()
 }
 
 fn add_prop_dates(dates: &mut Vec<Day>, props: &[axiom_model::Prop]) {
