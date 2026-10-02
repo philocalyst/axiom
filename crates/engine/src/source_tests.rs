@@ -30,6 +30,26 @@ fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R
     with_book(text, |book| then(book, &crate::run(book, Options { today, relaxed: false })))
 }
 
+/// Builds several native source sites, as a project with embedded systems.
+fn with_run_sources<'s, R>(
+    written: &[(&'s str, &'s str, bool)],
+    today: Day,
+    then: impl FnOnce(&Book<'s>, &Run) -> R,
+) -> R {
+    let sources: Vec<_> = written
+        .iter()
+        .enumerate()
+        .map(|(index, &(path, text, embedded))| {
+            let (file, parsed) = axiom_syntax::parse(FileId(index as u16), text, Folder::of(path));
+            assert!(parsed.is_empty(), "{path} does not parse: {parsed:?}");
+            Source { path, file, embedded }
+        })
+        .collect();
+    let (book, built) = axiom_model::build(&sources);
+    assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");
+    then(&book, &crate::run(&book, Options { today, relaxed: false }))
+}
+
 /// What `place` holds of `unit`, as the run ends.
 fn holding<'r>(book: &Book, run: &'r Run, place: &str, unit: &str) -> Option<&'r Holding> {
     let (place, unit) = (book.place(place).unwrap(), book.commodity(unit).unwrap());
@@ -143,21 +163,29 @@ opening 2026-01-01
 
 #[test]
 fn temporal_days_count_an_inclusive_residence_before_the_first_flow() {
+    let std = "\
+system std
+kind person : entity
+";
     let text = "\
 use std
-entity me
+base USD
+commodity USD
+entity me : person
   lives std from 2026-01-01 until 2026-01-10
   law residence-days
     each year
-    warn days(self.lives is std, year) != 10 \"residence days must include both endpoints\"
+    warn days(self.lives is std, year) == 10 \"residence days must include both endpoints\"
 ";
 
-    with_run(text, day(2026, 12, 31), |_, run| {
+    with_run_sources(&[("std.ax", std, true), ("axiom.ax", text, false)], day(2026, 12, 31), |book, run| {
         assert!(
             run.violations.is_empty(),
             "the ten-day residence is counted from its first day through its inclusive last day: {:?}",
             run.violations
         );
+        let law = book.law("residence-days").unwrap();
+        assert_eq!(run.checks[law.index()], 1, "the residence law ran once at year close");
     });
 }
 
@@ -168,26 +196,24 @@ base USD
 commodity USD
   precision 2
 kind payer : entity
-entity market
-entity me
 entity tax-office : payer
 account checking
   law owner-is-owner
     on out
     when self.owner is me
-    warn false \"an account still matches its owner\"
+    warn 0 < 0 \"an account still matches its owner\"
 law from-is-counterparty
   on out
   when from is market
-  warn false \"outside source matches its named party\"
+  warn 0 < 0 \"outside source matches its named party\"
 law from-is-owner
   on out
   when from is me
-  warn false \"an owned account matches its owner, not an outside party\"
+  warn 0 < 0 \"an owned account matches its owner, not an outside party\"
 law to-is-counterparty
   on in
   when to is payer
-  warn false \"outside recipient matches its named kind\"
+  warn 0 < 0 \"outside recipient matches its named kind\"
 2026-01-01 market -> checking 10 USD
 2026-01-02 checking -> tax-office 4 USD
 ";
