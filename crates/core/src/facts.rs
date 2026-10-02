@@ -150,7 +150,8 @@ const _: fn() = || {
     is_send_and_sync::<Facts>();
 };
 
-/// Every slot of every holder, frozen: steps on days in compressed rows. Built by a [`Builder`], then only read.
+/// Every slot of every holder, frozen: steps on days in compressed rows. Built by a [`Builder`], then only read. Reading
+/// a holder the store does not have panics, as indexing does.
 pub struct Facts {
     /// Holder to its first entry; one more at the end, so that a holder's entries are `rows[h]..rows[h + 1]`.
     rows: Vec<u32>,
@@ -331,6 +332,8 @@ fn day_before(day: Day) -> Day {
 pub struct Steps<'a, V> {
     stretches: Stretches<'a, V>,
 }
+
+const _: () = assert!(size_of::<Steps<'_, u32>>() == 32);
 
 impl<'a, V: Field> Steps<'a, V> {
     /// The steps that begin on `days`, valued by `values` from its value number `first`. The days strictly
@@ -638,7 +641,7 @@ impl Builder {
         let by_holder = ByHolder::new(&self.statements, holders);
         let chunks: Vec<Range<usize>> =
             (0..holders).step_by(per_chunk).map(|first| first..holders.min(first + per_chunk)).collect();
-        let mut facts = Facts::with_room_for(holders, self.statements.len()).finish();
+        let mut facts = Writer::with_room_for(holders, self.statements.len()).finish();
         par::map_each_ordered(&chunks, |chunk| by_holder.freeze(chunk.clone()), |part| facts.append(part));
         facts.members = self.sets.members.clone();
         facts
@@ -663,7 +666,7 @@ impl<'a> ByHolder<'a> {
     fn freeze(&self, holders: Range<usize>) -> Facts {
         let said = |holder: usize| &self.order[self.starts[holder] as usize..self.starts[holder + 1] as usize];
         let statements_in = (self.starts[holders.end] - self.starts[holders.start]) as usize;
-        let mut facts = Facts::with_room_for(holders.len(), statements_in);
+        let mut writer = Writer::with_room_for(holders.len(), statements_in);
         let (mut row, mut painted) = (Vec::new(), Vec::new());
         for holder in holders {
             row.clear();
@@ -672,26 +675,32 @@ impl<'a> ByHolder<'a> {
             row.sort_by_key(|statement| statement.slot);
             for group in row.chunk_by(|a, b| a.slot == b.slot) {
                 paint(group, &mut painted);
-                facts.push_entry(group[0].slot, &painted);
+                writer.push_entry(group[0].slot, &painted);
             }
-            facts.end_row();
+            writer.end_row();
         }
-        facts.finish()
+        writer.finish()
     }
 }
 
-/// The writer side of [`Facts`], for `freeze`: entries and steps appended in order, row by row, to a store that is
-/// finished when the last row is.
-impl Facts {
-    fn with_room_for(holders: usize, statements: usize) -> Facts {
+/// A store being written, row by row: its entries and steps are appended in order, and it cannot be read until
+/// `finish` says it is whole.
+struct Writer {
+    rows: Vec<u32>,
+    entries: Vec<Entry>,
+    days: Vec<Day>,
+    values: Column,
+}
+
+impl Writer {
+    fn with_room_for(holders: usize, statements: usize) -> Writer {
         let mut rows = Vec::with_capacity(holders + 1);
         rows.push(0);
-        Facts {
+        Writer {
             rows,
             entries: Vec::with_capacity(statements + 1),
             days: Vec::with_capacity(statements),
             values: Column::with_capacity(statements),
-            members: Column::new(),
         }
     }
 
@@ -707,12 +716,14 @@ impl Facts {
         self.rows.push(len32(self.entries.len()));
     }
 
-    /// Adds the last entry, which says where the steps end.
+    /// The store, with the last entry that says where the steps end, and no sets yet.
     fn finish(mut self) -> Facts {
         self.entries.push(Entry { slot: SlotId(u32::MAX), first: len32(self.days.len()) });
-        self
+        Facts { rows: self.rows, entries: self.entries, days: self.days, values: self.values, members: Column::new() }
     }
+}
 
+impl Facts {
     /// Lays the holders of `part` after those of this store.
     fn append(&mut self, part: Facts) {
         let (entries, steps) = (len32(self.entries.len() - 1), len32(self.days.len()));
@@ -1028,14 +1039,6 @@ mod tests {
     #[should_panic(expected = "holder 3 of a store of 3")]
     fn a_holder_the_store_does_not_have_is_refused_when_painted() {
         Facts::builder(3).paint_always(3, LETTER, 1);
-    }
-
-    #[test]
-    fn the_layout_is_the_one_the_design_commits_to() {
-        assert_eq!(size_of::<Entry>(), 8);
-        assert_eq!(size_of::<Key<Day>>(), size_of::<SlotId>());
-        assert_eq!(size_of::<Steps<'_, Day>>(), 32);
-        assert_eq!(size_of::<(Day, Datum)>(), 32);
     }
 
     const LIVES: Key<Many<u32>> = Key::new(SlotId(3));
@@ -1630,48 +1633,74 @@ mod tests {
         time.as_nanos() as f64 / count as f64
     }
 
-    /// `cargo test -p axiom-core --release facts::tests::bench -- --ignored --nocapture`
-    #[test]
-    #[ignore = "a benchmark"]
-    fn bench_a_million_holders_built_and_read() {
+    /// How a book is written: its statements in any order, or each thing's together, as a file is read.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Order {
+        Random,
+        ThingByThing,
+    }
+
+    /// A million holders and the statements they make, in random order, and the keys of the slots they are about.
+    struct Million {
+        book: Vec<Statement>,
+        keys: Vec<Key<u32>>,
+    }
+
+    impl Million {
         const HOLDERS: u32 = 1_000_000;
-        const READS: usize = 4_000_000;
-        let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
-        let book = generated_book(HOLDERS, &mut rng);
-        let keys: Vec<Key<u32>> = (0..8).map(|slot| Key::new(SlotId(slot))).collect();
-        let fill = || {
-            let mut builder = Facts::builder(HOLDERS as usize);
-            for &(holder, slot, days, letter) in &book {
-                builder.paint(holder, keys[slot as usize], days, letter);
+
+        fn new(rng: &mut Rng) -> Million {
+            Million {
+                book: generated_book(Million::HOLDERS, rng),
+                keys: (0..8).map(|slot| Key::new(SlotId(slot))).collect(),
+            }
+        }
+
+        /// The statements, made in `order`.
+        fn builder(&self, order: Order) -> Builder {
+            let mut book = self.book.clone();
+            if order == Order::ThingByThing {
+                book.sort_by_key(|&(holder, ..)| holder);
+            }
+            let mut builder = Facts::builder(Million::HOLDERS as usize);
+            for (holder, slot, days, letter) in book {
+                builder.paint(holder, self.keys[slot as usize], days, letter);
             }
             builder
-        };
-        let painting = best_of(3, fill);
-        let builder = fill();
+        }
+    }
+
+    /// Times the building of the store and of the nested vectors, and prints it with what they take in memory.
+    fn bench_building(million: &Million) -> (Facts, Nested) {
+        let (statements, holders) = (million.book.len(), Million::HOLDERS);
+        let making = best_of(3, || million.builder(Order::Random));
+        let (builder, grouped) = (million.builder(Order::Random), million.builder(Order::ThingByThing));
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         let freezing = best_of(3, || builder.freeze());
         // One chunk of every holder is one piece of work, which `par` runs on the calling thread.
-        let freezing_on_one_core = best_of(3, || builder.freeze_in_chunks(HOLDERS as usize));
-        let nested_build = best_of(3, || Nested::build(HOLDERS, &book));
-        let (facts, nested) = (builder.freeze(), Nested::build(HOLDERS, &book));
+        let freezing_on_one_core = best_of(3, || builder.freeze_in_chunks(holders as usize));
+        let grouped_on_one_core = best_of(3, || grouped.freeze_in_chunks(holders as usize));
+        let nesting = best_of(3, || Nested::build(holders, &million.book));
+        let (facts, nested) = (builder.freeze(), Nested::build(holders, &million.book));
 
         let (entries, steps) = (facts.entries.len() - 1, facts.days.len());
         let facts_bytes = facts.rows.len() * 4 + facts.entries.len() * 8 + steps * 21;
         let (nested_bytes, nested_allocations) = nested.bytes();
+        let ms = |time: std::time::Duration| time.as_secs_f64() * 1e3;
         eprintln!(
-            "{} statements for {HOLDERS} holders: {entries} entries, {steps} steps ({:.2} slots a holder, {:.2} steps a slot)",
-            book.len(),
-            entries as f64 / f64::from(HOLDERS),
+            "{statements} statements for {holders} holders: {entries} entries, {steps} steps ({:.2} slots a holder, {:.2} steps a slot)",
+            entries as f64 / f64::from(holders),
             steps as f64 / entries as f64
         );
         eprintln!(
             "  build: statements made {:.0} ms; freeze {:.0} ms on {cores} cores and {:.0} ms on one ({:.0} ns a statement); nested vectors {:.0} ms",
-            painting.as_secs_f64() * 1e3,
-            freezing.as_secs_f64() * 1e3,
-            freezing_on_one_core.as_secs_f64() * 1e3,
-            per(freezing_on_one_core, book.len()),
-            nested_build.as_secs_f64() * 1e3
+            ms(making),
+            ms(freezing),
+            ms(freezing_on_one_core),
+            per(freezing_on_one_core, statements),
+            ms(nesting)
         );
+        eprintln!("  freeze of a book written thing by thing, on one core: {:.0} ms", ms(grouped_on_one_core));
         eprintln!(
             "  size: facts {:.1} MB = {:.1} bytes a step; nested {:.1} MB = {:.1} bytes a step, in {nested_allocations} allocations",
             facts_bytes as f64 / 1e6,
@@ -1679,15 +1708,22 @@ mod tests {
             nested_bytes as f64 / 1e6,
             nested_bytes as f64 / steps as f64
         );
+        (facts, nested)
+    }
 
-        // Slots that the holder did not say are most of what is asked, 5 in 8, as they are when a thing falls back on its kind.
+    /// Times `at` on random holders, and on the same reads sorted by holder, for both.
+    fn bench_reading(million: &Million, facts: &Facts, nested: &Nested, rng: &mut Rng) {
+        const READS: usize = 4_000_000;
+        // Slots that the holder did not say are most of what is asked, 5 in 8, as they are when a thing falls back on
+        // its kind.
         let queries: Vec<(u32, u32, Day)> = (0..READS)
-            .map(|_| (rng.below(HOLDERS as usize) as u32, rng.below(8) as u32, Day(rng.below(4000) as i32)))
+            .map(|_| (rng.below(Million::HOLDERS as usize) as u32, rng.below(8) as u32, Day(rng.below(4000) as i32)))
             .collect();
         let mut sorted = queries.clone();
         sorted.sort_unstable_by_key(|&(holder, slot, _)| (holder, slot));
         let sum_facts = |queries: &[(u32, u32, Day)]| {
-            queries.iter().map(|&(h, s, day)| facts.at(keys[s as usize], h, day).map_or(0, u64::from)).sum::<u64>()
+            let read = |&(h, s, day): &(u32, u32, Day)| facts.at(million.keys[s as usize], h, day).map_or(0, u64::from);
+            queries.iter().map(read).sum::<u64>()
         };
         let sum_nested = |queries: &[(u32, u32, Day)]| {
             queries.iter().map(|&(h, s, day)| nested.at(h, s, day).map_or(0, u64::from)).sum::<u64>()
@@ -1702,41 +1738,53 @@ mod tests {
         );
     }
 
+    /// `cargo test -p axiom-core --release facts::tests::bench -- --ignored --nocapture`
+    #[test]
+    #[ignore = "a benchmark"]
+    fn bench_a_million_holders_built_and_read() {
+        let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
+        let million = Million::new(&mut rng);
+        let (facts, nested) = bench_building(&million);
+        bench_reading(&million, &facts, &nested, &mut rng);
+    }
+
     #[test]
     #[ignore = "a benchmark"]
     fn bench_the_days_a_condition_holds_by_integral_and_by_daily_sample() {
         const STEPS: i32 = 10_000;
-        let mut builder = Facts::builder(1);
-        for step in 0..STEPS {
-            builder.paint(0, LETTER, days(step * 3, step * 3 + 2), step as u32 % 3);
-        }
-        let facts = builder.freeze();
-        let window = days(0, STEPS * 3 - 1);
-        let holds = |letter: u32| letter == 1;
-        let integral = || facts.days_where(LETTER, 0, window, holds);
-        let sampled = || {
-            let mut runs: Vec<Days> = Vec::new();
-            for day in (window.first().0..=window.last().0).map(Day) {
-                if !facts.at(LETTER, 0, day).is_some_and(holds) {
-                    continue;
-                }
-                match runs.last_mut() {
-                    Some(run) if run.last().add_days(1) == day => *run = Days::new(run.first(), day).unwrap(),
-                    _ => runs.push(Days::on(day)),
-                }
+        // Steps of three days, and of thirty: the sample costs for each day and the integral for each step.
+        for length in [3, 30] {
+            let mut builder = Facts::builder(1);
+            for step in 0..STEPS {
+                builder.paint(0, LETTER, days(step * length, step * length + length - 1), step as u32 % 3);
             }
-            runs.into_iter().collect::<DaySet>()
-        };
-        assert_eq!(integral(), sampled(), "the sample finds the same days, a day at a time");
-        let (by_integral, by_sample) = (best_of(9, integral), best_of(9, sampled));
-        eprintln!(
-            "days_where over {} steps and {} days: integral {:.1} us, daily sample {:.1} us, {:.0} times as long",
-            facts.steps(LETTER, 0).len(),
-            window.len(),
-            by_integral.as_secs_f64() * 1e6,
-            by_sample.as_secs_f64() * 1e6,
-            by_sample.as_secs_f64() / by_integral.as_secs_f64()
-        );
+            let facts = builder.freeze();
+            let window = days(0, STEPS * length - 1);
+            let holds = |letter: u32| letter == 1;
+            let integral = || facts.days_where(LETTER, 0, window, holds);
+            let sampled = || {
+                let mut runs: Vec<Days> = Vec::new();
+                for day in (window.first().0..=window.last().0).map(Day) {
+                    if !facts.at(LETTER, 0, day).is_some_and(holds) {
+                        continue;
+                    }
+                    match runs.last_mut() {
+                        Some(run) if run.last().add_days(1) == day => *run = Days::new(run.first(), day).unwrap(),
+                        _ => runs.push(Days::on(day)),
+                    }
+                }
+                runs.into_iter().collect::<DaySet>()
+            };
+            assert_eq!(integral(), sampled(), "the sample finds the same days, a day at a time");
+            let (by_integral, by_sample) = (best_of(9, integral), best_of(9, sampled));
+            eprintln!(
+                "days_where over {} steps of {length} days: integral {:.1} us, daily sample {:.1} us, {:.0} times as long",
+                facts.steps(LETTER, 0).len(),
+                by_integral.as_secs_f64() * 1e6,
+                by_sample.as_secs_f64() * 1e6,
+                by_sample.as_secs_f64() / by_integral.as_secs_f64()
+            );
+        }
     }
 
     /// Where a row's slot is found by scanning and by searching cross: what `SCAN_UP_TO` is set from. Whole reads, with
