@@ -1,24 +1,23 @@
 //! Native S5 journal records. This pass reads the source AST directly and
 //! appends resolved records to the pooled Book arenas.
 
-use axiom_core::{Day, Days, Diagnostic, Dim, Groups, Id, Loc, Map, Qty, Run, Span, Sym};
+use axiom_core::{Day, Days, Diagnostic, Dim, Groups, Id, Loc, Map, Qty, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity, Subject};
 
 use super::push_amount_root;
 use super::staged::Staged;
+use super::tail::{FlowTail, Reach, Tail, written_purpose};
 use crate::book::{
     Amount, Change as BookChange, FlowSide, Place, ScheduleKind, Sign, TemplateAmount, TemplateItemParent, TermsState,
-    Text,
 };
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{
     Action, Assert, ClaimChange, ClaimChangeAction, Detail, EndEvent, EndTarget, Event, Filed, Flow, FlowExpressions,
-    Gap, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object,
-    OccurrenceTail, Origin, Provenance, Purposed, Quote, Reading, Select, Split, Txn, TxnKind, Waive, WrittenGroup,
-    WrittenOccurrence,
+    Gap, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, OccurrenceTail,
+    Origin, Provenance, Purposed, Quote, Reading, Select, Split, Txn, TxnKind, Waive, WrittenGroup, WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::problem::{self, CodeUse};
@@ -80,20 +79,6 @@ struct ResolvedQuantity {
     group: JournalQuantity,
 }
 
-#[derive(Clone, Default)]
-struct Tail {
-    purpose: Option<Purposed>,
-    purpose_loc: Option<Loc>,
-    description: Option<Text>,
-    payee: Option<Id<crate::book::Entity>>,
-    recognized: Option<Days>,
-    waive: Option<Waive>,
-    detail: Detail,
-    basis_root: Option<NodeId>,
-    price: Option<(axiom_core::Ratio, Id<crate::book::Commodity>, Loc)>,
-    valid: bool,
-}
-
 #[derive(Clone, Copy)]
 struct PurposeEvidence {
     purposed: Purposed,
@@ -119,7 +104,7 @@ enum CodeTarget {
 /// once after its lowering succeeds; repeated code storage on its header and
 /// flows is deduplicated by the transaction ID.
 #[derive(Default)]
-struct CodeIndex {
+pub(super) struct CodeIndex {
     by_code: Map<axiom_core::Sym, CodeTarget>,
 }
 
@@ -146,7 +131,7 @@ impl CodeIndex {
     }
 
     /// The transaction `code` names, or why it names none, said the way `used` asks.
-    fn resolve<'s>(
+    pub(super) fn resolve<'s>(
         &self,
         world: &mut World<'s>,
         code: ast::Code<'s>,
@@ -251,8 +236,11 @@ fn lower_txn<'a, 's>(
         return;
     };
 
-    let (header_codes, header_tail) =
-        lower_tail(&mut staged, home, file, written.flow.tail, written.date, &root_ids, code_index, diags);
+    let (header_codes, header_tail) = FlowTail { home, file, day: written.date, roots: &root_ids, code_index }.lower(
+        &mut staged,
+        written.flow.tail,
+        diags,
+    );
     let txn_waive = header_tail.waive;
     let mut flow_roots = Vec::new();
     let mut groups = Vec::new();
@@ -365,9 +353,12 @@ fn lower_txn<'a, 's>(
             };
             let (from, to) = if source_is_from { (source, other) } else { (other, source) };
             let mut tail = header_tail.clone();
-            let (leg_codes, leg_tail) =
-                lower_tail(&mut staged, home, file, leg.tail, written.date, &root_ids, code_index, diags);
-            tail = merge_tail(tail, leg_tail);
+            let (leg_codes, leg_tail) = FlowTail { home, file, day: written.date, roots: &root_ids, code_index }.lower(
+                &mut staged,
+                leg.tail,
+                diags,
+            );
+            tail = tail.merge(leg_tail);
             let unit = total.map_or(staged.book.base, |total| total.amount.unit);
             let Some(quantity) =
                 resolve_quantity(&mut staged, file, leg.amount, unit, source_side.other(), &root_ids, diags)
@@ -558,7 +549,9 @@ fn lower_opening_balances<'a, 's>(
             );
             continue;
         }
-        let tail = lower_tail(&mut staged, site.home, file, leg.tail, opening.date, &root_ids, code_index, diags).1;
+        let tail = FlowTail { home: site.home, file, day: opening.date, roots: &root_ids, code_index }
+            .lower(&mut staged, leg.tail, diags)
+            .1;
         if end.select.len() != 0 {
             diags.push(
                 Diagnostic::error("opening-selector", "an opening line sets a whole place")
@@ -784,8 +777,8 @@ fn lower_occurrence<'a, 's>(
         return;
     }
 
-    let (codes, header_tail) =
-        lower_tail(&mut staged, site.home, file, statement.tail, statement.date, &roots, code_index, diags);
+    let (codes, header_tail) = FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }
+        .lower(&mut staged, statement.tail, diags);
     if !header_tail.valid || header_tail.price.is_some() {
         if header_tail.price.is_some() {
             diags.push(
@@ -966,8 +959,12 @@ fn lower_occurrence<'a, 's>(
             continue;
         }
         let (local_codes, written_tail) =
-            lower_tail(&mut staged, site.home, file, leg.tail, statement.date, &roots, code_index, diags);
-        let mut tail = merge_tail(header_tail.clone(), written_tail);
+            FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }.lower(
+                &mut staged,
+                leg.tail,
+                diags,
+            );
+        let mut tail = header_tail.clone().merge(written_tail);
         if !tail.valid {
             continue;
         }
@@ -1272,8 +1269,11 @@ fn lower_loan_origin<'a, 's>(
     };
     let Some((program, root_ids)) = compiled else { return };
     let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
-    let (codes, mut tail) =
-        lower_tail(&mut staged, site.home, file, statement.tail, statement.date, &roots, code_index, diags);
+    let (codes, mut tail) = FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }.lower(
+        &mut staged,
+        statement.tail,
+        diags,
+    );
     let basis_root = tail.basis_root;
     let waive = tail.waive;
     if tail.price.is_some() {
@@ -1499,7 +1499,11 @@ fn lower_owes<'a, 's>(
     let txn_id = Id::new(staged.book.txns.len() as u32);
     let diagnostic_start = diags.len();
     let (header_codes, header_tail) =
-        lower_tail(&mut staged, site.home, file, statement.tail, statement.date, &roots, code_index, diags);
+        FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }.lower(
+            &mut staged,
+            statement.tail,
+            diags,
+        );
     if !header_tail.valid {
         return;
     }
@@ -1649,8 +1653,8 @@ fn lower_basis<'a, 's>(
     let mut staged = Staged::open(world);
     let txn_id = Id::new(staged.book.txns.len() as u32);
     let diagnostic_start = diags.len();
-    let (header_codes, mut tail) =
-        lower_tail(&mut staged, site.home, file, statement.tail, statement.date, &roots, code_index, diags);
+    let (header_codes, mut tail) = FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }
+        .lower(&mut staged, statement.tail, diags);
     tail.detail.since = since.or(tail.detail.since);
     let basis_root = match written_amount {
         ast::Amount::Literal(literal) => {
@@ -2385,13 +2389,8 @@ fn lower_measure<'s>(
                 Err(problem) => diags.push(problem),
             },
             ClauseKind::Purpose(written) => {
-                let purpose_id = world.purpose(home, Word::of(file, written.name.0));
-                match purpose_id {
-                    Ok(purpose_id) => {
-                        let of = written.of.and_then(|name| resolve_object(world, home, file, name, diags));
-                        purpose = Some(Purposed { purpose: purpose_id, of, source: Provenance::Written });
-                    }
-                    Err(problem) => diags.push(problem),
+                if let Some(purposed) = written_purpose(world, home, file, written, Reach::Anywhere, diags) {
+                    purpose = Some(purposed);
                 }
             }
             ClauseKind::Description(text) => {
@@ -2936,148 +2935,6 @@ fn purpose_evidence_label(world: &World<'_>, evidence: PurposeEvidence) -> Strin
     }
 }
 
-fn lower_tail<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    clauses: ast::Many<ast::Clause<'s>>,
-    day: Day,
-    roots: &Map<ast::ExprId, NodeId>,
-    code_index: &CodeIndex,
-    diags: &mut Vec<Diagnostic>,
-) -> (Run<axiom_core::Sym>, Tail) {
-    let start = world.book.codes.len();
-    let mut tail = Tail { valid: true, ..Tail::default() };
-    for clause in &file[clauses] {
-        match clause.kind {
-            ClauseKind::Purpose(written) => {
-                let purpose = world.purpose(home, Word::of(file, written.name.0));
-                let of = written.of.and_then(|name| resolve_object(world, home, file, name, diags));
-                match (purpose, written.of.is_some(), of) {
-                    (Ok(purpose), false, _) | (Ok(purpose), true, Some(_)) => {
-                        tail.purpose = Some(Purposed { purpose, of, source: Provenance::Written });
-                        tail.purpose_loc = Some(clause.at);
-                    }
-                    (Err(problem), _, _) => {
-                        diags.push(problem);
-                        tail.valid = false;
-                    }
-                    (Ok(_), true, None) => tail.valid = false,
-                }
-            }
-            ClauseKind::Description(text) => tail.description = Some(world.book.quoted_text(text.0)),
-            ClauseKind::Code(code) => {
-                let symbol = world.book.names.intern(code.name());
-                world.book.codes.push(symbol);
-            }
-            ClauseKind::For(ast::For::Period(first, last)) => {
-                tail.recognized = Days::new(first, last);
-                if tail.recognized.is_none() {
-                    tail.valid = false;
-                }
-            }
-            ClauseKind::For(ast::For::Last(relative)) => {
-                tail.recognized = Some(previous_period(day, relative));
-            }
-            ClauseKind::For(ast::For::Whom(name)) => match world.entity(home, Word::of(file, name.0)) {
-                Ok(entity) => tail.detail.hold = Some(entity),
-                Err(problem) => {
-                    diags.push(problem);
-                    tail.valid = false;
-                }
-            },
-            ClauseKind::Due(due) => {
-                tail.detail.due = Some(match due {
-                    ast::Due::On(day) => day,
-                    ast::Due::After(span) => day.add(span),
-                });
-            }
-            ClauseKind::Via(name) => match world.entity(home, Word::of(file, name.0)) {
-                Ok(entity) => tail.payee = Some(entity),
-                Err(problem) => {
-                    diags.push(problem);
-                    tail.valid = false;
-                }
-            },
-            ClauseKind::Basis(ast::Amount::Literal(literal)) => {
-                let Some(unit) = literal.unit().and_then(|unit| world.commodity_of(Word::of(file, unit.0)).ok()) else {
-                    diags.push(
-                        Diagnostic::error("basis-unit", "basis needs an explicit base-currency unit")
-                            .label(file.loc(literal.0), "write the unit"),
-                    );
-                    tail.valid = false;
-                    continue;
-                };
-                match world.amount(literal.num(), unit, file.loc(literal.0)) {
-                    Ok(amount) if amount.unit == world.book.base => tail.detail.basis = Some(amount.qty),
-                    Ok(_) => {
-                        diags.push(
-                            Diagnostic::error("basis-unit", "basis must be stated in the base currency")
-                                .label(file.loc(literal.0), "another unit is not the base currency"),
-                        );
-                        tail.valid = false;
-                    }
-                    Err(problem) => {
-                        diags.push(problem);
-                        tail.valid = false;
-                    }
-                }
-            }
-            ClauseKind::Basis(ast::Amount::Computed(expr)) => {
-                if let Some(&root) = roots.get(&expr) {
-                    tail.basis_root = Some(root);
-                } else {
-                    diags.push(
-                        Diagnostic::error("computed-basis", "computed basis expression was not compiled for this flow")
-                            .label(clause.at, "the basis expression is not available"),
-                    );
-                    tail.valid = false;
-                }
-            }
-            ClauseKind::Price(literal) => {
-                let Some(name) = literal.unit() else {
-                    diags.push(
-                        Diagnostic::error("price-unit", "a price needs a quoted commodity")
-                            .label(file.loc(literal.0), "write `@ 285.70 USD`"),
-                    );
-                    tail.valid = false;
-                    continue;
-                };
-                let Ok(unit) = world.commodity_of(Word::of(file, name.0)) else {
-                    tail.valid = false;
-                    continue;
-                };
-                let Some(rate) = literal.num().to_ratio().filter(|rate| !rate.is_zero()) else {
-                    diags.push(
-                        Diagnostic::error("price-zero", "a price must be greater than zero")
-                            .label(file.loc(literal.0), "this price is zero"),
-                    );
-                    tail.valid = false;
-                    continue;
-                };
-                tail.price = Some((rate, unit, clause.at));
-            }
-            ClauseKind::Since(day) => tail.detail.since = Some(day),
-            ClauseKind::Against(code) => {
-                tail.detail.against = code_index.resolve(world, code, clause.at, CodeUse::Against, diags);
-                tail.valid &= tail.detail.against.is_some();
-            }
-            ClauseKind::Until(_) => {
-                diags.push(
-                    Diagnostic::error("until-position", "`until` is only valid on a statement change or waiver")
-                        .label(clause.at, "it has no effect on a flow"),
-                );
-                tail.valid = false;
-            }
-            ClauseKind::Waive(waive) => {
-                tail.waive =
-                    Some(Waive { loc: waive.at, reason: waive.reason.map(|text| world.book.quoted_text(text.0)) });
-            }
-        }
-    }
-    (Run::new(Id::new(start as u32), (world.book.codes.len() - start) as u32), tail)
-}
-
 fn resolve_end<'s>(
     world: &mut World<'s>,
     home: Home,
@@ -3145,9 +3002,9 @@ fn lower_items<'s>(
         let Some(amount) = resolve_amount(staged, file, item.amount, staged.book.base, roots, diags) else {
             continue;
         };
-        let (local_codes, item_tail) = lower_tail(staged, home, file, item.tail, day, roots, code_index, diags);
-        let mut tail = inherited_tail.cloned().unwrap_or(Tail { valid: true, ..Tail::default() });
-        tail = merge_tail(tail, item_tail);
+        let (local_codes, item_tail) = FlowTail { home, file, day, roots, code_index }.lower(staged, item.tail, diags);
+        let mut tail = inherited_tail.cloned().unwrap_or(Tail::new());
+        tail = tail.merge(item_tail);
         let has_own_metadata = tail.purpose.is_some()
             || tail.description.is_some()
             || tail.detail != Detail::NONE
@@ -3230,64 +3087,6 @@ fn resolve_amount<'s>(
     }
 }
 
-pub(super) fn resolve_object<'s>(
-    world: &World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    name: ast::Name<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Object> {
-    if let Some(sym) = world.book.names.get(name.0)
-        && let Some(&asset) = world.book.lookup.assets.get(&sym)
-    {
-        return Some(Object::Asset(asset));
-    }
-    let word = Word::of(file, name.0);
-    if let Ok(end) = world.end(home, word) {
-        return Some(end.entity.map_or(Object::Place(end.place), Object::Entity));
-    }
-    world.place(word).or_report(diags).map(|place| Object::Place(place))
-}
-
-fn merge_tail(mut parent: Tail, child: Tail) -> Tail {
-    if child.purpose.is_some() {
-        parent.purpose = child.purpose;
-        parent.purpose_loc = child.purpose_loc;
-    }
-    if child.description.is_some() {
-        parent.description = child.description;
-    }
-    if child.payee.is_some() {
-        parent.payee = child.payee;
-    }
-    if child.recognized.is_some() {
-        parent.recognized = child.recognized;
-    }
-    if child.waive.is_some() {
-        parent.waive = child.waive;
-    }
-    if child.detail.basis.is_some() {
-        parent.detail.basis = child.detail.basis;
-    }
-    if child.detail.basis.is_some() || child.basis_root.is_some() {
-        parent.basis_root = child.basis_root;
-    }
-    if child.detail.hold.is_some() {
-        parent.detail.hold = child.detail.hold;
-    }
-    if child.detail.since.is_some() {
-        parent.detail.since = child.detail.since;
-    }
-    if child.detail.due.is_some() {
-        parent.detail.due = child.detail.due;
-    }
-    if child.price.is_some() {
-        parent.price = child.price;
-    }
-    parent.valid &= child.valid;
-    parent
-}
-
 /// An empty run of codes at the end of the pool: a flow with none of its own says where they would have gone.
 fn empty_codes(world: &World<'_>) -> Run<Sym> {
     Run::new(Id::new(world.book.codes.len() as u32), 0)
@@ -3326,27 +3125,6 @@ fn push_rejected_txn<'s>(staged: &mut Staged<'_, 's>, item: &ast::Item<'s>, day:
         ..journal_txn(staged, day, item.loc)
     };
     staged.book.txns.push(txn);
-}
-
-fn previous_period(day: Day, relative: ast::Relative) -> Days {
-    match relative {
-        ast::Relative::Month => {
-            let last = day.month_start().add_days(-1);
-            Days::new(last.month_start(), last).expect("previous month is ordered")
-        }
-        ast::Relative::Quarter => {
-            let (year, month, _) = day.ymd();
-            let quarter_month = ((month - 1) / 3) * 3 + 1;
-            let current = Day::from_ymd(year, quarter_month, 1).expect("quarter starts in calendar");
-            let last = current.add_days(-1);
-            let first = last.add(Span::months(-2)).month_start();
-            Days::new(first, last).expect("previous quarter is ordered")
-        }
-        ast::Relative::Year => {
-            let last = day.year_start().add_days(-1);
-            Days::new(last.year_start(), last).expect("previous year is ordered")
-        }
-    }
 }
 
 fn priced(

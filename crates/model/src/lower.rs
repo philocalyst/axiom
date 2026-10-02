@@ -9,6 +9,7 @@ pub(crate) mod also;
 mod contracts;
 mod record;
 mod staged;
+mod tail;
 
 pub(crate) use contracts::contracts;
 pub(crate) use record::record;

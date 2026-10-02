@@ -4,10 +4,11 @@ use axiom_core::{Diagnostic, Id, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
+use super::tail::{Reach, written_purpose, written_waive};
 use crate::book::Text;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Detail, Provenance, Purposed, Select, Waive};
+use crate::journal::{Detail, Purposed, Select, Waive};
 use crate::scope::Home;
 
 /// Pooled metadata shared by contract and declaration `also` clauses.
@@ -42,26 +43,14 @@ pub(crate) fn tail<'s>(
                 world.book.codes.push(world.book.names.intern(code.name()));
             }
             ClauseKind::Purpose(written) => {
-                let word = Word::of(file, written.name.0);
-                match world.purpose(home, word) {
-                    Ok(id) => {
-                        let of =
-                            written.of.and_then(|name| super::record::resolve_object(world, home, file, name, diags));
-                        if written.of.is_some() && of.is_none() {
-                            continue;
-                        }
-                        purpose = Some(Purposed { purpose: id, of, source: Provenance::Written });
-                    }
-                    Err(problem) => diags.push(problem),
-                }
+                // An object that names nothing has been said, and costs the purpose.
+                purpose = written_purpose(world, home, file, written, Reach::Anywhere, diags)
+                    .filter(|purposed| written.of.is_none() || purposed.of.is_some());
             }
             ClauseKind::Description(text) => {
                 description = Some(world.book.quoted_text(text.0));
             }
-            ClauseKind::Waive(written) => {
-                waive =
-                    Some(Waive { loc: written.at, reason: written.reason.map(|text| world.book.quoted_text(text.0)) });
-            }
+            ClauseKind::Waive(written) => waive = Some(written_waive(world, written)),
             ClauseKind::For(ast::For::Whom(name)) => match world.entity(home, Word::of(file, name.0)) {
                 Ok(entity) => detail.hold = Some(entity),
                 Err(problem) => diags.push(problem),

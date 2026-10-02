@@ -6,6 +6,7 @@ use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Span
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
+use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Loan, Prepay,
@@ -15,7 +16,7 @@ use crate::book::{
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
+use crate::journal::{Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
 use crate::problem::{self, Noun};
 use crate::scope::Home;
@@ -124,7 +125,9 @@ fn lower_contract<'a, 's>(
             Ok(id) => Some(At {
                 value: Purposed {
                     purpose: id,
-                    of: purpose.of.and_then(|object| resolve_object(world, written.site.home, file, object, diags)),
+                    of: purpose.of.and_then(|object| {
+                        resolve_object(world, written.site.home, file, object, Reach::Parties, diags)
+                    }),
                     source: Provenance::Contract(written.id),
                 },
                 loc: purpose_word.loc,
@@ -640,24 +643,22 @@ fn lower_terms<'a, 's>(
             description,
             leg.loc,
         );
-        let (codes, selectors, detail, waive, leg_purpose, leg_description) =
-            lower_tail(world, written.site.home, file, leg.tail, diags);
-        flow.codes = codes;
-        flow.select = selectors;
-        flow.detail = detail;
-        flow.waive = waive;
+        let leg_tail = lower_term_tail(world, written.site.home, file, leg.tail, diags);
+        flow.codes = leg_tail.codes;
+        flow.select = leg_tail.select;
+        flow.waive = leg_tail.waive;
         flow.purpose = super::record::infer_for_flow(
             world,
             leg_from,
             from_party,
             leg_to,
             None,
-            leg_purpose.or_else(|| purpose.map(|at| At { value: at.value, loc: at.loc })).map(|at| (at.value, at.loc)),
+            leg_tail.purpose.or(purpose).map(|at| (at.value, at.loc)),
             leg.loc,
             diags,
         )
         .ok()?;
-        flow.description = leg_description.or(flow.description);
+        flow.description = leg_tail.description.or(flow.description);
         legs.push(TemplateLeg { flow, side, quantity });
     }
     let mut items = Vec::new();
@@ -898,7 +899,7 @@ fn lower_item<'s>(
         TemplateQuantity::Amount(Some(root)) => TemplateAmount::Computed(root),
         _ => TemplateAmount::Literal(literal),
     };
-    let (codes, select, detail, waive, purpose, description) = lower_tail(world, home, file, item.tail, diags);
+    let tail = lower_term_tail(world, home, file, item.tail, diags);
     Some(TemplateItem {
         sign: match item.sign {
             ast::Sign::Carve => crate::book::Sign::Carve,
@@ -908,25 +909,36 @@ fn lower_item<'s>(
         parent,
         side,
         amount,
-        purpose: purpose.map(|at| at.value),
-        description,
-        codes,
-        select,
-        detail,
-        waive,
+        purpose: tail.purpose.map(|at| at.value),
+        description: tail.description,
+        codes: tail.codes,
+        select: tail.select,
+        detail: None,
+        waive: tail.waive,
         loc: item.loc,
     })
 }
 
-fn lower_tail<'s>(
+/// What a contract's term line says about the flow it promises.
+struct TermTail {
+    codes: Run<Sym>,
+    select: Run<Select>,
+    purpose: Option<At<Purposed>>,
+    description: Option<crate::book::Text>,
+    waive: Option<Waive>,
+}
+
+/// Reads the clauses a term line keeps: codes, a purpose, a description and a waiver. It takes no others: a line
+/// that promises a flow does not say what an occurrence of it says about itself (`for`, `due`, `via`, `basis`,
+/// `since`, `against`, `@` and `until`), and what is written there is left unread, as it always has been.
+fn lower_term_tail<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     tail: axiom_syntax::Many<ast::Clause<'s>>,
     diags: &mut Vec<Diagnostic>,
-) -> (Run<Sym>, Run<Select>, Option<Id<Detail>>, Option<Waive>, Option<At<Purposed>>, Option<crate::book::Text>) {
+) -> TermTail {
     let code_start = world.book.codes.len();
-    let mut details = Detail::NONE;
     let (mut purpose, mut description, mut waive) = (None, None, None);
     for clause in &file[tail] {
         match clause.kind {
@@ -934,36 +946,26 @@ fn lower_tail<'s>(
                 let sym = world.book.names.intern(code.name());
                 world.book.codes.push(sym);
             }
-            ClauseKind::Purpose(purpose_ast) => {
-                let word = Word::of(file, purpose_ast.name.0);
-                match world.purpose(home, word) {
-                    Ok(id) => {
-                        purpose = Some(At {
-                            value: Purposed {
-                                purpose: id,
-                                of: purpose_ast.of.and_then(|name| resolve_object(world, home, file, name, diags)),
-                                source: Provenance::Written,
-                            },
-                            loc: clause.at,
-                        });
-                    }
-                    Err(problem) => diags.push(problem),
+            ClauseKind::Purpose(written) => {
+                if let Some(value) = written_purpose(world, home, file, written, Reach::Parties, diags) {
+                    purpose = Some(At { value, loc: clause.at });
                 }
             }
             ClauseKind::Description(text) => description = Some(world.book.quoted_text(text.0)),
-            ClauseKind::Waive(written) => {
-                waive =
-                    Some(Waive { loc: written.at, reason: written.reason.map(|text| world.book.quoted_text(text.0)) });
-            }
-            ClauseKind::Due(_) => details.due = None,
-            ClauseKind::For(_) | ClauseKind::Via(_) | ClauseKind::Basis(_) | ClauseKind::Since(_) => {}
-            ClauseKind::Against(_) | ClauseKind::Price(_) | ClauseKind::Until(_) => {}
+            ClauseKind::Waive(written) => waive = Some(written_waive(world, written)),
+            ClauseKind::Due(_)
+            | ClauseKind::For(_)
+            | ClauseKind::Via(_)
+            | ClauseKind::Basis(_)
+            | ClauseKind::Since(_)
+            | ClauseKind::Against(_)
+            | ClauseKind::Price(_)
+            | ClauseKind::Until(_) => {}
         }
     }
     let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
     let select = Run::new(Id::new(world.book.selectors.len() as u32), 0);
-    let detail = (details != Detail::NONE).then(|| world.book.details.push(details));
-    (codes, select, detail, waive, purpose, description)
+    TermTail { codes, select, purpose, description, waive }
 }
 
 fn resolve_commodity<'s>(
@@ -1042,22 +1044,6 @@ fn contract_days(
         );
         None
     })
-}
-
-fn resolve_object<'s>(
-    world: &World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    name: Name<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<crate::journal::Object> {
-    let sym = world.book.names.get(name.0);
-    if let Some(sym) = sym
-        && let Some(&asset) = world.book.lookup.assets.get(&sym)
-    {
-        return Some(crate::journal::Object::Asset(asset));
-    }
-    world.entity(home, Word::of(file, name.0)).or_report(diags).map(|entity| crate::journal::Object::Entity(entity))
 }
 
 fn node_doc<'s>(world: &mut World<'s>, site: &Site<'_, 's>, loc: Loc) -> Option<Sym> {
