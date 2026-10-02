@@ -1,14 +1,15 @@
 //! What the journal records: flows grouped into transactions, balance
 //! assertions, measures, settlement events, prices, and returns as filed.
 
-use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
+use axiom_core::{Arena, Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, Place, Policy, Purpose, ScheduleKind,
-    Sign, System, TemplateAmount, TemplateItemParent, TemplateProgram, Text,
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System,
+    Text,
 };
-use crate::law::{Law, NodeId, Subject};
+use crate::law::{Law, Node, NodeId, Subject};
+use crate::split::{Expr, Made};
 
 /// Value moving once, from one place to another. Balanced by construction.
 #[derive(Clone, PartialEq, Debug)]
@@ -62,6 +63,21 @@ pub struct Flow {
 impl Flow {
     pub fn is_exchange(&self) -> bool {
         self.out.unit != self.arrive.unit
+    }
+
+    /// The amount that moves at `end`: what leaves the `from` place, or arrives at `to`.
+    pub fn amount_at(&self, end: End) -> Amount {
+        match end {
+            End::From => self.out,
+            End::To => self.arrive,
+        }
+    }
+
+    pub fn amount_at_mut(&mut self, end: End) -> &mut Amount {
+        match end {
+            End::From => &mut self.out,
+            End::To => &mut self.arrive,
+        }
     }
 
     /// The immutable pooled identity used to match selectors against source
@@ -583,7 +599,7 @@ pub struct Txn {
     /// Sparse typed roots and grouping for a transaction with computed
     /// amounts or line items. Literal ungrouped transactions pay no program
     /// allocation and carry `None`.
-    pub program: Option<Id<JournalProgram>>,
+    pub program: Option<Id<Program>>,
     pub codes: Run<Sym>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
@@ -616,6 +632,11 @@ impl Txn {
         self.kind == TxnKind::ContractEnd
     }
 
+    /// Where `flow` is among the transaction's own, if it is one of them.
+    pub fn offset(&self, flow: Id<Flow>) -> Option<u32> {
+        u32::try_from(flow.index().checked_sub(self.flows.start().index())?).ok()
+    }
+
     /// The contract whose principal is disbursed on its loan date.
     pub fn loan_origin(&self) -> Option<Id<Contract>> {
         if self.kind == TxnKind::LoanOrigin { self.contract } else { None }
@@ -630,24 +651,14 @@ pub struct WrittenOccurrence {
     pub schedule: ScheduleKind,
     /// An amount written after the contract name replaces the terms' amount
     /// for this occurrence only. Computed roots belong to `program` below.
-    pub amount: Option<TemplateAmount>,
+    pub amount: Option<Expr>,
     /// Computed amount, side and basis roots for this occurrence's overrides.
-    pub program: Option<Id<JournalProgram>>,
-    /// Source-ordered partial replacements; groups absent here inherit terms.
-    pub groups: Box<[WrittenGroup]>,
+    pub program: Option<Id<Program>>,
+    /// What it replaces of each of the terms' template groups, by position: a group it says nothing of is `None`
+    /// and inherits the terms. Offsets in a group address the source transaction's flows.
+    pub groups: Box<[Option<Made>]>,
     /// Partial header metadata applied to the inherited or replaced groups.
     pub tail: OccurrenceTail,
-}
-
-/// A partial replacement of one contract template group by a written
-/// occurrence. Side quantities are explicit options: an omitted side inherits
-/// the template, while group offsets address the source Txn's flow range.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct WrittenGroup {
-    pub template: u32,
-    pub out: Option<JournalQuantity>,
-    pub arrive: Option<JournalQuantity>,
-    pub group: JournalGroup,
 }
 
 /// Metadata written on a contract occurrence's header.
@@ -679,13 +690,32 @@ impl Default for OccurrenceTail {
     }
 }
 
-/// Expression roots and allocation groups for one written transaction.
-/// Roots and members are indexed by offsets in the owning `Txn::flows` run.
-#[derive(Clone, PartialEq, Debug)]
-pub struct JournalProgram {
-    pub program: TemplateProgram,
-    pub flow_roots: Box<[FlowExpressions]>,
-    pub groups: Box<[JournalGroup]>,
+/// The expressions of one source, compiled, and what a transaction's flows take from them. The nodes are
+/// immutable once lowered and are evaluated with the engine's reusable scratch.
+///
+/// Contract terms, assertions and laws have nodes only: what they compute is named by an [`Expr`] in the template
+/// or by the assertion. A transaction's flows are in the book's flow arena, which has no room for one, so what a
+/// flow computes is told here, by its offset in the transaction's own flows, and so is the split it is in.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Program {
+    pub nodes: Arena<Node>,
+    /// The flows that compute an amount or a basis, sparse and in flow order.
+    pub roots: Box<[FlowExpressions]>,
+    /// The split, or the header with items, that the flows are. A transaction has at most one.
+    pub group: Option<Box<Made>>,
+}
+
+impl Program {
+    /// The nodes of a source that has no flows of its own to say which computes what.
+    pub fn of(nodes: Arena<Node>) -> Program {
+        Program { nodes, ..Program::default() }
+    }
+
+    /// What the flow at `offset` of the transaction computes, if anything.
+    pub fn roots_of(&self, offset: u32) -> Option<FlowExpressions> {
+        let at = self.roots.partition_point(|roots| roots.flow < offset);
+        self.roots.get(at).filter(|roots| roots.flow == offset).copied()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -695,64 +725,6 @@ pub struct FlowExpressions {
     pub arrive: Option<NodeId>,
     /// Computed base-currency basis attached to this flow's runtime detail.
     pub basis: Option<NodeId>,
-}
-
-/// A resolved endpoint retained when a split header has no postable flow of
-/// its own. `entity` records that the written endpoint named an entity whose
-/// place is used by the flow.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct JournalEnd {
-    pub place: Id<Place>,
-    pub entity: Option<Id<Entity>>,
-}
-
-/// A split header's aggregate quantity when one named side is only group
-/// metadata. Literal amounts stay inline; a computed root, when present,
-/// replaces that literal during instantiation.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum JournalQuantity {
-    Amount(Amount, Option<NodeId>),
-    Pending(Amount, Option<NodeId>),
-    Target(Amount, Option<NodeId>),
-    Unknown(Id<Commodity>),
-    All(Option<Id<Commodity>>),
-    Rest,
-    Whole,
-    Derived,
-}
-
-/// A split header and its source-ordered legs and items.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct JournalGroup {
-    /// An independently posted header flow, or `None` when the named source
-    /// exists only as aggregate metadata for the split legs.
-    pub header: Option<u32>,
-    /// Resolved named source for a source-only split. Still populated for
-    /// headed groups so the source relation is explicit and uniform.
-    pub source: JournalEnd,
-    /// Which side of each leg corresponds to the aggregate header quantity.
-    pub side: FlowSide,
-    /// The aggregate quantity only when `header` is absent. When a header
-    /// flow exists, its own inline amount and `FlowExpressions` are canonical.
-    pub total: Option<JournalQuantity>,
-    pub legs: Box<[u32]>,
-    /// Typed quantities parallel to `legs`, preserving Rest/All/zero distinctions.
-    pub leg_quantities: Box<[JournalQuantity]>,
-    pub items: Box<[JournalItem]>,
-}
-
-/// A source-ordered line item attached to the header remainder or one leg.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct JournalItem {
-    /// The materialized purpose-bearing flow, if this item has one.
-    pub flow: Option<u32>,
-    pub sign: Sign,
-    pub parent: TemplateItemParent,
-    pub side: FlowSide,
-    /// Exactly one typed literal magnitude or computed root. A purposeless
-    /// Less item still retains its amount here while `flow` is `None`.
-    pub amount: TemplateAmount,
-    pub loc: Loc,
 }
 
 /// An id used only by contract template flows before an occurrence is
@@ -782,7 +754,7 @@ pub struct Assert {
     /// A computed amount, when written; the literal `amount` slot otherwise.
     /// The sparse program pool belongs to `Book`, so ordinary assertions keep
     /// only an empty option and no expression arena allocation.
-    pub computed: Option<(Id<TemplateProgram>, NodeId)>,
+    pub computed: Option<(Id<Program>, NodeId)>,
     /// What becomes of a difference between the balance and the statement.
     pub gap: Gap,
     pub loc: Loc,

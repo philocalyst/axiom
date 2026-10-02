@@ -2,7 +2,7 @@
 //! before any template expression compiles, so a template may mention a
 //! contract declared later in the project.
 
-use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline};
+use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Run, Span, Sym, Timeline};
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
@@ -12,19 +12,19 @@ use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
-    FlowSide, Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, TemplateAmount, TemplateFlow,
-    TemplateItem, TemplateItemParent, TemplateLeg, TemplateProgram, TemplateQuantity, Terms, TermsState, Text,
+    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, Terms, TermsState, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
+use crate::journal::{Flow, Infer, Mode, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
 use crate::laws::Placement;
 use crate::problem::{self, Noun};
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
+use crate::split::{Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
 
 /// A contract as written, with the id reserved for it and its name.
 #[derive(Clone, Copy)]
@@ -614,10 +614,10 @@ struct TermsCx<'a, 's> {
 }
 
 /// The header flow of a schedule, with what the legs and the items under it are made against.
-struct Header {
+struct HeaderCx {
     flow: Flow,
-    out: TemplateQuantity,
-    arrive: TemplateQuantity,
+    out: Quantity,
+    arrive: Quantity,
     /// The end the legs are paid from, which is the header's.
     from: Id<Place>,
     from_party: Option<Id<Entity>>,
@@ -630,7 +630,7 @@ fn lower_terms<'a, 's>(
     world: &mut World<'s>,
     cx: &TermsCx<'a, 's>,
     schedule: ast::Schedule<'s>,
-    program: TemplateProgram,
+    program: Program,
     roots: Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
@@ -641,10 +641,9 @@ fn lower_terms<'a, 's>(
         lower_header_item(world, cx, &header, &roots, item, diags)
     };
     let items: Vec<_> = file[node.body.items].iter().filter_map(|item| lower(world, item, diags)).collect();
-    let template = TemplateFlow {
-        flow: header.flow.clone(),
-        out: header.out,
-        arrive: header.arrive,
+    let template = Promised {
+        header: Header { flow: header.flow.clone(), out: header.out, arrive: header.arrive },
+        side: header.side,
         legs: legs.into_boxed_slice(),
         items: items.into_boxed_slice(),
     };
@@ -687,7 +686,7 @@ fn template_header<'a, 's>(
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Header> {
+) -> Option<HeaderCx> {
     let (file, party) = (cx.file, cx.party);
     let hold = schedule.terms.holding?;
     let holding = resolve_endpoint(world, cx.written.site.home, file, hold.name, diags)?;
@@ -704,7 +703,6 @@ fn template_header<'a, 's>(
     };
     let owner = world.book.places[holding].owner;
     let ScheduleAmount { quantity, amount, buys } = schedule_amount(world, file, schedule, roots, diags)?;
-    let (out, arrive) = (quantity, quantity);
     let mut flow = cx.flow(from, to, amount, owner, schedule.at);
     let (from_party, to_party) = match hold.direction {
         Direction::From => (None, Some(party)),
@@ -713,8 +711,8 @@ fn template_header<'a, 's>(
     let purpose = cx.purpose.map(|at| (at.value, at.loc));
     let (from_end, to_end) = (End { place: from, entity: from_party }, End { place: to, entity: to_party });
     flow.purpose = infer_for_flow(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
-    let arrive = buys.map_or(arrive, TemplateQuantity::Unknown);
-    Some(Header { flow, out, arrive, from, from_party, side, owner, unit: amount.unit })
+    let arrive = buys.map_or(quantity, Quantity::Unknown);
+    Some(HeaderCx { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
 }
 
 /// A promised split leg names the recipient. The source end of the scheduled header is kept and that portion is
@@ -723,16 +721,16 @@ fn template_header<'a, 's>(
 fn template_legs<'a, 's>(
     world: &mut World<'s>,
     cx: &TermsCx<'a, 's>,
-    header: &Header,
+    header: &HeaderCx,
     legs: ast::Many<ast::Leg<'s>>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Vec<TemplateLeg>> {
+) -> Option<Vec<Leg<Flow>>> {
     let (file, home) = (cx.file, cx.written.site.home);
     let mut lowered = Vec::new();
     for leg in &file[legs] {
         let to = resolve_endpoint(world, home, file, leg.end.name, diags)?;
-        let (quantity, amount) = template_quantity(world, file, leg.amount, roots, header.unit, diags)?;
+        let (part, amount) = template_quantity(world, file, leg.amount, roots, header.unit, diags)?;
         let mut flow = cx.flow(header.from, to, amount, header.owner, leg.loc);
         let tail = lower_term_tail(world, home, file, leg.tail, diags);
         flow.codes = tail.codes;
@@ -742,14 +740,14 @@ fn template_legs<'a, 's>(
         let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
         flow.purpose = infer_for_flow(world, ends.0, ends.1, inferred, leg.loc, diags).ok()?;
         flow.description = tail.description.or(flow.description);
-        lowered.push(TemplateLeg { flow, side: header.side, quantity });
+        lowered.push(Leg { flow, part });
     }
     Some(lowered)
 }
 
 /// What a schedule pays: how the header says it, in what amount, and, for a standing buy, the commodity bought.
 struct ScheduleAmount {
-    quantity: TemplateQuantity,
+    quantity: Quantity,
     amount: Amount,
     buys: Option<Id<Commodity>>,
 }
@@ -763,15 +761,15 @@ fn schedule_amount<'s>(
 ) -> Option<ScheduleAmount> {
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
-            let (quantity, amount) = template_amount(world, file, amount, roots, world.book.base, diags)?;
-            (quantity, amount, None)
+            let expr = template_amount(world, file, amount, roots, world.book.base, diags)?;
+            (Quantity::Amount(expr), expr.stand_in(world.book.base), None)
         }
         Some(ast::Payment::Buy { unit, spend }) => {
             let buy_unit = resolve_commodity(world, file, unit, diags)?;
-            let (quantity, amount) = template_amount(world, file, spend, roots, world.book.base, diags)?;
-            (quantity, amount, Some(buy_unit))
+            let expr = template_amount(world, file, spend, roots, world.book.base, diags)?;
+            (Quantity::Amount(expr), expr.stand_in(world.book.base), Some(buy_unit))
         }
-        None => (TemplateQuantity::Derived, Amount::zero(world.book.base), None),
+        None => (Quantity::Derived, Amount::zero(world.book.base), None),
     };
     Some(ScheduleAmount { quantity, amount, buys })
 }
@@ -806,6 +804,7 @@ impl TermsCx<'_, '_> {
     }
 }
 
+/// What a leg of a promise takes of its header, and the amount its flow carries until the fold has read it.
 fn template_quantity<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
@@ -813,7 +812,7 @@ fn template_quantity<'s>(
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     fallback: Id<Commodity>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<(TemplateQuantity, Amount)> {
+) -> Option<(Part, Amount)> {
     if let ast::Quantity::Amount(ast::Amount::Computed(expr)) = quantity
         && let ExprKind::Pct(percent) = file.exprs[expr].kind
     {
@@ -831,49 +830,39 @@ fn template_quantity<'s>(
             );
             return None;
         }
-        return Some((TemplateQuantity::Percent(rate), Amount::zero(fallback)));
+        return Some((Part::Share(rate), Amount::zero(fallback)));
     }
-    Some(match quantity {
+    let of = |quantity: Quantity, stand_in: Amount| Some((Part::Of(quantity), stand_in));
+    match quantity {
         ast::Quantity::Amount(amount) => {
-            let (quantity, amount) = template_amount(world, file, amount, roots, fallback, diags)?;
-            (as_quantity(quantity, 0), amount)
+            let expr = template_amount(world, file, amount, roots, fallback, diags)?;
+            of(Quantity::Amount(expr), expr.stand_in(fallback))
         }
         ast::Quantity::Pending(amount) => {
-            let (quantity, amount) = template_amount(world, file, amount, roots, fallback, diags)?;
-            (as_quantity(quantity, 1), amount)
+            let expr = template_amount(world, file, amount, roots, fallback, diags)?;
+            of(Quantity::Pending(expr), expr.stand_in(fallback))
         }
         ast::Quantity::Target(amount) => {
-            let (quantity, amount) = template_amount(world, file, amount, roots, fallback, diags)?;
-            (as_quantity(quantity, 2), amount)
+            let expr = template_amount(world, file, amount, roots, fallback, diags)?;
+            of(Quantity::Target(expr), expr.stand_in(fallback))
         }
         ast::Quantity::Unknown(unit) => {
             let unit = resolve_commodity(world, file, unit, diags)?;
-            (TemplateQuantity::Unknown(unit), Amount::zero(unit))
+            of(Quantity::Unknown(unit), Amount::zero(unit))
         }
         ast::Quantity::All(unit) => {
             let unit = match unit {
                 Some(unit) => Some(resolve_commodity(world, file, unit, diags)?),
                 None => None,
             };
-            (TemplateQuantity::All(unit), Amount::zero(unit.unwrap_or(fallback)))
+            of(Quantity::All(unit), Amount::zero(unit.unwrap_or(fallback)))
         }
-        ast::Quantity::Rest => (TemplateQuantity::Rest, Amount::zero(fallback)),
-        ast::Quantity::Whole => (TemplateQuantity::Whole, Amount::new(Qty(1), fallback)),
-    })
-}
-
-fn as_quantity(amount: TemplateQuantity, kind: u8) -> TemplateQuantity {
-    let root = match amount {
-        TemplateQuantity::Amount(root) => root,
-        _ => None,
-    };
-    match kind {
-        1 => TemplateQuantity::Pending(root),
-        2 => TemplateQuantity::Target(root),
-        _ => TemplateQuantity::Amount(root),
+        ast::Quantity::Rest => Some((Part::Rest, Amount::zero(fallback))),
+        ast::Quantity::Whole => unreachable!("the parser reads `basis` as a quantity only in an opening"),
     }
 }
 
+/// A written amount of a promise: its literal, or the node of the terms' program that computes it.
 fn template_amount<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
@@ -881,11 +870,10 @@ fn template_amount<'s>(
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     fallback: Id<Commodity>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<(TemplateQuantity, Amount)> {
+) -> Option<Expr> {
     match amount {
         ast::Amount::Literal(literal) => {
-            let amount = world.literal_amount(file, literal, Some(fallback)).or_report(diags)?;
-            Some((TemplateQuantity::Amount(None), amount))
+            world.literal_amount(file, literal, Some(fallback)).or_report(diags).map(Expr::Literal)
         }
         ast::Amount::Computed(root) => {
             let Some(&node) = roots.get(&root) else {
@@ -895,7 +883,7 @@ fn template_amount<'s>(
                 );
                 return None;
             };
-            Some((TemplateQuantity::Amount(Some(node)), Amount::zero(fallback)))
+            Some(Expr::Computed(node))
         }
     }
 }
@@ -904,35 +892,29 @@ fn template_amount<'s>(
 fn lower_header_item<'s>(
     world: &mut World<'s>,
     cx: &TermsCx<'_, 's>,
-    header: &Header,
+    header: &HeaderCx,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     item: &ast::LineItem<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<TemplateItem> {
+) -> Option<Item<Says>> {
     let (file, home) = (cx.file, cx.written.site.home);
-    let (parent, side, fallback) = (TemplateItemParent::Header, header.side, header.unit);
-    let (quantity, literal) = template_amount(world, file, item.amount, roots, fallback, diags)?;
-    let amount = match quantity {
-        TemplateQuantity::Amount(Some(root)) => TemplateAmount::Computed(root),
-        _ => TemplateAmount::Literal(literal),
-    };
+    let amount = template_amount(world, file, item.amount, roots, header.unit, diags)?;
     let tail = lower_term_tail(world, home, file, item.tail, diags);
-    Some(TemplateItem {
+    Some(Item {
         sign: match item.sign {
-            ast::Sign::Carve => crate::book::Sign::Carve,
-            ast::Sign::Add => crate::book::Sign::Add,
-            ast::Sign::Less => crate::book::Sign::Less,
+            ast::Sign::Carve => Sign::Carve,
+            ast::Sign::Add => Sign::Add,
+            ast::Sign::Less => Sign::Less,
         },
-        parent,
-        side,
         amount,
-        purpose: tail.purpose.map(|at| at.value),
-        description: tail.description,
-        codes: tail.codes,
-        select: tail.select,
-        detail: None,
-        waive: tail.waive,
         loc: item.loc,
+        flow: Says {
+            purpose: tail.purpose.map(|at| at.value),
+            description: tail.description,
+            codes: tail.codes,
+            select: tail.select,
+            waive: tail.waive,
+        },
     })
 }
 

@@ -1,5 +1,5 @@
 use axiom_core::{Day, FileId};
-use axiom_model::{Func, Implied, Limit, Owner, Period, Source, TemplateAmount, build};
+use axiom_model::{Expr, Func, Implied, Limit, Owner, Period, Source, build};
 use axiom_syntax::{Folder, parse};
 
 fn source(path: &'static str, text: &'static str, embedded: bool, id: u16) -> Source<'static> {
@@ -79,7 +79,7 @@ fn native_budget_and_declaration_also_are_linked() {
         .find(|(_, implied)| matches!(implied.what, Implied::Item { .. }))
         .map(|(_, implied)| implied)
         .expect("computed implied item");
-    assert!(matches!(implied.what, Implied::Item { amount: TemplateAmount::Computed(_), .. }));
+    assert!(matches!(implied.what, Implied::Item { amount: Expr::Computed(_), .. }));
     assert!(implied.purpose.is_some(), "the implied item keeps #fees");
     assert!(implied.when.is_some(), "the Also keeps its typed predicate");
     assert!(implied.law.index() < book.laws.len());

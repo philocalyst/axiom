@@ -2,22 +2,21 @@
 
 use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Ratio, Run, Sym};
 use axiom_syntax as ast;
-use axiom_syntax::{ClauseKind, Quantity};
+use axiom_syntax::ClauseKind;
 
 use super::infer::infer_for_flow;
 use super::push_amount_root;
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::Tail;
-use crate::book::{Amount, Commodity, FlowSide, Place, Sign, TemplateAmount, TemplateItemParent};
+use crate::book::{Amount, Commodity, Place};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{
-    Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalItem, JournalQuantity, Mode, Origin, Select, Txn,
-};
+use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Program, Select, Txn};
 use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
+use crate::split::{Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedEnd {
@@ -33,13 +32,13 @@ impl ResolvedEnd {
     }
 }
 
+/// A quantity written in a flow, as the flow carries it and as its group keeps it.
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedQuantity {
     pub amount: Amount,
     pub infer: Infer,
     pub mode: Mode,
-    pub root: Option<NodeId>,
-    pub group: JournalQuantity,
+    pub part: Part,
 }
 
 /// What the flows of one record are made against: where it is written, what its expressions compiled to, and
@@ -93,7 +92,6 @@ pub(super) struct Shape {
 #[derive(Clone, Copy)]
 pub(super) struct Parent<'t> {
     pub ends: Ends,
-    pub side: FlowSide,
     pub mode: Mode,
     pub header_codes: Run<Sym>,
     /// What its tail says, which an item's own tail adds to.
@@ -129,18 +127,32 @@ pub(super) fn push_tail_roots<'s>(
     }
 }
 
-pub(super) fn push_quantity_root<'s>(quantity: Quantity<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
+pub(super) fn push_quantity_root<'s>(quantity: ast::Quantity<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
     match quantity {
-        Quantity::Amount(amount) | Quantity::Pending(amount) | Quantity::Target(amount) => {
+        ast::Quantity::Amount(amount) | ast::Quantity::Pending(amount) | ast::Quantity::Target(amount) => {
             push_amount_root(amount, roots)
         }
-        Quantity::Unknown(_) | Quantity::All(_) | Quantity::Rest | Quantity::Whole => {}
+        ast::Quantity::Unknown(_) | ast::Quantity::All(_) | ast::Quantity::Rest | ast::Quantity::Whole => {}
     }
 }
 
 impl ResolvedQuantity {
-    fn new(amount: Amount, infer: Infer, mode: Mode, root: Option<NodeId>, group: JournalQuantity) -> ResolvedQuantity {
-        ResolvedQuantity { amount, infer, mode, root, group }
+    fn new(amount: Amount, infer: Infer, mode: Mode, part: Part) -> ResolvedQuantity {
+        ResolvedQuantity { amount, infer, mode, part }
+    }
+
+    /// The node that computes its amount, if it is computed.
+    pub fn root(&self) -> Option<NodeId> {
+        self.part.root()
+    }
+
+    /// What a side of a header says. A header never says a share or a remainder: the parser keeps `...` and a
+    /// bare share off it.
+    pub fn quantity(&self) -> Quantity {
+        match self.part {
+            Part::Of(quantity) => quantity,
+            Part::Share(_) | Part::Rest => unreachable!("a header side says an amount, not a share or a remainder"),
+        }
     }
 }
 
@@ -149,59 +161,56 @@ impl ResolvedQuantity {
 pub(super) fn resolve_quantity<'s>(
     world: &mut World<'s>,
     cx: &FlowCx<'_, 's>,
-    quantity: Quantity<'s>,
+    quantity: ast::Quantity<'s>,
     fallback: Id<crate::book::Commodity>,
     side: FlowSide,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
     let file = cx.file;
     let resolved = match quantity {
-        Quantity::Amount(written) => {
-            let (amount, root) = stated_amount(world, cx, written, fallback)?;
-            let group = JournalQuantity::Amount(amount, root);
-            ResolvedQuantity::new(amount, Infer::Known, Mode::Actual, root, group)
+        ast::Quantity::Amount(written) => {
+            let expr = stated_amount(world, cx, written, fallback)?;
+            ResolvedQuantity::new(expr.stand_in(fallback), Infer::Known, Mode::Actual, Part::Of(Quantity::Amount(expr)))
         }
-        Quantity::Pending(written) => {
-            let (amount, root) = stated_amount(world, cx, written, fallback)?;
-            let group = JournalQuantity::Pending(amount, root);
-            ResolvedQuantity::new(amount, Infer::Known, Mode::Pending, root, group)
-        }
-        Quantity::Target(written) => {
-            let (amount, root) = stated_amount(world, cx, written, fallback)?;
-            let end = if side == FlowSide::Out { crate::journal::End::From } else { crate::journal::End::To };
-            let infer = Infer::Target { end, balance: amount.qty };
-            ResolvedQuantity::new(amount, infer, Mode::Actual, root, JournalQuantity::Target(amount, root))
-        }
-        Quantity::Unknown(unit) => {
-            let unit = world.commodity_of(Word::of(file, unit.0)).or_report(diags)?;
+        ast::Quantity::Pending(written) => {
+            let expr = stated_amount(world, cx, written, fallback)?;
             ResolvedQuantity::new(
-                Amount::zero(unit),
-                Infer::Unknown,
-                Mode::Actual,
-                None,
-                JournalQuantity::Unknown(unit),
+                expr.stand_in(fallback),
+                Infer::Known,
+                Mode::Pending,
+                Part::Of(Quantity::Pending(expr)),
             )
         }
-        Quantity::All(unit) => {
+        ast::Quantity::Target(written) => {
+            let expr = stated_amount(world, cx, written, fallback)?;
+            let amount = expr.stand_in(fallback);
+            let end = side.end();
+            let infer = Infer::Target { end, balance: amount.qty };
+            ResolvedQuantity::new(amount, infer, Mode::Actual, Part::Of(Quantity::Target(expr)))
+        }
+        ast::Quantity::Unknown(unit) => {
+            let unit = world.commodity_of(Word::of(file, unit.0)).or_report(diags)?;
+            ResolvedQuantity::new(Amount::zero(unit), Infer::Unknown, Mode::Actual, Part::Of(Quantity::Unknown(unit)))
+        }
+        ast::Quantity::All(unit) => {
             let unit = match unit {
                 Some(unit) => Some(world.commodity_of(Word::of(file, unit.0)).or_report(diags)?),
                 None => None,
             };
             let amount = Amount::zero(unit.unwrap_or(fallback));
-            ResolvedQuantity::new(amount, Infer::All, Mode::Actual, None, JournalQuantity::All(unit))
+            ResolvedQuantity::new(amount, Infer::All, Mode::Actual, Part::Of(Quantity::All(unit)))
         }
-        Quantity::Rest => {
-            ResolvedQuantity::new(Amount::zero(fallback), Infer::Known, Mode::Actual, None, JournalQuantity::Rest)
-        }
-        Quantity::Whole => {
-            let amount = Amount::new(Qty(1), fallback);
-            ResolvedQuantity::new(amount, Infer::Known, Mode::Opening, None, JournalQuantity::Whole)
+        ast::Quantity::Rest => ResolvedQuantity::new(Amount::zero(fallback), Infer::Known, Mode::Actual, Part::Rest),
+        // An opening line's one unit of an asset: nothing keeps it as a quantity, only as an amount.
+        ast::Quantity::Whole => {
+            let one = Amount::new(Qty(1), fallback);
+            ResolvedQuantity::new(one, Infer::Known, Mode::Opening, Part::Of(Quantity::Amount(Expr::Literal(one))))
         }
     };
     Some(resolved)
 }
 
-/// A written amount: its literal, or zero and the node that computes it. A literal that is no amount costs the
+/// A written amount: its literal, or the node that computes it. A literal that is no amount costs the
 /// whole quantity and says nothing: the diagnostic is dropped here, as it always was, and is not the caller's to
 /// report.
 fn stated_amount<'s>(
@@ -209,10 +218,10 @@ fn stated_amount<'s>(
     cx: &FlowCx<'_, 's>,
     written: ast::Amount<'s>,
     fallback: Id<crate::book::Commodity>,
-) -> Option<(Amount, Option<NodeId>)> {
+) -> Option<Expr> {
     match written {
-        ast::Amount::Literal(literal) => Some((world.literal_amount(cx.file, literal, Some(fallback)).ok()?, None)),
-        ast::Amount::Computed(expr) => Some((Amount::zero(fallback), Some(*cx.roots.get(&expr)?))),
+        ast::Amount::Literal(literal) => world.literal_amount(cx.file, literal, Some(fallback)).ok().map(Expr::Literal),
+        ast::Amount::Computed(expr) => Some(Expr::Computed(*cx.roots.get(&expr)?)),
     }
 }
 
@@ -236,7 +245,7 @@ pub(super) fn make_flow<'s>(
         resolve_quantity(world, cx, quantity, fallback, FlowSide::Arrive, diags)
     });
     let (mut out_amount, mut arrive_amount, infer, mode) = stated_amounts(loc, out, arrive, diags)?;
-    let roots = (out.and_then(|quantity| quantity.root), arrive.and_then(|quantity| quantity.root));
+    let roots = (out.and_then(|quantity| quantity.root()), arrive.and_then(|quantity| quantity.root()));
     let basis_root = tail.basis_root;
     if let Some(price) = tail.price.take() {
         (out_amount, arrive_amount) = apply_price(world, out, arrive, price, loc, diags)?;
@@ -278,8 +287,8 @@ fn stated_amounts(
         (None, Some(b)) => (b.amount, b.amount, b.infer, b.mode),
     };
     if let (Some(out), Some(arrive)) = (out, arrive)
-        && out.root.is_none()
-        && arrive.root.is_none()
+        && out.root().is_none()
+        && arrive.root().is_none()
         && out.amount.unit == arrive.amount.unit
         && out.amount.qty != arrive.amount.qty
     {
@@ -302,9 +311,9 @@ fn apply_price(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Amount, Amount)> {
     let quoted = match (out, arrive) {
-        (Some(out), None) if out.root.is_none() => Some(priced(world, out.amount, quote, rate, at, diags)?),
-        (None, Some(arrive)) if arrive.root.is_none() => Some(priced(world, arrive.amount, quote, rate, at, diags)?),
-        (Some(out), Some(arrive)) if out.root.is_none() && arrive.root.is_none() => {
+        (Some(out), None) if out.root().is_none() => Some(priced(world, out.amount, quote, rate, at, diags)?),
+        (None, Some(arrive)) if arrive.root().is_none() => Some(priced(world, arrive.amount, quote, rate, at, diags)?),
+        (Some(out), Some(arrive)) if out.root().is_none() && arrive.root().is_none() => {
             let expected = if out.amount.unit == quote {
                 priced(world, arrive.amount, quote, rate, at, diags)?
             } else if arrive.amount.unit == quote {
@@ -452,12 +461,13 @@ pub(super) fn lower_items<'s>(
     parent: Parent<'_>,
     flow_roots: &mut Vec<FlowExpressions>,
     diags: &mut Vec<Diagnostic>,
-) -> Box<[JournalItem]> {
+) -> Box<[Item<Option<u32>>]> {
     let mut lowered = Vec::with_capacity(items.len());
     for item in &cx.file[items] {
-        let Some(amount) = resolve_amount(staged, cx, item.amount, staged.book.base, diags) else {
+        let Some(expr) = resolve_amount(staged, cx, item.amount, staged.book.base, diags) else {
             continue;
         };
+        let amount = expr.stand_in(staged.book.base);
         let (local_codes, item_tail) = cx.lower_tail(staged, item.tail, diags);
         let tail = parent.tail.cloned().unwrap_or_else(Tail::new).merge(item_tail);
         let says_something = tail.purpose.is_some()
@@ -475,13 +485,8 @@ pub(super) fn lower_items<'s>(
                 ast::Sign::Less => (parent.ends.to, parent.ends.from),
                 _ => (parent.ends.from, parent.ends.to),
             };
-            let shape = Shape {
-                ends: Ends { from, to },
-                out: amount.0,
-                arrive: amount.0,
-                infer: Infer::Known,
-                mode: parent.mode,
-            };
+            let shape =
+                Shape { ends: Ends { from, to }, out: amount, arrive: amount, infer: Infer::Known, mode: parent.mode };
             let codes = Codes { header: parent.header_codes, local: local_codes };
             make_resolved_flow(staged, cx, shape, codes, tail, item.loc, diags).map(|flow| {
                 let offset = staged.flows().len();
@@ -492,20 +497,31 @@ pub(super) fn lower_items<'s>(
         } else {
             None
         };
-        lowered.push(JournalItem {
-            flow,
+        lowered.push(Item {
             sign: match item.sign {
                 ast::Sign::Carve => Sign::Carve,
                 ast::Sign::Add => Sign::Add,
                 ast::Sign::Less => Sign::Less,
             },
-            parent: TemplateItemParent::Header,
-            side: parent.side,
-            amount: amount.1.map_or(TemplateAmount::Literal(amount.0), TemplateAmount::Computed),
+            amount: expr,
             loc: item.loc,
+            flow,
         });
     }
     lowered.into_boxed_slice()
+}
+
+/// A transaction's program, made of its compiled nodes and what its flows compute and are grouped as; the book
+/// keeps it only when there is something to keep, so that literal transactions pay no program.
+pub(super) fn keep_program(
+    staged: &mut Staged<'_, '_>,
+    nodes: Program,
+    roots: Vec<FlowExpressions>,
+    group: Option<Made>,
+) -> Option<Id<Program>> {
+    let program = Program { roots: roots.into_boxed_slice(), group: group.map(Box::new), ..nodes };
+    let says = !program.nodes.is_empty() || !program.roots.is_empty() || program.group.is_some();
+    says.then(|| staged.book.journal_programs.push(program))
 }
 
 pub(super) fn push_flow_expressions(
@@ -520,18 +536,19 @@ pub(super) fn push_flow_expressions(
     }
 }
 
+/// A written amount of a record: its literal, or the node that computes it. None after the problem is said.
 pub(super) fn resolve_amount<'s>(
     world: &World<'s>,
     cx: &FlowCx<'_, 's>,
     amount: ast::Amount<'s>,
     fallback: Id<crate::book::Commodity>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<(Amount, Option<NodeId>)> {
+) -> Option<Expr> {
     match amount {
         ast::Amount::Literal(literal) => {
-            world.literal_amount(cx.file, literal, Some(fallback)).or_report(diags).map(|amount| (amount, None))
+            world.literal_amount(cx.file, literal, Some(fallback)).or_report(diags).map(Expr::Literal)
         }
-        ast::Amount::Computed(root) => Some((Amount::zero(fallback), Some(*cx.roots.get(&root)?))),
+        ast::Amount::Computed(root) => Some(Expr::Computed(*cx.roots.get(&root)?)),
     }
 }
 
@@ -540,8 +557,8 @@ pub(super) fn empty_codes(world: &World<'_>) -> Run<Sym> {
     Run::new(Id::new(world.book.codes.len() as u32), 0)
 }
 
-pub(super) fn journal_end(end: ResolvedEnd) -> JournalEnd {
-    JournalEnd { place: end.place, entity: end.entity }
+pub(super) fn endpoint(end: ResolvedEnd) -> Endpoint {
+    Endpoint { place: end.place, entity: end.entity }
 }
 
 pub(super) fn priced(
@@ -575,19 +592,6 @@ pub(super) fn priced(
                     .label(loc, "this conversion overflows"),
             );
             None
-        }
-    }
-}
-
-pub(super) trait OtherSide {
-    fn other(self) -> Self;
-}
-
-impl OtherSide for crate::book::FlowSide {
-    fn other(self) -> Self {
-        match self {
-            Self::Out => Self::Arrive,
-            Self::Arrive => Self::Out,
         }
     }
 }

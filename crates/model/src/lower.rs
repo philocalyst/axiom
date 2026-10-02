@@ -35,6 +35,7 @@ use axiom_syntax::{ClauseKind, Direction, End, ExprKind, ItemKind, Name, Subject
 use crate::book::Input;
 use crate::declare::World;
 use crate::errors::Word;
+use crate::journal::Program;
 use crate::law::Ty;
 use crate::problem::{self, Noun};
 use crate::scope::Home;
@@ -454,9 +455,9 @@ fn compile_roots<'s>(
     inputs: &[Input],
     roots: &[(ast::ExprId, Ty)],
     diags: &mut Vec<Diagnostic>,
-) -> Option<(crate::book::TemplateProgram, Map<ast::ExprId, crate::law::NodeId>)> {
+) -> Option<(Program, Map<ast::ExprId, crate::law::NodeId>)> {
     if roots.is_empty() {
-        return Some((crate::book::TemplateProgram::default(), Map::default()));
+        return Some((Program::default(), Map::default()));
     }
     let (program, nodes) = crate::laws::compile_template(world, diags, file, home, subject, name, inputs, roots)?;
     let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();

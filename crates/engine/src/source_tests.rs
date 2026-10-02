@@ -1033,12 +1033,14 @@ opening 2025-02-01
         let cleo = book.entity("cleo").unwrap();
         let (_, txn) = book.txns.iter().find(|(_, txn)| txn.day == day(2025, 3, 1)).unwrap();
         let program = &book.journal_programs[txn.program.expect("split retains its sparse group")];
-        let [group] = program.groups.as_ref() else { panic!("one grouped split: {:?}", program.groups) };
-        assert_eq!(group.header, None, "one-sided split has no independently posted header");
-        assert_eq!(group.source.place, checking);
+        let Some(group) = program.group.as_deref() else { panic!("one grouped split: {:?}", program.group) };
+        let axiom_model::Heading::Source { end, total } = group.header else {
+            panic!("one-sided split has no independently posted header: {:?}", group.header)
+        };
+        assert_eq!(end.place, checking);
         assert!(matches!(
-            group.total,
-            Some(axiom_model::JournalQuantity::Amount(amount, None))
+            total,
+            Some(axiom_model::Quantity::Amount(axiom_model::Expr::Literal(amount)))
                 if amount.qty.0 == 315_000 && amount.unit == book.base
         ));
         assert_eq!(group.legs.len(), 3);
@@ -1046,8 +1048,8 @@ opening 2025-02-01
         let legs: Vec<_> = group
             .legs
             .iter()
-            .map(|offset| {
-                let flow = &book.flows[axiom_core::Id::new(txn.flows.start().index() as u32 + *offset)];
+            .map(|leg| {
+                let flow = &book.flows[axiom_core::Id::new(txn.flows.start().index() as u32 + leg.flow)];
                 let detail = flow.detail.map(|id| book.details[id]);
                 (flow.to, flow.payee, detail.and_then(|detail| detail.hold), detail.and_then(|detail| detail.due))
             })

@@ -15,7 +15,7 @@ use std::ops::{Deref, DerefMut};
 use axiom_core::{Arena, Id, Run, Sym};
 
 use crate::declare::World;
-use crate::journal::{Detail, Flow, JournalProgram, Select};
+use crate::journal::{Detail, Flow, Program, Select};
 
 /// Where each staged arena ended when the guard opened: the id its next item would get.
 #[derive(Clone, Copy)]
@@ -24,7 +24,7 @@ struct Marks {
     codes: Id<Sym>,
     selectors: Id<Select>,
     details: Id<Detail>,
-    programs: Id<JournalProgram>,
+    programs: Id<Program>,
 }
 
 fn end<T>(arena: &Arena<T>) -> Id<T> {

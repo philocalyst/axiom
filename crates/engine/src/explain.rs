@@ -16,7 +16,7 @@
 use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Budget, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op,
-    Param, Place, Purpose, RuntimeTxn, StepKind, Subject, System, TemplateProgram, Trigger, Value, Waive, Window,
+    Param, Place, Program, Purpose, RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
 use crate::calc::Calc;
@@ -486,7 +486,7 @@ pub(crate) fn assertion_fault(book: &Book, assertion: &Assert, fault: Fault) -> 
 pub(crate) fn journal_expression_fault(
     book: &Book,
     flow: &Flow,
-    program: &TemplateProgram,
+    program: &Program,
     root: NodeId,
     fault: Fault,
     day: Day,

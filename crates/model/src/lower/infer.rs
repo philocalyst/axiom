@@ -6,12 +6,13 @@
 
 use axiom_core::{Diagnostic, Id, Key, Loc};
 
-use crate::book::{Book, Commodity, FlowSide, Place, Purpose, Role};
+use crate::book::{Book, Commodity, Place, Purpose, Role};
 use crate::builtin;
 use crate::declare::World;
 use crate::holders::Holder;
 use crate::journal::{Provenance, Purposed};
 use crate::resolve::End;
+use crate::split::FlowSide;
 
 /// A purpose, and the line that says it.
 #[derive(Clone, Copy)]

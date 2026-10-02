@@ -23,6 +23,7 @@
 pub mod book;
 pub mod journal;
 pub mod law;
+pub mod split;
 pub mod sync;
 
 pub mod builtin;
@@ -60,6 +61,7 @@ pub use holders::{Holder, HolderIndex};
 pub use journal::*;
 pub use law::*;
 pub use slots::{Mult, Range, Schema, Slot, View, Weight};
+pub use split::*;
 
 use axiom_core::{Diagnostic, Interner, Set};
 use axiom_syntax::File;

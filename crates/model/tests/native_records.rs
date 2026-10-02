@@ -385,7 +385,7 @@ contract deferral with acme
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[book.contract("deferral").unwrap()];
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
-    let purpose = terms.template[0].flow.purpose.unwrap();
+    let purpose = terms.template[0].header.flow.purpose.unwrap();
     assert_eq!(purpose.purpose, book.purpose("pretax-deferral").unwrap());
     assert_eq!(purpose.source, axiom_model::Provenance::Account(book.kind("retirement-account").unwrap()));
 }
@@ -670,9 +670,7 @@ contract c with p
     let also = &book.also[regular.also[0]];
     assert_eq!(also.on, axiom_model::AlsoOn::Contract(contract_id));
     assert_eq!(book.name(book.codes[also.codes.start()]), "match");
-    let axiom_model::Implied::Flow { to: Some(to), amount: axiom_model::TemplateAmount::Computed(root), .. } =
-        also.what
-    else {
+    let axiom_model::Implied::Flow { to: Some(to), amount: axiom_model::Expr::Computed(root), .. } = also.what else {
         panic!("contract also should retain the typed implied flow")
     };
     assert_eq!(to, book.place("assets/savings").unwrap());
@@ -958,7 +956,7 @@ contract rent with landlord
     let usd = book.commodity("USD").unwrap();
     assert_eq!(
         occurrence.amount,
-        Some(axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(3_000), usd)))
+        Some(axiom_model::Expr::Literal(axiom_model::Amount::new(axiom_core::Qty(3_000), usd)))
     );
     assert!(occurrence.program.is_none());
     assert_eq!(book.name(book.codes[txn.codes.start()]), "paid");
@@ -985,13 +983,13 @@ contract invest with broker
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let txn = &book.txns[Id::new(0)];
     let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
-    assert!(matches!(occurrence.amount, Some(axiom_model::TemplateAmount::Computed(_))));
+    assert!(matches!(occurrence.amount, Some(axiom_model::Expr::Computed(_))));
     let program = occurrence.program.unwrap();
     let root = match occurrence.amount.unwrap() {
-        axiom_model::TemplateAmount::Computed(root) => root,
+        axiom_model::Expr::Computed(root) => root,
         _ => unreachable!(),
     };
-    assert!((root.index() as usize) < book.journal_programs[program].program.nodes.len());
+    assert!((root.index() as usize) < book.journal_programs[program].nodes.len());
 }
 
 #[test]
@@ -1188,21 +1186,19 @@ contract flat with landlord
     let txn = &book.txns[Id::new(0)];
     let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
     assert_eq!(occurrence.groups.len(), 1);
-    let overlay = &occurrence.groups[0];
-    assert_eq!(overlay.template, 0);
-    assert_eq!(overlay.group.legs.len(), 1);
-    assert_eq!(overlay.group.leg_quantities.len(), 1);
+    let overlay = occurrence.groups[0].as_ref().expect("the occurrence replaces template group 0");
+    assert_eq!(overlay.legs.len(), 1);
     let usd = book.commodity("USD").unwrap();
     assert_eq!(
-        overlay.group.leg_quantities[0],
-        axiom_model::JournalQuantity::Amount(axiom_model::Amount::new(axiom_core::Qty(200), usd), None,),
+        overlay.legs[0].part,
+        axiom_model::Part::Of(axiom_model::Quantity::Amount(axiom_model::Expr::Literal(axiom_model::Amount::new(
+            axiom_core::Qty(200),
+            usd
+        )))),
     );
-    assert_eq!(overlay.group.items.len(), 1);
-    assert_eq!(overlay.group.items[0].sign, axiom_model::Sign::Add);
-    assert_eq!(
-        overlay.group.items[0].amount,
-        axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(25), usd)),
-    );
+    assert_eq!(overlay.items.len(), 1);
+    assert_eq!(overlay.items[0].sign, axiom_model::Sign::Add);
+    assert_eq!(overlay.items[0].amount, axiom_model::Expr::Literal(axiom_model::Amount::new(axiom_core::Qty(25), usd)),);
     assert_eq!(txn.flows.len(), 2, "override offsets point into the occurrence transaction");
     assert_eq!(book.name(book.codes[txn.codes.start()]), "fee");
 }
@@ -1228,14 +1224,14 @@ contract job with lumen
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap());
-    assert_eq!(terms.template[0].flow.payee, Some(contract.party));
+    assert_eq!(terms.template[0].header.flow.payee, Some(contract.party));
     let leg = &terms.template[0].legs[0];
     let employer = book.entity("lumen").unwrap();
     let retirement = book.place("assets/retirement").unwrap();
     assert_eq!(leg.flow.from, book.entities[employer].place.unwrap());
     assert_eq!(leg.flow.to, retirement);
     assert_eq!(leg.flow.payee, Some(contract.party));
-    assert_eq!(leg.quantity, axiom_model::TemplateQuantity::Percent(axiom_core::Ratio::percent(6, 0).unwrap()));
+    assert_eq!(leg.part, axiom_model::Part::Share(axiom_core::Ratio::percent(6, 0).unwrap()));
     assert!(terms.program.nodes.is_empty(), "a literal percent needs no expression program");
 }
 
@@ -1271,9 +1267,8 @@ contract job with lumen
     let txn = &book.txns[Id::new(0)];
     let written = &book.written_occurrences[txn.occurrence.unwrap()];
     assert_eq!(written.groups.len(), 1);
-    let group = &written.groups[0].group;
+    let group = written.groups[0].as_ref().expect("the occurrence replaces template group 0");
     assert_eq!(group.legs.len(), 2);
-    assert_eq!(group.leg_quantities.len(), 2);
     let flows: Vec<_> = txn.flows.ids().map(|id| &book.flows[id]).collect();
     assert_eq!(flows.len(), 2);
     assert_eq!((flows[0].from, flows[0].to), (book.entities[employer].place.unwrap(), retirement));
@@ -1341,7 +1336,7 @@ contract mortgage with rocket
     ));
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
     assert_eq!(terms.rate, Some(axiom_core::Ratio::percent(5_875, 3).unwrap()));
-    assert!(matches!(terms.template[0].out, axiom_model::TemplateQuantity::Derived));
+    assert!(matches!(terms.template[0].header.out, axiom_model::Quantity::Derived));
 }
 
 #[test]
@@ -1440,25 +1435,25 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
         };
         let program = &book.journal_programs[program_id];
         let local_flow = |offset: u32| assert!(offset < txn.flows.len());
-        for root in program.flow_roots.iter() {
+        for root in program.roots.iter() {
             local_flow(root.flow);
             for node in [root.out, root.arrive, root.basis].into_iter().flatten() {
-                assert!(program.program.nodes[node].typed_ty().is_some());
+                assert!(program.nodes[node].typed_ty().is_some());
             }
         }
-        for group in program.groups.iter() {
-            if let Some(header) = group.header {
+        for group in program.group.iter() {
+            if let axiom_model::Heading::Flow(header) = group.header {
                 local_flow(header);
             }
-            for &leg in group.legs.iter() {
-                local_flow(leg);
+            for leg in group.legs.iter() {
+                local_flow(leg.flow);
             }
             for item in group.items.iter() {
                 if let Some(flow) = item.flow {
                     local_flow(flow);
                 }
-                if let axiom_model::book::TemplateAmount::Computed(root) = item.amount {
-                    assert!(program.program.nodes[root].typed_ty().is_some());
+                if let axiom_model::Expr::Computed(root) = item.amount {
+                    assert!(program.nodes[root].typed_ty().is_some());
                 }
             }
         }

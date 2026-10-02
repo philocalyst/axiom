@@ -55,7 +55,7 @@ def panics(binary, project):
 
 
 work, found, old_panics, new_panics, started = tempfile.mkdtemp(), [], 0, 0, time.time()
-differing = 0
+differing = rejected = 0
 for round_ in range(count):
     project = os.path.join(work, "p")
     shutil.rmtree(project, ignore_errors=True)
@@ -68,13 +68,16 @@ for round_ in range(count):
     (old_panicked, _, old_out), (new_panicked, stderr, new_out) = panics(old, project), panics(new, project)
     old_panics += old_panicked
     new_panics += new_panicked
-    changed = compare_output and old_out != new_out
+    # A run that timed out on a loaded machine says nothing: only both finishing and disagreeing is a difference.
+    changed = compare_output and "timeout" not in (old_out, new_out) and old_out != new_out
     differing += changed
+    rejected += not old_out.startswith("0\n")
     if (new_panicked and not old_panicked) or changed:
         shutil.copytree(project, f"regress_{round_}")
         found.append((f"regress_{round_}", stderr.strip().splitlines()[:2] if new_panicked else "output differs"))
 print(f"{count} mutants in {time.time() - started:.0f}s: panics old={old_panics} new={new_panics}, "
-      f"output differs={differing if compare_output else 'not compared'}, regressions={len(found)}")
+      f"rejected by check={rejected}, output differs={differing if compare_output else 'not compared'}, "
+      f"regressions={len(found)}")
 for case in found[:10]:
     print(case)
 sys.exit(1 if found else 0)

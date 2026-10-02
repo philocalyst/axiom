@@ -5,12 +5,13 @@ use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
 use super::tail::{Reach, written_purpose, written_waive};
-use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Sign, TemplateAmount, Text};
+use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
 use crate::law::{Law, NodeId, Owner, Rank, Trigger, Ty};
 use crate::scope::Home;
+use crate::split::{Expr, Sign};
 
 /// Pooled metadata shared by contract and declaration `also` clauses.
 #[derive(Clone, Copy)]
@@ -168,8 +169,8 @@ fn lower_also<'s>(
     }
     let (law, compiled_roots) = compile_also(world, cx, &roots, also.loc, diags)?;
     let amount = match amount {
-        PendingAmount::Literal(amount) => TemplateAmount::Literal(amount),
-        PendingAmount::Computed(index) => TemplateAmount::Computed(compiled_roots[index]),
+        PendingAmount::Literal(amount) => Expr::Literal(amount),
+        PendingAmount::Computed(index) => Expr::Computed(compiled_roots[index]),
     };
     match &mut what {
         Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => *slot = amount,
@@ -203,7 +204,7 @@ fn implied_item<'s>(
         ast::Sign::Add => Sign::Add,
         ast::Sign::Less => Sign::Less,
     };
-    let what = Implied::Item { sign, amount: TemplateAmount::Literal(Amount::zero(cx.currency)) };
+    let what = Implied::Item { sign, amount: Expr::Literal(Amount::zero(cx.currency)) };
     Some(Line { what, amount, clauses: item.tail, selectors: None })
 }
 
@@ -260,7 +261,7 @@ fn implied_flow<'s>(
         }
     };
     let amount = pending_amount(world, file, amount, cx.currency, roots, diags)?;
-    let what = Implied::Flow { from, to, amount: TemplateAmount::Literal(Amount::zero(cx.currency)) };
+    let what = Implied::Flow { from, to, amount: Expr::Literal(Amount::zero(cx.currency)) };
     Some(Line { what, amount, clauses: flow.tail, selectors: flow.from.end.map(|end| end.select) })
 }
 

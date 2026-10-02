@@ -15,12 +15,13 @@ use axiom_core::{
 
 use crate::holders::HolderIndex;
 use crate::journal::{
-    Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Prices, Purposed,
-    Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
+    Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
+    RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, Node, NodeId, Rules, Value};
+use crate::law::{Fault, Law, NodeId, Rules, Value};
 use crate::names::{Names, Scoped};
 use crate::slots::{Schema, Slot};
+use crate::split::{Expr, Item, Promised, Says, Sign};
 use crate::sync::{Format, Pattern, Source};
 
 pub use axiom_core::{Cadence, On, Period};
@@ -89,7 +90,7 @@ pub struct Book<'s> {
     pub txns: Arena<Txn>,
     /// Computed journal expressions and grouped line items. Only transactions
     /// that need them have a program handle in `Txn`.
-    pub journal_programs: Arena<JournalProgram>,
+    pub journal_programs: Arena<Program>,
     /// Exact scheduled identities for written contract occurrences. Ordinary
     /// transactions allocate nothing in this sparse pool.
     pub written_occurrences: Arena<WrittenOccurrence>,
@@ -106,7 +107,7 @@ pub struct Book<'s> {
     pub asserts: Vec<Assert>,
     /// Sparse typed expression programs retained by computed value assertions.
     /// Most assertions are written literals and allocate no program.
-    pub assertion_programs: Arena<TemplateProgram>,
+    pub assertion_programs: Arena<Program>,
     /// Sorted by day, then declaration order.
     pub events: Vec<Event>,
     /// Sorted by day, then source order. Includes promise/place ends and asset
@@ -492,9 +493,9 @@ pub struct Terms {
     /// One occurrence's typed flow groups, dated `anchor`. Each group retains
     /// its header, split legs, and line items. Computed amounts point into
     /// `program`; the engine evaluates them with this occurrence's inputs.
-    pub template: Box<[TemplateFlow]>,
+    pub template: Box<[Promised]>,
     /// Shared law IR for the computed sides of this term's flow templates.
-    pub program: TemplateProgram,
+    pub program: Program,
     /// `input water USD`: names occurrences may state (`water = 155.00 USD`).
     pub inputs: Box<[Input]>,
     /// `about`: each occurrence states its own amount; the template's is the
@@ -541,106 +542,13 @@ pub struct Input {
     pub loc: Loc,
 }
 
-/// Typed expressions used by one stretch of contract terms. The node arena is
-/// immutable after lowering and can be evaluated with reusable engine scratch.
-#[derive(Clone, PartialEq, Debug, Default)]
-pub struct TemplateProgram {
-    pub nodes: Arena<Node>,
-}
-
-/// A contract's grouped flow template. Computed amounts refer into the owning
-/// `Terms.program` and are evaluated for each occurrence.
-#[derive(Clone, PartialEq, Debug)]
-pub struct TemplateFlow {
-    /// The header endpoints and metadata. `txn` is [`crate::journal::TEMPLATE_TXN`]
-    /// until instantiation; engines replace it before reading transaction data.
-    /// The typed quantities below specify how each side is produced.
-    pub flow: Flow,
-    /// The header quantities on both sides; exchanges may use two units.
-    pub out: TemplateQuantity,
-    pub arrive: TemplateQuantity,
-    /// The split legs in source order. Their destinations and selectors stay
-    /// attached to their own quantities.
-    pub legs: Box<[TemplateLeg]>,
-    /// Items belong to this header group; they are not flattened into flows.
-    pub items: Box<[TemplateItem]>,
-}
-
-/// One leg of a contract template's split header.
-#[derive(Clone, PartialEq, Debug)]
-pub struct TemplateLeg {
-    pub flow: Flow,
-    /// The side supplied by this split leg.
-    pub side: FlowSide,
-    pub quantity: TemplateQuantity,
-}
-
-/// Which quantity of the parent transfer a leg or item supplies.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum FlowSide {
-    Out,
-    Arrive,
-}
-
-/// A line item's typed value. A computed root is authoritative and must be
-/// evaluated for each occurrence; a literal retains its exact typed amount.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TemplateAmount {
-    Literal(Amount),
-    Computed(NodeId),
-}
-
-/// The amount form on a template header or split leg. Literal amounts already
-/// live in the corresponding side of `Flow`; a root replaces that literal.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TemplateQuantity {
-    Amount(Option<NodeId>),
-    Pending(Option<NodeId>),
-    Target(Option<NodeId>),
-    /// A literal percentage of the parent flow side, resolved per occurrence.
-    Percent(Ratio),
-    Unknown(Id<Commodity>),
-    All(Option<Id<Commodity>>),
-    Rest,
-    Whole,
-    /// The amount is supplied by another contract rule, such as a loan.
-    Derived,
-}
-
-/// The exact endpoint pair an item bridges. For a split, `Leg(i)` points to
-/// that source-ordered leg and preserves the relationship to its remainder.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TemplateItemParent {
-    Header,
-    Leg(u16),
-}
-
-/// A source-ordered item retained with its parent flow group so the engine can
-/// apply Carve/Add/Less semantics without reparsing or allocating a side plan.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct TemplateItem {
-    pub sign: crate::book::Sign,
-    pub parent: TemplateItemParent,
-    /// Which parent quantity this item's unit contributes to. This is
-    /// explicit because an exchange item may use a different unit per side.
-    pub side: FlowSide,
-    pub amount: TemplateAmount,
-    pub purpose: Option<crate::journal::Purposed>,
-    pub description: Option<Text>,
-    pub codes: axiom_core::Run<Sym>,
-    pub select: axiom_core::Run<crate::journal::Select>,
-    pub detail: Option<Id<crate::journal::Detail>>,
-    pub waive: Option<crate::journal::Waive>,
-    pub loc: Loc,
-}
-
 /// A deadline after the due day, and what its passing adds.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Deadline {
     pub after: Span,
     /// The `else` item, compiled into the enclosing term's shared program;
     /// `None` if the deadline only makes the claim late.
-    pub otherwise: Option<TemplateItem>,
+    pub otherwise: Option<Item<Says>>,
 }
 
 /// Which of a contract's independent schedules an occurrence names.
@@ -928,7 +836,7 @@ fn occurrences_for<'a>(
 
 fn template_covers_flow(terms: &Terms, template: &Flow) -> bool {
     terms.template.iter().any(|candidate| {
-        same_flow_kind(template, &candidate.flow)
+        same_flow_kind(template, &candidate.header.flow)
             || candidate.legs.iter().any(|leg| same_flow_kind(template, &leg.flow))
     })
 }
@@ -1117,21 +1025,10 @@ pub enum AlsoOn {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Implied {
     /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
-    Item { sign: Sign, amount: TemplateAmount },
+    Item { sign: Sign, amount: Expr },
     /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
     /// `None` ends mean the implying flow's own ends (`issuer -> self`).
-    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: TemplateAmount },
-}
-
-/// How a line item bears on the flow it is under (LANGUAGE §3).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Sign {
-    /// Carved out of the header's amount.
-    Carve,
-    /// Comes on top of it.
-    Add,
-    /// Taken off it.
-    Less,
+    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: Expr },
 }
 
 /// `match 50% of retirement up to 6%`.
