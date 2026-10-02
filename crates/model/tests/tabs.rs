@@ -53,16 +53,23 @@ fn a_loan_paid_from_an_account_another_owner_holds_has_its_debt_tab_of_that_owne
 }
 
 #[test]
-fn a_tab_made_while_the_book_is_lowered_has_rules_and_a_row_of_facts_like_every_place() {
-    let text = format!("{PARTIES}{LOAN}law top\n  on in\n  warn year > 2000 \"late\"\n");
+fn a_tab_made_while_the_journal_is_lowered_has_rules_and_a_row_of_facts_like_every_place() {
+    let law = "law top\n  on in\n  warn year > 2000 \"late\"\n";
+    let text = format!("{PARTIES}{LOAN}2026-01-10 jo owes me 20 USD\n{law}");
     with_book(&text, |book| {
         let debt = book.contracts[book.contract("mortgage").unwrap()].loan.expect("a loan").debt;
+        let (claim, ..) = tabs(book).into_iter().find(|&(id, ..)| id != debt).expect("the claim's tab");
 
         assert_eq!(book.rules.on_in.keys(), book.places.len(), "rules are worked out once every place exists");
         assert_eq!(book.touching.keys(), book.places.len());
-        assert!(!book.rules.on_in[debt].is_empty(), "the project's law watches the tab as it does any place");
+        for tab in [debt, claim] {
+            assert!(!book.rules.on_in[tab].is_empty(), "the project's law watches a tab as it does any place");
+            assert!(
+                book.is_claim(tab) && book.holds(tab).is_none(),
+                "a tab says nothing of itself: its kind's defaults"
+            );
+        }
         assert_eq!(book.facts.holders(), book.holders.len(), "the facts have a row for every thing, tabs included");
-        assert!(book.is_claim(debt) && book.holds(debt).is_none(), "a tab says nothing of itself: its kind's defaults");
     });
 }
 
