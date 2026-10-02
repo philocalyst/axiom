@@ -17,8 +17,9 @@ use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Prices, Purposed,
     Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
+use crate::law::{Fault, Law, Node, NodeId, Rules, Value};
 use crate::names::{Names, Scoped};
+use crate::slots::{Schema, Slot};
 use crate::sync::{Format, Pattern, Source};
 
 pub use axiom_core::{Cadence, On, Period};
@@ -42,6 +43,8 @@ pub struct Book<'s> {
     pub issuer_places: Map<Id<Commodity>, Id<Place>>,
     pub entities: Tree<Entity>,
     pub kinds: Tree<Kind>,
+    /// What every kind's things have, and what each takes.
+    pub schema: Schema,
     /// What flows are for: `income`, `spending`, `capital` and the tree beneath
     /// them, pre-ordered so "is groceries food" is an interval test.
     pub purposes: Tree<Purpose>,
@@ -369,8 +372,8 @@ pub struct Kind {
     /// `business 60% for studio` on a party kind: every flow with its parties
     /// is shared.
     pub shares: Box<[Share]>,
-    /// Properties instances may set: own declarations, then inherited ones.
-    pub has: Box<[Has]>,
+    /// The slots this kind declares itself, a run of [`Schema`]'s: its things have these and its ancestors'.
+    pub slots: Run<Slot>,
     /// Defaults for instances: own, then inherited.
     pub props: Props,
     /// Only this kind's own laws; ancestors' laws are found through the tree.
@@ -395,14 +398,6 @@ pub enum Sort {
 pub struct Take {
     pub to: Id<Purpose>,
     pub from: Id<Purpose>,
-}
-
-/// A declared property: `has beneficiary entity`.
-#[derive(Clone, Copy, Debug)]
-pub struct Has {
-    pub name: Sym,
-    pub ty: Ty,
-    pub loc: Option<Loc>,
 }
 
 pub type Props = Box<[Prop]>;

@@ -26,7 +26,7 @@ kind hsa : tax-deferred
   deductible true
   liquidity 3d
   pays medical
-  has coverage name
+  has coverage one of self-only | family
 
   /// Contributions to an HSA are capped for each person and calendar year,
   /// with a catch-up from age 55 (IRC §223(b)). This deposit took the year over

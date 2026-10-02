@@ -19,11 +19,13 @@ use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
 use crate::scope::{Home, Scope, Seeing};
 
-/// Whether a declaration that names a root again is an error: a kind is built in, and a purpose may be written
-/// again to add laws to its root.
+/// When a declaration that names a root again is an error. A purpose may be written again to add laws to its root,
+/// and a kind to give its root slots, but a kind that names a parent is declaring something the root already is.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Repeated {
+    /// Only when it names a parent.
     Said,
+    /// Never.
     Allowed,
 }
 
@@ -130,7 +132,7 @@ impl<'a, 's, T: Node> Drafts<'a, 's, T> {
     ) -> usize {
         let (file, text, home) = (written.file(), written.node.name.0, written.home());
         if let Some(root) = T::ROOTS.iter().position(|&(word, _)| word == text) {
-            if T::REPEATED_ROOT == Repeated::Said {
+            if T::REPEATED_ROOT == Repeated::Said && written.node.kind.is_some() {
                 diags.push(problem::duplicate(T::NOUN, Word::of(file, text), None));
             }
             return root;
@@ -338,10 +340,11 @@ mod tests {
     }
 
     #[test]
-    fn a_kind_that_names_a_root_again_is_told_it_is_built_in_and_a_purpose_may() {
-        let (kinds, diags) = build::<Kind>(&[("std.ax", "system std\nkind asset : entity\nkind asset : debt\n", true)]);
+    fn a_kind_that_names_a_root_and_a_parent_is_told_it_is_built_in_and_one_that_does_not_opens_it() {
+        let (kinds, diags) =
+            build::<Kind>(&[("std.ax", "system std\nkind asset : entity\nkind asset : debt\nkind asset\n", true)]);
         assert_eq!(diags.iter().map(|diag| &*diag.message).collect::<Vec<_>>(), ["kind `asset` is built in"; 2]);
-        assert_eq!(kinds.declarations, [kinds.roots[0]; 2], "a repeat stands for the root");
+        assert_eq!(kinds.declarations, [kinds.roots[0]; 3], "a repeat stands for the root");
 
         let (purposes, diags) = build::<Purpose>(&[("std.ax", "system std\npurpose income : transfer\n", true)]);
         assert!(diags.is_empty(), "{diags:?}");

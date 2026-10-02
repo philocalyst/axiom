@@ -136,7 +136,7 @@ kind lender : org
 kind tenant : org
 
 kind taxpayer : entity
-  has filing name
+  has filing one of single | joint
   has children number
   children 0
 kind person : taxpayer

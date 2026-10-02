@@ -217,6 +217,83 @@ pub(crate) fn cycle(noun: Noun, route: &[(&str, Option<Loc>)], root: &str) -> Di
     diagnostic
 }
 
+/// A slot declared twice in one kind.
+pub(crate) fn slot_twice(name: &str, again: Loc, first: Loc) -> Diagnostic {
+    Diagnostic::error("duplicate-property-declaration", format!("property `{name}` is declared twice on this kind"))
+        .label(again, "declared again here")
+        .context(first, "first declared here")
+}
+
+/// A slot that takes one sort of value in one kind and another in another: laws read `.name` without knowing the kind.
+pub(crate) fn slot_type(name: &str, now: &str, then: &str, loc: Loc, first: Loc) -> Diagnostic {
+    Diagnostic::error("property-type", format!("`{name}` takes {now} here, but {then} elsewhere"))
+        .label(loc, format!("takes {now} here"))
+        .context(first, format!("takes {then} here"))
+        .note(format!("a slot takes one sort of value wherever it is declared, so that `.{name}` means the same thing wherever it is written"))
+}
+
+/// What a slot repeated beneath its first declaration takes more of.
+#[derive(Clone, Copy)]
+pub(crate) enum Widening {
+    Range,
+    Count,
+    Weight,
+}
+
+/// A kind repeats a slot of one above it and takes more than it does; `narrowed` is the line that would not.
+pub(crate) fn slot_widening(name: &str, how: Widening, narrowed: &str, loc: Loc, above: Loc) -> Diagnostic {
+    let wider = match how {
+        Widening::Range => "takes things the slot above does not",
+        Widening::Count => "takes more values than the slot above",
+        Widening::Weight => "weighs its values differently from the slot above",
+    };
+    Diagnostic::error("slot-widening", format!("`{name}` is wider here than the slot it repeats"))
+        .label(loc, wider)
+        .context(above, "the slot above is declared here")
+        .note("a kind may repeat a slot of the kinds above it only to narrow it: fewer kinds or words, or a tighter count")
+        .fix("narrow it to what the slot above takes", loc, narrowed)
+}
+
+/// `entity` or `name` as a slot's whole range, which takes anything of its sort; `proposal` is what the book's own
+/// things say the slot takes, if they say.
+pub(crate) fn untyped_slot(slot: Word, wide: Word, proposal: Option<&str>) -> Diagnostic {
+    let what = if wide.text == "name" { "word" } else { "entity" };
+    let diagnostic = Diagnostic::error("untyped-slot", format!("`{}` takes any {what}", slot.text))
+        .label(wide.loc, format!("every {what} is one"))
+        .note("a slot takes the kinds of thing it is for, or the words it knows, so that a wrong one is an error where it is written");
+    match proposal {
+        Some(text) => diagnostic.fix(format!("write `{text}`, which is what the book fills it with"), wide.loc, text),
+        None => diagnostic.help(format!(
+            "name the kinds it takes, as in `has {0} person | household`, or the words, as in `has {0} one of a | b`",
+            slot.text
+        )),
+    }
+}
+
+/// A range of kinds of different sorts of thing: `person | 401k`.
+pub(crate) fn mixed_sorts(word: Word, kind: &str) -> Diagnostic {
+    Diagnostic::error(
+        "slot-range-sorts",
+        format!("`{kind}` is not the sort of thing the other kinds of this range are"),
+    )
+    .label(word.loc, "a different sort of thing")
+    .note("a slot takes things of one sort: people and households, or accounts, but not both")
+}
+
+/// A weight on a slot that takes one value, which there is nothing to weigh against.
+pub(crate) fn weighted_one(slot: Word, line: Loc) -> Diagnostic {
+    Diagnostic::error("weight-on-one", format!("`{}` takes one value, so there is nothing to weigh", slot.text))
+        .label(line, "only a slot that is `some` or `many` is weighed")
+        .help("write `some` or `many` before `by`, or remove the weight")
+}
+
+/// A slot declared under a thing and not under its kind.
+pub(crate) fn slot_on_a_thing(line: Loc, noun: &str) -> Diagnostic {
+    Diagnostic::error("unknown-property", format!("`has` is not a property of {}", article(noun)))
+        .label(line, "only a kind declares slots")
+        .help("write the slot under the kind this one is of")
+}
+
 /// A property a kind may not declare because every kind has it.
 pub(crate) fn built_in_property(word: Word) -> Diagnostic {
     Diagnostic::error("reserved-property", format!("`{}` is a built-in property", word.text))

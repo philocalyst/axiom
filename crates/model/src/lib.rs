@@ -7,6 +7,7 @@
 //! | `collect`    | every item of every source, sorted into typed buckets once  |
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
 //! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
+//! | `slots`      | what the things of a kind have: ranges, counts and weights  |
 //! | `props`      | property lines, read once and applied down the kind chain   |
 //! | `params`     | dated tables                                                |
 //! | `laws`       | laws compiled and typed, and the order they run in          |
@@ -38,6 +39,7 @@ mod purposes;
 mod resolve;
 mod rules;
 mod scope;
+mod slots;
 mod sources;
 mod sync_lower;
 mod taxonomy;
@@ -48,6 +50,7 @@ mod values;
 pub use book::*;
 pub use journal::*;
 pub use law::*;
+pub use slots::{Mult, Range, Schema, Slot, View, Weight};
 
 use axiom_core::{Diagnostic, Interner, Set};
 use axiom_syntax::File;
@@ -78,6 +81,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let said = declare::Said { sites: &sites, collected: &collected, survey: &survey };
     let systems = declare::Systems { tree: systems_tree, index: systems, scopes };
     let mut world = declare::declare(said, &settings, names, systems, &mut diags);
+    slots::declare(&mut world, &collected, &mut diags);
     props::declare(&mut world, &collected, &mut diags);
     world.finish_props();
     params::declare(&mut world, &collected, &mut diags);

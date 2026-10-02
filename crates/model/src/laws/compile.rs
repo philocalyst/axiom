@@ -756,8 +756,8 @@ impl<'s> Compiler<'_, '_, 's> {
             return Ok((Op::Field(node, field), ty));
         }
         let sym = self.world.book.names.intern(field.text);
-        if let Some(has) = self.world.props.get(ty, sym) {
-            return Ok((Op::Field(node, Field::Prop(sym)), has.ty));
+        if let Some(ty) = self.world.book.schema.field(ty, sym) {
+            return Ok((Op::Field(node, Field::Prop(sym)), ty));
         }
         Err(self.unknown_field(ty, field, receiver).into())
     }
@@ -879,7 +879,7 @@ impl<'s> Compiler<'_, '_, 's> {
             _ => Vec::new(),
         };
         // In the order of the alphabet, not of the hash of their symbols, which every new name the book interns shuffles.
-        let mut declared: Vec<&str> = self.world.props.names(ty).map(|sym| self.world.book.name(sym)).collect();
+        let mut declared: Vec<&str> = self.world.book.schema.fields(ty).map(|sym| self.world.book.name(sym)).collect();
         declared.sort_unstable();
         valid.extend(declared);
         let mut diagnostic =

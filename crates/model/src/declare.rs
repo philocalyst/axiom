@@ -14,7 +14,6 @@ use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
 use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
-use crate::props::PropTable;
 use crate::resolve::End;
 use crate::scope::{Home, Scopes, Seeing};
 use crate::sources::{Site, SystemIndex};
@@ -29,7 +28,6 @@ pub(crate) struct World<'s> {
     pub book: Book<'s>,
     pub scopes: Scopes,
     pub systems: SystemIndex<'s>,
-    pub props: PropTable,
     pub prop_writes: Vec<(PropTarget, Prop)>,
     pub tallies: Set<&'s str>,
     /// Claim tabs allocated from the bounded syntax survey before place IDs
@@ -504,16 +502,7 @@ pub(crate) fn declare<'a, 's>(
     let made = Made { commodities, entities, assets, places, kinds: native_kinds, purposes: native_purposes };
     let tabs = made.places.tabs.clone();
     let book = book(made, names, systems_tree, settings);
-    World {
-        book,
-        scopes,
-        systems,
-        props: PropTable::default(),
-        prop_writes: Vec::new(),
-        tallies: Set::default(),
-        tabs,
-        contract_endpoints,
-    }
+    World { book, scopes, systems, prop_writes: Vec::new(), tallies: Set::default(), tabs, contract_endpoints }
 }
 
 /// What the passes made, to be put together into a book.
@@ -556,6 +545,7 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
         issuer_places: places.issuers,
         entities: entities.tree,
         kinds: kinds.tree,
+        schema: Default::default(),
         purposes: purposes.tree,
         systems,
         commodities: commodities.arena,

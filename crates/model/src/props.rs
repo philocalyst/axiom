@@ -12,17 +12,17 @@
 
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
 use axiom_syntax::{
-    BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting,
-    Statement, Subject, Verb,
+    Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting, Statement,
+    Subject, Verb,
 };
 
 use crate::book::{
-    Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy, Residence, Role, Share,
-    Sort, Take,
+    Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Prop, Purpose, RatePolicy, Residence, Role, Share, Sort,
+    Take,
 };
 use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, PropTarget, World};
-use crate::errors::{Reported, Word, article, list, suggest};
+use crate::errors::{Word, article, list, suggest};
 use crate::law::{Ty, Value};
 use crate::problem;
 use crate::scope::Home;
@@ -87,7 +87,6 @@ enum Assign {
     Deferred,
     Claim,
     Basis(Basis),
-    Has,
     /// A value for a property a kind declared.
     Prop(Prop),
 }
@@ -101,7 +100,6 @@ impl Assign {
                 | Assign::Deferred
                 | Assign::Claim
                 | Assign::Basis(_)
-                | Assign::Has
                 | Assign::Purpose(_)
                 | Assign::Pays(_)
                 | Assign::Takes(_)
@@ -117,7 +115,7 @@ type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
-const BUILTINS: [(&str, &[Target], Reader); 25] = [
+const BUILTINS: [(&str, &[Target], Reader); 24] = [
     ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?))),
     ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| a.policy().map(Assign::Select)),
     ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?))),
@@ -151,62 +149,10 @@ const BUILTINS: [(&str, &[Target], Reader); 25] = [
         Ok(Assign::Basis(if a.word(&["zero", "cost"])? == "zero" { Basis::Zero } else { Basis::Cost }))
     }),
     ("claim", &[Target::Kind], |_| Ok(Assign::Claim)),
-    ("has", &[Target::Kind], |a| a.has()),
 ];
-
-/// Words that read a value off a thing in a law (`self.balance`), so a
-/// declared property may not take them.
-const FIELD_WORDS: [&str; 8] = ["balance", "basis", "owner", "kind", "age", "unit", "year", "month"];
 
 const POLICIES: [(&str, Policy); 4] =
     [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
-
-const TYPES: [(&str, Ty); 14] = [
-    ("date", Ty::Day),
-    ("amount", Ty::AMOUNT),
-    ("number", Ty::Num),
-    ("percent", Ty::Num),
-    ("span", Ty::Span),
-    ("text", Ty::Text),
-    ("name", Ty::Name),
-    ("entity", Ty::Entity),
-    ("place", Ty::Place),
-    ("kind", Ty::Kind),
-    ("unit", Ty::Unit),
-    ("bool", Ty::Bool),
-    ("purpose", Ty::Purpose),
-    ("asset", Ty::Asset),
-];
-
-/// Every declared property, typed once for all things of its sort: two kinds
-/// that declare `filing` for entities agree on what it is, so `owner.filing`
-/// has one type wherever it is written.
-#[derive(Default)]
-pub(crate) struct PropTable {
-    declared: Map<(Ty, Sym), Has>,
-}
-
-impl PropTable {
-    /// The type family a sort's properties are typed in: places, entities or
-    /// commodities (as `Ty::Unit`), matching what a law's receiver is.
-    fn family(sort: Sort) -> Ty {
-        match sort {
-            Sort::Place(_) => Ty::Place,
-            Sort::Thing => Ty::Asset,
-            Sort::Commodity => Ty::Unit,
-            Sort::Entity => Ty::Entity,
-        }
-    }
-
-    pub fn get(&self, family: Ty, name: Sym) -> Option<Has> {
-        self.declared.get(&(family, name)).copied()
-    }
-
-    /// The declared property names of one family.
-    pub fn names(&self, family: Ty) -> impl Iterator<Item = Sym> {
-        self.declared.keys().filter(move |key| key.0 == family).map(|key| key.1)
-    }
-}
 
 // ─── Applying ───────────────────────────────────────────────────────────────
 
@@ -576,30 +522,6 @@ impl<'a, 's> Args<'_, 'a, 's> {
         };
         Ok(Assign::Lives(Residence { days, system }))
     }
-
-    /// `has employer entity`
-    fn has(&mut self) -> Result<Assign, Diagnostic> {
-        let name = self.name("a property name")?;
-        let ty = |expr: &Expr| match expr.kind {
-            ExprKind::Name(written) => TYPES.iter().find(|ty| ty.0 == written.0).map(|ty| ty.1),
-            _ => None,
-        };
-        let wanted = format!("a type: {}", list(&TYPES.map(|ty| ty.0)));
-        self.arg(&wanted, ty)?;
-        if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text) {
-            return Err(problem::built_in_property(name));
-        }
-        self.world.book.names.intern(name.text);
-        Ok(Assign::Has)
-    }
-
-    /// The value of a property a kind declared.
-    fn declared(&mut self, has: Has) -> Result<Assign, Diagnostic> {
-        let id = self.next_id("a value")?;
-        let (value, _) = self.world.constant(self.home, self.file, id, Some(has.ty))?;
-        // v3 bridge: a property holds from the beginning; statements that change one come with the v4 model.
-        Ok(Assign::Prop(Prop { name: has.name, value, since: Day::MIN, loc: Some(self.line.loc) }))
-    }
 }
 
 fn validate_share_rate(rate: Ratio, loc: Loc) -> Result<(), Diagnostic> {
@@ -630,33 +552,24 @@ fn read_line<'s>(
     at: &Lines<'_, 's>,
     line: &Line<'s>,
     targets: &[Target],
-    has: &[Has],
     kind: Id<Kind>,
 ) -> Result<Assign, Diagnostic> {
     let word = line.name.0;
-    let builtin = BUILTINS.iter().find(|entry| entry.0 == word && targets.iter().any(|t| entry.1.contains(t)));
-    let declared = world.book.names.get(word).and_then(|sym| has.iter().find(|has| has.name == sym)).copied();
-    let read = match (builtin, declared) {
-        (Some(entry), _) => Ok(entry.2),
-        (None, Some(has)) => Err(has),
-        (None, None) => {
-            return Err(unknown_property(world, at.file.loc(word), targets[0], kind, has, word));
-        }
+    let Some(builtin) = BUILTINS.iter().find(|entry| entry.0 == word && targets.iter().any(|t| entry.1.contains(t)))
+    else {
+        return Err(unknown_property(world, at.file.loc(word), targets[0], kind, word));
     };
     let mut args = Args { world, file: at.file, ids: &at.file[line.args], line, home: at.home, next: 0 };
-    let assign = match read {
-        Ok(read) => read(&mut args)?,
-        Err(has) => args.declared(has)?,
-    };
+    let assign = (builtin.2)(&mut args)?;
     args.done()?;
     Ok(assign)
 }
 
 /// `benificiary` is not a property of an account of kind `529`.
-fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, has: &[Has], word: &str) -> Diagnostic {
+fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, word: &str) -> Diagnostic {
     let kind_name = world.book.name(world.book.kinds[kind].name);
     let mut valid: Vec<&str> = BUILTINS.iter().filter(|entry| entry.1.contains(&target)).map(|entry| entry.0).collect();
-    valid.extend(has.iter().map(|has| world.book.name(has.name)));
+    valid.extend(declared_names(world, kind));
     let of = match target {
         Target::Kind => format!("kind `{kind_name}`"),
         target => format!("{} of kind `{kind_name}`", article(target.noun())),
@@ -672,41 +585,6 @@ fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, has
         None => error,
     }
     .note(format!("its properties are {}", list(&valid)))
-}
-
-impl<'s> World<'s> {
-    /// Records the properties a kind declares. Two kinds that declare one name
-    /// for one sort of thing must give it the same type.
-    pub(crate) fn declare_props(&mut self, sort: Sort, own: &[Has], diags: &mut Vec<Diagnostic>) {
-        let family = PropTable::family(sort);
-        for &has in own {
-            let earlier = *self.props.declared.entry((family, has.name)).or_insert(has);
-            if earlier.ty != has.ty {
-                diags.push(disagreement(earlier, has, family, self.book.name(has.name)));
-            }
-        }
-    }
-}
-
-fn disagreement(first: Has, again: Has, family: Ty, name: &str) -> Diagnostic {
-    let noun = family.word();
-    let mut diagnostic = Diagnostic::error(
-        "property-type",
-        format!(
-            "`{name}` is declared as {} here, but as {} elsewhere",
-            article(again.ty.word()),
-            article(first.ty.word())
-        ),
-    );
-    if let Some(loc) = again.loc {
-        diagnostic = diagnostic.label(loc, format!("{} here", again.ty.word()));
-    }
-    if let Some(loc) = first.loc {
-        diagnostic = diagnostic.context(loc, format!("{} here", first.ty.word()));
-    }
-    diagnostic.note(format!(
-        "a property has one type for every {noun}, so that `.{name}` means the same thing wherever it is written"
-    ))
 }
 
 // ─── Native S5 declarations ────────────────────────────────────────────────
@@ -733,39 +611,11 @@ struct PropertyChange {
 /// Kind defaults stay on their kind and are inherited by the law evaluator via
 /// the kind tree; this pass never clones a default into every instance.
 pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    declare_has(world, collected, diags);
     native_builtins(world, collected, diags);
     let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
     stage_declared_values(world, collected, &mut seen, diags);
     let changes = property_changes(world, collected, &mut seen, diags);
     stage_changes(world, changes);
-}
-
-/// The properties each kind says it has: its own `has` lines and every ancestor's.
-fn declare_has<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    let mut kind_decls: Map<Id<Kind>, Written<'a, 's, Decl<'s>>> = Map::default();
-    for written in collected.decls_of(DeclKind::Kind) {
-        let word = Word { text: written.node.name.0, loc: written.item.loc };
-        if let Ok(kind) = world.kind(written.home(), word) {
-            kind_decls.entry(kind).or_insert(*written);
-        }
-    }
-
-    // The kind tree is preordered, so a child's inherited declarations are
-    // available before its own declarations are checked.
-    let kinds: Vec<Id<Kind>> = world.book.kinds.ids().collect();
-    for kind in kinds {
-        let own = match kind_decls.get(&kind).copied() {
-            Some(written) => read_has_lines(world, written.file(), written.node, diags),
-            None => Vec::new(),
-        };
-        let sort = world.book.kinds[kind].sort;
-        world.declare_props(sort, &own, diags);
-        let inherited: Vec<Has> =
-            world.book.kinds.parent(kind).map(|parent| world.book.kinds[parent].has.to_vec()).unwrap_or_default();
-        let inherited = inherited.iter().filter(|above| !own.iter().any(|child| child.name == above.name));
-        world.book.kinds[kind].has = own.iter().chain(inherited).copied().collect();
-    }
 }
 
 /// The values the property lines of declarations give, from the beginning of time.
@@ -940,10 +790,9 @@ fn kind_defaults<'a, 's>(
             let (above, child) = world.book.kinds.with_parent_mut(kind).expect("kind parent exists");
             child.inherit(above);
         }
-        let has = world.book.kinds[kind].has.clone();
         if let Some(written) = written.get(&kind).copied() {
             let at = Lines::from_native(written);
-            let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], &has, kind, diags);
+            let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], kind, diags);
             for assign in &assigns {
                 world.book.kinds[kind].set(assign);
                 if assign.is_default() {
@@ -967,8 +816,7 @@ fn own_builtins<'a, 's>(
         return Vec::new();
     };
     let at = Lines::from_native(written);
-    let has = world.book.kinds[kind].has.clone();
-    read_builtin_lines(world, &at, &[target], &has, kind, diags)
+    read_builtin_lines(world, &at, &[target], kind, diags)
 }
 
 fn builtin_commodities<'a, 's>(
@@ -1096,15 +944,11 @@ fn read_builtin_lines<'s>(
     world: &mut World<'s>,
     at: &Lines<'_, 's>,
     targets: &[Target],
-    has: &[Has],
     kind: Id<Kind>,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Assign> {
     let mut assigns = Vec::new();
     for line in at.lines {
-        if line.name.0 == "has" {
-            continue;
-        }
         if line.name.0 == "owner" {
             if targets.len() != 1 || !matches!(targets[0], Target::Entity | Target::Place | Target::Asset) {
                 diags.push(
@@ -1124,7 +968,7 @@ fn read_builtin_lines<'s>(
             );
             continue;
         }
-        match read_line(world, at, line, targets, has, kind) {
+        match read_line(world, at, line, targets, kind) {
             Ok(assign) => assigns.push(assign),
             Err(problem) => diags.push(problem),
         }
@@ -1232,113 +1076,12 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
     }
 }
 
-fn read_has_lines<'s>(
-    world: &mut World<'s>,
-    file: &File<'s>,
-    decl: &Decl<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Has> {
-    let mut own = Vec::new();
-    for line in &file[decl.props] {
-        if line.name.0 != "has" {
-            continue;
-        }
-        let Some(has) = parse_has(world, file, line).or_report(diags) else {
-            continue;
-        };
-        if is_builtin_line(world.book.name(has.name)) || FIELD_WORDS.contains(&world.book.name(has.name)) {
-            let word = Word { text: world.book.name(has.name), loc: has.loc.unwrap_or(line.loc) };
-            diags.push(problem::built_in_property(word));
-            continue;
-        }
-        if own.iter().any(|earlier: &Has| earlier.name == has.name) {
-            let earlier = own.iter().find(|earlier| earlier.name == has.name).copied().unwrap();
-            let mut diagnostic = Diagnostic::error(
-                "duplicate-property-declaration",
-                format!("property `{}` is declared twice on this kind", world.book.name(has.name)),
-            );
-            if let Some(loc) = has.loc {
-                diagnostic = diagnostic.label(loc, "declared again here");
-            }
-            if let Some(loc) = earlier.loc {
-                diagnostic = diagnostic.context(loc, "first declared here");
-            }
-            diags.push(diagnostic);
-            continue;
-        }
-        own.push(has);
-    }
-    own
-}
-
-fn parse_has<'s>(world: &mut World<'s>, file: &File<'s>, line: &Line<'s>) -> Result<Has, Diagnostic> {
-    let args = &file[line.args];
-    if args.len() != 2 {
-        return Err(Diagnostic::error("has-type", "`has` needs a property name and a type")
-            .label(line.loc, "write `has name type` or `has name UNIT`"));
-    }
-    let name_expr = &file.exprs[args[0]];
-    let ExprKind::Name(name) = name_expr.kind else {
-        return Err(Diagnostic::error("has-name", "a custom property needs a name")
-            .label(name_expr.loc, "write a lower-case property name"));
-    };
-    let type_expr = &file.exprs[args[1]];
-    let ty = match type_expr.kind {
-        ExprKind::Name(type_name) => match TYPES.iter().find(|(name, _)| *name == type_name.0).map(|(_, ty)| *ty) {
-            Some(ty) => ty,
-            None => {
-                let valid: Vec<&str> = TYPES.iter().map(|(name, _)| *name).collect();
-                return Err(suggest(
-                    Diagnostic::error("has-type", format!("`{}` is not a property type", type_name.0))
-                        .label(type_expr.loc, "unknown type"),
-                    type_expr.loc,
-                    type_name.0,
-                    valid,
-                ));
-            }
-        },
-        ExprKind::Unit(unit) => {
-            let commodity = world.commodity_of(Word { text: unit.0, loc: type_expr.loc })?;
-            Ty::Amount(Dim::Of(commodity))
-        }
-        ExprKind::Binary(BinOp::Div, top, bottom) => {
-            let numerator = unit_type(world, file, top)?;
-            let denominator = unit_type(world, file, bottom)?;
-            match numerator.div(denominator) {
-                Some(dim) if dim != Dim::Number && dim != Dim::Any => Ty::Amount(dim),
-                _ => {
-                    return Err(Diagnostic::error("has-unit", "this is not a supported amount unit")
-                        .label(type_expr.loc, "write one commodity or a rate such as `USD/MI`"));
-                }
-            }
-        }
-        _ => {
-            return Err(Diagnostic::error("has-type", "a property type must be a name or a unit")
-                .label(type_expr.loc, "write a built-in type or a commodity unit"));
-        }
-    };
-    let name = world.book.names.intern(name.0);
-    Ok(Has { name, ty, loc: Some(name_expr.loc) })
-}
-
-fn unit_type<'s>(world: &World<'s>, file: &File<'s>, id: ExprId) -> Result<Dim<Id<Commodity>>, Diagnostic> {
-    let expr = &file.exprs[id];
-    let (text, loc) = match expr.kind {
-        ExprKind::Unit(name) | ExprKind::Name(name) => (name.0, expr.loc),
-        _ => {
-            return Err(Diagnostic::error("has-unit", "this is not a commodity unit")
-                .label(expr.loc, "write a declared unit such as `USD`"));
-        }
-    };
-    world.commodity_of(Word { text, loc }).map(Dim::Of)
-}
-
 fn property_value<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &File<'s>,
     line: &Line<'s>,
-    has: Has,
+    has: Named,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     let args = &file[line.args];
@@ -1481,12 +1224,25 @@ fn subject_candidates(world: &World<'_>, home: Home, subject: Subject<'_>, loc: 
     targets.into_iter().map(|target| NativeTarget::of(world, target)).collect()
 }
 
-fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Has> {
-    let name = world.book.names.get(name)?;
-    world.book.kinds[kind].has.iter().find(|has| has.name == name).copied()
+/// A slot as a property line fills it: its name and what its values are.
+#[derive(Clone, Copy)]
+struct Named {
+    name: Sym,
+    ty: Ty,
 }
 
-fn is_builtin_line(name: &str) -> bool {
+fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Named> {
+    let (schema, name) = (&world.book.schema, world.book.names.get(name)?);
+    let number = schema.find(&world.book.kinds, kind, name).and_then(|slot| schema.number(slot.name))?;
+    Some(Named { name, ty: schema.ty(number) })
+}
+
+/// The names of the slots things of `kind` have.
+fn declared_names<'w>(world: &'w World<'_>, kind: Id<Kind>) -> impl Iterator<Item = &'w str> {
+    world.book.schema.effective(&world.book.kinds, kind).map(|slot| world.book.name(slot.name))
+}
+
+pub(crate) fn is_builtin_line(name: &str) -> bool {
     matches!(
         name,
         "owner"
@@ -1505,7 +1261,6 @@ fn is_builtin_line(name: &str) -> bool {
             | "deferred"
             | "basis"
             | "claim"
-            | "has"
             | "purpose"
             | "pays"
             | "takes"
@@ -1538,7 +1293,7 @@ fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<
         })
         .map(|builtin| builtin.0)
         .collect();
-    valid.extend(world.book.kinds[target.kind].has.iter().map(|has| world.book.name(has.name)));
+    valid.extend(declared_names(world, target.kind));
     if matches!(target.target, PropTarget::Asset(_)) {
         valid.extend(["owner", "known-as", "share", "at", "part", "also"]);
     }
@@ -1696,7 +1451,7 @@ mod native_property_tests {
             takes: Box::default(),
             sales_tax: None,
             shares: Box::default(),
-            has: Box::default(),
+            slots: axiom_core::Run::default(),
             props: Box::default(),
             laws: Box::default(),
             doc: None,
@@ -1779,7 +1534,7 @@ mod native_property_tests {
                 takes: Box::default(),
                 sales_tax: None,
                 shares: Box::default(),
-                has: Box::default(),
+                slots: axiom_core::Run::default(),
                 props: Box::default(),
                 laws: Box::default(),
                 doc: None,

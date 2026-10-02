@@ -3,7 +3,7 @@
 //! Kinds form one tree under the built-in roots: the two classes of account, identified things, commodities, measures
 //! and entities. [`taxonomy`](crate::taxonomy) builds it; this module says what is particular to kinds.
 
-use axiom_core::{Diagnostic, Id, Interner, Loc, Sym, Tree};
+use axiom_core::{Diagnostic, Id, Interner, Loc, Run, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind};
 
 use crate::book::{Class, Kind, KindRoots, Miss, Sort, System};
@@ -32,7 +32,7 @@ impl Kind {
             takes: Box::default(),
             sales_tax: None,
             shares: Box::default(),
-            has: Box::default(),
+            slots: Run::default(),
             props: Box::default(),
             laws: Box::default(),
             doc: None,

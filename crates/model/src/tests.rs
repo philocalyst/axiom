@@ -114,7 +114,7 @@ asset condo : rental-home
     assert_eq!(middle_default.value, Value::Num(Ratio::int(24)));
     assert_eq!(child_default.value, Value::Num(Ratio::int(18)));
     assert!(parent_default.loc.is_some() && middle_default.loc.is_some() && child_default.loc.is_some());
-    assert!(book.kinds[child].has.iter().any(|has| has.name == name));
+    assert!(book.schema.find(&book.kinds, child, name).is_some(), "a kind has the slots of its ancestors");
     assert!(book.assets[asset].props.is_empty(), "defaults stay on their kinds");
 }
 
