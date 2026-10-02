@@ -15,8 +15,9 @@ use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
 use crate::kinds::{self, NativeKinds};
 use crate::names::{Names, Scoped};
-use crate::problem::{self, Noun, Reads, unresolved};
+use crate::problem::{self, Among, Noun};
 use crate::props::PropTable;
+use crate::purposes::NativePurposes;
 use crate::resolve::End;
 use crate::scope::{Home, Scopes};
 use crate::sources::{Site, SystemIndex};
@@ -209,12 +210,9 @@ pub(crate) fn settings<'s>(collected: &Collected<'_, 's>, diags: &mut Vec<Diagno
             Setting::Base(name) => {
                 let word = Word::of(written.file(), name.0);
                 match settings.base {
-                    Some(first) if first.text != word.text => diags.push(
-                        Diagnostic::error("duplicate-base", "the base currency is set twice")
-                            .label(word.loc, format!("`base {}` here", word.text))
-                            .context(first.loc, "and here")
-                            .help("a book has one base currency: remove one of them"),
-                    ),
+                    Some(first) if first.text != word.text => {
+                        diags.push(problem::twice("base currency", word.loc, first.loc))
+                    }
                     Some(_) => {}
                     None => settings.base = Some(word),
                 }
@@ -493,6 +491,8 @@ pub(crate) fn declare<'a, 's>(
     let native_purposes =
         crate::purposes::declare_sites(collected, &mut names, &systems_tree, &scopes, &native_kinds.index, diags);
     check_cross_namespace_names(collected, &scopes, &systems_tree, diags);
+    let resolving =
+        Resolving { systems: &systems_tree, scopes: &scopes, kinds: &native_kinds, purposes: &native_purposes };
 
     let mut commodities = Arena::new();
     let mut commodity_by_name: Map<&'s str, Id<Commodity>> = Map::default();
@@ -501,21 +501,10 @@ pub(crate) fn declare<'a, 's>(
         let (file, decl) = (written.file(), written.node);
         let symbol = decl.name.0;
         if let Some(&first) = commodity_by_name.get(symbol) {
-            diags.push(problem::declared_twice(Noun::Commodity, Word::of(file, symbol), commodities[first].loc, None));
+            diags.push(problem::duplicate(Noun::Commodity, Word::of(file, symbol), commodities[first].loc));
             continue;
         }
-        let kind = resolve_kind(
-            decl,
-            written.home(),
-            Sort::Commodity,
-            commodity_root,
-            &native_kinds,
-            &names,
-            &systems_tree,
-            &scopes,
-            file,
-            diags,
-        );
+        let kind = resolving.kind(&names, written, Sort::Commodity, commodity_root, diags);
         let id = commodities.push(Commodity {
             symbol: names.intern(symbol),
             kind,
@@ -566,7 +555,7 @@ pub(crate) fn declare<'a, 's>(
             commodity_by_name.get(word.text).copied().or_else(|| {
                 let suggestion =
                     axiom_core::diag::closest(word.text, commodity_by_name.keys().copied()).map(|near| near as &str);
-                diags.push(problem::unknown(Noun::BaseCommodity, word, suggestion, &[]));
+                diags.push(problem::unknown(Noun::Commodity, word, suggestion));
                 None
             })
         })
@@ -576,8 +565,7 @@ pub(crate) fn declare<'a, 's>(
         .expect("a book always has a base commodity");
 
     let mut entity_drafts: Vec<EntityDraft<'s>> = Vec::new();
-    let mut explicit_entities: Map<&'s str, (Home, &'a axiom_syntax::File<'s>, &'a Decl<'s>, Option<Sym>)> =
-        Map::default();
+    let mut explicit_entities: Map<&'s str, (Written<'a, 's, Decl<'s>>, Option<Sym>)> = Map::default();
     let mut first_entity_paths = Vec::new();
     let mut owner_names: Set<&'s str> = Set::default();
     let mut declared_entity_names = Set::default();
@@ -590,17 +578,16 @@ pub(crate) fn declare<'a, 's>(
             continue;
         }
         let path = decl.name.0;
-        if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
-            diags.push(problem::declared_twice(
+        if let Some((first, _)) = explicit_entities.get(path) {
+            diags.push(problem::duplicate(
                 Noun::Entity,
                 Word::of(file, path),
-                Some(first_file.loc(first.name.0)),
-                None,
+                Some(first.file().loc(first.node.name.0)),
             ));
             continue;
         }
         let doc = written.item.doc.map(|doc| names.intern(doc.0));
-        explicit_entities.insert(path, (written.home(), file, decl, doc));
+        explicit_entities.insert(path, (*written, doc));
         declared_entity_names.insert(path);
         first_entity_paths.push(path);
     }
@@ -690,7 +677,7 @@ pub(crate) fn declare<'a, 's>(
         add_path_spellings(&mut entity_spellings, path);
     }
     for &path in &first_entity_paths {
-        let (home, ..) = explicit_entities[&path];
+        let home = explicit_entities[&path].0.home();
         entity_drafts.push(EntityDraft { path, home });
     }
     for root in ["me", "?", "opening", "market"] {
@@ -708,21 +695,12 @@ pub(crate) fn declare<'a, 's>(
     let entity_home_by_path: Map<&str, Home> = entity_drafts.iter().map(|draft| (draft.path, draft.home)).collect();
     let (mut entities, entity_ids) = crate::paths::build(entity_paths.iter().copied(), |path| {
         let draft = explicit_entities.get(path);
-        let (kind, purpose, doc, loc) = if let Some((home, file, decl, doc)) = draft {
-            let kind = resolve_kind(
-                decl,
-                *home,
-                Sort::Entity,
-                native_kinds.roots.entity,
-                &native_kinds,
-                &names,
-                &systems_tree,
-                &scopes,
-                file,
-                diags,
-            );
+        let (kind, purpose, doc, loc) = if let Some((written, doc)) = draft {
+            let (file, decl) = (written.file(), written.node);
+            let kind = resolving.kind(&names, written, Sort::Entity, native_kinds.roots.entity, diags);
             let purpose = decl.purpose.and_then(|name| {
-                resolve_purpose(name.0, file.loc(name.0), *home, &native_purposes, &names, &scopes, diags)
+                resolving
+                    .purpose(&names, name.0, file.loc(name.0), written.home(), diags)
                     .map(|value| At { value, loc: file.loc(name.0) })
             });
             (kind, purpose, *doc, Some(file.loc(decl.name.0)))
@@ -765,11 +743,10 @@ pub(crate) fn declare<'a, 's>(
     // Ownership belongs to entities as well as accounts. Build it after every
     // entity id exists, preserving the declaration's source order.
     for written in collected.decls_of(DeclKind::Entity) {
-        let (file, decl) = (written.file(), written.node);
-        let Some(&entity) = entity_ids.get(decl.name.0) else {
+        let Some(&entity) = entity_ids.get(written.node.name.0) else {
             continue;
         };
-        let owners = resolve_owner_shares(file, decl, written.home(), &entity_index, &names, &scopes, me, diags);
+        let owners = resolving.owners(&names, written, &entity_index, &entities, me, diags);
         if let Some(share) = owners.first() {
             entities[entity].owner = Some(share.entity);
             entities[entity].owned_by = owners.into_boxed_slice();
@@ -784,22 +761,11 @@ pub(crate) fn declare<'a, 's>(
         let (file, decl) = (written.file(), written.node);
         let path = decl.name.0;
         if let Some(&first) = declared_account_paths.get(path) {
-            diags.push(problem::declared_twice(Noun::Account, Word::of(file, path), Some(first), None));
+            diags.push(problem::duplicate(Noun::Account, Word::of(file, path), Some(first)));
             continue;
         }
         declared_account_paths.insert(path, file.loc(path));
-        let kind = resolve_kind(
-            decl,
-            written.home(),
-            Sort::Place(Class::Asset),
-            native_kinds.roots.asset,
-            &native_kinds,
-            &names,
-            &systems_tree,
-            &scopes,
-            file,
-            diags,
-        );
+        let kind = resolving.kind(&names, written, Sort::Place(Class::Asset), native_kinds.roots.asset, diags);
         let class = match native_kinds.tree[kind].sort {
             Sort::Place(class) => class,
             found => {
@@ -810,7 +776,7 @@ pub(crate) fn declare<'a, 's>(
                 Class::Asset
             }
         };
-        let shares = resolve_owner_shares(file, decl, written.home(), &entity_index, &names, &scopes, me, diags);
+        let shares = resolving.owners(&names, written, &entity_index, &entities, me, diags);
         let owner = shares.first().map_or_else(
             || first_name_prop(file, decl, "owner").and_then(|name| entity_by_name.get(name).copied()).unwrap_or(me),
             |share| share.entity,
@@ -855,21 +821,10 @@ pub(crate) fn declare<'a, 's>(
         let (file, decl) = (written.file(), written.node);
         let path = decl.name.0;
         if let Some(&first) = asset_names.get(path) {
-            diags.push(problem::declared_twice(Noun::Asset, Word::of(file, path), Some(assets[first].loc), None));
+            diags.push(problem::duplicate(Noun::Asset, Word::of(file, path), Some(assets[first].loc)));
             continue;
         }
-        let kind = resolve_kind(
-            decl,
-            written.home(),
-            Sort::Thing,
-            native_kinds.roots.thing,
-            &native_kinds,
-            &names,
-            &systems_tree,
-            &scopes,
-            file,
-            diags,
-        );
+        let kind = resolving.kind(&names, written, Sort::Thing, native_kinds.roots.thing, diags);
         let name = names.intern(path);
         let unit = commodities.push(Commodity {
             symbol: name,
@@ -884,7 +839,7 @@ pub(crate) fn declare<'a, 's>(
             loc: Some(file.loc(path)),
         });
         commodity_by_name.entry(path).or_insert(unit);
-        let owners = resolve_owner_shares(file, decl, written.home(), &entity_index, &names, &scopes, me, diags);
+        let owners = resolving.owners(&names, written, &entity_index, &entities, me, diags);
         let owner = owners.first().map_or(me, |share| share.entity);
         let asset = assets.push(Asset {
             name,
@@ -995,11 +950,8 @@ pub(crate) fn declare<'a, 's>(
     // without allocating one endpoint per kind.
     let mut own_pays = vec![false; native_kinds.tree.len()];
     let mut seen_kind_declarations = Set::default();
-    let mut kind_declaration_at = 0;
-    for written in collected.decls_of(DeclKind::Kind) {
+    for (written, &kind) in collected.decls_of(DeclKind::Kind).zip(&native_kinds.declarations) {
         let (file, decl) = (written.file(), written.node);
-        let kind = native_kinds.declarations[kind_declaration_at];
-        kind_declaration_at += 1;
         if seen_kind_declarations.insert(kind) && native_kinds.tree[kind].sort == Sort::Commodity {
             own_pays[kind.index()] = file[decl.props].iter().any(|prop| prop.name.0 == "pays");
         }
@@ -1330,61 +1282,79 @@ mod tests {
     }
 }
 
-fn resolve_kind<'s>(
-    decl: &Decl<'s>,
-    home: Home,
-    expected: Sort,
-    fallback: Id<Kind>,
-    kinds: &NativeKinds,
-    names: &Interner<'s>,
-    _systems: &Tree<System>,
-    scopes: &Scopes,
-    file: &axiom_syntax::File<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Id<Kind> {
-    let Some(word) = decl.kind else {
-        return fallback;
-    };
-    let loc = file.loc(word.0);
-    let kind = match kinds.index.resolve(names, scopes.of(home), word.0) {
-        Ok(kind) => kind,
-        Err(miss) => {
-            let describe = |id| names.name(kinds.tree[id].name).to_string();
-            diags.push(unresolved(miss, Noun::Kind, Word { text: word.0, loc }, names, Reads::Mean, describe));
-            return fallback;
-        }
-    };
-    let found = kinds.tree[kind].sort;
-    let valid = match expected {
-        Sort::Place(_) => matches!(found, Sort::Place(_)),
-        other => found == other,
-    };
-    if valid {
-        kind
-    } else {
-        diags.push(
-            Diagnostic::error("kind-sort", format!("kind `{}` cannot classify this declaration", word.0))
-                .label(loc, format!("expected {expected:?}, found {found:?}")),
-        );
-        fallback
-    }
+/// What the words of a declaration are resolved against once the kinds and the purposes are built.
+struct Resolving<'a> {
+    systems: &'a Tree<System>,
+    scopes: &'a Scopes,
+    kinds: &'a NativeKinds,
+    purposes: &'a NativePurposes,
 }
 
-fn resolve_purpose<'s>(
-    name: &str,
-    loc: Loc,
-    home: Home,
-    purposes: &crate::purposes::NativePurposes,
-    names: &Interner<'s>,
-    scopes: &Scopes,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Purpose>> {
-    match purposes.index.resolve(names, scopes.of(home), name) {
-        Ok(purpose) => Some(purpose),
-        Err(miss) => {
-            let describe = |id| names.name(purposes.tree[id].name).to_string();
-            diags.push(unresolved(miss, Noun::Purpose, Word { text: name, loc }, names, Reads::Mean, describe));
-            None
+impl Resolving<'_> {
+    /// The kind a declaration is written as, or `fallback` when it names none, or one of another sort than `expected`.
+    fn kind(
+        &self,
+        names: &Interner,
+        written: &Written<Decl>,
+        expected: Sort,
+        fallback: Id<Kind>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Id<Kind> {
+        let Some(word) = written.node.kind else {
+            return fallback;
+        };
+        let loc = written.file().loc(word.0);
+        let (kinds, scope) = (self.kinds, self.scopes.of(written.home()));
+        let kind = match kinds.index.resolve(names, scope, word.0) {
+            Ok(kind) => kind,
+            Err(miss) => {
+                let among = Among { index: &kinds.index, names, systems: self.systems };
+                diags.push(kinds::unresolved(miss, Word { text: word.0, loc }, &among, |id| &kinds.tree[id]));
+                return fallback;
+            }
+        };
+        let found = kinds.tree[kind].sort;
+        let valid = match expected {
+            Sort::Place(_) => matches!(found, Sort::Place(_)),
+            other => found == other,
+        };
+        if valid {
+            kind
+        } else {
+            diags.push(
+                Diagnostic::error("kind-sort", format!("kind `{}` cannot classify this declaration", word.0))
+                    .label(loc, format!("expected {expected:?}, found {found:?}")),
+            );
+            fallback
+        }
+    }
+
+    /// The purpose `name` is, for a declaration in `home`.
+    fn purpose(
+        &self,
+        names: &Interner,
+        name: &str,
+        loc: Loc,
+        home: Home,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Option<Id<Purpose>> {
+        let (purposes, scope) = (self.purposes, self.scopes.of(home));
+        match purposes.index.resolve(names, scope, name) {
+            Ok(purpose) => Some(purpose),
+            Err(miss) => {
+                let among = Among { index: &purposes.index, names, systems: self.systems };
+                let describe = |ids: &[Id<Purpose>]| {
+                    problem::shortest(
+                        names,
+                        &purposes.index.names,
+                        ids,
+                        |id| purposes.tree[id].name,
+                        |id| purposes.tree[id].loc,
+                    )
+                };
+                diags.push(among.failed(miss, Noun::Purpose, Word { text: name, loc }, describe));
+                None
+            }
         }
     }
 }
@@ -1410,80 +1380,85 @@ fn owner_names_in<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>) -> 
         .collect()
 }
 
-fn resolve_owner_shares<'a, 's>(
-    file: &'a axiom_syntax::File<'s>,
-    decl: &Decl<'s>,
-    home: Home,
-    entities: &Scoped<Entity>,
-    names: &Interner<'s>,
-    scopes: &Scopes,
-    fallback: Id<Entity>,
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Share> {
-    let Some(line) = file[decl.props].iter().find(|prop| prop.name.0 == "owner") else {
-        return Vec::new();
-    };
-    let mut resolved: Vec<(Id<Entity>, Option<Ratio>, Loc)> = Vec::new();
-    for &arg in &file[line.args] {
-        let expr = &file.exprs[arg];
-        match expr.kind {
-            ExprKind::Name(name) => match entities.resolve(names, scopes.of(home), name.0) {
-                Ok(entity) => resolved.push((entity, None, expr.loc)),
-                Err(miss) => {
-                    let describe = |id: Id<Entity>| format!("entity #{}", id.index());
-                    let word = Word { text: name.0, loc: expr.loc };
-                    diags.push(unresolved(miss, Noun::Owner, word, names, Reads::Mean, describe));
-                }
-            },
-            ExprKind::Pct(number) => {
-                if let Some((_, rate, _)) = resolved.last_mut() {
-                    if rate.is_some() {
-                        diags.push(
-                            Diagnostic::error("owner-share", "an owner has more than one share")
-                                .label(expr.loc, "write one percentage after this owner"),
-                        );
-                    } else {
-                        *rate = Ratio::percent(number.mantissa.into(), number.scale);
+impl Resolving<'_> {
+    /// The shares a declaration gives its owners, `fallback` owning it whole when none is usable.
+    fn owners(
+        &self,
+        names: &Interner,
+        written: &Written<Decl>,
+        index: &Scoped<Entity>,
+        entities: &Tree<Entity>,
+        fallback: Id<Entity>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Vec<Share> {
+        let (file, decl) = (written.file(), written.node);
+        let Some(line) = file[decl.props].iter().find(|prop| prop.name.0 == "owner") else {
+            return Vec::new();
+        };
+        let mut resolved: Vec<(Id<Entity>, Option<Ratio>, Loc)> = Vec::new();
+        for &arg in &file[line.args] {
+            let expr = &file.exprs[arg];
+            match expr.kind {
+                ExprKind::Name(name) => match index.resolve(names, self.scopes.of(written.home()), name.0) {
+                    Ok(entity) => resolved.push((entity, None, expr.loc)),
+                    Err(miss) => {
+                        let among = Among { index, names, systems: self.systems };
+                        let describe = |ids: &[Id<Entity>]| {
+                            problem::shortest(names, &index.names, ids, |id| entities[id].path, |id| entities[id].loc)
+                        };
+                        diags.push(among.failed(miss, Noun::Owner, Word { text: name.0, loc: expr.loc }, describe));
                     }
-                } else {
-                    diags.push(
-                        Diagnostic::error("owner-share", "a share percentage needs an owner name")
-                            .label(expr.loc, "write `owner NAME 60%`"),
-                    );
+                },
+                ExprKind::Pct(number) => {
+                    if let Some((_, rate, _)) = resolved.last_mut() {
+                        if rate.is_some() {
+                            diags.push(
+                                Diagnostic::error("owner-share", "an owner has more than one share")
+                                    .label(expr.loc, "write one percentage after this owner"),
+                            );
+                        } else {
+                            *rate = Ratio::percent(number.mantissa.into(), number.scale);
+                        }
+                    } else {
+                        diags.push(
+                            Diagnostic::error("owner-share", "a share percentage needs an owner name")
+                                .label(expr.loc, "write `owner NAME 60%`"),
+                        );
+                    }
                 }
+                _ => diags.push(
+                    Diagnostic::error("owner-name", "an owner must be an entity name")
+                        .label(expr.loc, "write the owner before its optional percentage"),
+                ),
             }
-            _ => diags.push(
-                Diagnostic::error("owner-name", "an owner must be an entity name")
-                    .label(expr.loc, "write the owner before its optional percentage"),
-            ),
         }
+        if resolved.is_empty() {
+            // The diagnostic above is tied to the offending expression; keeping a
+            // deterministic default prevents an invalid declaration cascading.
+            return vec![Share { rate: Ratio::ONE, entity: fallback, measure: None, loc: line.loc }];
+        }
+        let has_rate = resolved.iter().any(|(_, rate, _)| rate.is_some());
+        let all_rate = resolved.iter().all(|(_, rate, _)| rate.is_some());
+        if has_rate && !all_rate {
+            diags.push(
+                Diagnostic::error("owner-share", "every owner in a shared place needs a percentage")
+                    .label(line.loc, "write a percentage for each owner"),
+            );
+        }
+        let equal = Ratio::new(1, resolved.len() as i128).unwrap_or(Ratio::ZERO);
+        let shares: Vec<_> = resolved
+            .into_iter()
+            .map(|(entity, rate, loc)| Share { rate: rate.unwrap_or(equal), entity, measure: None, loc })
+            .collect();
+        let total = shares.iter().try_fold(Ratio::ZERO, |sum, share| sum.checked_add(share.rate));
+        if shares.iter().any(|share| share.rate.is_negative()) || total != Some(Ratio::ONE) {
+            diags.push(
+                Diagnostic::error("owner-share-total", "owner shares must be nonnegative and add to 100%")
+                    .label(line.loc, "adjust the percentages so they total exactly 100%"),
+            );
+        }
+        shares
     }
-    if resolved.is_empty() {
-        // The diagnostic above is tied to the offending expression; keeping a
-        // deterministic default prevents an invalid declaration cascading.
-        return vec![Share { rate: Ratio::ONE, entity: fallback, measure: None, loc: line.loc }];
-    }
-    let has_rate = resolved.iter().any(|(_, rate, _)| rate.is_some());
-    let all_rate = resolved.iter().all(|(_, rate, _)| rate.is_some());
-    if has_rate && !all_rate {
-        diags.push(
-            Diagnostic::error("owner-share", "every owner in a shared place needs a percentage")
-                .label(line.loc, "write a percentage for each owner"),
-        );
-    }
-    let equal = Ratio::new(1, resolved.len() as i128).unwrap_or(Ratio::ZERO);
-    let shares: Vec<_> = resolved
-        .into_iter()
-        .map(|(entity, rate, loc)| Share { rate: rate.unwrap_or(equal), entity, measure: None, loc })
-        .collect();
-    let total = shares.iter().try_fold(Ratio::ZERO, |sum, share| sum.checked_add(share.rate));
-    if shares.iter().any(|share| share.rate.is_negative()) || total != Some(Ratio::ONE) {
-        diags.push(
-            Diagnostic::error("owner-share-total", "owner shares must be nonnegative and add to 100%")
-                .label(line.loc, "adjust the percentages so they total exactly 100%"),
-        );
-    }
-    shares
 }
 
 /// The declared place a full path is closest to, used in migration diagnostics.

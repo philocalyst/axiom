@@ -21,7 +21,7 @@ use crate::journal::{
     WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
-use crate::problem::{self, CodeUse, Twice};
+use crate::problem::{self, CodeUse};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -823,7 +823,7 @@ fn lower_occurrence<'a, 's>(
         if let Some(input_at) = input {
             if bound[input_at] {
                 let first = inputs[input_at].loc;
-                diags.push(problem::twice(Twice::ContractInput, leg.loc, first));
+                diags.push(problem::twice("input binding", leg.loc, first));
                 continue;
             }
             if !file[leg.tail].is_empty() {
@@ -916,7 +916,7 @@ fn lower_occurrence<'a, 's>(
             Some((template_at, leg_at)) => {
                 if replaced_legs.contains(&(template_at, leg_at)) {
                     let first = templates[template_at].legs[leg_at].flow.loc;
-                    diags.push(problem::twice(Twice::TemplateLeg, leg.loc, first));
+                    diags.push(problem::twice("occurrence leg", leg.loc, first));
                     continue;
                 }
                 replaced_legs.push((template_at, leg_at));
@@ -929,7 +929,7 @@ fn lower_occurrence<'a, 's>(
                 // to the same group and subtracts it from the header's
                 // remainder.
                 if let Some((_, first_loc)) = added_ends.iter().find(|(place, _)| *place == endpoint.place) {
-                    diags.push(problem::twice(Twice::AdditionalEnd, leg.loc, *first_loc));
+                    diags.push(problem::twice("occurrence leg", leg.loc, *first_loc));
                     continue;
                 }
                 added_ends.push((endpoint.place, leg.loc));
@@ -1897,11 +1897,7 @@ fn lower_contract_change<'a, 's>(
         match clause.kind {
             ClauseKind::Until(until) => {
                 if let Some(first) = until_loc {
-                    diags.push(
-                        Diagnostic::error("duplicate-waiver-until", "a waiver has one end date")
-                            .label(first, "the first end date is here")
-                            .label(clause.at, "this second end date would replace it"),
-                    );
+                    diags.push(problem::twice("waiver end date", clause.at, first));
                     return;
                 }
                 until_loc = Some(clause.at);
@@ -1909,11 +1905,7 @@ fn lower_contract_change<'a, 's>(
             }
             ClauseKind::Code(written) => {
                 if let Some((_, first)) = code {
-                    diags.push(
-                        Diagnostic::error("duplicate-waiver-code", "a waiver names one change code")
-                            .label(first, "the first code is here")
-                            .label(clause.at, "this second code cannot replace it"),
-                    );
+                    diags.push(problem::twice("waiver code", clause.at, first));
                     return;
                 }
                 code = Some((written, clause.at));

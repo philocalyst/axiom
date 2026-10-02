@@ -9,7 +9,7 @@ use axiom_syntax as ast;
 use crate::book::{Book, CodeRule, CodeScope, Role};
 use crate::collect::Collected;
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Candidate, Word};
 use crate::problem::{self, Noun};
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
@@ -17,21 +17,22 @@ use crate::sync::{
     Capture, CharClass, Column, Fetch, Field, Format, Op, Pattern, Rule, Shape, Sink, Source, Spec, Text,
 };
 
-#[derive(Clone, Copy)]
-struct Named {
+/// A pattern or a format a name was declared for, and where it can be seen from.
+struct Named<T> {
     name: Sym,
     home: Home,
-    id: Id<Pattern>,
+    id: Id<T>,
     loc: Loc,
 }
 
-#[derive(Clone, Copy)]
-struct NamedFormat {
-    name: Sym,
-    home: Home,
-    id: Id<Format>,
-    loc: Loc,
+// Written out because deriving would demand `T: Copy` of the marker type.
+impl<T> Clone for Named<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
+
+impl<T> Copy for Named<T> {}
 
 /// Builds the book's canonical patterns, formats, code rules and sources.
 /// Called after base declarations exist so sync names can bind to typed ids.
@@ -42,7 +43,7 @@ pub(crate) fn declare<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut named = Vec::new();
-    let mut by_name: Map<(Home, Sym), Named> = Map::default();
+    let mut by_name: Map<(Home, Sym), Named<Pattern>> = Map::default();
 
     // Reserve every named pattern first. Forward calls then lower to stable
     // arena ids without copying or recompiling another pattern's program.
@@ -51,7 +52,7 @@ pub(crate) fn declare<'a, 's>(
         let name = world.book.names.intern(source.name.0);
         if let Some(first) = by_name.get(&(written.home(), name)) {
             let word = Word::of(file, source.name.0);
-            diags.push(problem::declared_twice(Noun::Pattern, word, Some(first.loc), None));
+            diags.push(problem::duplicate(Noun::Pattern, word, Some(first.loc)));
             continue;
         }
         let loc = file.loc(source.name.0);
@@ -92,7 +93,7 @@ pub(crate) fn declare<'a, 's>(
     lower_sources(world, collected, &formats, diags);
 }
 
-fn validate_pattern_calls(arena: &axiom_core::Arena<Pattern>, named: &[Named], diags: &mut Vec<Diagnostic>) {
+fn validate_pattern_calls(arena: &axiom_core::Arena<Pattern>, named: &[Named<Pattern>], diags: &mut Vec<Diagnostic>) {
     const MAX_CALL_DEPTH: usize = 32;
     let mut state = vec![0u8; arena.len()];
     let mut height = vec![0usize; arena.len()];
@@ -158,48 +159,44 @@ fn validate_pattern_calls(arena: &axiom_core::Arena<Pattern>, named: &[Named], d
     }
 }
 
-fn resolve_named(
+/// The pattern or format `name` stands for at `from`: the nearest declaration of it that `from` can see.
+fn resolve_named<T>(
+    noun: Noun,
     file: &ast::File<'_>,
     names: &Interner<'_>,
-    named: &[Named],
+    named: &[Named<T>],
     scopes: &Scopes,
     from: Home,
     name: ast::Name<'_>,
-) -> Result<Id<Pattern>, Diagnostic> {
+) -> Result<Id<T>, Diagnostic> {
     let scope = scopes.of(from);
-    let Some(sym) = names.get(name.0) else {
-        let visible =
-            named.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name));
-        let nearest = closest(name.0, visible);
-        return Err(problem::unknown(Noun::Pattern, Word::of(file, name.0), nearest, &[]));
+    let word = Word::of(file, name.0);
+    let visible = || named.iter().filter(|candidate| scope.sees(candidate.home));
+    let sym = names.get(name.0);
+    let here: Vec<_> = visible().filter(|candidate| Some(candidate.name) == sym).collect();
+    let Some(rank) = here.iter().map(|candidate| scope.rank(candidate.home)).min() else {
+        let nearest = closest(name.0, visible().map(|candidate| names.name(candidate.name)));
+        return Err(problem::unknown(noun, word, nearest));
     };
-    let nearest = named
-        .iter()
-        .filter(|candidate| candidate.name == sym && scope.sees(candidate.home))
-        .map(|candidate| (scope.rank(candidate.home), candidate.id))
-        .min_by_key(|(rank, _)| *rank)
-        .map(|(rank, id)| (rank, id));
-    let Some((rank, id)) = nearest else {
-        return Err(Diagnostic::error("unknown-pattern", format!("there is no pattern named `{}`", name.0))
-            .label(file.loc(name.0), "not a visible pattern"));
-    };
-    if named.iter().any(|candidate| {
-        candidate.name == sym && scope.sees(candidate.home) && scope.rank(candidate.home) == rank && candidate.id != id
-    }) {
-        return Err(Diagnostic::error(
-            "ambiguous-pattern",
-            format!("pattern `{}` is declared more than once at this scope", name.0),
-        )
-        .label(file.loc(name.0), "which declaration is meant?"));
+    let best: Vec<_> = here.into_iter().filter(|candidate| scope.rank(candidate.home) == rank).collect();
+    match best[..] {
+        [only] => Ok(only.id),
+        _ => {
+            let describe = |candidate: &&Named<T>| Candidate {
+                is: format!("`{}`", name.0),
+                declared: Some(candidate.loc),
+                write: None,
+            };
+            Err(problem::ambiguous(noun, word, &best.iter().map(describe).collect::<Vec<_>>()))
+        }
     }
-    Ok(id)
 }
 
 fn compile_pattern<'s>(
     file: &ast::File<'s>,
     pattern: ast::Pattern<'s>,
     book: &mut Book<'s>,
-    named: &[Named],
+    named: &[Named<Pattern>],
     scopes: &Scopes,
     home: Home,
 ) -> Result<Vec<Op>, Diagnostic> {
@@ -210,7 +207,7 @@ fn compile_pattern_at<'s>(
     file: &ast::File<'s>,
     pattern: ast::Pattern<'s>,
     book: &mut Book<'s>,
-    named: &[Named],
+    named: &[Named<Pattern>],
     scopes: &Scopes,
     home: Home,
     depth: u8,
@@ -236,7 +233,7 @@ fn compile_pattern_at<'s>(
                     ast::Class::End => CharClass::End,
                 })],
                 ast::PatternAtom::Named(reference) => {
-                    vec![Op::Call(resolve_named(file, &book.names, named, scopes, home, reference)?)]
+                    vec![Op::Call(resolve_named(Noun::Pattern, file, &book.names, named, scopes, home, reference)?)]
                 }
                 ast::PatternAtom::Group(group) => {
                     let choices = file[group.choices].len();
@@ -293,7 +290,12 @@ fn op_len(_file: &ast::File<'_>, loc: Loc, len: usize) -> Result<u16, Diagnostic
     })
 }
 
-fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Named], diags: &mut Vec<Diagnostic>) {
+fn lower_known_as<'s>(
+    world: &mut World<'s>,
+    sites: &[Site<'_, 's>],
+    named: &[Named<Pattern>],
+    diags: &mut Vec<Diagnostic>,
+) {
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -426,15 +428,15 @@ fn lower_formats<'s>(
     world: &mut World<'s>,
     collected: &Collected<'_, 's>,
     diags: &mut Vec<Diagnostic>,
-) -> Vec<NamedFormat> {
+) -> Vec<Named<Format>> {
     let mut named = Vec::new();
-    let mut by_name: Map<(Home, Sym), NamedFormat> = Map::default();
+    let mut by_name: Map<(Home, Sym), Named<Format>> = Map::default();
     for written in &collected.formats {
         let (file, source) = (written.file(), written.node);
         let name = world.book.names.intern(source.name.0);
         if let Some(first) = by_name.get(&(written.home(), name)) {
             let word = Word::of(file, source.name.0);
-            diags.push(problem::declared_twice(Noun::Format, word, Some(first.loc), None));
+            diags.push(problem::duplicate(Noun::Format, word, Some(first.loc)));
             continue;
         }
         let loc = file.loc(source.name.0);
@@ -445,7 +447,7 @@ fn lower_formats<'s>(
             categories: Box::default(),
             loc,
         });
-        let entry = NamedFormat { name, home: written.home(), id, loc };
+        let entry = Named { name, home: written.home(), id, loc };
         by_name.insert((written.home(), name), entry);
         named.push(entry);
     }
@@ -741,7 +743,7 @@ fn field(name: &str) -> Option<Field> {
 fn lower_sources<'s>(
     world: &mut World<'s>,
     collected: &Collected<'_, 's>,
-    formats: &[NamedFormat],
+    formats: &[Named<Format>],
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut declared: Map<(Home, Sym), Loc> = Map::default();
@@ -750,7 +752,7 @@ fn lower_sources<'s>(
         let name = world.book.names.intern(sync.name.0);
         if let Some(first) = declared.get(&(written.home(), name)) {
             let word = Word::of(file, sync.name.0);
-            diags.push(problem::declared_twice(Noun::Sync, word, Some(*first), None));
+            diags.push(problem::duplicate(Noun::Sync, word, Some(*first)));
             continue;
         }
         declared.insert((written.home(), name), file.loc(sync.name.0));
@@ -773,7 +775,8 @@ fn lower_sources<'s>(
                 let written_format = &file[reference];
                 if file[written_format.lines].is_empty() {
                     let (names, scopes) = (&world.book.names, &world.scopes);
-                    match resolve_format(file, names, formats, scopes, written.home(), written_format.name) {
+                    match resolve_named(Noun::Format, file, names, formats, scopes, written.home(), written_format.name)
+                    {
                         Ok(id) => Some(id),
                         Err(problem) => {
                             diags.push(problem);
@@ -864,52 +867,12 @@ fn lower_sources<'s>(
     }
 }
 
-fn resolve_format(
-    file: &ast::File<'_>,
-    names: &Interner<'_>,
-    formats: &[NamedFormat],
-    scopes: &Scopes,
-    from: Home,
-    name: ast::Name<'_>,
-) -> Result<Id<Format>, Diagnostic> {
-    let scope = scopes.of(from);
-    let missing = |noun| {
-        let visible =
-            (formats.iter()).filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name));
-        let nearest = closest(name.0, visible);
-        problem::unknown(noun, Word::of(file, name.0), nearest, &[])
-    };
-    let Some(sym) = names.get(name.0) else {
-        return Err(missing(Noun::Format));
-    };
-    let candidates: Vec<_> = formats
-        .iter()
-        .filter(|candidate| candidate.name == sym && scope.sees(candidate.home))
-        .map(|candidate| (scope.rank(candidate.home), candidate.id, candidate.loc))
-        .collect();
-    let Some(rank) = candidates.iter().map(|(rank, _, _)| *rank).min() else {
-        return Err(missing(Noun::VisibleFormat));
-    };
-    let mut best = candidates.iter().filter(|(other_rank, _, _)| *other_rank == rank);
-    let (_, id, first_loc) = *best.next().expect("the minimum rank came from a candidate");
-    if let Some((_, _, second_loc)) = best.next() {
-        return Err(Diagnostic::error(
-            "ambiguous-format",
-            format!("format `{}` is declared more than once at this scope", name.0),
-        )
-        .label(file.loc(name.0), "which declaration is meant?")
-        .context(first_loc, "one format is declared here")
-        .context(*second_loc, "another format is declared here"));
-    }
-    Ok(id)
-}
-
 fn anonymous_patterns<'s>(
     file: &ast::File<'s>,
     book: &mut Book<'s>,
     patterns: &ast::Many<ast::Pattern<'s>>,
     loc: Loc,
-    named: &[Named],
+    named: &[Named<Pattern>],
     scopes: &Scopes,
     home: Home,
     diags: &mut Vec<Diagnostic>,

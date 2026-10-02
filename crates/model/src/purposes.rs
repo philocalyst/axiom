@@ -12,7 +12,7 @@ use crate::collect::Collected;
 use crate::errors::Word;
 use crate::kinds;
 use crate::names::Scoped;
-use crate::problem::{self, Noun, Reads, unresolved};
+use crate::problem::{self, Among, Noun};
 use crate::scope::{Home, Scopes};
 
 pub(crate) struct NativePurposes {
@@ -121,9 +121,13 @@ pub(crate) fn declare_sites<'s>(
         match index.resolve(names, scope, parent.0) {
             Ok(parent_id) => parents[child] = Some(parent_id.index()),
             Err(miss) => {
-                let describe = |id: Id<Purpose>| names.name(drafts[id.index()].name).to_string();
-                let word = Word::of(file, parent.0);
-                diags.push(unresolved(miss, Noun::Purpose, word, names, Reads::Name, describe));
+                let among = Among { index: &index, names, systems };
+                let describe = |ids: &[Id<Purpose>]| {
+                    let (name, loc) =
+                        (|id: Id<Purpose>| drafts[id.index()].name, |id: Id<Purpose>| drafts[id.index()].loc);
+                    problem::shortest(names, &index.names, ids, name, loc)
+                };
+                diags.push(among.failed(miss, Noun::Purpose, Word::of(file, parent.0), describe));
                 parents[child] = Some(root_ids[3].index());
             }
         }

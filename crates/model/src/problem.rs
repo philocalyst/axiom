@@ -1,21 +1,22 @@
 //! What the model says is wrong, for the problems that come in families.
 //!
-//! A name nothing answers to, a name several things answer to, a thing declared twice, a code that names no
-//! transaction: each is said the same way wherever it is found, so each is one function here, taking the facts
-//! borrowed from the book, and its words are written once. A caller decides that something is wrong and says
-//! what; it never words it. One-off diagnostics stay where they arise, for the catalog is for families.
+//! A name nothing answers to, a name several things answer to, a thing declared twice, something written twice:
+//! each is said the same way wherever it is found, so each is one function here, and its words are written once.
+//! A caller decides that something is wrong and says what; it never words it. One-off diagnostics stay where
+//! they arise, for the catalog is for families.
 
-use axiom_core::{Diagnostic, Id, Interner, Loc};
+use axiom_core::{Diagnostic, Id, Interner, Loc, Sym, Tree};
 
-use crate::book::Miss;
-use crate::errors::{Candidate, Word};
+use crate::book::{Miss, System};
+use crate::errors::{Candidate, Word, article};
+use crate::names::{Names, Scoped};
+use crate::scope::Home;
 
 /// What a name names, for the sentence a diagnostic says about it.
 #[derive(Clone, Copy)]
 pub(crate) enum Noun {
     Account,
     Asset,
-    BaseCommodity,
     Commodity,
     Contract,
     Entity,
@@ -30,7 +31,6 @@ pub(crate) enum Noun {
     Purpose,
     Sync,
     System,
-    VisibleFormat,
 }
 
 impl Noun {
@@ -40,7 +40,6 @@ impl Noun {
         match self {
             Noun::Account => ("account", "accounts"),
             Noun::Asset => ("asset", "assets"),
-            Noun::BaseCommodity => ("base commodity", "base commodities"),
             Noun::Commodity => ("commodity", "commodities"),
             Noun::Contract => ("contract", "contracts"),
             Noun::Entity => ("entity", "entities"),
@@ -55,33 +54,8 @@ impl Noun {
             Noun::Purpose => ("purpose", "purposes"),
             Noun::Sync => ("sync", "syncs"),
             Noun::System => ("system", "systems"),
-            Noun::VisibleFormat => ("visible format", "visible formats"),
         }
     }
-
-    /// The noun diagnostic codes are made of: `unknown-commodity`, for a base commodity as well.
-    const fn slug(self) -> &'static str {
-        match self {
-            Noun::BaseCommodity => "commodity",
-            Noun::VisibleFormat => "format",
-            other => other.words().0,
-        }
-    }
-
-    /// Things that are declared share one code; those that sync and the contract machinery declare have their own.
-    fn duplicate_code(self) -> String {
-        match self {
-            Noun::Format | Noun::Input | Noun::Pattern | Noun::Sync => format!("duplicate-{}", self.slug()),
-            _ => "duplicate-declaration".to_string(),
-        }
-    }
-}
-
-/// A thing a system the reader has not used declares under the name that was written.
-#[derive(Clone, Copy)]
-pub(crate) struct Unused<'a> {
-    pub name: &'a str,
-    pub system: &'a str,
 }
 
 /// What a code is asked to name, which decides how a failure to name it is worded.
@@ -93,152 +67,88 @@ pub(crate) enum CodeUse {
     ClaimWaiver,
 }
 
-/// How a diagnostic that lists what an ambiguous name could be reads: the declarations of a book say "could
-/// mean", the declaration of a purpose's parent says "could name".
-#[derive(Clone, Copy)]
-pub(crate) enum Reads {
-    Mean,
-    Name,
+/// What a name is looked up among: the index that answers to names, the interner that spells them, and the
+/// systems that declare some of what is indexed. They travel together to every diagnostic about a lookup.
+pub(crate) struct Among<'a, 's, T> {
+    pub index: &'a Scoped<T>,
+    pub names: &'a Interner<'s>,
+    pub systems: &'a Tree<System>,
 }
 
-/// Something written once that was written again: the code and message, and what each of the two says.
-#[derive(Clone, Copy)]
-pub(crate) enum Twice {
-    AdditionalEnd,
-    ContractArea,
-    ContractDate,
-    ContractDeposit,
-    ContractGrace,
-    ContractInput,
-    ContractLoan,
-    LoanPrepay,
-    LoanResets,
-    PropertyChange,
-    SystemCurrency,
-    SystemRates,
-    TemplateLeg,
-}
+impl<'s, T> Among<'_, 's, T> {
+    /// The path of the system that declared `id`; the project and the built-ins belong to none.
+    pub fn system_of(&self, id: Id<T>) -> Option<&'s str> {
+        match self.index.home(id) {
+            Home::System(system) => Some(self.names.name(self.systems[system].path)),
+            Home::Project | Home::Builtin => None,
+        }
+    }
 
-impl Twice {
-    /// The code, the message, what the second one is told, and what the first one is told.
-    const fn words(self) -> [&'static str; 4] {
-        match self {
-            Twice::AdditionalEnd => [
-                "contract-occurrence-leg-duplicate",
-                "this additional end is written twice",
-                "keep one replacement for this end",
-                "the first replacement is here",
-            ],
-            Twice::ContractArea => [
-                "contract-area-duplicate",
-                "a contract's area is declared twice",
-                "remove this repeated area",
-                "the first area is here",
-            ],
-            Twice::ContractDate => [
-                "duplicate-contract-date",
-                "a contract date is written twice",
-                "written again here",
-                "first written here",
-            ],
-            Twice::ContractDeposit => [
-                "contract-deposit-duplicate",
-                "a contract has one deposit",
-                "remove this repeated deposit",
-                "the first deposit is here",
-            ],
-            Twice::ContractGrace => [
-                "duplicate-contract-grace",
-                "a contract has one grace interval",
-                "a second interval cannot replace the first",
-                "the first interval is here",
-            ],
-            Twice::ContractInput => [
-                "contract-input-duplicate",
-                "this contract input is supplied twice",
-                "remove the repeated binding",
-                "the input is declared here",
-            ],
-            Twice::ContractLoan => [
-                "duplicate-contract-loan",
-                "a contract has one loan definition",
-                "a second loan cannot replace the first",
-                "the first loan is here",
-            ],
-            Twice::LoanPrepay => [
-                "duplicate-loan-prepay",
-                "a loan has one prepayment rule",
-                "a second rule cannot replace the first",
-                "the first rule is here",
-            ],
-            Twice::LoanResets => [
-                "duplicate-loan-resets",
-                "a loan has one reset rule",
-                "a second reset cannot replace the first",
-                "the first reset is here",
-            ],
-            Twice::PropertyChange => [
-                "duplicate-property-change",
-                "this property changes twice on the same day",
-                "change written again here",
-                "first change written here",
-            ],
-            Twice::SystemCurrency => [
-                "duplicate-system-currency",
-                "this system sets its currency twice",
-                "currency set again here",
-                "first set here",
-            ],
-            Twice::SystemRates => [
-                "duplicate-system-rates",
-                "this system sets its rate policy twice",
-                "rate policy set again here",
-                "first set here",
-            ],
-            Twice::TemplateLeg => [
-                "contract-occurrence-leg-duplicate",
-                "this template leg is overridden twice",
-                "keep one replacement for this end",
-                "the template leg is declared here",
-            ],
+    /// `unknown`, and the systems that declare the name without being used.
+    pub fn unknown(&self, noun: Noun, word: Word, nearest: Option<&str>) -> Diagnostic {
+        let mut diagnostic = unknown(noun, word, nearest);
+        for &hidden in self.index.names.candidates(self.names, word.text) {
+            if let Some(system) = self.system_of(hidden) {
+                diagnostic = diagnostic
+                    .note(format!(
+                        "the {} `{}` is declared by system `{system}`, which is not used here",
+                        noun.words().0,
+                        word.text
+                    ))
+                    .help(format!("add `use {system}` to bring it into scope"));
+            }
+        }
+        diagnostic
+    }
+
+    /// Why `word` names no single thing: nothing answers to it, or the things `candidates` describes do.
+    pub fn failed(
+        &self,
+        miss: Miss<T>,
+        noun: Noun,
+        word: Word,
+        candidates: impl FnOnce(&[Id<T>]) -> Vec<Candidate>,
+    ) -> Diagnostic {
+        match miss {
+            Miss::Unknown { suggestion } => self.unknown(noun, word, suggestion.map(|sym| self.names.name(sym))),
+            Miss::Ambiguous(ids) => ambiguous(noun, word, &candidates(&ids)),
         }
     }
 }
 
-/// Something that may be written once, written again at `again` after `first`.
-pub(crate) fn twice(what: Twice, again: Loc, first: Loc) -> Diagnostic {
-    let [code, message, second, earlier] = what.words();
-    Diagnostic::error(code, message).label(again, second).context(first, earlier)
-}
-
-/// A property a kind may not declare because every kind has it.
-pub(crate) fn built_in_property(word: Word) -> Diagnostic {
-    Diagnostic::error("reserved-property", format!("`{}` is a built-in property", word.text))
-        .label(word.loc, "choose another name")
-        .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them")
+/// The things an ambiguous suffix could mean, each with the shortest written form that means only it.
+pub(crate) fn shortest<T>(
+    names: &Interner,
+    table: &Names<T>,
+    ids: &[Id<T>],
+    path: impl Fn(Id<T>) -> Sym,
+    declared: impl Fn(Id<T>) -> Option<Loc>,
+) -> Vec<Candidate> {
+    let describe = |&id: &Id<T>| {
+        let full = names.name(path(id));
+        let write = table.shortest_unique(names, full, id).to_string();
+        Candidate { is: format!("`{full}`"), declared: declared(id), write: Some(write) }
+    };
+    ids.iter().map(describe).collect()
 }
 
 /// `there is no place `chekcing``, with the closest known name as the fix.
-pub(crate) fn unknown(noun: Noun, word: Word, nearest: Option<&str>, unused: &[Unused]) -> Diagnostic {
+pub(crate) fn unknown(noun: Noun, word: Word, nearest: Option<&str>) -> Diagnostic {
     let name = noun.words().0;
-    let mut diagnostic =
-        Diagnostic::error(format!("unknown-{}", noun.slug()), format!("there is no {name} `{}`", word.text))
-            .label(word.loc, format!("not a known {name}"));
-    if let Some(near) = nearest {
-        diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), word.loc, near);
+    let diagnostic = Diagnostic::error(format!("unknown-{name}"), format!("there is no {name} `{}`", word.text))
+        .label(word.loc, format!("not a known {name}"));
+    match nearest {
+        Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), word.loc, near),
+        None => diagnostic,
     }
-    for Unused { name: written, system } in unused {
-        diagnostic = diagnostic
-            .note(format!("the {name} `{written}` is declared by system `{system}`, which is not used here"))
-            .help(format!("add `use {system}` to bring it into scope"));
-    }
-    diagnostic
 }
 
+/// A name several things answer to: where each is declared and, if there is one, how to write only it.
 pub(crate) fn ambiguous(noun: Noun, word: Word, candidates: &[Candidate]) -> Diagnostic {
-    let (which, plural) = (if candidates.len() == 2 { "either of these" } else { "any of these" }, noun.words().1);
+    let (which, name, plural) =
+        (if candidates.len() == 2 { "either of these" } else { "any of these" }, noun.words().0, noun.words().1);
     let mut diagnostic =
-        Diagnostic::error(format!("ambiguous-{}", noun.slug()), format!("`{}` could be {which} {plural}", word.text))
+        Diagnostic::error(format!("ambiguous-{name}"), format!("`{}` could be {which} {plural}", word.text))
             .label(word.loc, "which one is meant?");
     for candidate in candidates {
         if let Some(loc) = candidate.declared {
@@ -246,46 +156,43 @@ pub(crate) fn ambiguous(noun: Noun, word: Word, candidates: &[Candidate]) -> Dia
         }
         diagnostic = match &candidate.write {
             Some(write) => diagnostic.fix(format!("write `{write}` for {}", candidate.is), word.loc, write),
-            None => diagnostic
-                .note(format!("{} cannot be written any other way: rename it to tell them apart", candidate.is)),
+            None => {
+                // Candidates that share a spelling would say the same thing once each.
+                let note = format!("{} cannot be written any other way: rename it to tell them apart", candidate.is);
+                if diagnostic.notes.contains(&note) { diagnostic } else { diagnostic.note(note) }
+            }
         };
     }
     diagnostic
 }
 
-pub(crate) fn ambiguous_name(noun: Noun, word: Word, among: &[String], reads: Reads) -> Diagnostic {
-    let could = match reads {
-        Reads::Mean => "mean",
-        Reads::Name => "name",
-    };
-    Diagnostic::error(format!("ambiguous-{}", noun.slug()), format!("{} `{}` is ambiguous", noun.words().0, word.text))
-        .label(word.loc, format!("could {could} {}", among.join(" or ")))
-}
-
+/// A thing declared again, after `first` or, with no first, because it is built in.
 pub(crate) fn duplicate(noun: Noun, word: Word, first: Option<Loc>) -> Diagnostic {
-    let (text, loc, noun) = (word.text, word.loc, noun.words().0);
+    let (name, text) = (noun.words().0, word.text);
+    let code = format!("duplicate-{name}");
     match first {
-        Some(first) => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is declared twice"))
-            .label(loc, "declared again here")
+        Some(first) => Diagnostic::error(code, format!("{name} `{text}` is declared twice"))
+            .label(word.loc, "declared again here")
             .context(first, "first declared here")
             .help("keep the declaration you mean and delete the other"),
-        None => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is built in"))
-            .label(loc, "declared again here")
+        None => Diagnostic::error(code, format!("{name} `{text}` is built in"))
+            .label(word.loc, "declared again here")
             .help("delete this declaration"),
     }
 }
 
-pub(crate) fn declared_twice(noun: Noun, word: Word, first: Option<Loc>, advice: Option<&str>) -> Diagnostic {
-    let mut diagnostic =
-        Diagnostic::error(noun.duplicate_code(), format!("{} `{}` is declared twice", noun.words().0, word.text))
-            .label(word.loc, "declared again here");
-    if let Some(first) = first {
-        diagnostic = diagnostic.context(first, "first declared here");
-    }
-    match advice {
-        Some(advice) => diagnostic.help(advice),
-        None => diagnostic,
-    }
+/// Something that may be written once, `what`, written again at `again` after `first`.
+pub(crate) fn twice(what: &str, again: Loc, first: Loc) -> Diagnostic {
+    Diagnostic::error(format!("duplicate-{}", what.replace(' ', "-")), format!("{} is written twice", article(what)))
+        .label(again, "written again here")
+        .context(first, "first written here")
+}
+
+/// A property a kind may not declare because every kind has it.
+pub(crate) fn built_in_property(word: Word) -> Diagnostic {
+    Diagnostic::error("reserved-property", format!("`{}` is a built-in property", word.text))
+        .label(word.loc, "choose another name")
+        .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them")
 }
 
 pub(crate) fn unknown_code(used: CodeUse, code: &str, at: Loc) -> Diagnostic {
@@ -320,27 +227,6 @@ pub(crate) fn ambiguous_code(used: CodeUse, code: &str, at: Loc, first: Loc, sec
         .help(help)
 }
 
-/// Why a name a declaration wrote names no single thing: nothing answers to it, or the things `describe` says do.
-pub(crate) fn unresolved<T>(
-    miss: Miss<T>,
-    noun: Noun,
-    word: Word,
-    names: &Interner,
-    reads: Reads,
-    describe: impl Fn(Id<T>) -> String,
-) -> Diagnostic {
-    match miss {
-        Miss::Unknown { suggestion } => {
-            let nearest = suggestion.map(|sym| names.name(sym));
-            unknown(noun, word, nearest, &[])
-        }
-        Miss::Ambiguous(ids) => {
-            let among: Vec<_> = ids.iter().map(|&id| describe(id)).collect();
-            ambiguous_name(noun, word, &among, reads)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use axiom_core::FileId;
@@ -356,27 +242,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_name_offers_its_nearest_as_an_edit_and_names_the_systems_that_declare_it() {
-        let unused = [Unused { name: "chekcing", system: "us" }];
-        let diagnostic = unknown(Noun::Place, word("chekcing"), Some("checking"), &unused);
-
-        assert_eq!(diagnostic.code, "unknown-place");
-        assert_eq!(diagnostic.message, "there is no place `chekcing`");
-        assert_eq!(diagnostic.labels[0].text, "not a known place");
-        assert_eq!(diagnostic.help[0].edit, Some((at(0), "checking".to_string())));
-        assert_eq!(diagnostic.notes, ["the place `chekcing` is declared by system `us`, which is not used here"]);
-        assert_eq!(diagnostic.help[1].text, "add `use us` to bring it into scope");
-    }
-
-    #[test]
     fn a_noun_gives_each_family_its_own_code_and_words() {
         let several = ambiguous(Noun::Place, word("x"), &[]);
         assert_eq!((&*several.code, &*several.message), ("ambiguous-place", "`x` could be any of these accounts"));
-
-        let base = unknown(Noun::BaseCommodity, word("ZZZ"), None, &[]);
-        assert_eq!(base.code, "unknown-commodity");
-        assert_eq!(declared_twice(Noun::Pattern, word("p"), Some(at(9)), None).code, "duplicate-pattern");
-        assert_eq!(declared_twice(Noun::Asset, word("car"), None, None).code, "duplicate-declaration");
+        assert_eq!(duplicate(Noun::Pattern, word("p"), Some(at(9))).code, "duplicate-pattern");
+        assert_eq!(duplicate(Noun::Asset, word("car"), Some(at(9))).message, "asset `car` is declared twice");
     }
 
     #[test]
@@ -389,13 +259,17 @@ mod tests {
 
     #[test]
     fn something_written_twice_points_at_both_and_tells_each_what_it_is() {
-        let diagnostic = twice(Twice::LoanPrepay, at(20), at(4));
+        let diagnostic = twice("prepayment rule", at(20), at(4));
 
-        assert_eq!(diagnostic.message, "a loan has one prepayment rule");
+        assert_eq!(
+            (&*diagnostic.code, &*diagnostic.message),
+            ("duplicate-prepayment-rule", "a prepayment rule is written twice")
+        );
         assert_eq!((diagnostic.labels[0].loc, diagnostic.labels[0].primary), (at(20), true));
-        assert_eq!(diagnostic.labels[0].text, "a second rule cannot replace the first");
+        assert_eq!(diagnostic.labels[0].text, "written again here");
         assert_eq!((diagnostic.labels[1].loc, diagnostic.labels[1].primary), (at(4), false));
-        assert_eq!(diagnostic.labels[1].text, "the first rule is here");
+        assert_eq!(diagnostic.labels[1].text, "first written here");
+        assert_eq!(twice("area", at(1), at(0)).message, "an area is written twice");
     }
 
     #[test]

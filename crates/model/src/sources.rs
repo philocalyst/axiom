@@ -86,7 +86,7 @@ impl SystemIndex<'_> {
     /// The `unknown-system` diagnostic for a `use` or `lives` naming no system.
     pub fn unknown(&self, word: Word) -> Diagnostic {
         let nearest = closest(word.text, self.by_path.keys().copied());
-        problem::unknown(Noun::System, word, nearest, &[])
+        problem::unknown(Noun::System, word, nearest)
     }
 }
 

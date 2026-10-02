@@ -11,6 +11,7 @@
 //! | `laws`      | laws compiled and typed, and the order they run in           |
 //! | `rules`     | which laws watch which place, households and residences      |
 //! | `flows`     | the journal elaborated, in parallel, into flows              |
+//! | `problem`   | the diagnostics that come in families, each worded once      |
 
 pub mod book;
 pub mod journal;

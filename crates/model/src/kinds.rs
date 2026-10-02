@@ -3,14 +3,14 @@
 //! Kinds form typed trees rooted in the built-in place, asset, commodity,
 //! measure and entity kinds. This stage creates the trees and resolves parents.
 
-use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Tree};
+use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
 use axiom_syntax::DeclKind;
 
 use crate::book::{Class, Kind, Miss, Sort, System};
 use crate::collect::Collected;
 use crate::errors::{Candidate, Word};
 use crate::names::Scoped;
-use crate::problem::{self, Noun, Unused};
+use crate::problem::{self, Among, Noun};
 use crate::scope::{Home, Scopes};
 
 /// The kind tree built from the promoted S5 declaration nodes. `declarations`
@@ -141,9 +141,8 @@ pub(crate) fn declare_sites<'s>(
         match find(&draft_index, names, systems, parent.0, |visible| scopes.of(home).sees(visible)) {
             Ok(parent) => parents[child] = Some(parent.index()),
             Err(miss) => {
-                diags.push(unresolved(miss, Word::of(file, parent.0), &draft_index, names, systems, |id| {
-                    drafts[id.index()].loc
-                }));
+                let among = Among { index: &draft_index, names, systems };
+                diags.push(unresolved(miss, Word::of(file, parent.0), &among, |id| &drafts[id.index()]));
                 parents[child] = Some(ROOT_THING);
                 broken[child] = true;
             }
@@ -218,52 +217,27 @@ pub(crate) fn find(
     kinds.names.resolve(names, name, declared_by)
 }
 
-/// Why `word` named no single kind.
-pub(crate) fn unresolved(
+/// Why `word` named no single kind. A kind of a system is written `system/kind`, which is how it is offered.
+pub(crate) fn unresolved<'k>(
     miss: Miss<Kind>,
     word: Word,
-    kinds: &Scoped<Kind>,
-    names: &Interner,
-    systems: &Tree<System>,
-    loc_of: impl Fn(Id<Kind>) -> Option<Loc>,
+    among: &Among<Kind>,
+    kind_of: impl Fn(Id<Kind>) -> &'k Kind,
 ) -> Diagnostic {
-    let system_path = |id: Id<Kind>| match kinds.home(id) {
-        Home::System(system) => Some(names.name(systems[system].path)),
-        Home::Project | Home::Builtin => None,
+    let describe = |&id: &Id<Kind>| {
+        let (declared, name) = (kind_of(id).loc, among.names.name(kind_of(id).name));
+        match (among.index.home(id), among.system_of(id)) {
+            (Home::System(_), Some(system)) => {
+                let last = system.rsplit('/').next().unwrap_or(system);
+                // `us/401k` names the kind `401k` of that system, and is the shorter way to say it.
+                let write = if last == word.text { system.to_string() } else { format!("{system}/{}", word.text) };
+                Candidate { is: format!("`{}` from `{system}`", word.text), declared, write: Some(write) }
+            }
+            (Home::Builtin, _) => Candidate { is: format!("the built-in `{name}`"), declared, write: None },
+            _ => Candidate { is: format!("the project's `{name}`"), declared, write: None },
+        }
     };
-    match miss {
-        Miss::Unknown { suggestion } => {
-            let unused: Vec<_> = (kinds.names.candidates(names, word.text).iter())
-                .filter_map(|&hidden| system_path(hidden))
-                .map(|system| Unused { name: word.text, system })
-                .collect();
-            let nearest = suggestion.map(|sym| names.name(sym));
-            problem::unknown(Noun::Kind, word, nearest, &unused)
-        }
-        Miss::Ambiguous(ids) => {
-            let candidates: Vec<Candidate> = ids
-                .iter()
-                .map(|&id| {
-                    let declared = loc_of(id);
-                    match (kinds.home(id), system_path(id)) {
-                        (Home::System(_), Some(system)) => {
-                            let last = system.rsplit('/').next().unwrap_or(system);
-                            // `us/401k` names the kind `401k` of that system, and
-                            // is the shorter way to say it.
-                            let write =
-                                if last == word.text { system.to_string() } else { format!("{system}/{}", word.text) };
-                            Candidate { is: format!("`{}` from `{system}`", word.text), declared, write: Some(write) }
-                        }
-                        (Home::Builtin, _) => {
-                            Candidate { is: format!("the built-in `{}`", word.text), declared, write: None }
-                        }
-                        _ => Candidate { is: format!("the project's `{}`", word.text), declared, write: None },
-                    }
-                })
-                .collect();
-            problem::ambiguous(Noun::Kind, word, &candidates)
-        }
-    }
+    among.failed(miss, Noun::Kind, word, |ids| ids.iter().map(describe).collect())
 }
 
 /// Each cycle of parents, as the kinds on it in the order each inherits from

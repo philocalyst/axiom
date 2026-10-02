@@ -23,7 +23,7 @@ use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
 use crate::book::{Also, AlsoOn, Amount, Implied, Input, Kind, Sign, Sort, System, TemplateAmount};
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Candidate, Word};
 use crate::journal::Select as LotSelect;
 use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
 use crate::names::Rank as NameRank;
@@ -185,18 +185,15 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
                         .any(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
                 });
                 let nearest = closest(text, visible);
-                diags.push(problem::unknown(Noun::Law, Word { text, loc }, nearest, &[]));
+                diags.push(problem::unknown(Noun::Law, Word { text, loc }, nearest));
             }
             targets => {
-                let mut diagnostic =
-                    Diagnostic::error("ambiguous-law", format!("law `{text}` names more than one law"))
-                        .label(loc, "qualify which law this one overrides");
-                for &target in targets {
+                let describe = |&target: &Id<Law>| {
                     let law = &world.book.laws[target];
-                    diagnostic =
-                        diagnostic.context(law.loc, format!("`{}` is declared here", world.book.name(law.name)));
-                }
-                diags.push(diagnostic);
+                    Candidate { is: format!("`{}`", world.book.name(law.name)), declared: Some(law.loc), write: None }
+                };
+                let candidates: Vec<_> = targets.iter().map(describe).collect();
+                diags.push(problem::ambiguous(Noun::Law, Word { text, loc }, &candidates));
             }
         }
     }

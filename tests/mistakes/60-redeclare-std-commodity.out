@@ -1,4 +1,4 @@
-error[duplicate-declaration]: commodity `USD` is declared twice
+error[duplicate-commodity]: commodity `USD` is declared twice
     ╭─[60-redeclare-std-commodity.ax:6:11]
     │
   6 │ commodity USD : currency
@@ -10,6 +10,8 @@ error[duplicate-declaration]: commodity `USD` is declared twice
 163 │ commodity USD : currency
     │           ─┬─
     │            ╰── first declared here
+    │
+    = help: keep the declaration you mean and delete the other
 
 error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
    ╭─[60-redeclare-std-commodity.ax:10:9]

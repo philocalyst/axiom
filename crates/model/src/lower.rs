@@ -319,9 +319,8 @@ fn inputs<'s>(
         };
         let symbol = world.book.names.intern(name.0);
         if let Some(first) = seen.get(&symbol) {
-            let advice = Some("keep one declaration so every occurrence has one binding");
             let word = Word { text: name.0, loc: prop.loc };
-            diags.push(problem::declared_twice(Noun::Input, word, Some(*first), advice));
+            diags.push(problem::duplicate(Noun::Input, word, Some(*first)));
             continue;
         }
         seen.insert(symbol, prop.loc);

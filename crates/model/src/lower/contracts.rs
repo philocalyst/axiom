@@ -17,7 +17,7 @@ use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
-use crate::problem::{self, Noun, Twice};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -262,7 +262,7 @@ fn contract_loan<'s>(
         return Some(None);
     };
     if let Some(duplicate) = written.next() {
-        diags.push(problem::twice(Twice::ContractLoan, duplicate.loc, prop.loc));
+        diags.push(problem::twice("loan", duplicate.loc, prop.loc));
         return None;
     }
 
@@ -390,7 +390,7 @@ fn contract_loan<'s>(
         match nested.name.0 {
             "prepay" => {
                 if let Some(first) = prepay_loc {
-                    diags.push(problem::twice(Twice::LoanPrepay, nested.loc, first));
+                    diags.push(problem::twice("prepayment rule", nested.loc, first));
                     return None;
                 }
                 prepay_loc = Some(nested.loc);
@@ -435,7 +435,7 @@ fn loan_resets<'s>(
         return Some(None);
     };
     if let Some(second) = resets.next() {
-        diags.push(problem::twice(Twice::LoanResets, second.0.loc, first.0.loc));
+        diags.push(problem::twice("reset rule", second.0.loc, first.0.loc));
         return None;
     }
 
@@ -1045,13 +1045,13 @@ fn contract_days(
     let mut valid = true;
     let mut seen = Map::default();
     for prop in &file[props] {
-        let target = match prop.name.0 {
-            "from" => &mut first,
-            "until" => &mut last,
+        let (target, what) = match prop.name.0 {
+            "from" => (&mut first, "start date"),
+            "until" => (&mut last, "end date"),
             _ => continue,
         };
         if let Some(previous) = seen.insert(prop.name.0, prop.loc) {
-            diags.push(problem::twice(Twice::ContractDate, prop.loc, previous));
+            diags.push(problem::twice(what, prop.loc, previous));
             valid = false;
             continue;
         }
@@ -1140,7 +1140,7 @@ fn grace_property(
         return Some(None);
     };
     if let Some(second) = written.next() {
-        diags.push(problem::twice(Twice::ContractGrace, second.loc, first.loc));
+        diags.push(problem::twice("grace interval", second.loc, first.loc));
         return None;
     }
     let span = span_property(file, props, "grace", diags)?;
@@ -1308,7 +1308,7 @@ fn contract_area<'s>(
             continue;
         }
         if let Some(first) = first_loc {
-            diags.push(problem::twice(Twice::ContractArea, prop.loc, first));
+            diags.push(problem::twice("area", prop.loc, first));
             return Err(());
         }
         first_loc = Some(prop.loc);
@@ -1384,7 +1384,7 @@ fn contract_deposit<'s>(
             continue;
         }
         if let Some(first) = first_loc {
-            diags.push(problem::twice(Twice::ContractDeposit, prop.loc, first));
+            diags.push(problem::twice("deposit", prop.loc, first));
             return Err(());
         }
         first_loc = Some(prop.loc);

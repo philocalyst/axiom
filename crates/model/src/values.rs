@@ -181,7 +181,7 @@ impl<'s> World<'s> {
     /// Why `word` is no asset, with the nearest asset as the fix.
     pub(crate) fn missing_asset(&self, word: Word<'_>) -> Diagnostic {
         let nearest = closest(word.text, self.book.assets.values().map(|asset| self.book.name(asset.name)));
-        problem::unknown(Noun::Asset, word, nearest, &[])
+        problem::unknown(Noun::Asset, word, nearest)
     }
 
     /// `0 USD 10% | 12_400 USD 12% | …`: marginal brackets, ascending from zero,

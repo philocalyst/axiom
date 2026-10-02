@@ -8,14 +8,14 @@
 
 use axiom_core::diag::closest;
 use axiom_core::num::DecError;
-use axiom_core::{Dec, Diagnostic, Id, Loc, Sym};
+use axiom_core::{Dec, Diagnostic, Id, Loc};
 
 use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, Place, Purpose, Role, System};
 use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word};
 use crate::kinds;
-use crate::names::{Found, Names, Scoped};
-use crate::problem::{self, Noun, Unused};
+use crate::names::{Found, Scoped};
+use crate::problem::{self, Among, Noun};
 use crate::scope::Home;
 
 /// A place written in a flow, and the entity it stood for if it was one.
@@ -46,7 +46,7 @@ impl<'s> World<'s> {
     fn explain_commodity(&self, word: Word) -> Diagnostic {
         let symbols = self.book.commodities.values().map(|commodity| self.book.name(commodity.symbol));
         let nearest = closest(word.text, symbols);
-        problem::unknown(Noun::Commodity, word, nearest, &[]).note(format!(
+        problem::unknown(Noun::Commodity, word, nearest).note(format!(
             "commodities are declared with `commodity {}`; USD, EUR, GBP… come with `use std`",
             word.text
         ))
@@ -84,8 +84,7 @@ impl<'s> World<'s> {
     }
 
     fn kind_miss(&self, miss: Miss<Kind>, word: Word) -> Diagnostic {
-        let loc_of = |id: Id<Kind>| self.book.kinds[id].loc;
-        kinds::unresolved(miss, word, &self.book.lookup.kinds, &self.book.names, &self.book.systems, loc_of)
+        kinds::unresolved(miss, word, &self.among(&self.book.lookup.kinds), |id| &self.book.kinds[id])
     }
 
     pub fn seek_kind(&self, home: Home, word: Word) -> Seek<Kind> {
@@ -113,10 +112,14 @@ impl<'s> World<'s> {
     }
 
     fn ambiguous_entity(&self, word: Word, ids: &[Id<Entity>]) -> Diagnostic {
-        let entities = &self.book.entities;
-        let candidates =
-            self.candidates(&self.book.lookup.entities.names, ids, |id| entities[id].path, |id| entities[id].loc);
+        let (entities, table) = (&self.book.entities, &self.book.lookup.entities.names);
+        let candidates = problem::shortest(&self.book.names, table, ids, |id| entities[id].path, |id| entities[id].loc);
         problem::ambiguous(Noun::Entity, word, &candidates)
+    }
+
+    /// What a name is looked up among, for the diagnostics about a lookup that failed.
+    fn among<'a, T>(&'a self, index: &'a Scoped<T>) -> Among<'a, 's, T> {
+        Among { index, names: &self.book.names, systems: &self.book.systems }
     }
 
     /// Why `word` names nothing `home` can see: the closest name it can see, and the systems that declare it
@@ -127,14 +130,7 @@ impl<'s> World<'s> {
             Err(Miss::Unknown { suggestion }) => suggestion.map(|sym| names.name(sym)),
             Ok(_) | Err(Miss::Ambiguous(_)) => None,
         };
-        let unused: Vec<_> = (lookup.names.candidates(names, word.text).iter())
-            .filter_map(|&hidden| match lookup.home(hidden) {
-                Home::System(system) => Some(self.book.name(self.book.systems[system].path)),
-                Home::Project | Home::Builtin => None,
-            })
-            .map(|system| Unused { name: word.text, system })
-            .collect();
-        problem::unknown(noun, word, nearest, &unused)
+        self.among(lookup).unknown(noun, word, nearest)
     }
 
     pub fn entity(&self, home: Home, word: Word) -> Result<Id<Entity>, Diagnostic> {
@@ -154,9 +150,8 @@ impl<'s> World<'s> {
     }
 
     fn ambiguous_purpose(&self, word: Word, ids: &[Id<Purpose>]) -> Diagnostic {
-        let purposes = &self.book.purposes;
-        let candidates =
-            self.candidates(&self.book.lookup.purposes.names, ids, |id| purposes[id].name, |id| purposes[id].loc);
+        let (purposes, table) = (&self.book.purposes, &self.book.lookup.purposes.names);
+        let candidates = problem::shortest(&self.book.names, table, ids, |id| purposes[id].name, |id| purposes[id].loc);
         problem::ambiguous(Noun::Purpose, word, &candidates)
     }
 
@@ -173,9 +168,9 @@ impl<'s> World<'s> {
             Found::One(place) => Ok(Some(place)),
             Found::Nothing => Ok(None),
             Found::Several(ids) => {
-                let places = &self.book.places;
-                let names = &self.book.lookup.places;
-                let candidates = self.candidates(names, &ids, |id| places[id].path, |id| places[id].loc);
+                let (places, table) = (&self.book.places, &self.book.lookup.places);
+                let candidates =
+                    problem::shortest(&self.book.names, table, &ids, |id| places[id].path, |id| places[id].loc);
                 Err(problem::ambiguous(Noun::Place, word, &candidates))
             }
         }
@@ -313,7 +308,7 @@ impl<'s> World<'s> {
         let (places, names) = (&self.book.lookup.places, &self.book.names);
         let known = places.keys(names);
         let closest = closest(word.text, known);
-        let mut diagnostic = problem::unknown(Noun::Place, word, closest, &[]);
+        let mut diagnostic = problem::unknown(Noun::Place, word, closest);
         // Old chart roots no longer assign place classes. Preserve a useful
         // refusal for paths that look like an attempt to use the v3 chart.
         if legacy_chart_path(word.text) {
@@ -339,39 +334,14 @@ impl<'s> World<'s> {
         diagnostic
     }
 
-    /// The things an ambiguous suffix could mean, each with the shortest
-    /// written form that means only it.
-    fn candidates<T>(
-        &self,
-        table: &Names<T>,
-        ids: &[Id<T>],
-        path: impl Fn(Id<T>) -> Sym,
-        loc: impl Fn(Id<T>) -> Option<Loc>,
-    ) -> Vec<Candidate> {
-        let names = &self.book.names;
-        let describe = |&id: &Id<T>| {
-            let full = self.book.name(path(id));
-            let write = table.shortest_unique(names, full, id).to_string();
-            Candidate { is: format!("`{full}`"), declared: loc(id), write: Some(write) }
-        };
-        ids.iter().map(describe).collect()
-    }
-
     // ─── Params ─────────────────────────────────────────────────────────────
-
-    fn param_system(&self, id: Id<Param>) -> Option<&'s str> {
-        match self.book.lookup.params.home(id) {
-            Home::System(system) => Some(self.book.name(self.book.systems[system].path)),
-            Home::Project | Home::Builtin => None,
-        }
-    }
 
     /// The param `home` can see under `word`: its own system's first, then its
     /// ancestors', then the used systems' (which must not disagree). Written
     /// `us/401k/limit`, it names that system's param, used or not.
     pub fn seek_param(&self, home: Home, word: Word) -> Seek<Param> {
         let (lookup, names) = (&self.book.lookup.params, &self.book.names);
-        let scope = self.scopes.of(home);
+        let (scope, among) = (self.scopes.of(home), self.among(lookup));
         let (qualifier, leaf) = match word.text.rsplit_once('/') {
             Some((system, leaf)) => (Some(system), leaf),
             None => (None, word.text),
@@ -382,7 +352,7 @@ impl<'s> World<'s> {
             .iter()
             .copied()
             .filter(|&id| match qualifier {
-                Some(system) => self.param_system(id) == Some(system),
+                Some(system) => among.system_of(id) == Some(system),
                 None => scope.sees(lookup.home(id)),
             })
             .collect();
@@ -397,7 +367,7 @@ impl<'s> World<'s> {
                     .iter()
                     .map(|&id| {
                         let declared = Some(self.book.params[id].loc);
-                        match self.param_system(id) {
+                        match among.system_of(id) {
                             Some(system) => Candidate {
                                 is: format!("`{leaf}` from `{system}`"),
                                 declared,
@@ -415,17 +385,12 @@ impl<'s> World<'s> {
     pub fn missing_param(&self, home: Home, word: Word) -> Diagnostic {
         let (lookup, names) = (&self.book.lookup.params, &self.book.names);
         let scope = self.scopes.of(home);
-        let leaf = word.text.rsplit('/').next().unwrap_or(word.text);
         let visible = lookup
             .names
             .keys(names)
             .filter(|&known| lookup.names.candidates(names, known).iter().any(|&id| scope.sees(lookup.home(id))));
         let nearest = closest(word.text, visible);
-        let unused: Vec<_> = (lookup.names.candidates(names, leaf).iter())
-            .filter_map(|&hidden| self.param_system(hidden))
-            .map(|system| Unused { name: leaf, system })
-            .collect();
-        problem::unknown(Noun::Param, word, nearest, &unused)
+        self.among(lookup).unknown(Noun::Param, word, nearest)
     }
 
     pub fn system(&self, word: Word) -> Result<Id<System>, Diagnostic> {

@@ -24,7 +24,7 @@ use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
 use crate::law::{Ty, Value};
-use crate::problem::{self, Twice};
+use crate::problem;
 use crate::scope::Home;
 use crate::values::describe;
 
@@ -831,7 +831,7 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
         }
         let key = (target_key(target.target), has.name, statement.date);
         if let Some(first) = seen.get(&key).copied() {
-            diags.push(problem::twice(Twice::PropertyChange, line.loc, first));
+            diags.push(problem::twice("property change", line.loc, first));
             continue;
         }
         seen.insert(key, line.loc);
@@ -1121,7 +1121,7 @@ fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_,
         };
         let at = written.item.loc;
         if let Some(first) = seen.insert(system, at) {
-            diags.push(problem::twice(Twice::SystemCurrency, at, first));
+            diags.push(problem::twice("currency", at, first));
             continue;
         }
         match world.commodity_of(Word::of(written.file(), unit.0)) {
@@ -1141,7 +1141,7 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
         };
         let at = written.item.loc;
         if let Some(first) = seen.insert(system, at) {
-            diags.push(problem::twice(Twice::SystemRates, at, first));
+            diags.push(problem::twice("rate policy", at, first));
             continue;
         }
         let policy = match policy {

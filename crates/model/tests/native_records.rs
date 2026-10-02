@@ -798,7 +798,7 @@ fn invalid_contract_deposits_do_not_leave_active_terms() {
     let cases = [
         ("deposit 0 USD", "contract-deposit-positive"),
         ("deposit 5 USD into dana", "contract-deposit-holding"),
-        ("deposit 5 USD\n  deposit 7 USD", "contract-deposit-duplicate"),
+        ("deposit 5 USD\n  deposit 7 USD", "duplicate-deposit"),
     ];
     for (deposit, expected) in cases {
         let text = format!(
