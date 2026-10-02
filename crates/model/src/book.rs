@@ -14,8 +14,9 @@ use axiom_core::{
 };
 
 use crate::journal::{
-    Assert, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Plan, Prices,
-    Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
+    Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure,
+    Plan, Prices, Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
+    WrittenOccurrence,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
@@ -101,6 +102,9 @@ pub struct Book<'s> {
     /// Sorted by day, then source order. Includes promise/place ends and asset
     /// disposals; assets are consumed by the engine without a synthetic flow.
     pub endings: Vec<EndEvent>,
+    /// Sorted by day and source order. Claim changes target the source
+    /// transaction so itemized claims remain one atomic reference.
+    pub claim_changes: Vec<ClaimChange>,
     pub prices: Prices,
     /// Sorted by day, then declaration order.
     pub splits: Vec<Split>,

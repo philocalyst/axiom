@@ -13,10 +13,10 @@ use crate::book::{
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
-    Action, Assert, Detail, EndEvent, EndTarget, Event, Filed, Flow, FlowExpressions, Gap, Infer,
-    JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object,
-    OccurrenceTail, Origin, Provenance, Purposed, Quote, Reading, Select, Split, Waive,
-    WrittenGroup, WrittenOccurrence,
+    Action, Assert, ClaimChange, ClaimChangeAction, Detail, EndEvent, EndTarget, Event, Filed,
+    Flow, FlowExpressions, Gap, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram,
+    JournalQuantity, Measure, Mode, Object, OccurrenceTail, Origin, Provenance, Purposed, Quote,
+    Reading, Select, Split, Waive, WrittenGroup, WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::scope::Home;
@@ -160,6 +160,43 @@ impl CodeIndex {
                             format!("`{}` has not named a transaction yet", code.name()),
                         )
                         .help("put this code on an earlier transaction or one of its flows"),
+                );
+                None
+            }
+        }
+    }
+
+    fn resolve_claim<'s>(
+        &self,
+        world: &mut World<'s>,
+        code: ast::Code<'s>,
+        loc: Loc,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Option<Id<crate::journal::Txn>> {
+        let symbol = world.book.names.intern(code.name());
+        match self.by_code.get(&symbol).copied() {
+            Some(CodeTarget::Unique { txn, .. }) => Some(txn),
+            Some(CodeTarget::Ambiguous { first, second }) => {
+                diags.push(
+                    Diagnostic::error(
+                        "ambiguous-claim-reference",
+                        "this code identifies more than one earlier transaction",
+                    )
+                    .label(loc, "a claim waiver must identify one source transaction")
+                    .label(first, "one matching transaction is here")
+                    .label(second, "another matching transaction is here")
+                    .help("use a code that appears on only one earlier transaction"),
+                );
+                None
+            }
+            None => {
+                diags.push(
+                    Diagnostic::error(
+                        "unknown-claim-reference",
+                        "this code identifies no earlier claim transaction",
+                    )
+                    .label(loc, "no prior transaction has this code")
+                    .help("put the code on the earlier `owes` transaction"),
                 );
                 None
             }
@@ -936,7 +973,12 @@ fn lower_statement<'a, 's>(
         ast::Verb::Now(ast::Change::Budget(_)) => {
             // Native budgets are lowered by the declaration/law pass.
         }
-        ast::Verb::Waived => lower_contract_change(world, site, loc, statement, diags),
+        ast::Verb::Waived => match statement.subject {
+            Subject::Code(code) => lower_claim_change(
+                world, site, loc, statement, code, code_index, diags,
+            ),
+            _ => lower_contract_change(world, site, loc, statement, diags),
+        },
         ast::Verb::Ends => lower_end(world, site, loc, statement, diags),
         ast::Verb::Occurrence(amount) => lower_occurrence(
             world,
@@ -2738,6 +2780,94 @@ fn lower_contract_change<'a, 's>(
             .label(loc, "there is no regular or standing occurrence here"),
         );
     }
+}
+
+fn lower_claim_change<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    code: ast::Code<'s>,
+    code_index: &CodeIndex,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    if !statement.body.legs.is_empty() || !statement.body.items.is_empty() {
+        unsupported_statement(
+            loc,
+            "a full claim write-off cannot include recovery lines",
+            diags,
+        );
+        return;
+    }
+
+    let mut description = None;
+    let mut description_loc = None;
+    for clause in &file[statement.tail] {
+        match clause.kind {
+            ClauseKind::Description(text) => {
+                if let Some(first) = description_loc {
+                    diags.push(
+                        Diagnostic::error(
+                            "duplicate-claim-writeoff-description",
+                            "a claim write-off has one description",
+                        )
+                        .label(first, "the first description is here")
+                        .label(clause.at, "this second description cannot replace it"),
+                    );
+                    return;
+                }
+                description_loc = Some(clause.at);
+                description = Some(world.book.quoted_text(text.0));
+            }
+            _ => {
+                unsupported_statement(
+                    loc,
+                    "a full claim write-off only accepts a description",
+                    diags,
+                );
+                return;
+            }
+        }
+    }
+
+    let reference_loc = file.loc(code.name());
+    let Some(target) = code_index.resolve_claim(world, code, reference_loc, diags) else {
+        return;
+    };
+    let source = &world.book.txns[target];
+    let has_claim_flow = source.flows.ids().any(|flow_id| {
+        let flow = &world.book.flows[flow_id];
+        matches!(world.book.places[flow.from].role, crate::book::Role::Tab(_))
+            || matches!(world.book.places[flow.to].role, crate::book::Role::Tab(_))
+    });
+    if !has_claim_flow {
+        diags.push(
+            Diagnostic::error(
+                "claim-writeoff-target",
+                "this transaction did not create an open claim",
+            )
+            .label(reference_loc, "the referenced transaction has no claim flow")
+            .context(source.loc, "the transaction identified by this code is here")
+            .help("use the code on an earlier `owes` statement"),
+        );
+        return;
+    }
+    if statement.date < source.day {
+        diags.push(
+            Diagnostic::error("claim-writeoff-date", "a claim cannot be waived before it exists")
+                .label(loc, "this date precedes the claim transaction"),
+        );
+        return;
+    }
+
+    world.book.claim_changes.push(ClaimChange {
+        day: statement.date,
+        target,
+        action: ClaimChangeAction::WriteOff,
+        description,
+        loc,
+    });
 }
 
 fn lower_end<'a, 's>(

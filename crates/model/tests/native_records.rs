@@ -101,6 +101,74 @@ opening 2026-01-01
 }
 
 #[test]
+fn a_claim_writeoff_targets_all_items_of_its_unique_prior_transaction() {
+    let path = "journal/2025/12.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity me : person
+entity delta-rugs : person
+2025-12-01 delta-rugs owes me due 2025-12-31 ^inv-2025-d1
+  2_000 USD
+  1_800 USD
+2025-12-15 ^inv-2025-d1 waived \"not collected under the cash method\"
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(book.txns.len(), 1);
+    assert_eq!(book.claim_changes.len(), 1);
+    let change = book.claim_changes[0];
+    assert_eq!(change.day, Day::from_ymd(2025, 12, 15).unwrap());
+    assert_eq!(change.target, Id::new(0));
+    assert_eq!(change.action, axiom_model::journal::ClaimChangeAction::WriteOff);
+    assert_eq!(book.text(change.description.unwrap()), "not collected under the cash method");
+    let flows = &book.flows[book.txns[change.target].flows];
+    assert_eq!(flows.len(), 2, "the event targets the whole itemized invoice transaction");
+    assert!(flows.iter().all(|flow| {
+        matches!(book.places[flow.from].role, axiom_model::Role::Tab(_))
+            || matches!(book.places[flow.to].role, axiom_model::Role::Tab(_))
+    }));
+    assert_record_indices(&book);
+}
+
+#[test]
+fn invalid_claim_writeoffs_do_not_append_events_or_money_flows() {
+    let path = "journal/2025/12.ax";
+    let cases = [
+        (
+            "base USD\ncommodity USD\n2025-12-15 ^missing waived\n",
+            "unknown-claim-reference",
+        ),
+        (
+            "base USD\ncommodity USD\naccount checking\n2025-12-01 checking -> ? 5 USD ^cash\n2025-12-15 ^cash waived\n",
+            "claim-writeoff-target",
+        ),
+    ];
+    for (text, expected) in cases {
+        let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+        assert!(syntax.is_empty(), "{syntax:?}");
+        let (book, diagnostics) = build(&[Source {
+            path,
+            file,
+            embedded: false,
+        }]);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
+            "expected {expected}, got {diagnostics:?}"
+        );
+        assert!(book.claim_changes.is_empty());
+    }
+}
+
+#[test]
 fn commodity_payers_get_distinct_issuer_places_and_nearest_pays_provenance() {
     let path = "journal/2026/01.ax";
     let text = "\

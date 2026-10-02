@@ -920,6 +920,23 @@ pub enum EndTarget {
     Asset(Id<Asset>),
 }
 
+/// A source event that changes an already-open claim without inventing a
+/// monetary transaction.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ClaimChange {
+    pub day: Day,
+    pub target: Id<Txn>,
+    pub action: ClaimChangeAction,
+    pub description: Option<Text>,
+    pub loc: Loc,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ClaimChangeAction {
+    /// Forgive the remaining amount of the referenced claim.
+    WriteOff,
+}
+
 /// `every month on 1 checking -> landlord 2_400 USD until 2027-06`, or a named
 /// one, `plan paycheck every 2w …`, which the journal can also instantiate.
 pub struct Plan {

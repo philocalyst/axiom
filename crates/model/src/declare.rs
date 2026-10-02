@@ -1623,6 +1623,7 @@ pub(crate) fn declare<'a, 's>(
         asserts: Vec::new(),
         events: Vec::new(),
         endings: Vec::new(),
+        claim_changes: Vec::new(),
         prices: Default::default(),
         splits: Vec::new(),
         measures: Arena::new(),
