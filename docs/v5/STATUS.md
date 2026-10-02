@@ -11,7 +11,8 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **C** core primitives | `tagless`, `dayset`, `sparse`, `postings`, `placement`, `trail` | **merged** (`8704e75`) |
 | **K0a** model groundwork | `Staged`, one `problem` catalog, `Word::of`, one collect pass, dead code, one lowering of a literal | running |
 | **K0b** outer groundwork | owners, JSON writers, sync dates, sync apply, `RuntimeRange` | running |
-| **K12** kinds, slots, facts | typed slots, `Taxonomy`, `Facts` with typed keys, integrated conditions | brief written; starts when K0a merges |
+| **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral | running |
+| **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | brief written; starts when K0a merges |
 | K3 positions and addresses | | after K12 |
 | K4 events | | after K3 |
 | K5 promises | | after K4 |
