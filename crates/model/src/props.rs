@@ -66,55 +66,52 @@ impl Target {
 /// How the arguments of one of the language's properties read, and what they say.
 type Reader = fn(&mut Args<'_, '_, '_>) -> Result<(), Diagnostic>;
 
+/// A line whose argument, as `Args::$read` reads it, is what it says of `$key`: through `$then` first, if the slot
+/// holds the word as a number.
+macro_rules! says {
+    ($key:expr, $read:ident) => {
+        |a| {
+            let value = a.$read()?;
+            a.say($key, value)
+        }
+    };
+    ($key:expr, $read:ident, $then:ident) => {
+        |a| {
+            let value = a.$read()?;
+            a.say($key, value.$then())
+        }
+    };
+}
+
+/// A line whose arguments, as `Args::$read` reads them, are the set it says of `$key`.
+macro_rules! says_all {
+    ($key:expr, $read:ident) => {
+        |a| {
+            let members = a.$read()?;
+            a.say_set($key, members)
+        }
+    };
+}
+
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
 const BUILTINS: [(&str, &[Target], Reader); 24] = [
-    ("holds", &[Target::Place], |a| {
-        let units = a.holds()?;
-        a.say_set(slot::HOLDS, units)
-    }),
-    ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| {
-        let policy = a.policy()?;
-        a.say(slot::SELECT, policy.code())
-    }),
-    ("opened", &[Target::Place], |a| {
-        let day = a.day()?;
-        a.say(slot::OPENED, day)
-    }),
-    ("closed", &[Target::Place], |a| {
-        let day = a.day()?;
-        a.say(slot::CLOSED, day)
-    }),
-    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], |a| {
-        let span = a.span()?;
-        a.say(slot::LIQUIDITY, span)
-    }),
-    ("via", &[Target::Entity], |a| {
-        let place = a.place()?;
-        a.say(slot::VIA, place)
-    }),
+    ("holds", &[Target::Place], says_all!(slot::HOLDS, holds)),
+    ("select", &[Target::Place, Target::Commodity, Target::Asset], says!(slot::SELECT, policy, code)),
+    ("opened", &[Target::Place], says!(slot::OPENED, day)),
+    ("closed", &[Target::Place], says!(slot::CLOSED, day)),
+    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], says!(slot::LIQUIDITY, span)),
+    ("via", &[Target::Entity], says!(slot::VIA, place)),
     ("lives", &[Target::Entity], |a| {
         let residence = a.residence()?;
         a.done()?;
         a.pending.lives.entry(a.thing).or_default().push(residence);
         Ok(())
     }),
-    ("member", &[Target::Entity], |a| {
-        let household = a.entity()?;
-        a.say(slot::MEMBER, household)
-    }),
-    ("currency", &[Target::Entity], |a| {
-        let currency = a.currency()?;
-        a.say(slot::CURRENCY, currency)
-    }),
-    ("citizen", &[Target::Entity], |a| {
-        let systems = a.citizens()?;
-        a.say_set(slot::CITIZEN, systems)
-    }),
-    ("books", &[Target::Entity], |a| {
-        let books = a.books()?;
-        a.say(slot::BOOKS, books.code())
-    }),
+    ("member", &[Target::Entity], says!(slot::MEMBER, entity)),
+    ("currency", &[Target::Entity], says!(slot::CURRENCY, currency)),
+    ("citizen", &[Target::Entity], says_all!(slot::CITIZEN, citizens)),
+    ("books", &[Target::Entity], says!(slot::BOOKS, books, code)),
     ("purpose", &[Target::Kind, Target::Entity], |a| {
         let (purpose, loc) = a.purpose()?;
         a.say_at(slot::PURPOSE, purpose, loc)
@@ -137,10 +134,7 @@ const BUILTINS: [(&str, &[Target], Reader); 24] = [
         }
         Ok(())
     }),
-    ("sales-tax", &[Target::Kind], |a| {
-        let rate = a.percent()?;
-        a.say(slot::SALES_TAX, rate)
-    }),
+    ("sales-tax", &[Target::Kind], says!(slot::SALES_TAX, percent)),
     ("share", &[Target::Kind], |a| {
         let entity = a.share()?;
         a.done()?;
@@ -172,10 +166,7 @@ const BUILTINS: [(&str, &[Target], Reader); 24] = [
     }),
     ("restricted", &[Target::Kind], |a| a.say(slot::RESTRICTED, true)),
     ("deferred", &[Target::Kind], |a| a.say(slot::DEFERRED, true)),
-    ("basis", &[Target::Kind], |a| {
-        let basis = if a.word(&["zero", "cost"])? == "zero" { Basis::Zero } else { Basis::Cost };
-        a.say(slot::BASIS, basis.code())
-    }),
+    ("basis", &[Target::Kind], says!(slot::BASIS, basis, code)),
     ("claim", &[Target::Kind], |a| a.say(slot::CLAIM, true)),
 ];
 
@@ -414,6 +405,10 @@ impl<'a, 's> Args<'_, 'a, 's> {
         } else {
             Ok(systems)
         }
+    }
+
+    fn basis(&mut self) -> Result<Basis, Diagnostic> {
+        Ok(if self.word(&["zero", "cost"])? == "zero" { Basis::Zero } else { Basis::Cost })
     }
 
     fn books(&mut self) -> Result<Books, Diagnostic> {
