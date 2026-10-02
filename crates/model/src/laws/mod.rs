@@ -23,7 +23,7 @@ use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
 use crate::book::{AlsoOn, Kind, Sort, System};
 use crate::declare::World;
-use crate::errors::{Candidate, Word};
+use crate::errors::{Candidate, Reported, Word};
 use crate::law::{Law, Owner, Rank, RankClass, Ty};
 use crate::lower::also::{AlsoCx, lower_alsos};
 use crate::names::Rank as NameRank;
@@ -34,72 +34,18 @@ use crate::sources::Site;
 pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
     world.tallies = counted(sites);
     let mut seen: Set<(DeclKind, u32)> = Set::default();
-    for source in sites {
-        let file = &source.source.file;
+    for site in sites {
+        let file = &site.source.file;
         for item in &file.items {
             match item.kind {
                 ItemKind::Law(id) => {
-                    let law = &file[id];
-                    let owner = match source.home {
+                    let owner = match site.home {
                         Home::System(system) => Owner::System(system),
                         Home::Project | Home::Builtin => Owner::Book,
                     };
-                    compile_native(world, diags, file, source.home, owner, Ty::Entity, law);
+                    compile_native(world, diags, file, site.home, owner, Ty::Entity, &file[id]);
                 }
-                ItemKind::Decl(id) => {
-                    let decl = &file[id];
-                    let word = Word::of(file, decl.name.0);
-                    let resolved = match decl.what {
-                        DeclKind::Kind => world.kind(source.home, word).map(|kind| {
-                            let subject = match world.book.kinds[kind].sort {
-                                Sort::Place(_) => Ty::Place,
-                                Sort::Entity => Ty::Entity,
-                                Sort::Thing => Ty::Asset,
-                                Sort::Commodity => Ty::Unit,
-                            };
-                            (Owner::Kind(kind), subject, kind.index() as u32)
-                        }),
-                        DeclKind::Account => {
-                            world.place(word).map(|place| (Owner::Place(place), Ty::Place, place.index() as u32))
-                        }
-                        DeclKind::Entity => world
-                            .entity(source.home, word)
-                            .map(|entity| (Owner::Entity(entity), Ty::Entity, entity.index() as u32)),
-                        DeclKind::Asset => world
-                            .book
-                            .asset(word.text)
-                            .ok_or_else(|| world.missing_asset(word))
-                            .map(|asset| (Owner::Asset(asset), Ty::Asset, asset.index() as u32)),
-                        DeclKind::Purpose => world.purpose(source.home, word).map(|purpose| {
-                            // Purpose laws govern purpose-bearing flows, but
-                            // `self` is the owner of the flow (LANGUAGE §8).
-                            // `total(window)` retains the purpose context in
-                            // the law owner instead of changing `self`'s type.
-                            (Owner::Purpose(purpose), Ty::Entity, purpose.index() as u32)
-                        }),
-                        DeclKind::Commodity => {
-                            misplaced(diags, file, decl.laws, "a commodity");
-                            continue;
-                        }
-                    };
-                    let (owner, subject, key) = match resolved {
-                        Ok(resolved) => resolved,
-                        Err(problem) => {
-                            diags.push(problem);
-                            continue;
-                        }
-                    };
-                    if decl.what == DeclKind::Kind && subject == Ty::Unit {
-                        misplaced(diags, file, decl.laws, "a commodity kind");
-                        continue;
-                    }
-                    if seen.insert((decl.what, key)) {
-                        for law in &file[decl.laws] {
-                            compile_native(world, diags, file, source.home, owner, subject, law);
-                        }
-                    }
-                    declare_alsos(world, diags, file, source.home, decl, owner, decl.what);
-                }
+                ItemKind::Decl(id) => declare_in(world, site, &file[id], &mut seen, diags),
                 // Contract laws are compiled by the contract pass after every
                 // contract id exists, so references can point forward.
                 ItemKind::Contract(_)
@@ -117,6 +63,84 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
         }
     }
     budget::declare(world, sites, diags);
+}
+
+/// What the laws written under a declaration govern: their owner, what `self` is inside them, and the key that
+/// tells the declaration from the others of its kind.
+struct Governed {
+    owner: Owner,
+    subject: Ty,
+    key: u32,
+}
+
+/// The laws and `also` lines written under a declaration. A declaration's laws are compiled once, however many
+/// sources spell it.
+fn declare_in<'s>(
+    world: &mut World<'s>,
+    site: &Site<'_, 's>,
+    decl: &ast::Decl<'s>,
+    seen: &mut Set<(DeclKind, u32)>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Some(Governed { owner, subject, key }) = governed(world, site.home, file, decl, diags) else {
+        return;
+    };
+    if seen.insert((decl.what, key)) {
+        for law in &file[decl.laws] {
+            compile_native(world, diags, file, site.home, owner, subject, law);
+        }
+    }
+    declare_alsos(world, diags, file, site.home, decl, owner, decl.what);
+}
+
+/// What a declaration's laws govern, or None after saying why they govern nothing.
+fn governed<'s>(
+    world: &World<'s>,
+    home: Home,
+    file: &ast::File<'s>,
+    decl: &ast::Decl<'s>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Governed> {
+    let word = Word::of(file, decl.name.0);
+    let (owner, subject, key) = match decl.what {
+        DeclKind::Kind => {
+            let kind = world.kind(home, word).or_report(diags)?;
+            let subject = match world.book.kinds[kind].sort {
+                Sort::Place(_) => Ty::Place,
+                Sort::Entity => Ty::Entity,
+                Sort::Thing => Ty::Asset,
+                Sort::Commodity => {
+                    misplaced(diags, file, decl.laws, "a commodity kind");
+                    return None;
+                }
+            };
+            (Owner::Kind(kind), subject, kind.index())
+        }
+        DeclKind::Account => {
+            let place = world.place(word).or_report(diags)?;
+            (Owner::Place(place), Ty::Place, place.index())
+        }
+        DeclKind::Entity => {
+            let entity = world.entity(home, word).or_report(diags)?;
+            (Owner::Entity(entity), Ty::Entity, entity.index())
+        }
+        DeclKind::Asset => {
+            let asset = world.book.asset(word.text).ok_or_else(|| world.missing_asset(word)).or_report(diags)?;
+            (Owner::Asset(asset), Ty::Asset, asset.index())
+        }
+        DeclKind::Purpose => {
+            // Purpose laws govern purpose-bearing flows, but `self` is the owner of the flow (LANGUAGE §8).
+            // `total(window)` retains the purpose context in the law owner instead of changing `self`'s type.
+            let purpose = world.purpose(home, word).or_report(diags)?;
+            (Owner::Purpose(purpose), Ty::Entity, purpose.index())
+        }
+        DeclKind::Commodity => {
+            misplaced(diags, file, decl.laws, "a commodity");
+            return None;
+        }
+    };
+    Some(Governed { owner, subject, key: key as u32 })
 }
 
 /// Compiles a nested or native S5 law using the same typed compiler as

@@ -121,6 +121,14 @@ pub(super) fn push_quantity_root<'s>(quantity: Quantity<'s>, roots: &mut Vec<(as
     }
 }
 
+impl ResolvedQuantity {
+    fn new(amount: Amount, infer: Infer, mode: Mode, root: Option<NodeId>, group: JournalQuantity) -> ResolvedQuantity {
+        ResolvedQuantity { amount, infer, mode, root, group }
+    }
+}
+
+/// What a quantity written in a flow is, in `fallback`'s unit when it names none. None when it cannot be, which is
+/// said for a commodity that does not exist and, as it always was, for nothing else.
 pub(super) fn resolve_quantity<'s>(
     world: &mut World<'s>,
     cx: &FlowCx<'_, 's>,
@@ -129,65 +137,33 @@ pub(super) fn resolve_quantity<'s>(
     side: FlowSide,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
-    let (file, roots) = (cx.file, cx.roots);
-    // A literal that is no amount costs the whole quantity and says nothing: the diagnostic is dropped here, as it
-    // always was, and is not the caller's to report.
-    let resolve_literal = |world: &World<'s>, literal: ast::Literal<'s>| -> Option<Amount> {
-        world.literal_amount(file, literal, Some(fallback)).ok()
-    };
+    let file = cx.file;
     let resolved = match quantity {
-        Quantity::Amount(amount) => {
-            let (amount, root) = match amount {
-                ast::Amount::Literal(literal) => (resolve_literal(world, literal)?, None),
-                ast::Amount::Computed(expr) => (Amount::zero(fallback), Some(*roots.get(&expr)?)),
-            };
-            ResolvedQuantity {
-                amount,
-                infer: Infer::Known,
-                mode: Mode::Actual,
-                root,
-                group: JournalQuantity::Amount(amount, root),
-            }
+        Quantity::Amount(written) => {
+            let (amount, root) = stated_amount(world, cx, written, fallback)?;
+            let group = JournalQuantity::Amount(amount, root);
+            ResolvedQuantity::new(amount, Infer::Known, Mode::Actual, root, group)
         }
-        Quantity::Pending(amount) => {
-            let (amount, root) = match amount {
-                ast::Amount::Literal(literal) => (resolve_literal(world, literal)?, None),
-                ast::Amount::Computed(expr) => (Amount::zero(fallback), Some(*roots.get(&expr)?)),
-            };
-            ResolvedQuantity {
-                amount,
-                infer: Infer::Known,
-                mode: Mode::Pending,
-                root,
-                group: JournalQuantity::Pending(amount, root),
-            }
+        Quantity::Pending(written) => {
+            let (amount, root) = stated_amount(world, cx, written, fallback)?;
+            let group = JournalQuantity::Pending(amount, root);
+            ResolvedQuantity::new(amount, Infer::Known, Mode::Pending, root, group)
         }
-        Quantity::Target(amount) => {
-            let (amount, root) = match amount {
-                ast::Amount::Literal(literal) => (resolve_literal(world, literal)?, None),
-                ast::Amount::Computed(expr) => (Amount::zero(fallback), Some(*roots.get(&expr)?)),
-            };
-            ResolvedQuantity {
-                amount,
-                infer: Infer::Target {
-                    end: if side == FlowSide::Out { crate::journal::End::From } else { crate::journal::End::To },
-                    balance: amount.qty,
-                },
-                mode: Mode::Actual,
-                root,
-                group: JournalQuantity::Target(amount, root),
-            }
+        Quantity::Target(written) => {
+            let (amount, root) = stated_amount(world, cx, written, fallback)?;
+            let end = if side == FlowSide::Out { crate::journal::End::From } else { crate::journal::End::To };
+            let infer = Infer::Target { end, balance: amount.qty };
+            ResolvedQuantity::new(amount, infer, Mode::Actual, root, JournalQuantity::Target(amount, root))
         }
         Quantity::Unknown(unit) => {
             let unit = world.commodity_of(Word::of(file, unit.0)).or_report(diags)?;
-            let amount = Amount::zero(unit);
-            ResolvedQuantity {
-                amount,
-                infer: Infer::Unknown,
-                mode: Mode::Actual,
-                root: None,
-                group: JournalQuantity::Unknown(unit),
-            }
+            ResolvedQuantity::new(
+                Amount::zero(unit),
+                Infer::Unknown,
+                Mode::Actual,
+                None,
+                JournalQuantity::Unknown(unit),
+            )
         }
         Quantity::All(unit) => {
             let unit = match unit {
@@ -195,30 +171,32 @@ pub(super) fn resolve_quantity<'s>(
                 None => None,
             };
             let amount = Amount::zero(unit.unwrap_or(fallback));
-            ResolvedQuantity {
-                amount,
-                infer: Infer::All,
-                mode: Mode::Actual,
-                root: None,
-                group: JournalQuantity::All(unit),
-            }
+            ResolvedQuantity::new(amount, Infer::All, Mode::Actual, None, JournalQuantity::All(unit))
         }
-        Quantity::Rest => ResolvedQuantity {
-            amount: Amount::zero(fallback),
-            infer: Infer::Known,
-            mode: Mode::Actual,
-            root: None,
-            group: JournalQuantity::Rest,
-        },
-        Quantity::Whole => ResolvedQuantity {
-            amount: Amount::new(Qty(1), fallback),
-            infer: Infer::Known,
-            mode: Mode::Opening,
-            root: None,
-            group: JournalQuantity::Whole,
-        },
+        Quantity::Rest => {
+            ResolvedQuantity::new(Amount::zero(fallback), Infer::Known, Mode::Actual, None, JournalQuantity::Rest)
+        }
+        Quantity::Whole => {
+            let amount = Amount::new(Qty(1), fallback);
+            ResolvedQuantity::new(amount, Infer::Known, Mode::Opening, None, JournalQuantity::Whole)
+        }
     };
     Some(resolved)
+}
+
+/// A written amount: its literal, or zero and the node that computes it. A literal that is no amount costs the
+/// whole quantity and says nothing: the diagnostic is dropped here, as it always was, and is not the caller's to
+/// report.
+fn stated_amount<'s>(
+    world: &World<'s>,
+    cx: &FlowCx<'_, 's>,
+    written: ast::Amount<'s>,
+    fallback: Id<crate::book::Commodity>,
+) -> Option<(Amount, Option<NodeId>)> {
+    match written {
+        ast::Amount::Literal(literal) => Some((world.literal_amount(cx.file, literal, Some(fallback)).ok()?, None)),
+        ast::Amount::Computed(expr) => Some((Amount::zero(fallback), Some(*cx.roots.get(&expr)?))),
+    }
 }
 
 /// The flow a header with both its ends named makes: what it says moves, checked and priced, and the expressions
