@@ -11,7 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axiom_core::{Day, Diagnostic, FileId};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, sync::Fetch};
-use axiom_report::{Context, Query, ReportRenderer, Summary, json::JsonRenderer};
+use axiom_report::json::{JsonRenderer, string as json_string};
+use axiom_report::{Context, Query, ReportRenderer, Summary};
 use axiom_sync::{Change, PlanOutcome, SourceFailure};
 
 use crate::args::{Command, Invocation};
@@ -222,24 +223,6 @@ fn json_suggestions(suggestions: &[MemoSuggestion]) -> String {
     }
     out.push_str("]}\n");
     out
-}
-
-fn json_string(out: &mut String, value: &str) {
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch <= '\u{1f}' => {
-                let _ = write!(out, "\\u{:04x}", ch as u32);
-            }
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
 }
 
 /// Shows a query-construction error in the same channels as a report error.

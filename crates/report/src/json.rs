@@ -517,7 +517,8 @@ fn comma(out: &mut String, index: usize) {
     }
 }
 
-fn string(out: &mut String, text: &str) {
+/// `text` as a JSON string, quotes included: the one escaper every JSON the program writes goes through.
+pub fn string(out: &mut String, text: &str) {
     out.push('"');
     escaped(out, text);
     out.push('"');
@@ -621,6 +622,13 @@ mod tests {
         assert!(json.contains("line one\\nline two\\t✓"));
         assert!(json.contains("\"type\":\"amount\""));
         assert!(json.contains("\"file\":\"ledger.ax\",\"line\":1,\"column\":1"));
+    }
+
+    #[test]
+    fn a_string_escapes_exactly_what_json_requires_and_keeps_the_rest() {
+        let mut out = String::new();
+        string(&mut out, "q\" b\\ \u{8}\u{c}\n\r\t \u{1}\u{1f} é🧾/");
+        assert_eq!(out, "\"q\\\" b\\\\ \\b\\f\\n\\r\\t \\u0001\\u001f é🧾/\"");
     }
 
     #[test]
