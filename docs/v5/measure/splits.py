@@ -318,11 +318,21 @@ def split(book):
     book.forms.update(forms)
 
 
+def cost_amount(rng, forms):
+    """What a cost item under a trade says: an amount, or, now and then, a share of one that is computed."""
+    if rng.random() < 0.7:
+        return f"{rng.randint(2, 20)} USD"
+    forms["item:computed"] += 1
+    forms["ex:cost-computed"] += 1
+    return rng.choice([f"{rng.choice([2, 5, 10])}% of {rng.randint(50, 300)} USD", f"{rng.choice([1, 2])}% of amount"])
+
+
 def exchange(book):
     """A trade: a purchase or a sale, with a cost item, at a stated or a quoted price."""
     rng, forms = book.rng, Counter()
     day = book.day()
     kind = rng.choice(["buy", "sell", "buy-cost", "sell-cost", "buy-price", "sale-asset", "purchase-asset"])
+    cost = cost_amount(rng, forms)
     if kind == "buy":
         text = f"{day} checking {rng.randint(300, 900)} USD -> broker {rng.randint(1, 5)} VTI"
         forms["hdr:exchange"] += 1
@@ -331,14 +341,14 @@ def exchange(book):
         forms["hdr:exchange"] += 1
     elif kind == "buy-cost":
         text = (f"{day} checking {rng.randint(300, 900)} USD -> broker {rng.randint(1, 5)} VTI\n"
-                f"  {rng.randint(2, 20)} USD #fees")
+                f"  {cost} #fees")
         forms["hdr:exchange"] += 1
         forms["ex:cost-purchase"] += 1
         forms["item:carve"] += 1
     elif kind == "sell-cost":
         sign = rng.choice(["- ", "- ", ""])
         text = (f"{day} broker {rng.randint(1, 4)} VTI -> checking {rng.randint(300, 900)} USD\n"
-                f"  {sign}{rng.randint(2, 20)} USD #fees")
+                f"  {sign}{cost} #fees")
         forms["hdr:exchange"] += 1
         forms["ex:cost-sale"] += 1
         forms["item:less" if sign else "item:carve"] += 1
@@ -346,8 +356,8 @@ def exchange(book):
         text = f"{day} checking -> broker {rng.randint(1, 5)} VTI @ {rng.randint(100, 300)} USD"
         forms["hdr:price"] += 1
     elif kind == "sale-asset":
-        text = (f"{day} buyer -> checking {rng.randint(300, 900)} USD #sale of condo\n"
-                f"  - {rng.randint(5, 50)} USD #selling-costs")
+        selling = f"{rng.randint(5, 50)} USD" if rng.random() < 0.85 else "10% of 100 USD"
+        text = f"{day} buyer -> checking {rng.randint(300, 900)} USD #sale of condo\n  - {selling} #selling-costs"
         forms["ex:asset-sale"] += 1
         forms["item:less"] += 1
     else:
@@ -415,13 +425,15 @@ def contract(book):
     rng, forms = book.rng, Counter()
     book.contracts += 1
     name = rng.choice(["salary", "retainer", "stipend", "lease", "flat", "plan", "dues"]) + str(book.contracts)
-    party = rng.choice(["acme", "shop", "broker-co"])
+    party = rng.choice(["acme", "shop", "broker-co", "acme", "shop", "broker-co", "me"])
     direction = rng.choice(["into", "from"])
-    holding = rng.choice(["checking", "checking", "savings"])
+    holding = rng.choice(["checking", "checking", "savings", "savings", "wallet", "shop"])
     day = rng.choice([1, 5, 15, 28])
     start_month = rng.choice([1, 2])
     start = f"2026-{start_month:02d}-{day:02d}"
     shape = rng.choices(["fixed", "about", "buy", "loan", "twice", "weekly"], [10, 2, 4, 3, 1, 1])[0]
+    if shape in ("loan", "buy"):
+        holding = rng.choice(["checking", "checking", "savings"])
     c = Contract(name, direction, holding, day, "monthly", start)
     lines = [f"contract {name} with {party}"]
     if shape == "loan":
@@ -482,7 +494,7 @@ def contract(book):
             if rng.random() < 0.5:
                 lines.append("  prorated")
                 forms["contract:prorated"] += 1
-        if rng.random() < 0.1:
+        if rng.random() < 0.1 and holding in ("checking", "savings"):
             lines.append(f"  deposit {rng.randint(200, 900)} USD")
             forms["contract:deposit"] += 1
     book.add("\n".join(lines), *forms)
