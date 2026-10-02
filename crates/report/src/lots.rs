@@ -2,7 +2,7 @@
 
 use axiom_core::Qty;
 use axiom_engine::{Holding, Parcel};
-use axiom_model::{Amount, Place};
+use axiom_model::{Amount, Book, Place};
 
 use crate::gains::Term;
 use crate::lens::Lens;
@@ -30,7 +30,7 @@ pub(crate) fn view_from<'h, 's>(
         Column::left("Note"),
     ]);
 
-    let (mut basis, mut value, mut unrealized, mut unpriced) = (Qty::ZERO, Qty::ZERO, Qty::ZERO, 0);
+    let mut sum = Sum::default();
     let held = holdings.into_iter().filter(|holding| {
         lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
     });
@@ -42,14 +42,7 @@ pub(crate) fn view_from<'h, 's>(
                 continue;
             }
             let worth = lens.value(Amount::new(quantity, holding.unit));
-            basis += lot_basis;
-            match worth {
-                Some(worth) => {
-                    value += worth;
-                    unrealized += worth - lot_basis;
-                }
-                None => unpriced += 1,
-            }
+            sum.add(lot_basis, worth);
             section.push(row(lens, holding, lot, quantity, lot_basis, worth));
         }
     }
@@ -57,21 +50,52 @@ pub(crate) fn view_from<'h, 's>(
     if section.rows.is_empty() {
         section.note("No parcels: everything held is plain money.");
     } else {
+        section.push(sum.row(book));
+    }
+    if sum.unpriced > 0 {
+        section.note(format!(
+            "{} parcels have no price; they are muted and left out of Value and Unrealized.",
+            sum.unpriced
+        ));
+    }
+    Report::new(format!("Lots at {at}")).with(section)
+}
+
+/// What the parcels shown come to.
+#[derive(Default)]
+struct Sum {
+    basis: Qty,
+    value: Qty,
+    unrealized: Qty,
+    /// How many have no price.
+    unpriced: usize,
+}
+
+impl Sum {
+    /// Adds a parcel with its basis and what it would fetch, if that is known.
+    fn add(&mut self, basis: Qty, worth: Option<Qty>) {
+        self.basis += basis;
+        match worth {
+            Some(worth) => {
+                self.value += worth;
+                self.unrealized += worth - basis;
+            }
+            None => self.unpriced += 1,
+        }
+    }
+
+    fn row<'s>(&self, book: &'s Book<'_>) -> Row<'s> {
         let cells = [
             Cell::text("Total"),
             Cell::Blank,
-            Cell::base(book, basis),
+            Cell::base(book, self.basis),
             Cell::Blank,
             Cell::Blank,
-            Cell::base(book, value),
-            Cell::base(book, unrealized),
+            Cell::base(book, self.value),
+            Cell::base(book, self.unrealized),
         ];
-        section.push(Row::padded(cells, 9).style(Style::Total));
+        Row::padded(cells, 9).style(Style::Total)
     }
-    if unpriced > 0 {
-        section.note(format!("{unpriced} parcels have no price; they are muted and left out of Value and Unrealized."));
-    }
-    Report::new(format!("Lots at {at}")).with(section)
 }
 
 fn row<'s>(
