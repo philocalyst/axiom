@@ -240,3 +240,61 @@ contract's name.
   after it and before it; both print `checking → bank-co` on the baseline, and must keep printing it (section 7).
 - `docs/v5/measure/diff/cases2/tab-implied-parties.ax`: parties that no declaration names (`zorb`, `frob`, `kidz`, `paypl`,
   `dana`) exist, and a claim against one of them works (section 0.4).
+
+## 10. What the lane built, and where it departs from this map
+
+Commits, in order: `Tree::push_root`, `Facts::grow` and `Builder::grow` in `core`; the holders numbered with the places last;
+`World::tab` finds or makes, and `rules::govern` after `record`; the survey deleted; claim tabs listed by whom they are with;
+`tabs.py`.
+
+Where it departs from what section 0 and the sections after it expected:
+
+- **Section 0.4 held, with a smaller deletion.** `visit_endpoints` and `EndpointContext` became `declare/mentions.rs`, a
+  two-valued `Role` and about 130 lines, against about 165 for the walker and 330 for the survey. The brief's target of
+  about -600 lines became -337 (model -356, core +15, report +4), because that walk stays and the replacement for the
+  survey is code: `World::tab` and `open_place`, the loan endpoint, `Listing`.
+- **Section 5 left the order undecided; the lane decided it.** The tree has the tabs in the order the journal asks for
+  them, and every report that lists places says its own order, `Book::listing`: the declared places in the tree's order, then
+  the tabs by the party's name, then what is owed to the owner before what the owner owes, then by owner. The reports that
+  list tabs are `balance`, `lots`, `claims` and `available` (found by running them, not by reading: `available` lists
+  claims through `claims::open`).
+- **Section 7 held.** The loan's endpoint is asked for by a loop of `lower::contracts` over the contracts it has reserved.
+  It resolves the party and the owner quietly and again, with diagnostics, in `lower_contract`: two resolutions of one
+  thing, which the lane keeps rather than reorder what `lower_contract` says.
+- **A refusal made on purpose.** `contract-loan-party`: a loan whose lender is the owner of the account it is paid from.
+  The survey skipped the tab between a party and itself, so lowering said `unregistered-tab`: an accident that was the only
+  guard. A tab between a party and itself is now a `debug_assert!` in `World::tab`.
+- **A bug the survey had that this map did not find.** Its guess of a loan's owner was used twice: for the debt tab
+  `contract_loan` asked for (`unregistered-tab` when no other mention made the same key) and for the tab the loan's *name*
+  stands for. Where another mention made the key, a flow to the loan's name landed in a tab owned by `me`, and a claim of
+  the party in the loan's own: two tabs for one debt. `tabs.py names` shows the build now cannot tell `joint` from
+  `assets/joint` (0 of 300 projects differ; the baseline's 125).
+
+### Does `Role` block `(owner, with, kind)`?
+
+Not in this lane, and not structurally. `Place` already has `owner`, `kind` and `class`. The 26 reads of `.role` ask four
+things: who is the party at this place (`Tab`, `Outside`, `Holding`; `engine/eval.rs:1011` defines it), is it a declared
+account (`Account` in `sync` three times, in `infer`, `record`, `contracts` and `sync_lower`), is it the place of an asset or
+an issuer, and is it the owner's own holding. The payloads: `Account { institution }` is **never read**, `Holding(owner)` is
+`place.owner`, and `Tab(party)` and `Outside(Some(party))` are the one `with` of the design. Only `Issuer(Commodity)` and
+`Asset(Asset)` carry a "with" that is not an entity, which K3c's assets-as-parcels and a commodity's issuer as an entity
+remove. The smallest change: delete `institution`; make `Holding` a unit variant (the four readers compare with
+`place.owner`); add `with: Option<Id<Entity>>` to `Place`, set for tabs and a party's place; then `Role` is a fieldless enum
+beside `(owner, with, kind)`. K3c then gives tabs a `claim` kind and `said.rs::is_claim` stops asking for `Role::Tab`.
+
+### What this lane makes of K3b and K3c
+
+**K3b (addresses, entities).** The place tree stays frozen at declaration and positions grow after it: that is now one
+operation on `Tree` and one on the facts, and anything made lazily after K3b needs the same three things this lane needed
+(a trailing id, a holder number, a row of facts). The holders are one arena short of K3's "merge the arenas": places last is
+the stepping stone, and the merge makes `HolderIndex` the identity. Lazy positions keep `Addresses`' posting lists sorted for
+free, since a new id is the largest. Making entities lazy is not this lane's push: the implied-party walk in
+`declare/mentions.rs` is what K3b deletes, and it must first decide what an ambiguous suffix means when the second entity
+is made after the first was resolved (DESIGN 2.4 answers by the line's day). Its other consequence is visible: an implied
+entity's source line would be its first *lowered* mention, not its first written one, as a tab's now is.
+
+**K3c (claims and assets as parcels).** A tab is already the position a claim is a parcel in: `(party, owner, class)` made
+when a claim asks, which is the creation rule K3c wants. What goes: the `Debt`-class tab as a plain balance told apart by
+code (`claims::owed_by_you`), `Role::Tab` in `said::is_claim` (give tabs a `claim` kind), and `statements::claim_target`'s
+test (a transaction that has a flow into a claim position). `loan_endpoint` stands in for "a promise's name is its position"
+and goes with K5. `Listing` is the pattern for K3c's lists: ids say when a position was made, a reader sees by whom.
