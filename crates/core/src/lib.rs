@@ -15,6 +15,7 @@ pub mod id;
 pub mod num;
 pub mod par;
 pub mod placement;
+pub mod postings;
 pub mod sparse;
 pub mod sym;
 pub mod tagless;
