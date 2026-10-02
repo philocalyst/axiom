@@ -65,6 +65,21 @@ impl Flow {
         self.out.unit != self.arrive.unit
     }
 
+    /// The amount that moves at `end`: what leaves the `from` place, or arrives at `to`.
+    pub fn amount_at(&self, end: End) -> Amount {
+        match end {
+            End::From => self.out,
+            End::To => self.arrive,
+        }
+    }
+
+    pub fn amount_at_mut(&mut self, end: End) -> &mut Amount {
+        match end {
+            End::From => &mut self.out,
+            End::To => &mut self.arrive,
+        }
+    }
+
     /// The immutable pooled identity used to match selectors against source
     /// transaction and local codes, including after a flow is forecast.
     pub fn code_runs(&self) -> FlowCodes {
