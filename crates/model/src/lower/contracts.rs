@@ -713,7 +713,7 @@ fn lower_terms<'a, 's>(
     let owner = world.book.places[holding].owner;
     let ((out_quantity, arrive_quantity), header_amount, buys) =
         schedule_amount(world, file, schedule, &roots, diags)?;
-    let header_flow = template_flow(
+    let mut header_flow = template_flow(
         anchor,
         from,
         to,
@@ -724,6 +724,21 @@ fn lower_terms<'a, 's>(
         description,
         schedule.at,
     );
+    let (from_party, to_party) = match hold.direction {
+        Direction::From => (None, Some(party)),
+        Direction::Into => (Some(party), None),
+    };
+    header_flow.purpose = super::record::infer_for_flow(
+        world,
+        from,
+        from_party,
+        to,
+        to_party,
+        purpose.map(|at| (at.value, at.loc)),
+        schedule.at,
+        diags,
+    )
+    .ok()?;
     let mut legs = Vec::new();
     for leg in &file[body.legs] {
         let endpoint =
@@ -753,7 +768,19 @@ fn lower_terms<'a, 's>(
         flow.select = selectors;
         flow.detail = detail;
         flow.waive = waive;
-        flow.purpose = leg_purpose.or(flow.purpose);
+        flow.purpose = super::record::infer_for_flow(
+            world,
+            leg_from,
+            from_party,
+            leg_to,
+            None,
+            leg_purpose
+                .or_else(|| purpose.map(|at| At { value: at.value, loc: at.loc }))
+                .map(|at| (at.value, at.loc)),
+            leg.loc,
+            diags,
+        )
+        .ok()?;
         flow.description = leg_description.or(flow.description);
         legs.push(TemplateLeg {
             flow,
@@ -1055,7 +1082,7 @@ fn lower_item<'s>(
         parent,
         side,
         amount,
-        purpose,
+        purpose: purpose.map(|at| at.value),
         description,
         codes,
         select,
@@ -1077,7 +1104,7 @@ fn lower_tail<'s>(
     Run<Select>,
     Option<Id<Detail>>,
     Option<Waive>,
-    Option<Purposed>,
+    Option<At<Purposed>>,
     Option<crate::book::Text>,
 ) {
     let code_start = world.book.codes.len();
@@ -1096,12 +1123,15 @@ fn lower_tail<'s>(
                 };
                 match world.purpose(home, word) {
                     Ok(id) => {
-                        purpose = Some(Purposed {
-                            purpose: id,
-                            of: purpose_ast
-                                .of
-                                .and_then(|name| resolve_object(world, home, file, name, diags)),
-                            source: Provenance::Written,
+                        purpose = Some(At {
+                            value: Purposed {
+                                purpose: id,
+                                of: purpose_ast
+                                    .of
+                                    .and_then(|name| resolve_object(world, home, file, name, diags)),
+                                source: Provenance::Written,
+                            },
+                            loc: clause.at,
                         });
                     }
                     Err(problem) => diags.push(problem),

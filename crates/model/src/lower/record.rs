@@ -59,6 +59,12 @@ struct Tail {
     valid: bool,
 }
 
+#[derive(Clone, Copy)]
+struct PurposeEvidence {
+    purposed: Purposed,
+    loc: Loc,
+}
+
 struct OccurrenceGroupDraft {
     template: u32,
     source: JournalEnd,
@@ -3865,33 +3871,20 @@ fn make_resolved_flow(
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Flow> {
-    let issuer_purpose = commodity_purpose(world, from.place);
-    if let (Some(written), Some(inferred)) = (tail.purpose, issuer_purpose)
-        && written.purpose != inferred.purpose
-    {
-        let source_loc = match inferred.source {
-            Provenance::Commodity(kind) => world.book.kinds[kind].pays.map(|pays| pays.loc),
-            _ => None,
-        };
-        let written_name = world.book.name(world.book.purposes[written.purpose].name);
-        let inferred_name = world.book.name(world.book.purposes[inferred.purpose].name);
-        let mut diagnostic = Diagnostic::error(
-            "purpose-disagreement",
-            "this flow's purpose sources disagree",
-        )
-        .label(
+    let purpose = infer_for_flow(
+        world,
+        from.place,
+        from.entity,
+        to.place,
+        to.entity,
+        tail.purpose.map(|purpose| (
+            purpose,
             tail.purpose_loc.unwrap_or(loc),
-            format!("the written purpose is `{written_name}`"),
-        );
-        if let Some(source_loc) = source_loc {
-            diagnostic = diagnostic.label(
-                source_loc,
-                format!("the commodity kind says `{inferred_name}`"),
-            );
-        }
-        diags.push(diagnostic);
-        return None;
-    }
+        )),
+        loc,
+        diags,
+    )
+    .ok()?;
     let mut detail = tail.detail;
     detail.spender = from.entity;
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
@@ -3916,7 +3909,6 @@ fn make_resolved_flow(
         from_place.owner
     };
     let payee = tail.payee.or(to.entity).or(from.entity);
-    let purpose = tail.purpose.or(issuer_purpose);
     let recognized = tail.recognized.unwrap_or(Days::on(day));
     Some(Flow {
         day,
@@ -3942,27 +3934,185 @@ fn make_resolved_flow(
     })
 }
 
-/// A commodity in party position contributes the `pays` purpose inherited by
-/// its kind. The provenance names the nearest kind that actually wrote it,
-/// rather than the commodity's kind when that rule came from an ancestor.
-fn commodity_purpose(world: &World<'_>, source: Id<crate::book::Place>) -> Option<Purposed> {
-    let crate::book::Role::Issuer(unit) = world.book.places[source].role else {
-        return None;
+/// The party at an endpoint classifies flows through its own purpose or the
+/// applicable purpose of its kind. A commodity issuer contributes `pays`;
+/// an account recipient can transform that source through `takes` below.
+fn endpoint_purpose(
+    world: &World<'_>,
+    place: Id<crate::book::Place>,
+    named_entity: Option<Id<crate::book::Entity>>,
+    source: bool,
+) -> Option<PurposeEvidence> {
+    if let crate::book::Role::Issuer(unit) = world.book.places[place].role {
+        if !source {
+            return None;
+        }
+        let mut kind = world.book.commodities[unit].kind;
+        let pays = world.book.kinds[kind].pays?;
+        while let Some(parent) = world.book.kinds.parent(kind) {
+            if world.book.kinds[parent].pays == Some(pays) {
+                kind = parent;
+            } else {
+                break;
+            }
+        }
+        return Some(PurposeEvidence {
+            purposed: Purposed {
+                purpose: pays.value,
+                of: None,
+                source: Provenance::Commodity(kind),
+            },
+            loc: pays.loc,
+        });
+    }
+
+    let role_entity = match world.book.places[place].role {
+        crate::book::Role::Outside(Some(entity)) | crate::book::Role::Tab(entity) => Some(entity),
+        _ => None,
     };
-    let mut kind = world.book.commodities[unit].kind;
-    let pays = world.book.kinds[kind].pays?;
-    while let Some(parent) = world.book.kinds.parent(kind) {
-        if world.book.kinds[parent].pays == Some(pays) {
-            kind = parent;
-        } else {
-            break;
+    let entity = named_entity.or(role_entity)?;
+    let party = &world.book.entities[entity];
+    let kind_id = party.kind;
+    let kind = &world.book.kinds[kind_id];
+    if let Some(purpose) = party.purpose {
+        // The declaration builder may carry an inherited kind value on an
+        // entity. Preserve its true provenance so explanations name the kind.
+        if kind.purpose != Some(purpose) && kind.pays != Some(purpose) {
+            return Some(PurposeEvidence {
+                purposed: Purposed {
+                    purpose: purpose.value,
+                    of: None,
+                    source: Provenance::Entity(entity),
+                },
+                loc: purpose.loc,
+            });
         }
     }
-    Some(Purposed {
-        purpose: pays.value,
-        of: None,
-        source: Provenance::Commodity(kind),
+
+    let purpose = if source {
+        kind.pays.or(kind.purpose)
+    } else {
+        kind.purpose
+    }?;
+    Some(PurposeEvidence {
+        purposed: Purposed {
+            purpose: purpose.value,
+            of: None,
+            source: Provenance::Party(party.kind),
+        },
+        loc: purpose.loc,
     })
+}
+
+/// Resolve purpose sources once for ordinary and contract flow templates. The
+/// returned purpose is absent when no source classifies the flow; conflicting
+/// sources return an error and retain both declaration locations.
+pub(super) fn infer_for_flow(
+    world: &World<'_>,
+    from: Id<crate::book::Place>,
+    from_entity: Option<Id<crate::book::Entity>>,
+    to: Id<crate::book::Place>,
+    to_entity: Option<Id<crate::book::Entity>>,
+    written: Option<(Purposed, Loc)>,
+    loc: Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> Result<Option<Purposed>, ()> {
+    let from_purpose = endpoint_purpose(world, from, from_entity, true);
+    let to_purpose = endpoint_purpose(world, to, to_entity, false);
+    if let (Some(from), Some(to)) = (from_purpose, to_purpose)
+        && !same_purpose(from.purposed, to.purposed)
+    {
+        diags.push(purpose_disagreement(world, loc, from, to));
+        return Err(());
+    }
+    let inferred = from_purpose
+        .or(to_purpose)
+        .map(|source| taken_purpose(world, to, source).unwrap_or(source));
+    if let (Some((written, written_loc)), Some(inferred)) = (written, inferred)
+        && !same_purpose(written, inferred.purposed)
+    {
+        diags.push(purpose_disagreement(
+            world,
+            loc,
+            PurposeEvidence {
+                purposed: written,
+                loc: written_loc,
+            },
+            inferred,
+        ));
+        return Err(());
+    }
+    Ok(written.map(|(purpose, _)| purpose).or(inferred.map(|source| source.purposed)))
+}
+
+fn taken_purpose(
+    world: &World<'_>,
+    destination: Id<crate::book::Place>,
+    source: PurposeEvidence,
+) -> Option<PurposeEvidence> {
+    if !matches!(world.book.places[destination].role, crate::book::Role::Account { .. }) {
+        return None;
+    }
+    let kind_id = world.book.places[destination].kind;
+    let take = world.book.kinds[kind_id]
+        .takes
+        .iter()
+        .find(|take| take.value.from == source.purposed.purpose)?;
+    Some(PurposeEvidence {
+        purposed: Purposed {
+            purpose: take.value.to,
+            of: source.purposed.of,
+            source: Provenance::Account(kind_id),
+        },
+        loc: take.loc,
+    })
+}
+
+fn same_purpose(left: Purposed, right: Purposed) -> bool {
+    left.purpose == right.purpose && left.of == right.of
+}
+
+fn purpose_disagreement(
+    world: &World<'_>,
+    loc: Loc,
+    first: PurposeEvidence,
+    second: PurposeEvidence,
+) -> Diagnostic {
+    Diagnostic::error(
+        "purpose-disagreement",
+        "this flow's purpose sources disagree",
+    )
+    .label(first.loc, purpose_evidence_label(world, first))
+    .label(second.loc, purpose_evidence_label(world, second))
+    .label(loc, "these sources classify the same flow differently")
+}
+
+fn purpose_evidence_label(world: &World<'_>, evidence: PurposeEvidence) -> String {
+    let purpose = world.book.name(world.book.purposes[evidence.purposed.purpose].name);
+    match evidence.purposed.source {
+        Provenance::Written => format!("the written purpose is `#{purpose}`"),
+        Provenance::Contract(contract) => format!(
+            "contract `{}` gives purpose `#{purpose}`",
+            world.book.name(world.book.contracts[contract].name),
+        ),
+        Provenance::Entity(entity) => format!(
+            "party `{}` gives purpose `#{purpose}`",
+            world.book.name(world.book.entities[entity].path),
+        ),
+        Provenance::Party(kind) => format!(
+            "party kind `{}` gives purpose `#{purpose}`",
+            world.book.name(world.book.kinds[kind].name),
+        ),
+        Provenance::Commodity(kind) => format!(
+            "commodity kind `{}` gives purpose `#{purpose}`",
+            world.book.name(world.book.kinds[kind].name),
+        ),
+        Provenance::Account(kind) => format!(
+            "account kind `{}` takes the flow as `#{purpose}`",
+            world.book.name(world.book.kinds[kind].name),
+        ),
+        Provenance::Derived => format!("the derived flow has purpose `#{purpose}`"),
+    }
 }
 
 fn lower_tail<'s>(

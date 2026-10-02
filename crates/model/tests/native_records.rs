@@ -262,6 +262,139 @@ account assets/fidelity
 }
 
 #[test]
+fn party_kinds_classify_incoming_and_outgoing_flows() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose groceries : spending
+kind payroll-agency : entity
+  purpose wages
+kind grocer-kind : entity
+  purpose groceries
+entity acme : payroll-agency
+entity grocer : grocer-kind
+entity designer : entity
+  purpose groceries
+account checking
+2026-01-01 acme -> checking 4_600 USD
+2026-01-02 checking -> grocer 85 USD
+2026-01-03 checking -> designer 90 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let wages = book.purpose("wages").unwrap();
+    let groceries = book.purpose("groceries").unwrap();
+    let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
+    assert_eq!(flows[0].purpose.unwrap().purpose, wages);
+    assert_eq!(flows[0].purpose.unwrap().source, axiom_model::Provenance::Party(book.kind("payroll-agency").unwrap()));
+    assert_eq!(flows[1].purpose.unwrap().purpose, groceries);
+    assert_eq!(flows[1].purpose.unwrap().source, axiom_model::Provenance::Party(book.kind("grocer-kind").unwrap()));
+    assert_eq!(flows[2].purpose.unwrap().purpose, groceries);
+    assert_eq!(flows[2].purpose.unwrap().source, axiom_model::Provenance::Entity(book.entity("designer").unwrap()));
+}
+
+#[test]
+fn account_takes_maps_the_source_purpose_on_incoming_flows() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose pretax-deferral : income
+kind payroll-agency : entity
+  purpose wages
+kind retirement-account : asset
+  takes pretax-deferral from wages
+entity acme : payroll-agency
+account retirement : retirement-account
+2026-01-01 acme -> retirement 400 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let flow = book.flows.iter().next().unwrap().1;
+    assert_eq!(flow.purpose.unwrap().purpose, book.purpose("pretax-deferral").unwrap());
+    assert_eq!(flow.purpose.unwrap().source, axiom_model::Provenance::Account(book.kind("retirement-account").unwrap()));
+}
+
+#[test]
+fn contract_templates_use_the_same_party_and_account_purpose_rules() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose pretax-deferral : income
+kind payroll-agency : entity
+  purpose wages
+kind retirement-account : asset
+  takes pretax-deferral from wages
+entity acme : payroll-agency
+account retirement : retirement-account
+contract deferral with acme
+  400 USD monthly on 1 into retirement
+  from 2026-01-01
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[book.contract("deferral").unwrap()];
+    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+    let purpose = terms.template[0].flow.purpose.unwrap();
+    assert_eq!(purpose.purpose, book.purpose("pretax-deferral").unwrap());
+    assert_eq!(purpose.source, axiom_model::Provenance::Account(book.kind("retirement-account").unwrap()));
+}
+
+#[test]
+fn party_purpose_conflicts_are_diagnostic_and_atomic() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose groceries : spending
+purpose interest : income
+kind payroll-agency : entity
+  purpose wages
+entity acme : payroll-agency
+account checking
+2026-01-01 acme -> checking 400 USD #interest
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
+    assert_eq!(problem.labels.len(), 3);
+    assert!(book.flows.is_empty());
+}
+
+#[test]
 fn quoted_unit_price_records_both_typed_flow_quantities() {
     let path = "journal/2026/01.ax";
     let text = "\
