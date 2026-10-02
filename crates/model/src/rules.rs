@@ -114,30 +114,14 @@ impl Rules {
         contracts.sort_by_key(|(_, rule)| rank[rule.law.index()]);
         let mut timed = timed(book, &residents);
         timed.sort_by_key(|rule| rank[rule.law.index()]);
-        let on_in_pairs = on_in;
-        let on_in = Groups::build(places, on_in_pairs.iter().copied());
-        drop(on_in_pairs);
-        let on_out_pairs = on_out;
-        let on_out = Groups::build(places, on_out_pairs.iter().copied());
-        drop(on_out_pairs);
-        let on_gain_pairs = on_gain;
-        let on_gain = Groups::build(places, on_gain_pairs.iter().copied());
-        drop(on_gain_pairs);
-        let always_pairs = always_on;
-        let always = Groups::build(places, always_pairs.iter().copied());
-        drop(always_pairs);
-        let spending_pairs = spending;
-        let on_spend = Groups::build(book.entities.len(), spending_pairs.iter().copied());
-        drop(spending_pairs);
-        let purpose_pairs = purposes;
-        let purposes = Groups::build(book.purposes.len(), purpose_pairs.iter().copied());
-        drop(purpose_pairs);
-        let about_pairs = about;
-        let about = Groups::build(places, about_pairs.iter().copied());
-        drop(about_pairs);
-        let contract_pairs = contracts;
-        let contracts = Groups::build(book.contracts.len(), contract_pairs.iter().copied());
-        drop(contract_pairs);
+        let on_in = Groups::build(places, on_in.iter().copied());
+        let on_out = Groups::build(places, on_out.iter().copied());
+        let on_gain = Groups::build(places, on_gain.iter().copied());
+        let always = Groups::build(places, always_on.iter().copied());
+        let on_spend = Groups::build(book.entities.len(), spending.iter().copied());
+        let purposes = Groups::build(book.purposes.len(), purposes.iter().copied());
+        let about = Groups::build(places, about.iter().copied());
+        let contracts = Groups::build(book.contracts.len(), contracts.iter().copied());
         Rules { on_in, on_out, on_gain, always, on_spend, purposes, about, contracts, timed }
     }
 }

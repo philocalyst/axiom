@@ -289,7 +289,7 @@ fn lower_budget_terms<'s>(
 ) -> Option<BudgetTerms> {
     let limit = lower_budget_limit(world, purpose, entry, name, nodes, diags)?;
     let funded = if entry.allowance.funded.is_some() {
-        funding(world, entry.home, entry.file, entry.allowance.funded, entry.loc, diags)?
+        funding(world, entry.file, entry.allowance.funded, diags)?
     } else if entry.declared {
         None
     } else {
@@ -353,10 +353,8 @@ fn lower_budget_limit<'s>(
 
 fn funding(
     world: &World<'_>,
-    _home: Home,
     file: &ast::File<'_>,
     funded: Option<ast::Funding<'_>>,
-    _loc: axiom_core::Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<(Id<crate::book::Place>, Id<crate::book::Place>)>> {
     funded

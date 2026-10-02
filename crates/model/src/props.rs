@@ -63,14 +63,14 @@ impl Target {
 /// One property line, read: a setting for whatever it is applied to.
 #[derive(Clone, Debug)]
 enum Assign {
-    Holds(Option<Box<[Id<Commodity>]>>, Loc),
+    Holds(Option<Box<[Id<Commodity>]>>),
     Select(Policy),
-    Opened(Day, Loc),
-    Closed(Day, Loc),
+    Opened(Day),
+    Closed(Day),
     Liquidity(Span),
     Via(Id<Place>),
     Lives(Residence),
-    Member(Id<Entity>, Loc),
+    Member(Id<Entity>),
     Currency(Id<Commodity>),
     Citizen(Box<[Id<crate::book::System>]>),
     Books(Books),
@@ -87,7 +87,7 @@ enum Assign {
     Deferred,
     Claim,
     Basis(Basis),
-    Has(Has),
+    Has,
     /// A value for a property a kind declared.
     Prop(Prop),
 }
@@ -101,7 +101,7 @@ impl Assign {
                 | Assign::Deferred
                 | Assign::Claim
                 | Assign::Basis(_)
-                | Assign::Has(_)
+                | Assign::Has
                 | Assign::Purpose(_)
                 | Assign::Pays(_)
                 | Assign::Takes(_)
@@ -118,14 +118,14 @@ type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
 const BUILTINS: [(&str, &[Target], Reader); 25] = [
-    ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?, a.line.loc))),
+    ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?))),
     ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| a.policy().map(Assign::Select)),
-    ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?, a.line.loc))),
-    ("closed", &[Target::Place], |a| Ok(Assign::Closed(a.day()?, a.line.loc))),
+    ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?))),
+    ("closed", &[Target::Place], |a| Ok(Assign::Closed(a.day()?))),
     ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], |a| a.span().map(Assign::Liquidity)),
     ("via", &[Target::Entity], |a| a.place().map(Assign::Via)),
     ("lives", &[Target::Entity], |a| a.residence()),
-    ("member", &[Target::Entity], |a| Ok(Assign::Member(a.entity()?, a.line.loc))),
+    ("member", &[Target::Entity], |a| Ok(Assign::Member(a.entity()?))),
     ("currency", &[Target::Entity], |a| a.currency().map(Assign::Currency)),
     ("citizen", &[Target::Entity], |a| a.citizens().map(Assign::Citizen)),
     ("books", &[Target::Entity], |a| a.books().map(Assign::Books)),
@@ -323,7 +323,7 @@ impl Entity {
             Assign::Purpose(purpose) => self.purpose = Some(*purpose),
             Assign::Via(place) => self.place = Some(*place),
             Assign::Lives(residence) => self.lives = self.lives.iter().copied().chain([*residence]).collect(),
-            Assign::Member(entity, _) => self.member = Some(*entity),
+            Assign::Member(entity) => self.member = Some(*entity),
             Assign::Currency(currency) => self.currency = *currency,
             Assign::Citizen(citizen) => self.citizen = citizen.clone(),
             Assign::Books(books) => self.books = *books,
@@ -336,10 +336,10 @@ impl Entity {
 impl Place {
     fn set(&mut self, assign: &Assign) {
         match assign {
-            Assign::Holds(holds, _) => self.holds = holds.clone(),
+            Assign::Holds(holds) => self.holds = holds.clone(),
             Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Opened(day, _) => self.opened = Some(*day),
-            Assign::Closed(day, _) => self.closed = Some(*day),
+            Assign::Opened(day) => self.opened = Some(*day),
+            Assign::Closed(day) => self.closed = Some(*day),
             Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
@@ -585,11 +585,12 @@ impl<'a, 's> Args<'_, 'a, 's> {
             _ => None,
         };
         let wanted = format!("a type: {}", list(&TYPES.map(|ty| ty.0)));
-        let ty = self.arg(&wanted, ty)?;
+        self.arg(&wanted, ty)?;
         if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text) {
             return Err(problem::built_in_property(name));
         }
-        Ok(Assign::Has(Has { name: self.world.book.names.intern(name.text), ty, loc: Some(name.loc) }))
+        self.world.book.names.intern(name.text);
+        Ok(Assign::Has)
     }
 
     /// The value of a property a kind declared.
@@ -846,7 +847,7 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
         });
         order += 1;
     }
-    stage_changes(world, updates, diags);
+    stage_changes(world, updates);
 }
 
 /// Reads built-in kind defaults and applies them oldest-ancestor first to the
@@ -1569,7 +1570,7 @@ fn stage_unique(
     world.set_prop(target, prop);
 }
 
-fn stage_changes(world: &mut World<'_>, mut updates: Vec<PropertyChange>, _diags: &mut Vec<Diagnostic>) {
+fn stage_changes(world: &mut World<'_>, mut updates: Vec<PropertyChange>) {
     let mut groups: Map<((u8, u32), Sym), Vec<PropertyChange>> = Map::default();
     for update in updates.drain(..) {
         groups.entry((target_key(update.target), update.name)).or_default().push(update);

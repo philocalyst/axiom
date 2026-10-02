@@ -19,7 +19,6 @@ pub(crate) struct NativePurposes {
     pub tree: Tree<Purpose>,
     pub index: Scoped<Purpose>,
     pub roots: crate::book::PurposeRoots,
-    pub declarations: Vec<Id<Purpose>>,
 }
 
 pub(crate) fn declare_sites<'s>(
@@ -209,7 +208,6 @@ pub(crate) fn declare_sites<'s>(
             capital: remap[root_ids[2].index()],
             transfer: remap[root_ids[3].index()],
         },
-        declarations: draft_of.into_iter().map(|at| remap[at]).collect(),
     }
 }
 

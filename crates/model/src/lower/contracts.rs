@@ -6,7 +6,7 @@ use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Span
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
-use super::{JournalSurvey, compile_roots, contract_roots, inputs};
+use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Loan, Prepay,
     Relative, Reset, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent, TemplateLeg,
@@ -33,12 +33,7 @@ struct WrittenContract<'a, 's> {
 /// Reserves every contract id before compiling any contract body. Terms and
 /// their computed roots are then compiled against the complete contract
 /// namespace, while occurrences are handled by [`super::record`].
-pub(crate) fn contracts<'a, 's>(
-    world: &mut World<'s>,
-    collected: &Collected<'a, 's>,
-    _survey: &JournalSurvey<'s>,
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
     let mut written = Vec::new();
     for contract in &collected.contracts {
         let (site, node, loc) = (contract.site, contract.node, contract.item.loc);
@@ -155,7 +150,7 @@ fn lower_contract<'a, 's>(
     );
 
     let owner = match node.schedule.or(node.standing) {
-        Some(schedule) => schedule_owner(world, written.site.home, file, Some(schedule), party, diags)?,
+        Some(schedule) => schedule_owner(world, written.site.home, file, Some(schedule), diags)?,
         None => world.book.roots.me,
     };
     let deposit = contract_deposit(
@@ -588,7 +583,7 @@ fn lower_terms<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let hold = schedule.terms.holding?;
-    let holding = resolve_endpoint(world, written.site.home, file, hold.name, schedule.at, diags)?;
+    let holding = resolve_endpoint(world, written.site.home, file, hold.name, diags)?;
     let Some(party_place) = world.book.entities[party].place else {
         diags.push(
             Diagnostic::error("contract-party-place", "the contract party has no usable place")
@@ -630,7 +625,7 @@ fn lower_terms<'a, 's>(
     .ok()?;
     let mut legs = Vec::new();
     for leg in &file[body.legs] {
-        let endpoint = resolve_endpoint(world, written.site.home, file, leg.end.name, leg.loc, diags)?;
+        let endpoint = resolve_endpoint(world, written.site.home, file, leg.end.name, diags)?;
         // A promised split leg names the recipient. Keep the source end of
         // the scheduled header and send that portion to the named endpoint:
         // an employer's paycheck leg is `lumen -> retirement`, and an owner
@@ -650,7 +645,7 @@ fn lower_terms<'a, 's>(
             leg.loc,
         );
         let (codes, selectors, detail, waive, leg_purpose, leg_description) =
-            lower_tail(world, written.site.home, file, leg.tail, leg.loc, diags);
+            lower_tail(world, written.site.home, file, leg.tail, diags);
         flow.codes = codes;
         flow.select = selectors;
         flow.detail = detail;
@@ -915,8 +910,7 @@ fn lower_item<'s>(
             (),
         ),
     };
-    let (codes, select, detail, waive, purpose, description) =
-        lower_tail(world, home, file, item.tail, item.loc, diags);
+    let (codes, select, detail, waive, purpose, description) = lower_tail(world, home, file, item.tail, diags);
     Some(TemplateItem {
         sign: match item.sign {
             ast::Sign::Carve => crate::book::Sign::Carve,
@@ -941,7 +935,6 @@ fn lower_tail<'s>(
     home: Home,
     file: &ast::File<'s>,
     tail: axiom_syntax::Many<ast::Clause<'s>>,
-    loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> (Run<Sym>, Run<Select>, Option<Id<Detail>>, Option<Waive>, Option<At<Purposed>>, Option<crate::book::Text>) {
     let code_start = world.book.codes.len();
@@ -1010,7 +1003,6 @@ fn resolve_endpoint<'s>(
     home: Home,
     file: &ast::File<'s>,
     name: Name<'s>,
-    loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Place>> {
     match world.end(home, Word::of(file, name.0)) {
@@ -1027,11 +1019,10 @@ fn schedule_owner<'s>(
     home: Home,
     file: &ast::File<'s>,
     schedule: Option<ast::Schedule<'s>>,
-    _party: Id<crate::book::Entity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Entity>> {
     let holding = schedule?.terms.holding?;
-    let place = resolve_endpoint(world, home, file, holding.name, schedule?.at, diags)?;
+    let place = resolve_endpoint(world, home, file, holding.name, diags)?;
     Some(world.book.places[place].owner)
 }
 
@@ -1440,7 +1431,7 @@ fn contract_deposit<'s>(
             );
             return Err(());
         };
-        let place = match resolve_endpoint(world, home, file, name, name_loc, diags) {
+        let place = match resolve_endpoint(world, home, file, name, diags) {
             Some(place) => place,
             None => return Err(()),
         };

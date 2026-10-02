@@ -80,7 +80,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     props::system_rates(&mut world, &collected, &mut diags);
     sync_lower::declare(&mut world, &sites, &collected, &mut diags);
     laws::declare(&mut world, &sites, &mut diags);
-    lower::contracts(&mut world, &collected, &survey, &mut diags);
+    lower::contracts(&mut world, &collected, &mut diags);
     laws::register_native(&mut world, &mut diags);
     lower::record(&mut world, &collected, &mut diags);
     // One cause is reported once, however many declarations shared the line.

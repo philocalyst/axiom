@@ -59,17 +59,6 @@ pub(crate) fn list(words: &[&str]) -> String {
     }
 }
 
-/// `a, b and c`, each in backticks.
-pub(crate) fn list_and(words: &[&str]) -> String {
-    match words {
-        [init @ .., last] if !init.is_empty() => {
-            let init: Vec<String> = init.iter().map(|word| format!("`{word}`")).collect();
-            format!("{} and `{last}`", init.join(", "))
-        }
-        _ => list(words),
-    }
-}
-
 /// One count in words: `1 line`, `3 lines`.
 pub(crate) fn count(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })

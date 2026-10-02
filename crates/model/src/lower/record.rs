@@ -270,7 +270,6 @@ fn lower_txn<'a, 's>(
             let flow_at = staged.flows().len();
             match make_flow(
                 &mut staged,
-                home,
                 file,
                 written.date,
                 from,
@@ -1888,21 +1887,14 @@ fn lower_contract_change<'a, 's>(
         return;
     }
 
+    // The parser takes one `until` and one description per statement, and no clause a waiver has no use for;
+    // only codes may be repeated.
     let mut last = statement.date;
-    let mut until_loc = None;
     let mut code = None;
-    let mut description_loc = None;
     let mut description = None;
     for clause in &file[statement.tail] {
         match clause.kind {
-            ClauseKind::Until(until) => {
-                if let Some(first) = until_loc {
-                    diags.push(problem::twice("waiver end date", clause.at, first));
-                    return;
-                }
-                until_loc = Some(clause.at);
-                last = until;
-            }
+            ClauseKind::Until(until) => last = until,
             ClauseKind::Code(written) => {
                 if let Some((_, first)) = code {
                     diags.push(problem::twice("waiver code", clause.at, first));
@@ -1910,26 +1902,12 @@ fn lower_contract_change<'a, 's>(
                 }
                 code = Some((written, clause.at));
             }
-            ClauseKind::Description(text) => {
-                if let Some(first) = description_loc {
-                    diags.push(
-                        Diagnostic::error("duplicate-waiver-description", "a waiver has one description")
-                            .label(first, "the first description is here")
-                            .label(clause.at, "this second description cannot replace it"),
-                    );
-                    return;
-                }
-                description_loc = Some(clause.at);
-                description = Some(world.book.quoted_text(text.0));
-            }
+            ClauseKind::Description(text) => description = Some(world.book.quoted_text(text.0)),
             ClauseKind::Purpose(_) => {
                 unsupported_statement(loc, "a contract waiver has no claim-recovery purpose", diags);
                 return;
             }
-            _ => {
-                unsupported_statement(loc, "this clause does not apply to a contract waiver", diags);
-                return;
-            }
+            other => unreachable!("the parser keeps {other:?} off a waiver"),
         }
     }
     let Some(days) = Days::new(statement.date, last) else {
@@ -1981,24 +1959,10 @@ fn lower_claim_change<'a, 's>(
     }
 
     let mut description = None;
-    let mut description_loc = None;
     for clause in &file[statement.tail] {
         match clause.kind {
-            ClauseKind::Description(text) => {
-                if let Some(first) = description_loc {
-                    diags.push(
-                        Diagnostic::error(
-                            "duplicate-claim-writeoff-description",
-                            "a claim write-off has one description",
-                        )
-                        .label(first, "the first description is here")
-                        .label(clause.at, "this second description cannot replace it"),
-                    );
-                    return;
-                }
-                description_loc = Some(clause.at);
-                description = Some(world.book.quoted_text(text.0));
-            }
+            // The parser takes one description per statement.
+            ClauseKind::Description(text) => description = Some(world.book.quoted_text(text.0)),
             _ => {
                 unsupported_statement(loc, "a full claim write-off only accepts a description", diags);
                 return;
@@ -2054,29 +2018,13 @@ fn lower_end<'a, 's>(
         unsupported_statement(loc, "an ending cannot carry journal lines", diags);
         return;
     }
-    // Validate the whole row before changing a contract or closing a place.
-    // Codes may repeat by design; a description may occur only once.
+    // The parser takes one description per statement, codes any number of times, and nothing else on an ending.
     let mut description = None;
-    let mut description_loc = None;
     for clause in &file[statement.tail] {
         match clause.kind {
             ClauseKind::Code(_) => {}
-            ClauseKind::Description(text) => {
-                if let Some(first) = description_loc {
-                    diags.push(
-                        Diagnostic::error("duplicate-end-description", "an ending has one description")
-                            .label(first, "the first description is here")
-                            .label(clause.at, "this second description cannot replace it"),
-                    );
-                    return;
-                }
-                description_loc = Some(clause.at);
-                description = Some(text);
-            }
-            _ => {
-                unsupported_statement(loc, "this clause does not apply to an ending", diags);
-                return;
-            }
+            ClauseKind::Description(text) => description = Some(text),
+            other => unreachable!("the parser keeps {other:?} off an ending"),
         }
     }
     let Subject::Name(name) = statement.subject else {
@@ -2196,7 +2144,7 @@ enum StatementTarget {
     Asset(Id<crate::book::Asset>),
     Unit(Id<crate::book::Commodity>),
     Code(axiom_core::Sym),
-    Purpose(Id<crate::book::Purpose>),
+    Purpose,
 }
 
 fn statement_target<'s>(
@@ -2240,7 +2188,7 @@ fn statement_target<'s>(
         Subject::Code(code) => Some(StatementTarget::Code(world.book.names.intern(code.name()))),
         Subject::Purpose(name) => world
             .purpose(home, Word::of(file, name.0))
-            .map(StatementTarget::Purpose)
+            .map(|_| StatementTarget::Purpose)
             .map_err(|problem| diags.push(problem))
             .ok(),
         Subject::Unit(name) => world
@@ -2372,7 +2320,7 @@ fn lower_value<'s>(
             };
             world.book.prices.quotes.push(Quote { unit, quote, day: statement.date, rate, implied: false, loc });
         }
-        StatementTarget::Entity(_) | StatementTarget::Purpose(_) => {
+        StatementTarget::Entity(_) | StatementTarget::Purpose => {
             unsupported_statement(loc, "a value needs an account, asset, code or commodity subject", diags)
         }
     }
@@ -2439,13 +2387,7 @@ fn assertion_gap<'s>(
                 });
             }
             ClauseKind::Description(_) | ClauseKind::Code(_) => {}
-            _ => {
-                diags.push(
-                    Diagnostic::error("assertion-tail", "this tail clause does not apply to a value")
-                        .label(clause.at, "remove the clause or move it to a flow"),
-                );
-                return None;
-            }
+            other => unreachable!("the parser keeps {other:?} off a value"),
         }
     }
     Some(gap)
@@ -2579,16 +2521,6 @@ fn resolve_quantity<'s>(
     roots: &Map<ast::ExprId, NodeId>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
-    let loc = match quantity {
-        Quantity::Amount(ast::Amount::Literal(literal))
-        | Quantity::Pending(ast::Amount::Literal(literal))
-        | Quantity::Target(ast::Amount::Literal(literal)) => file.loc(literal.0),
-        Quantity::Amount(ast::Amount::Computed(root))
-        | Quantity::Pending(ast::Amount::Computed(root))
-        | Quantity::Target(ast::Amount::Computed(root)) => file.exprs[root].loc,
-        Quantity::Unknown(name) => file.loc(name.0),
-        _ => Loc::default(),
-    };
     let resolve_literal = |world: &World<'s>, literal: ast::Literal<'s>| -> Option<Amount> {
         let unit = match literal.unit() {
             Some(unit) => world.commodity_of(Word::of(file, unit.0)).ok(),
@@ -2681,13 +2613,11 @@ fn resolve_quantity<'s>(
             group: JournalQuantity::Whole,
         },
     };
-    let _ = loc;
     Some(resolved)
 }
 
 fn make_flow<'s>(
     world: &mut World<'s>,
-    home: Home,
     file: &ast::File<'s>,
     day: Day,
     from: ResolvedEnd,
@@ -2840,7 +2770,6 @@ fn make_flow<'s>(
     )?;
     let expressions = (root_exprs.0.is_some() || root_exprs.1.is_some() || basis_root.is_some())
         .then_some(FlowExpressions { flow: 0, out: root_exprs.0, arrive: root_exprs.1, basis: basis_root });
-    let _ = home;
     Some((flow, expressions))
 }
 
@@ -3296,28 +3225,16 @@ fn lower_items<'s>(
             || tail.waive.is_some()
             || !local_codes.is_empty();
         let flow = if has_own_metadata {
-            let resolved = ResolvedQuantity {
-                amount: amount.0,
-                infer: Infer::Known,
-                mode,
-                root: amount.1,
-                group: JournalQuantity::Amount(amount.0, amount.1),
-            };
             let from_flow = if item.sign == ast::Sign::Less { to } else { from };
             let to_flow = if item.sign == ast::Sign::Less { from } else { to };
-            let (out, arrive) = if parent_side == crate::book::FlowSide::Out {
-                (resolved.amount, resolved.amount)
-            } else {
-                (resolved.amount, resolved.amount)
-            };
             let basis_root = tail.basis_root;
             make_resolved_flow(
                 staged,
                 day,
                 from_flow,
                 to_flow,
-                out,
-                arrive,
+                amount.0,
+                amount.0,
                 Infer::Known,
                 mode,
                 tail,
