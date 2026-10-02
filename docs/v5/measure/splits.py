@@ -208,9 +208,14 @@ def unknown(book):
     day = book.day(3)
     source = rng.choice(["reserve", "reserve"])
     other = rng.choice(["savings", "bonus", "shop"])
-    form = rng.choice(["unknown", "unknown", "unknown-split"])
+    form = rng.choice(["unknown", "unknown", "unknown-split", "unknown-exchange"])
     book.add(f"{day} checking -> {source} {start} USD")
-    if form == "unknown":
+    if form == "unknown-exchange":
+        bought, sold = rng.randint(1, 4), rng.randint(1, 3)
+        book.add(f"{day} checking {rng.choice([2, 5, 10])}% of {rng.randint(200, 900)} USD -> broker {bought} VTI\n"
+                 f"{day} broker ? VTI -> checking {rng.randint(100, 400)} USD\n"
+                 f"{day} broker = {10 + bought - sold} VTI", "hdr:unknown", "hdr:exchange", "unknown:computed-exchange")
+    elif form == "unknown":
         book.add(f"{day} {source} -> {other} ? USD\n{day} {source} = {left} USD", "hdr:unknown")
     else:
         book.add(f"{day} {source} ->\n  {other} ? USD\n  shop {rng.randint(5, 30)} USD\n{day} {source} = {left} USD",
