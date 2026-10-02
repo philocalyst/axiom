@@ -14,6 +14,9 @@ pub mod id;
 pub mod num;
 pub mod par;
 pub mod sym;
+pub mod tagless;
+#[cfg(test)]
+mod testing;
 pub mod timeline;
 pub mod tree;
 pub mod unit;
@@ -28,6 +31,7 @@ pub use hash::{Map, Set};
 pub use id::{Arena, Id, Run};
 pub use num::{Dec, Qty, Ratio};
 pub use sym::{Interner, Sym};
+pub use tagless::{Column, Tag};
 pub use timeline::Timeline;
 pub use tree::Tree;
 pub use unit::Dim;
