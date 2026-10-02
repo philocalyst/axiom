@@ -493,7 +493,7 @@ Built-in properties:
 | | `pays NAME` | on a commodity kind: what its issuer pays is for |
 | | `takes NAME from NAME` | on an account kind: what arrives from flows of the second purpose is the first |
 | | `select POLICY`, `liquidity SPAN` | defaults |
-| | `has NAME TYPE` | declares a property of this kind's things |
+| | `has NAME RANGE [MULT] [by WEIGHT]` | declares a slot of this kind's things (below) |
 | party kind | `sales-tax PERCENT` | the tax inside every price paid to its parties (derived, §10) |
 | | `pays NAME` | what money from its parties is for |
 | contract, party, kind, purpose | `also ITEM \| FLOW [when EXPR]` | an item or flow every matching flow implies (§10) |
@@ -501,10 +501,30 @@ Built-in properties:
 | | `budget LIMIT monthly\|yearly [carries]` | see above |
 | contract, party, purpose, asset | `share SHARE for ENTITY, …` | who bears each flow (§10): for an owner an allocation, for a party a claim on it. `SHARE` is a percent, a fraction, or a measure (`120 SQFT` of the thing's `area`) |
 
-A kind's other property lines are defaults for its things. `TYPE` is one of `date
-amount number percent span text name entity place kind unit bool purpose asset`,
-and an amount type may name its unit (`has rate USD/MI`). An unknown property is an
+A kind's other property lines are defaults for its things. An unknown property is an
 error with a suggestion.
+
+**Slots.** `has NAME RANGE [MULT] [by WEIGHT]` declares what the things of a kind
+have, what each takes and how many. The range is one of:
+
+- the kinds it takes, `person | household`: a thing of one of those kinds, or of a
+  kind beneath them (all kinds of one sort of thing);
+- `one of self-only | family`: one of those words;
+- a value type: `date amount number percent span text place kind unit bool
+  purpose asset`, or a commodity (`has fee USD`) or a rate of two (`has rate USD/MI`).
+
+The count is none for exactly one, `optional` for none or one, `some` for one or
+more, `many` for any number. A slot that holds several may weigh each value, `by
+share` or `by rent USD`, and its line then gives each value its weight:
+`owners dana 60%, theo 40%`. A kind may repeat a slot of the kinds above it only to
+narrow it (fewer kinds or words, a tighter count): anything wider is
+`slot-widening`. `entity` and `name` are not ranges: a slot takes the kinds of thing
+it is for, or the words it knows (`untyped-slot`).
+
+A property line `NAME VALUE[, VALUE …]` fills the slot of that name, and is checked
+there: `wrong-kind` and `wrong-word` say what was found and what the slot takes,
+`too-many` counts the values, and a required slot that neither the thing nor a kind
+above it fills is `missing-role` at the thing's name, with the line to write.
 
 ```text
 code GLOB [GLOB…]          // `code inv-*`: codes matching it

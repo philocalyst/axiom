@@ -10,7 +10,7 @@
 //! order their lines need: an amount is only exact once its commodity's
 //! precision is settled.
 
-use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, SlotId, Span, Sym, Tree};
 use axiom_syntax::{
     Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting, Statement,
     Subject, Verb,
@@ -22,10 +22,12 @@ use crate::book::{
 };
 use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, PropTarget, World};
-use crate::errors::{Word, article, list, suggest};
-use crate::law::{Ty, Value};
+use crate::errors::{Reported, Word, article, list, suggest};
+use crate::fill::{self, Filled};
+use crate::law::Value;
 use crate::problem;
 use crate::scope::Home;
+use crate::slots::{Range, Slot};
 use crate::values::describe;
 
 /// What a property line describes.
@@ -613,9 +615,11 @@ struct PropertyChange {
 pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
     native_builtins(world, collected, diags);
     let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
-    stage_declared_values(world, collected, &mut seen, diags);
+    let mut filled = Filled::default();
+    stage_declared_values(world, collected, &mut seen, &mut filled, diags);
     let changes = property_changes(world, collected, &mut seen, diags);
     stage_changes(world, changes);
+    missing_roles(world, collected, &filled, diags);
 }
 
 /// The values the property lines of declarations give, from the beginning of time.
@@ -623,6 +627,7 @@ fn stage_declared_values<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
     seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    filled: &mut Filled,
     diags: &mut Vec<Diagnostic>,
 ) {
     for &written in &collected.decls {
@@ -638,13 +643,23 @@ fn stage_declared_values<'a, 's>(
             }
             let Some(has) = has_named(world, target.kind, line.name.0) else {
                 diags.push(unknown_native_property(world, target, line));
+                // A near miss of a slot's name is an attempt to fill it: the typo is said, and the slot not again.
+                let key = target_key(target.target);
+                filled.extend(near_slot(world, target.kind, line.name.0).map(|number| (key.0, key.1, number)));
                 continue;
             };
-            let Some(value) = property_value(world, written.home(), written.file(), line, has, diags) else {
+            // A line that is wrong is still an attempt to fill the slot: it is said, and the slot not again.
+            let key = target_key(target.target);
+            filled.insert((key.0, key.1, has.number));
+            let at = fill::At { home: written.home(), file: written.file(), line };
+            let Some(filling) = fill::fill(world, &at, &has.slot).or_report(diags) else {
                 continue;
             };
-            let prop = Prop { name: has.name, value, since: Day::MIN, loc: Some(line.loc) };
-            stage_unique(world, seen, target.target, prop, diags);
+            // A slot that holds several is stored once the facts are (the next change); one value is a row.
+            if let (true, [value]) = (fill::holds_one(has.slot.mult), &filling.values[..]) {
+                let prop = Prop { name: has.name, value: *value, since: Day::MIN, loc: Some(line.loc) };
+                stage_unique(world, seen, target.target, prop, diags);
+            }
         }
     }
 }
@@ -690,7 +705,9 @@ fn property_change<'a, 's>(
         diags.push(unknown_native_property(world, target, line));
         return None;
     };
-    let value = property_value(world, written.home(), file, line, has, diags)?;
+    let at = fill::At { home: written.home(), file, line };
+    let filling = fill::fill(world, &at, &has.slot).or_report(diags)?;
+    let [value] = filling.values[..] else { return None };
     let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
         ClauseKind::Until(day) => Some(day),
         _ => None,
@@ -1076,80 +1093,6 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
     }
 }
 
-fn property_value<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &File<'s>,
-    line: &Line<'s>,
-    has: Named,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Value> {
-    let args = &file[line.args];
-    if args.len() != 1 {
-        diags.push(
-            Diagnostic::error("property-value", format!("`{}` needs one value", line.name.0))
-                .label(line.loc, "write one value here"),
-        );
-        return None;
-    }
-    if !file[line.lines].is_empty() {
-        diags.push(
-            Diagnostic::error("property-nested-lines", "a custom property value cannot have nested lines")
-                .label(line.loc, "remove the nested lines"),
-        );
-        return None;
-    }
-    let expr = &file.exprs[args[0]];
-    let wanted = match has.ty {
-        Ty::Amount(_) if matches!(expr.kind, ExprKind::Num(_) | ExprKind::Pct(_)) => Ty::Num,
-        Ty::Amount(_) => Ty::AMOUNT,
-        other => other,
-    };
-    let (value, found) = match world.constant(home, file, args[0], Some(wanted)) {
-        Ok(value) => value,
-        Err(problem) => {
-            diags.push(problem);
-            return None;
-        }
-    };
-    if !property_value_fits(has.ty, value, found) {
-        let expected = match has.ty {
-            Ty::Amount(dim) => format!("an amount in {}", dimension_name(world, dim)),
-            ty => article(ty.word()),
-        };
-        diags.push(
-            Diagnostic::error("property-type", format!("`{}` needs {expected}", line.name.0))
-                .label(expr.loc, format!("this is {}", describe(&expr.kind))),
-        );
-        return None;
-    }
-    Some(value)
-}
-
-fn property_value_fits(expected: Ty, value: Value, found: Ty) -> bool {
-    match (expected, value) {
-        (Ty::Amount(Dim::Any), Value::Amount(_)) | (Ty::Amount(Dim::Any), Value::Empty) => true,
-        (Ty::Amount(Dim::Of(want)), Value::Amount(amount)) => amount.unit == want,
-        (Ty::Amount(Dim::Of(_)), Value::Num(_)) => true,
-        (Ty::Amount(Dim::Per(_, _)), Value::Num(_)) => true,
-        (Ty::Amount(Dim::Rate(_, _)), Value::Num(_)) => true,
-        (Ty::Amount(Dim::Number), Value::Num(_)) => true,
-        (Ty::Amount(_), Value::Empty) => true,
-        (ty, _) => crate::values::fits(ty, found),
-    }
-}
-
-fn dimension_name(world: &World<'_>, dim: Dim<Id<Commodity>>) -> String {
-    let unit = |unit: Id<Commodity>| world.book.name(world.book.commodities[unit].symbol).to_owned();
-    match dim {
-        Dim::Number => "a number".to_owned(),
-        Dim::Of(id) => unit(id),
-        Dim::Per(top, bottom) => format!("{}/{}", unit(top), unit(bottom)),
-        Dim::Rate(id, period) => format!("{} per {period:?}", unit(id)),
-        Dim::Any => "an amount".to_owned(),
-    }
-}
-
 impl NativeTarget {
     fn of(world: &World<'_>, target: PropTarget) -> NativeTarget {
         let kind = match target {
@@ -1224,17 +1167,24 @@ fn subject_candidates(world: &World<'_>, home: Home, subject: Subject<'_>, loc: 
     targets.into_iter().map(|target| NativeTarget::of(world, target)).collect()
 }
 
-/// A slot as a property line fills it: its name and what its values are.
+/// The slot a property line fills, as the thing's kind declares it.
 #[derive(Clone, Copy)]
 struct Named {
     name: Sym,
-    ty: Ty,
+    number: SlotId,
+    slot: Slot,
 }
 
 fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Named> {
     let (schema, name) = (&world.book.schema, world.book.names.get(name)?);
-    let number = schema.find(&world.book.kinds, kind, name).and_then(|slot| schema.number(slot.name))?;
-    Some(Named { name, ty: schema.ty(number) })
+    let slot = *schema.find(&world.book.kinds, kind, name)?;
+    Some(Named { name, number: schema.number(name)?, slot })
+}
+
+/// The slot of things of `kind` whose name `word` is a near miss of.
+fn near_slot(world: &World<'_>, kind: Id<Kind>, word: &str) -> Option<SlotId> {
+    let near = axiom_core::diag::closest(word, declared_names(world, kind))?;
+    world.book.schema.number(world.book.names.get(near)?)
 }
 
 /// The names of the slots things of `kind` have.
@@ -1328,18 +1278,12 @@ fn stage_unique(
     diags: &mut Vec<Diagnostic>,
 ) {
     let key = (target_key(target), prop.name, prop.since);
+    let line = prop.loc.unwrap_or_default();
     if let Some(first) = seen.get(&key).copied() {
-        let mut diagnostic = Diagnostic::error(
-            "duplicate-property-value",
-            format!("property `{}` is assigned twice on the same day", world.book.name(prop.name)),
-        );
-        if let Some(loc) = prop.loc {
-            diagnostic = diagnostic.label(loc, "assigned again here");
-        }
-        diags.push(diagnostic.context(first, "first assigned here"));
+        diags.push(problem::filled_twice(world.book.name(prop.name), line, first));
         return;
     }
-    seen.insert(key, prop.loc.unwrap_or_default());
+    seen.insert(key, line);
     world.set_prop(target, prop);
 }
 
@@ -1399,6 +1343,49 @@ fn property_timeline(base: Value, changes: &[PropertyChange]) -> Vec<(Day, Value
         visible = value;
     }
     timeline
+}
+
+/// Required slots that nothing fills: not the thing, and not a kind above it.
+fn missing_roles<'a, 's>(
+    world: &World<'s>,
+    collected: &Collected<'a, 's>,
+    filled: &Filled,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let book = &world.book;
+    for &written in &collected.decls {
+        if matches!(written.node.what, DeclKind::Kind | DeclKind::Purpose) {
+            continue;
+        }
+        let Some(target) = native_target(world, written) else { continue };
+        let key = target_key(target.target);
+        for slot in book.schema.effective(&book.kinds, target.kind).filter(|slot| fill::is_required(slot.mult)) {
+            let number = book.schema.number(slot.name).expect("a declared slot is numbered");
+            let by_kind = |above: Id<Kind>| {
+                let kind = target_key(PropTarget::Kind(above));
+                filled.contains(&(kind.0, kind.1, number))
+            };
+            if filled.contains(&(key.0, key.1, number)) || book.kinds.lineage(target.kind).any(by_kind) {
+                continue;
+            }
+            diags.push(missing_role(world, written, target.kind, slot));
+        }
+    }
+}
+
+/// `college` is a 529-plan, which takes a person as its `beneficiary`, and none is written.
+fn missing_role(world: &World<'_>, written: Written<'_, '_, Decl<'_>>, kind: Id<Kind>, slot: &Slot) -> Diagnostic {
+    let book = &world.book;
+    let thing = Word::of(written.file(), written.node.name.0);
+    let candidates: Vec<&str> = match slot.range {
+        Range::Kinds(run) => fill::fitting(world, book.schema.kinds_of(run)),
+        Range::Words(run) => book.schema.words_of(run).iter().map(|&word| book.name(word)).collect(),
+        Range::Value(_) => Vec::new(),
+    };
+    let takes = book.schema.view(slot.range).describe(book);
+    let header = written.item.loc;
+    let insert = Loc::new(header.file, header.end, header.end);
+    problem::missing_role(thing, book.name(book.kinds[kind].name), book.name(slot.name), &takes, &candidates, insert)
 }
 
 #[cfg(test)]

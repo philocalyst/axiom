@@ -8,6 +8,7 @@
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
 //! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
 //! | `slots`      | what the things of a kind have: ranges, counts and weights  |
+//! | `fill`       | what a line gives a slot: range, count and weights, checked |
 //! | `props`      | property lines, read once and applied down the kind chain   |
 //! | `params`     | dated tables                                                |
 //! | `laws`       | laws compiled and typed, and the order they run in          |
@@ -24,6 +25,7 @@ pub mod sync;
 mod collect;
 mod declare;
 mod errors;
+mod fill;
 mod kinds;
 mod laws;
 mod lower;

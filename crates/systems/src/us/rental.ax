@@ -14,7 +14,7 @@ use std
 kind rental-home : property
   has in-service date
   has land amount
-  has area SQFT
+  has area SQFT optional
 
   /// Residential rental property is depreciated straight-line over 27.5 years
   /// from the month it is placed in service, using the mid-month convention.
