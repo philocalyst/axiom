@@ -5,11 +5,11 @@ use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, Place, Policy, Purpose, ScheduleKind,
-    Sign, System, TemplateItemParent, TemplateProgram, Text,
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System,
+    TemplateProgram, Text,
 };
 use crate::law::{Law, NodeId, Subject};
-use crate::split::{Expr, Part, Quantity};
+use crate::split::{Expr, Made};
 
 /// Value moving once, from one place to another. Balanced by construction.
 #[derive(Clone, PartialEq, Debug)]
@@ -634,19 +634,11 @@ pub struct WrittenOccurrence {
     pub amount: Option<Expr>,
     /// Computed amount, side and basis roots for this occurrence's overrides.
     pub program: Option<Id<JournalProgram>>,
-    /// Source-ordered partial replacements; groups absent here inherit terms.
-    pub groups: Box<[WrittenGroup]>,
+    /// What it replaces of each of the terms' template groups, by position: a group it says nothing of is `None`
+    /// and inherits the terms. Offsets in a group address the source transaction's flows.
+    pub groups: Box<[Option<Made>]>,
     /// Partial header metadata applied to the inherited or replaced groups.
     pub tail: OccurrenceTail,
-}
-
-/// A partial replacement of one contract template group by a written
-/// occurrence. What it does not say it inherits from the template, and group
-/// offsets address the source Txn's flow range.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct WrittenGroup {
-    pub template: u32,
-    pub group: JournalGroup,
 }
 
 /// Metadata written on a contract occurrence's header.
@@ -684,7 +676,7 @@ impl Default for OccurrenceTail {
 pub struct JournalProgram {
     pub program: TemplateProgram,
     pub flow_roots: Box<[FlowExpressions]>,
-    pub groups: Box<[JournalGroup]>,
+    pub groups: Box<[Made]>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -694,49 +686,6 @@ pub struct FlowExpressions {
     pub arrive: Option<NodeId>,
     /// Computed base-currency basis attached to this flow's runtime detail.
     pub basis: Option<NodeId>,
-}
-
-/// A resolved endpoint retained when a split header has no postable flow of
-/// its own. `entity` records that the written endpoint named an entity whose
-/// place is used by the flow.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct JournalEnd {
-    pub place: Id<Place>,
-    pub entity: Option<Id<Entity>>,
-}
-
-/// A split header and its source-ordered legs and items.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct JournalGroup {
-    /// An independently posted header flow, or `None` when the named source
-    /// exists only as aggregate metadata for the split legs.
-    pub header: Option<u32>,
-    /// Resolved named source for a source-only split. Still populated for
-    /// headed groups so the source relation is explicit and uniform.
-    pub source: JournalEnd,
-    /// Which side of each leg corresponds to the aggregate header quantity.
-    pub side: FlowSide,
-    /// The aggregate quantity only when `header` is absent. When a header
-    /// flow exists, its own inline amount and `FlowExpressions` are canonical.
-    pub total: Option<Quantity>,
-    pub legs: Box<[u32]>,
-    /// What each leg takes, parallel to `legs`: it preserves the Rest, All and zero distinctions.
-    pub leg_quantities: Box<[Part]>,
-    pub items: Box<[JournalItem]>,
-}
-
-/// A source-ordered line item attached to the header remainder or one leg.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct JournalItem {
-    /// The materialized purpose-bearing flow, if this item has one.
-    pub flow: Option<u32>,
-    pub sign: Sign,
-    pub parent: TemplateItemParent,
-    pub side: FlowSide,
-    /// Exactly one typed literal magnitude or computed root. A purposeless
-    /// Less item still retains its amount here while `flow` is `None`.
-    pub amount: Expr,
-    pub loc: Loc,
 }
 
 /// An id used only by contract template flows before an occurrence is

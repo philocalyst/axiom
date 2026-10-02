@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use axiom_core::{Id, Loc, Sym};
 use axiom_engine::{Cause, Run};
-use axiom_model::{Action, Amount, Book, Flow, Provenance, Purposed, Subject, TemplateFlow, Terms};
+use axiom_model::{Action, Amount, Book, Flow, Promised, Provenance, Purposed, Subject, Terms};
 
 use super::event_words;
 use crate::flow::{object_name, scoped_movement_qty};
@@ -230,13 +230,13 @@ fn add_terms_codes(book: &Book, terms: &Terms, codes: &mut BTreeSet<axiom_core::
     }
 }
 
-fn add_template_codes(book: &Book, template: &TemplateFlow, codes: &mut BTreeSet<axiom_core::Sym>) {
-    codes.extend(book.flow_view(&template.flow).codes());
+fn add_template_codes(book: &Book, template: &Promised, codes: &mut BTreeSet<axiom_core::Sym>) {
+    codes.extend(book.flow_view(&template.header.flow).codes());
     for leg in &template.legs {
         codes.extend(book.flow_view(&leg.flow).codes());
     }
     for item in &template.items {
-        codes.extend(book.codes[item.codes].iter().copied());
+        codes.extend(book.codes[item.flow.codes].iter().copied());
     }
 }
 

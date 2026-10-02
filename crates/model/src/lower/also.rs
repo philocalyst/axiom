@@ -5,13 +5,13 @@ use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
 use super::tail::{Reach, written_purpose, written_waive};
-use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Sign, Text};
+use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
 use crate::law::{Law, NodeId, Owner, Rank, Trigger, Ty};
 use crate::scope::Home;
-use crate::split::Expr;
+use crate::split::{Expr, Sign};
 
 /// Pooled metadata shared by contract and declaration `also` clauses.
 #[derive(Clone, Copy)]

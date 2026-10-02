@@ -12,8 +12,7 @@ use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
-    FlowSide, Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, TemplateFlow, TemplateItem,
-    TemplateItemParent, TemplateLeg, TemplateProgram, Terms, TermsState, Text,
+    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, TemplateProgram, Terms, TermsState, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
@@ -25,7 +24,7 @@ use crate::problem::{self, Noun};
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
-use crate::split::{Expr, Part, Quantity};
+use crate::split::{Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
 
 /// A contract as written, with the id reserved for it and its name.
 #[derive(Clone, Copy)]
@@ -615,7 +614,7 @@ struct TermsCx<'a, 's> {
 }
 
 /// The header flow of a schedule, with what the legs and the items under it are made against.
-struct Header {
+struct HeaderCx {
     flow: Flow,
     out: Quantity,
     arrive: Quantity,
@@ -642,10 +641,9 @@ fn lower_terms<'a, 's>(
         lower_header_item(world, cx, &header, &roots, item, diags)
     };
     let items: Vec<_> = file[node.body.items].iter().filter_map(|item| lower(world, item, diags)).collect();
-    let template = TemplateFlow {
-        flow: header.flow.clone(),
-        out: header.out,
-        arrive: header.arrive,
+    let template = Promised {
+        header: Header { flow: header.flow.clone(), out: header.out, arrive: header.arrive },
+        side: header.side,
         legs: legs.into_boxed_slice(),
         items: items.into_boxed_slice(),
     };
@@ -688,7 +686,7 @@ fn template_header<'a, 's>(
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Header> {
+) -> Option<HeaderCx> {
     let (file, party) = (cx.file, cx.party);
     let hold = schedule.terms.holding?;
     let holding = resolve_endpoint(world, cx.written.site.home, file, hold.name, diags)?;
@@ -714,7 +712,7 @@ fn template_header<'a, 's>(
     let (from_end, to_end) = (End { place: from, entity: from_party }, End { place: to, entity: to_party });
     flow.purpose = infer_for_flow(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
     let arrive = buys.map_or(quantity, Quantity::Unknown);
-    Some(Header { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
+    Some(HeaderCx { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
 }
 
 /// A promised split leg names the recipient. The source end of the scheduled header is kept and that portion is
@@ -723,11 +721,11 @@ fn template_header<'a, 's>(
 fn template_legs<'a, 's>(
     world: &mut World<'s>,
     cx: &TermsCx<'a, 's>,
-    header: &Header,
+    header: &HeaderCx,
     legs: ast::Many<ast::Leg<'s>>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Vec<TemplateLeg>> {
+) -> Option<Vec<Leg<Flow>>> {
     let (file, home) = (cx.file, cx.written.site.home);
     let mut lowered = Vec::new();
     for leg in &file[legs] {
@@ -742,7 +740,7 @@ fn template_legs<'a, 's>(
         let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
         flow.purpose = infer_for_flow(world, ends.0, ends.1, inferred, leg.loc, diags).ok()?;
         flow.description = tail.description.or(flow.description);
-        lowered.push(TemplateLeg { flow, side: header.side, part });
+        lowered.push(Leg { flow, part });
     }
     Some(lowered)
 }
@@ -894,31 +892,29 @@ fn template_amount<'s>(
 fn lower_header_item<'s>(
     world: &mut World<'s>,
     cx: &TermsCx<'_, 's>,
-    header: &Header,
+    header: &HeaderCx,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     item: &ast::LineItem<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<TemplateItem> {
+) -> Option<Item<Says>> {
     let (file, home) = (cx.file, cx.written.site.home);
-    let (parent, side, fallback) = (TemplateItemParent::Header, header.side, header.unit);
-    let amount = template_amount(world, file, item.amount, roots, fallback, diags)?;
+    let amount = template_amount(world, file, item.amount, roots, header.unit, diags)?;
     let tail = lower_term_tail(world, home, file, item.tail, diags);
-    Some(TemplateItem {
+    Some(Item {
         sign: match item.sign {
-            ast::Sign::Carve => crate::book::Sign::Carve,
-            ast::Sign::Add => crate::book::Sign::Add,
-            ast::Sign::Less => crate::book::Sign::Less,
+            ast::Sign::Carve => Sign::Carve,
+            ast::Sign::Add => Sign::Add,
+            ast::Sign::Less => Sign::Less,
         },
-        parent,
-        side,
         amount,
-        purpose: tail.purpose.map(|at| at.value),
-        description: tail.description,
-        codes: tail.codes,
-        select: tail.select,
-        detail: None,
-        waive: tail.waive,
         loc: item.loc,
+        flow: Says {
+            purpose: tail.purpose.map(|at| at.value),
+            description: tail.description,
+            codes: tail.codes,
+            select: tail.select,
+            waive: tail.waive,
+        },
     })
 }
 

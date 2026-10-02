@@ -17,10 +17,9 @@
 
 use axiom_core::{Arena, Cadence, Day, Days, Diagnostic, Id, Qty, Ratio, Span, par};
 use axiom_model::{
-    Amount, Book, Commodity, Contract, End, Expr, Fault, Flow, FlowExpressions, FlowSide, FlowView, Infer,
-    JournalGroup, JournalItem, JournalProgram, Mode, OccurrenceTail, Origin, Part, Place, PurposeRoot, Quantity,
-    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Sign, Subject, TemplateFlow, TemplateItemParent, TemplateLeg,
-    TemplateProgram, Terms, Value,
+    Amount, Book, Commodity, Contract, End, Expr, Fault, Flow, FlowExpressions, FlowSide, FlowView, Heading, Infer,
+    Item, JournalProgram, Leg, Made, Mode, OccurrenceTail, Origin, Part, Place, Promised, PurposeRoot, Quantity,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Sign, Subject, TemplateProgram, Terms, Value,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -371,24 +370,6 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let occurrence_journal =
             written.and_then(|written| written.program).and_then(|program| book.journal_programs.get(program));
         let occurrence_program = occurrence_journal.map(|journal| &journal.program);
-        if let Some(written) = written {
-            for (index, group) in written.groups.iter().enumerate() {
-                let valid_offsets = group
-                    .group
-                    .header
-                    .into_iter()
-                    .chain(group.group.legs.iter().copied())
-                    .chain(group.group.items.iter().filter_map(|item| item.flow))
-                    .all(|offset| (offset as usize) < source_flows.len());
-                if group.template as usize >= terms.template.len()
-                    || group.group.legs.len() != group.group.leg_quantities.len()
-                    || !valid_offsets
-                    || written.groups[..index].iter().any(|previous| previous.template == group.template)
-                {
-                    return Err(TemplateError::InvalidTemplate { loc: contract.loc });
-                }
-            }
-        }
         let amount_override = match written.and_then(|written| written.amount) {
             None => OccurrenceAmount::Inherit,
             Some(Expr::Literal(amount)) => OccurrenceAmount::Value(amount),
@@ -408,7 +389,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     txn: runtime_txn,
                     inputs,
                 };
-                match self.compute(&at, &template.flow, root, 0, missing_inputs)? {
+                match self.compute(&at, &template.header.flow, root, 0, missing_inputs)? {
                     Some(amount) => OccurrenceAmount::Value(amount),
                     None => OccurrenceAmount::Omitted,
                 }
@@ -419,15 +400,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let mut ordinal_base = 0u32;
         let result = (|| {
             for (group_index, template) in terms.template.iter().enumerate() {
-                let written_group = written
-                    .and_then(|written| written.groups.iter().find(|group| group.template as usize == group_index));
+                let written_group = written.and_then(|written| written.groups.get(group_index)?.as_ref());
                 let width = 1usize
                     .checked_add(template.legs.len())
-                    .and_then(|width| width.checked_add(written_group.map_or(0, |group| group.group.legs.len())))
+                    .and_then(|width| width.checked_add(written_group.map_or(0, |group| group.legs.len())))
                     .and_then(|width| width.checked_add(template.items.len()))
-                    .and_then(|width| width.checked_add(written_group.map_or(0, |group| group.group.items.len())))
+                    .and_then(|width| width.checked_add(written_group.map_or(0, |group| group.items.len())))
                     .and_then(|width| u32::try_from(width).ok())
-                    .ok_or(TemplateError::InvalidTemplate { loc: template.flow.loc })?;
+                    .ok_or(TemplateError::InvalidTemplate { loc: template.header.flow.loc })?;
                 self.materialize_group(
                     contract_id,
                     schedule,
@@ -449,8 +429,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     details,
                     missing_inputs,
                 )?;
-                ordinal_base =
-                    ordinal_base.checked_add(width).ok_or(TemplateError::InvalidTemplate { loc: template.flow.loc })?;
+                ordinal_base = ordinal_base
+                    .checked_add(width)
+                    .ok_or(TemplateError::InvalidTemplate { loc: template.header.flow.loc })?;
             }
             Ok(())
         })();
@@ -487,12 +468,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         source_day: Day,
         runtime_txn: RuntimeTxn,
         terms: &Terms,
-        template: &TemplateFlow,
+        template: &Promised,
         group_index: usize,
         ordinal_base: u32,
         ratio: axiom_core::Ratio,
         amount_override: OccurrenceAmount,
-        written_group: Option<&axiom_model::WrittenGroup>,
+        written_group: Option<&Made>,
         source_flows: &[Flow],
         tail: Option<&OccurrenceTail>,
         occurrence_journal: Option<&JournalProgram>,
@@ -518,7 +499,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             ..template_at
         };
         let group_start = out.len();
-        let recognized = match book.contracts[contract_id].recognition_on_schedule(&template.flow, schedule, due) {
+        let recognized = match book.contracts[contract_id].recognition_on_schedule(&template.header.flow, schedule, due)
+        {
             Ok(recognized) => recognized,
             // A contract without an authored `from` date uses Day::MIN as
             // the template's storage anchor. Its default recognition day is
@@ -526,15 +508,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             // overflows even though no date arithmetic is semantically
             // needed. Explicit recognition periods are resolved before this
             // shift in `recognition_on_schedule` and keep their normal path.
-            Err(axiom_model::ForecastError::Overflow) if template.flow.day == Day::MIN => Days::on(due),
+            Err(axiom_model::ForecastError::Overflow) if template.header.flow.day == Day::MIN => Days::on(due),
             Err(error) => return Err(TemplateError::Forecast(error)),
         };
 
-        let mut header = written_group
-            .and_then(|group| group.group.header)
-            .and_then(|offset| source_flows.get(offset as usize))
-            .cloned()
-            .unwrap_or_else(|| template.flow.clone());
+        let mut header = template.header.flow.clone();
         header.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
         header.origin = Origin::Occurrence(contract_id);
         header.mode = if runtime_txn.source_txn().is_some() { Mode::Actual } else { Mode::Planned };
@@ -558,12 +536,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             }
         }
         let header_ordinal = ordinal_base;
-        let out_value = self.quantity(&template_at, &header, template.out, End::From, header_ordinal, missing)?;
-        let arrive_value = self.quantity(&template_at, &header, template.arrive, End::To, header_ordinal, missing)?;
+        let out_value =
+            self.quantity(&template_at, &header, template.header.out, End::From, header_ordinal, missing)?;
+        let arrive_value =
+            self.quantity(&template_at, &header, template.header.arrive, End::To, header_ordinal, missing)?;
         // A missing binding must not silently reuse the compile-time Flow
         // placeholder. Omit this group and retain the missing-input index.
-        if (template.out.root().is_some() && out_value.is_none())
-            || (template.arrive.root().is_some() && arrive_value.is_none())
+        if (template.header.out.root().is_some() && out_value.is_none())
+            || (template.header.arrive.root().is_some() && arrive_value.is_none())
         {
             return Ok(());
         }
@@ -582,8 +562,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 header.mode = Mode::Pending;
             }
         }
-        let out_is_explicit = template.out.root().is_some();
-        let arrive_is_explicit = template.arrive.root().is_some();
+        let out_is_explicit = template.header.out.root().is_some();
+        let arrive_is_explicit = template.header.arrive.root().is_some();
         if !header.is_exchange() {
             if out_is_explicit && !arrive_is_explicit {
                 if let Some(out) = out_value {
@@ -602,7 +582,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         if group_index == 0 {
             if let OccurrenceAmount::Value(amount) = amount_override {
                 apply_occurrence_amount(book, &mut header, book.contracts[contract_id].buys, due, amount)
-                    .map_err(|fault| TemplateError::Expression { fault, loc: template.flow.loc })?;
+                    .map_err(|fault| TemplateError::Expression { fault, loc: template.header.flow.loc })?;
             }
         }
         if let Some(value) =
@@ -636,7 +616,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         }
         self.push_occurrence_flow(header, source_day, runtime_txn, header_ordinal, detail_override, details, out)?;
 
-        let extra_leg_capacity = written_group.map_or(0, |group| group.group.legs.len());
+        let extra_leg_capacity = written_group.map_or(0, |group| group.legs.len());
         let mut leg_values = Vec::with_capacity(template.legs.len() + extra_leg_capacity);
         let mut leg_flows = Vec::with_capacity(template.legs.len() + extra_leg_capacity);
         let mut leg_sides = Vec::with_capacity(template.legs.len() + extra_leg_capacity);
@@ -649,15 +629,15 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 .ok_or(TemplateError::InvalidTemplate { loc: leg.flow.loc })?;
             let written_leg = written_leg_for_template(written_group, source_flows, leg);
             let (mut flow, part, at) = match written_leg {
-                Some((_, source_flow, part)) => (source_flow.clone(), part, &written_at),
+                Some((source_flow, part)) => (source_flow.clone(), part, &written_at),
                 None => (leg.flow.clone(), leg.part, &template_at),
             };
             // A share is of the header as it was resolved, before any leg has carved it.
-            let header_side = match leg.side {
+            let header_side = match template.side {
                 FlowSide::Out => out[group_start].flow.out,
                 FlowSide::Arrive => out[group_start].flow.arrive,
             };
-            let value = self.leg(at, &flow, part, leg.side.end(), flow_ordinal, header_side, missing)?;
+            let value = self.leg(at, &flow, part, template.side.end(), flow_ordinal, header_side, missing)?;
             flow.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
             flow.origin = Origin::Occurrence(contract_id);
             flow.mode = if runtime_txn.source_txn().is_some() { Mode::Actual } else { Mode::Planned };
@@ -670,7 +650,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 }
             }
             if matches!(value, ResolvedLeg::Rest) {
-                let side = match leg.side {
+                let side = match template.side {
                     FlowSide::Out => 0,
                     FlowSide::Arrive => 1,
                 };
@@ -679,7 +659,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 }
             }
             leg_flows.push(flow);
-            leg_sides.push(leg.side);
+            leg_sides.push(template.side);
             leg_ordinals.push(flow_ordinal);
             leg_values.push(value);
         }
@@ -687,14 +667,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         // members of the same split. Their explicit amounts reduce the header
         // before any remainder leg is resolved.
         if let Some(written_group) = written_group {
-            if written_group.group.legs.len() != written_group.group.leg_quantities.len() {
-                return Err(TemplateError::InvalidTemplate { loc: template.flow.loc });
-            }
-            for (_written_index, (&offset, &part)) in
-                written_group.group.legs.iter().zip(written_group.group.leg_quantities.iter()).enumerate()
-            {
-                let Some(flow) = source_flows.get(offset as usize) else {
-                    return Err(TemplateError::InvalidTemplate { loc: template.flow.loc });
+            for written_leg in written_group.legs.iter() {
+                let Some(flow) = source_flows.get(written_leg.flow as usize) else {
+                    return Err(TemplateError::InvalidTemplate { loc: template.header.flow.loc });
                 };
                 if template.legs.iter().any(|leg| same_flow_ends(flow, &leg.flow)) {
                     continue;
@@ -718,14 +693,15 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                         flow.waive = Some(waive);
                     }
                 }
-                let side = written_group.group.side;
+                let side = written_group.side;
                 let header_side = match side {
                     FlowSide::Out => out[group_start].flow.out,
                     FlowSide::Arrive => out[group_start].flow.arrive,
                 };
-                let value = self.leg(&written_at, &flow, part, side.end(), flow_ordinal, header_side, missing)?;
+                let value =
+                    self.leg(&written_at, &flow, written_leg.part, side.end(), flow_ordinal, header_side, missing)?;
                 if matches!(value, ResolvedLeg::Rest) {
-                    let side = match written_group.group.side {
+                    let side = match written_group.side {
                         FlowSide::Out => 0,
                         FlowSide::Arrive => 1,
                     };
@@ -734,7 +710,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     }
                 }
                 leg_flows.push(flow);
-                leg_sides.push(written_group.group.side);
+                leg_sides.push(written_group.side);
                 leg_ordinals.push(flow_ordinal);
                 leg_values.push(value);
             }
@@ -763,12 +739,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             }
         }
 
-        let mut leg_positions = Vec::with_capacity(leg_flows.len());
         for ((mut flow, side), (value, flow_ordinal)) in
             leg_flows.into_iter().zip(leg_sides.into_iter()).zip(leg_values.into_iter().zip(leg_ordinals.into_iter()))
         {
             let ResolvedLeg::Value(value) = value else {
-                leg_positions.push(None);
                 continue;
             };
             match side {
@@ -781,35 +755,16 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             }
             flow.infer = value.infer;
             flow.mode = value.mode;
-            let leg_position = out.len();
             self.push_occurrence_flow(flow, source_day, runtime_txn, flow_ordinal, None, details, out)?;
-            debug_assert!(leg_position >= group_start + 1);
-            leg_positions.push(Some(leg_position));
         }
 
         for (item_index, item) in template.items.iter().enumerate() {
-            let parent_index = match item.parent {
-                TemplateItemParent::Header => group_start,
-                TemplateItemParent::Leg(index) => {
-                    match leg_positions.get(index as usize) {
-                        Some(Some(position)) => *position,
-                        Some(None) => {
-                            // A missing input can omit a leg. Any item
-                            // attached to that leg has no parent to reduce.
-                            continue;
-                        }
-                        None => return Err(TemplateError::InvalidTemplate { loc: item.loc }),
-                    }
-                }
-            };
-            let Some(parent) = out.get(parent_index).map(|runtime| runtime.flow.clone()) else {
-                return Err(TemplateError::InvalidTemplate { loc: item.loc });
-            };
+            let parent = out[group_start].flow.clone();
             let flow_ordinal = ordinal_base
                 .checked_add(1)
                 .and_then(|base| base.checked_add(u32::try_from(template.legs.len()).ok()?))
                 .and_then(|base| {
-                    base.checked_add(u32::try_from(written_group.map_or(0, |group| group.group.legs.len())).ok()?)
+                    base.checked_add(u32::try_from(written_group.map_or(0, |group| group.legs.len())).ok()?)
                 })
                 .and_then(|base| base.checked_add(u32::try_from(item_index).ok()?))
                 .ok_or(TemplateError::InvalidTemplate { loc: item.loc })?;
@@ -823,11 +778,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     amount
                 }
             };
-            if item.sign == Sign::Carve || (item.sign == Sign::Less && item.purpose.is_none()) {
-                subtract_parent(&mut out[parent_index].flow, item.side, amount)
+            if item.sign == Sign::Carve || (item.sign == Sign::Less && item.flow.purpose.is_none()) {
+                subtract_parent(&mut out[group_start].flow, template.side, amount)
                     .map_err(|fault| TemplateError::Expression { fault, loc: item.loc })?;
             }
-            let Some(purpose) = item.purpose else {
+            let Some(purpose) = item.flow.purpose else {
                 continue;
             };
             let mut flow = parent;
@@ -844,11 +799,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 }
             }
             flow.purpose = Some(purpose);
-            flow.description = item.description.or(flow.description);
-            flow.codes = item.codes;
-            flow.select = item.select;
-            flow.detail = item.detail;
-            flow.waive = item.waive.or(flow.waive);
+            flow.description = item.flow.description.or(flow.description);
+            flow.codes = item.flow.codes;
+            flow.select = item.flow.select;
+            flow.detail = None;
+            flow.waive = item.flow.waive.or(flow.waive);
             flow.loc = item.loc;
             if item.sign == Sign::Less {
                 std::mem::swap(&mut flow.from, &mut flow.to);
@@ -860,24 +815,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         }
 
         if let Some(written_group) = written_group {
-            for (item_index, item) in written_group.group.items.iter().enumerate() {
-                let parent_index = match item.parent {
-                    TemplateItemParent::Header => group_start,
-                    TemplateItemParent::Leg(index) => match leg_positions.get(index as usize) {
-                        Some(Some(position)) => *position,
-                        Some(None) => continue,
-                        None => return Err(TemplateError::InvalidTemplate { loc: item.loc }),
-                    },
-                };
-                let Some(parent) = out.get(parent_index).map(|runtime| runtime.flow.clone()) else {
-                    return Err(TemplateError::InvalidTemplate { loc: item.loc });
-                };
+            for (item_index, item) in written_group.items.iter().enumerate() {
+                let parent = out[group_start].flow.clone();
                 let source_item = item.flow.and_then(|offset| source_flows.get(offset as usize));
                 let context_flow = source_item.unwrap_or(&parent);
                 let flow_ordinal = ordinal_base
                     .checked_add(1)
                     .and_then(|base| base.checked_add(u32::try_from(template.legs.len()).ok()?))
-                    .and_then(|base| base.checked_add(u32::try_from(written_group.group.legs.len()).ok()?))
+                    .and_then(|base| base.checked_add(u32::try_from(written_group.legs.len()).ok()?))
                     .and_then(|base| base.checked_add(u32::try_from(template.items.len()).ok()?))
                     .and_then(|base| base.checked_add(u32::try_from(item_index).ok()?))
                     .ok_or(TemplateError::InvalidTemplate { loc: item.loc })?;
@@ -892,7 +837,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 };
                 let has_purpose = source_item.is_some_and(|flow| flow.purpose.is_some());
                 if item.sign == Sign::Carve || (item.sign == Sign::Less && !has_purpose) {
-                    subtract_parent(&mut out[parent_index].flow, item.side, amount)
+                    subtract_parent(&mut out[group_start].flow, written_group.side, amount)
                         .map_err(|fault| TemplateError::Expression { fault, loc: item.loc })?;
                 }
                 let Some(source_item) = source_item.filter(|_| has_purpose) else {
@@ -1361,7 +1306,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             journal.flow_roots.get(at).filter(|roots| roots.flow == offset).copied()
         });
         let roots = roots.filter(|roots| roots.out.is_some() || roots.arrive.is_some() || roots.basis.is_some());
-        let group = journal.and_then(|journal| journal.groups.iter().find(|group| group.header == offset));
+        let group = journal.and_then(|journal| {
+            let header = Heading::Flow(offset?);
+            journal.groups.iter().find(|group| group.header == header)
+        });
         let item = journal.and_then(|journal| {
             let offset = offset?;
             journal
@@ -1672,23 +1620,16 @@ fn same_flow_ends(left: &Flow, right: &Flow) -> bool {
     left.from == right.from && left.to == right.to
 }
 
+/// The flow a written occurrence made for the template leg that goes to the same end, and what it takes.
 fn written_leg_for_template<'a>(
-    written: Option<&axiom_model::WrittenGroup>,
+    written: Option<&Made>,
     source_flows: &'a [Flow],
-    template: &TemplateLeg,
-) -> Option<(usize, &'a Flow, Part)> {
-    let written = written?;
-    if written.group.legs.len() != written.group.leg_quantities.len() {
-        return None;
-    }
-    written.group.legs.iter().zip(written.group.leg_quantities.iter()).enumerate().find_map(
-        |(index, (&offset, &part))| {
-            source_flows
-                .get(offset as usize)
-                .filter(|flow| same_flow_ends(flow, &template.flow))
-                .map(|flow| (index, flow, part))
-        },
-    )
+    template: &Leg<Flow>,
+) -> Option<(&'a Flow, Part)> {
+    written?.legs.iter().find_map(|leg| {
+        let flow = source_flows.get(leg.flow as usize)?;
+        same_flow_ends(flow, &template.flow).then_some((flow, leg.part))
+    })
 }
 
 fn scale_template_amount(amount: Amount, ratio: Ratio) -> Result<Amount, Fault> {
@@ -2316,11 +2257,11 @@ contract split with landlord
 /// Whether this line item is a `Less` cost attached to an exchange header.
 /// The group retains the relationship; no endpoint guessing or transaction
 /// range scan is needed when the flow is posted.
-fn is_exchange_cost(book: &Book, flows: axiom_core::Run<Flow>, group: &JournalGroup, item: &JournalItem) -> bool {
-    if item.sign != Sign::Less || item.parent != TemplateItemParent::Header {
+fn is_exchange_cost(book: &Book, flows: axiom_core::Run<Flow>, group: &Made, item: &Item<Option<u32>>) -> bool {
+    if item.sign != Sign::Less {
         return false;
     }
-    let (Some(header), Some(item)) = (group.header, item.flow) else {
+    let (Heading::Flow(header), Some(item)) = (group.header, item.flow) else {
         return false;
     };
     let Some(header_index) = flows.start().index().checked_add(header as usize) else {

@@ -951,13 +951,12 @@ impl Ledger<'_, '_, '_> {
         let Some(txn) = book.txns.get(txn_id) else { return Some(Qty::ZERO) };
         let Some(program_id) = txn.program else { return Some(Qty::ZERO) };
         let program = &book.journal_programs[program_id];
-        let Some(group) = program.groups.iter().find(|group| group.header == Some(m.flow_ordinal)) else {
+        let header = axiom_model::Heading::Flow(m.flow_ordinal);
+        let Some(group) = program.groups.iter().find(|group| group.header == header) else {
             return Some(Qty::ZERO);
         };
         let mut total = Qty::ZERO;
-        for item in group.items.iter().filter(|item| {
-            item.parent == axiom_model::TemplateItemParent::Header && item.sign == axiom_model::Sign::Less
-        }) {
+        for item in group.items.iter().filter(|item| item.sign == axiom_model::Sign::Less) {
             let amount = match item.amount {
                 axiom_model::Expr::Literal(amount) => amount,
                 axiom_model::Expr::Computed(_) => {

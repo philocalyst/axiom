@@ -9,14 +9,14 @@ use super::push_amount_root;
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::Tail;
-use crate::book::{Amount, Commodity, FlowSide, Place, Sign, TemplateItemParent};
+use crate::book::{Amount, Commodity, Place};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalItem, Mode, Origin, Select, Txn};
+use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Select, Txn};
 use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
-use crate::split::{Expr, Part, Quantity};
+use crate::split::{Endpoint, Expr, FlowSide, Item, Part, Quantity, Sign};
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedEnd {
@@ -92,7 +92,6 @@ pub(super) struct Shape {
 #[derive(Clone, Copy)]
 pub(super) struct Parent<'t> {
     pub ends: Ends,
-    pub side: FlowSide,
     pub mode: Mode,
     pub header_codes: Run<Sym>,
     /// What its tail says, which an item's own tail adds to.
@@ -185,7 +184,7 @@ pub(super) fn resolve_quantity<'s>(
         ast::Quantity::Target(written) => {
             let expr = stated_amount(world, cx, written, fallback)?;
             let amount = expr.stand_in(fallback);
-            let end = if side == FlowSide::Out { crate::journal::End::From } else { crate::journal::End::To };
+            let end = side.end();
             let infer = Infer::Target { end, balance: amount.qty };
             ResolvedQuantity::new(amount, infer, Mode::Actual, Part::Of(Quantity::Target(expr)))
         }
@@ -462,7 +461,7 @@ pub(super) fn lower_items<'s>(
     parent: Parent<'_>,
     flow_roots: &mut Vec<FlowExpressions>,
     diags: &mut Vec<Diagnostic>,
-) -> Box<[JournalItem]> {
+) -> Box<[Item<Option<u32>>]> {
     let mut lowered = Vec::with_capacity(items.len());
     for item in &cx.file[items] {
         let Some(expr) = resolve_amount(staged, cx, item.amount, staged.book.base, diags) else {
@@ -498,17 +497,15 @@ pub(super) fn lower_items<'s>(
         } else {
             None
         };
-        lowered.push(JournalItem {
-            flow,
+        lowered.push(Item {
             sign: match item.sign {
                 ast::Sign::Carve => Sign::Carve,
                 ast::Sign::Add => Sign::Add,
                 ast::Sign::Less => Sign::Less,
             },
-            parent: TemplateItemParent::Header,
-            side: parent.side,
             amount: expr,
             loc: item.loc,
+            flow,
         });
     }
     lowered.into_boxed_slice()
@@ -547,8 +544,8 @@ pub(super) fn empty_codes(world: &World<'_>) -> Run<Sym> {
     Run::new(Id::new(world.book.codes.len() as u32), 0)
 }
 
-pub(super) fn journal_end(end: ResolvedEnd) -> JournalEnd {
-    JournalEnd { place: end.place, entity: end.entity }
+pub(super) fn endpoint(end: ResolvedEnd) -> Endpoint {
+    Endpoint { place: end.place, entity: end.entity }
 }
 
 pub(super) fn priced(
@@ -582,19 +579,6 @@ pub(super) fn priced(
                     .label(loc, "this conversion overflows"),
             );
             None
-        }
-    }
-}
-
-pub(super) trait OtherSide {
-    fn other(self) -> Self;
-}
-
-impl OtherSide for crate::book::FlowSide {
-    fn other(self) -> Self {
-        match self {
-            Self::Out => Self::Arrive,
-            Self::Arrive => Self::Out,
         }
     }
 }

@@ -6,9 +6,9 @@ use axiom_syntax as ast;
 use axiom_syntax::Subject;
 
 use super::flow::{
-    Codes, Ends, FlowCx, OtherSide, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, flow_roots,
-    journal_end, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root,
-    push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
+    Codes, Ends, FlowCx, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, endpoint, flow_roots,
+    lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root, push_tail_roots,
+    resolve_amount, resolve_end, resolve_quantity,
 };
 use super::push_amount_root;
 use super::staged::Staged;
@@ -16,19 +16,19 @@ use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
-use crate::book::{Amount, FlowSide, Place, ScheduleKind};
+use crate::book::{Amount, Place, ScheduleKind};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
-    Action, Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram, Mode,
-    OccurrenceTail, Origin, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
+    Action, Detail, Flow, FlowExpressions, Infer, JournalProgram, Mode, OccurrenceTail, Origin, Txn, TxnKind,
+    WrittenOccurrence,
 };
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
 use crate::scope::Home;
 use crate::sources::Site;
-use crate::split::{Part, Quantity};
+use crate::split::{Endpoint, FlowSide, Heading, Item, Leg, Made, Part, Promised, Quantity};
 
 /// A dated record of the journal, whichever kind of item wrote it.
 #[derive(Clone, Copy)]
@@ -69,13 +69,12 @@ impl<'a, 's> Record<'a, 's> {
     }
 }
 
+/// What an occurrence has said of one template group so far.
 struct OccurrenceGroupDraft {
-    template: u32,
-    source: JournalEnd,
+    source: Endpoint,
     side: FlowSide,
-    legs: Vec<u32>,
-    leg_quantities: Vec<Part>,
-    items: Box<[JournalItem]>,
+    legs: Vec<Leg<u32>>,
+    items: Box<[Item<Option<u32>>]>,
 }
 
 #[derive(Clone, Copy)]
@@ -198,7 +197,7 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
 /// What the lowering of one transaction has made so far.
 struct Built {
     flow_roots: Vec<FlowExpressions>,
-    groups: Vec<JournalGroup>,
+    groups: Vec<Made>,
     /// Whether anything said so far makes the transaction wrong.
     successful: bool,
 }
@@ -319,17 +318,9 @@ fn lower_named_flow<'s>(
     if cx.file[written.body.items].is_empty() {
         return;
     }
-    let parent = Parent { ends, side: FlowSide::Out, mode: Mode::Actual, header_codes: codes, tail: None };
+    let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
     let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots, diags);
-    built.groups.push(JournalGroup {
-        header: Some(flow_at),
-        source: journal_end(ends.from),
-        side: FlowSide::Out,
-        total: None,
-        legs: Box::default(),
-        leg_quantities: Box::default(),
-        items,
-    });
+    built.groups.push(Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items });
 }
 
 /// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
@@ -348,8 +339,7 @@ struct Split<'c, 's> {
 
 /// The legs of a split so far: where each flow went, and what each said it moved.
 struct SplitLegs {
-    legs: Vec<u32>,
-    quantities: Vec<Part>,
+    legs: Vec<Leg<u32>>,
 }
 
 /// A header that names one end is the source of its legs, which name the others, and of the items under it.
@@ -371,27 +361,23 @@ fn lower_split_flow<'s>(
         built.successful = false;
     }
     let split = Split { txn, source, total };
-    let mut made = SplitLegs { legs: Vec::new(), quantities: Vec::new() };
+    let mut made = SplitLegs { legs: Vec::new() };
     for leg in &cx.file[written.body.legs] {
         let Some(leg) = split.lower_leg(staged, leg, diags) else {
             built.successful = false;
             continue;
         };
-        made.legs.push(leg.at);
-        made.quantities.push(leg.quantity);
+        made.legs.push(Leg { flow: leg.at, part: leg.quantity });
         push_flow_expressions(&mut built.flow_roots, leg.at, leg.out, leg.arrive, leg.basis);
     }
     let items = split.items(staged, &made, built, diags);
     if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && made.legs.is_empty() {
         built.successful = false;
     }
-    built.groups.push(JournalGroup {
-        header: None,
-        source: journal_end(source.end),
+    built.groups.push(Made {
+        header: Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) },
         side: source.side,
-        total: total.map(|total| total.quantity()),
         legs: made.legs.into_boxed_slice(),
-        leg_quantities: made.quantities.into_boxed_slice(),
         items,
     });
 }
@@ -442,15 +428,15 @@ impl<'s> Split<'_, 's> {
         made: &SplitLegs,
         built: &mut Built,
         diags: &mut Vec<Diagnostic>,
-    ) -> Box<[JournalItem]> {
+    ) -> Box<[Item<Option<u32>>]> {
         let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
-        let leg_end = made.legs.first().map(|&offset| {
-            let leg = staged.flow(offset);
+        let leg_end = made.legs.first().map(|leg| {
+            let leg = staged.flow(leg.flow);
             let place = if side == FlowSide::Out { leg.to } else { leg.from };
             ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) }
         });
         let ends = Ends { from: source, to: leg_end.unwrap_or(source) };
-        let parent = Parent { ends, side, mode: Mode::Actual, header_codes: self.txn.codes, tail: None };
+        let parent = Parent { ends, mode: Mode::Actual, header_codes: self.txn.codes, tail: None };
         lower_items(staged, cx, self.txn.flow.body.items, parent, &mut built.flow_roots, diags)
     }
 }
@@ -861,8 +847,8 @@ fn lower_occurrence<'a, 's>(
             }
         };
         let template = &templates[template_at];
-        let side = template_leg.map_or_else(|| template_side(&staged, template), |leg| leg.side);
-        let base_flow = template_leg.map_or_else(|| template.flow.clone(), |leg| leg.flow.clone());
+        let side = template_leg.map_or_else(|| template_side(&staged, template), |_| template.side);
+        let base_flow = template_leg.map_or_else(|| template.header.flow.clone(), |leg| leg.flow.clone());
         if endpoint.select.len() != 0 {
             diags.push(
                 Diagnostic::error("selector-target", "selectors narrow the source endpoint of a flow")
@@ -976,11 +962,10 @@ fn lower_occurrence<'a, 's>(
         push_flow_expressions(&mut flow_roots, offset, out_root, arrive_root, tail.basis_root);
         if written_groups[template_at].is_none() {
             let side = template_side(&staged, template);
-            written_groups[template_at] = Some(occurrence_group_draft(template_at, template, side));
+            written_groups[template_at] = Some(occurrence_group_draft(template, side));
         }
         let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
-        draft.legs.push(offset);
-        draft.leg_quantities.push(quantity.part);
+        draft.legs.push(Leg { flow: offset, part: quantity.part });
     }
     if !file[statement.body.items].is_empty() {
         let Some(template) = templates.first() else {
@@ -993,34 +978,29 @@ fn lower_occurrence<'a, 's>(
         let side = template_side(&staged, template);
         let (from, to, common) = occurrence_item_ends(&staged, template, side);
         let parent =
-            Parent { ends: Ends { from, to }, side, mode: Mode::Actual, header_codes: codes, tail: Some(&header_tail) };
+            Parent { ends: Ends { from, to }, mode: Mode::Actual, header_codes: codes, tail: Some(&header_tail) };
         let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
         let template_at = 0;
         if written_groups[template_at].is_none() {
-            written_groups[template_at] = Some(occurrence_group_draft(template_at, template, side));
+            written_groups[template_at] = Some(occurrence_group_draft(template, side));
         }
         let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
-        draft.source = JournalEnd { place: common, entity: None };
+        draft.source = Endpoint { place: common, entity: None };
         draft.items = items;
     }
     if diags.len() != diagnostic_start {
         return;
     }
 
-    let groups: Box<[WrittenGroup]> = written_groups
+    let groups: Box<[Option<Made>]> = written_groups
         .into_iter()
-        .flatten()
-        .map(|draft| WrittenGroup {
-            template: draft.template,
-            group: JournalGroup {
-                header: None,
-                source: draft.source,
+        .map(|draft| {
+            draft.map(|draft| Made {
+                header: Heading::Source { end: draft.source, total: None },
                 side: draft.side,
-                total: None,
                 legs: draft.legs.into_boxed_slice(),
-                leg_quantities: draft.leg_quantities.into_boxed_slice(),
                 items: draft.items,
-            },
+            })
         })
         .collect();
     let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
@@ -1114,7 +1094,7 @@ fn lower_loan_origin<'a, 's>(
             );
             return;
         };
-        let mut candidates = [template.flow.from, template.flow.to].into_iter().filter(|&place| {
+        let mut candidates = [template.header.flow.from, template.header.flow.to].into_iter().filter(|&place| {
             let place = &world.book.places[place];
             place.owner == contract.owner
                 && place.class == crate::book::Class::Asset
@@ -1398,32 +1378,16 @@ fn lower_owes<'a, 's>(
             staged.book.flows.push(flow);
             push_flow_expressions(&mut flow_roots, 0, root, root, header_tail.basis_root);
             if !statement.body.items.is_empty() {
-                let parent = Parent { ends: Ends { from, to }, side: FlowSide::Out, mode, header_codes, tail: None };
+                let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
                 let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
-                groups.push(JournalGroup {
-                    header: Some(0),
-                    source: journal_end(from),
-                    side: FlowSide::Out,
-                    total: None,
-                    legs: Box::default(),
-                    leg_quantities: Box::default(),
-                    items,
-                });
+                groups.push(Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items });
             }
         }
     } else {
-        let parent =
-            Parent { ends: Ends { from, to }, side: FlowSide::Out, mode, header_codes, tail: Some(&header_tail) };
+        let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
         let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
-        groups.push(JournalGroup {
-            header: None,
-            source: journal_end(from),
-            side: FlowSide::Out,
-            total: Some(Quantity::Derived),
-            legs: Box::default(),
-            leg_quantities: Box::default(),
-            items,
-        });
+        let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
+        groups.push(Made { header, side: FlowSide::Out, legs: Box::default(), items });
     }
     if diags.len() != diagnostic_start {
         return;
@@ -1456,35 +1420,30 @@ fn occurrence_amount_unit(
     let Some(template) = terms.template.first() else {
         return base;
     };
-    if template.flow.out.unit == base || template.flow.arrive.unit == base { base } else { template.flow.arrive.unit }
+    let flow = &template.header.flow;
+    if flow.out.unit == base || flow.arrive.unit == base { base } else { flow.arrive.unit }
 }
 
-fn template_side(world: &World<'_>, template: &crate::book::TemplateFlow) -> FlowSide {
-    if let Some(leg) = template.legs.first() {
-        return leg.side;
+fn template_side(world: &World<'_>, template: &Promised) -> FlowSide {
+    if !template.legs.is_empty() {
+        return template.side;
     }
-    if world.book.places[template.flow.from].class != crate::book::Class::Outside {
+    if world.book.places[template.header.flow.from].class != crate::book::Class::Outside {
         FlowSide::Arrive
     } else {
         FlowSide::Out
     }
 }
 
-fn occurrence_group_draft(
-    template_at: usize,
-    template: &crate::book::TemplateFlow,
-    side: FlowSide,
-) -> OccurrenceGroupDraft {
+fn occurrence_group_draft(template: &Promised, side: FlowSide) -> OccurrenceGroupDraft {
     let common = match side {
-        FlowSide::Out => template.flow.to,
-        FlowSide::Arrive => template.flow.from,
+        FlowSide::Out => template.header.flow.to,
+        FlowSide::Arrive => template.header.flow.from,
     };
     OccurrenceGroupDraft {
-        template: template_at as u32,
-        source: JournalEnd { place: common, entity: None },
+        source: Endpoint { place: common, entity: None },
         side,
         legs: Vec::new(),
-        leg_quantities: Vec::new(),
         items: Box::default(),
     }
 }
@@ -1502,19 +1461,19 @@ fn place_entity(world: &World<'_>, place: Id<Place>) -> Option<Id<crate::book::E
 
 fn occurrence_item_ends(
     world: &World<'_>,
-    template: &crate::book::TemplateFlow,
+    template: &Promised,
     side: FlowSide,
 ) -> (ResolvedEnd, ResolvedEnd, Id<Place>) {
     let common = match side {
-        FlowSide::Out => template.flow.to,
-        FlowSide::Arrive => template.flow.from,
+        FlowSide::Out => template.header.flow.to,
+        FlowSide::Arrive => template.header.flow.from,
     };
     let remainder = template.legs.first().map_or_else(
         || match side {
-            FlowSide::Out => template.flow.from,
-            FlowSide::Arrive => template.flow.to,
+            FlowSide::Out => template.header.flow.from,
+            FlowSide::Arrive => template.header.flow.to,
         },
-        |leg| match leg.side {
+        |leg| match template.side {
             FlowSide::Out => leg.flow.from,
             FlowSide::Arrive => leg.flow.to,
         },

@@ -215,7 +215,9 @@ mod tests {
     #[test]
     fn contract_suppression_tracks_each_projected_date_and_typed_identity() {
         use axiom_core::{Loc, Timeline};
-        use axiom_model::{Cadence, Contract, Expr, Quantity, TemplateFlow, TemplateProgram, Terms, TermsState};
+        use axiom_model::{
+            Cadence, Contract, Expr, FlowSide, Header, Promised, Quantity, TemplateProgram, Terms, TermsState,
+        };
 
         let mut house = household();
         let today = day(2026, 5, 1);
@@ -228,10 +230,13 @@ mod tests {
             every: Cadence::Every(axiom_core::Span::months(1)),
             on: Box::default(),
             anchor: today,
-            template: vec![TemplateFlow {
-                flow: template.clone(),
-                out: Quantity::Amount(Expr::Literal(template.out)),
-                arrive: Quantity::Amount(Expr::Literal(template.arrive)),
+            template: vec![Promised {
+                header: Header {
+                    flow: template.clone(),
+                    out: Quantity::Amount(Expr::Literal(template.out)),
+                    arrive: Quantity::Amount(Expr::Literal(template.arrive)),
+                },
+                side: FlowSide::Out,
                 legs: Box::default(),
                 items: Box::default(),
             }]
