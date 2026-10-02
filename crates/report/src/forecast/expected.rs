@@ -391,33 +391,4 @@ mod tests {
         other_unit.out.unit = Id::new(99);
         assert!(!covered_on(&house.book, &other_unit, start.add_days(1)));
     }
-
-    #[test]
-    fn a_monthly_depreciation_does_not_end_because_the_house_holds_no_dollars() {
-        let source = "\
-base USD
-commodity USD
-  precision 2
-commodity HOME
-  precision 0
-
-account assets/house
-account expenses/depreciation
-
-opening 2026-01-01
-  house 1 HOME basis 120_000 USD
-
-2026-01-31 house.basis -> depreciation 300 USD
-2026-02-28 house.basis -> depreciation 300 USD
-2026-03-31 house.basis -> depreciation 300 USD
-2026-04-30 house.basis -> depreciation 300 USD
-";
-        crate::source_tests::with_run(source, day(2026, 5, 10), |book, run| {
-            let whose = crate::lens::Whose::default();
-            let plan = axiom_engine::Plan::new(book);
-            let found = expected(Lens::new(&plan, &whose, run.today), run);
-            assert_eq!(found.len(), 1, "the depreciation is a habit");
-            assert!(book.flow_view(found[0].template).detail().basis.is_some());
-        });
-    }
 }

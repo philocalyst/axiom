@@ -901,6 +901,87 @@ contract repair-reserve with garage
   until 2026-05-02
 ";
 
+#[test]
+fn native_annual_premium_is_spread_across_months() {
+    with_run(FLOW_SOURCES, day(2026, 3, 31), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Period(axiom_model::Period::Month),
+                from: Some(day(2026, 1, 1)),
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        let insurance = lines(&report.sections[0])
+            .into_iter()
+            .find(|row| row.contains("insurance"))
+            .expect("the source premium is classified under insurance");
+        assert_eq!(
+            insurance.trim_start(),
+            "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD"
+        );
+    });
+}
+
+#[test]
+fn native_sales_report_realized_short_and_long_gains() {
+    let source = "\
+base USD
+use std
+commodity VTI : stock
+account checking : asset
+account short-term : asset
+account long-term : asset
+
+opening 2024-01-05
+  long-term 5 VTI basis 1_000 USD
+opening 2025-12-01
+  short-term 2 VTI basis 600 USD
+
+2026-02-12 short-term 2 VTI -> checking 1_000 USD @ 500 USD
+2026-03-03 long-term 5 VTI -> checking 1_800 USD @ 360 USD
+";
+    with_std(source, day(2026, 3, 3), |book, run| {
+        let report = crate::report(book, run, &Query::Gains { year: Some(2026) }, None).unwrap();
+        let section = &report.sections[0];
+        let realized: Vec<_> = section
+            .rows
+            .iter()
+            .filter_map(|row| match (&row.cells[0], &row.cells[6], &row.cells[7]) {
+                (
+                    crate::Cell::Day(sold),
+                    crate::Cell::Amount { qty, unit, .. },
+                    crate::Cell::Text(term),
+                ) if *unit == "USD" => Some((*sold, *qty, term.as_ref())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            realized,
+            [
+                (day(2026, 2, 12), Qty(40_000), "short"),
+                (day(2026, 3, 3), Qty(80_000), "long")
+            ]
+        );
+        let total = section
+            .rows
+            .iter()
+            .find(|row| matches!(&row.cells[0], crate::Cell::Text(label) if label == "Total"))
+            .expect("the short and long term gains have an aggregate");
+        assert!(matches!(
+            &total.cells[6],
+            crate::Cell::Amount {
+                qty: Qty(120_000),
+                unit,
+                ..
+            } if *unit == "USD"
+        ));
+    });
+}
+
 pub(crate) const NATIVE_LOAN: &str = "\
 base USD
 commodity USD

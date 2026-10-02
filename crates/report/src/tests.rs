@@ -1395,34 +1395,6 @@ fn a_view_can_be_about_one_person_or_their_household() {
 // ─── Statements ─────────────────────────────────────────────────────────────
 
 #[test]
-fn flow_recognizes_a_spread_premium_a_little_each_day() {
-    let house = household();
-    // 1,200 over 365 days: January's 31 days are 101.92, February's 28 are 92.05,
-    // and half-even rounding at each month boundary keeps the year exact.
-    let flow = house.report(Query::Flow {
-        by: FlowBy::Period(Period::Month),
-        from: None,
-        to: None,
-    });
-    let insurance = lines(&flow.sections[0])
-        .into_iter()
-        .find(|row| row.trim_start().starts_with("insurance"))
-        .unwrap();
-    assert_eq!(
-        insurance.trim_start(),
-        "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD"
-    );
-    let gains = lines(&flow.sections[0])
-        .into_iter()
-        .find(|row| row.contains("realized gains"))
-        .unwrap();
-    assert_eq!(
-        gains,
-        "~  realized gains ≈ |  | 400.00 USD | 800.00 USD | 1,200.00 USD"
-    );
-}
-
-#[test]
 fn register_runs_a_balance_and_mutes_the_pending_check() {
     let house = household();
     let checking = house.place("assets/bank/checking");
@@ -1573,7 +1545,6 @@ fn limits_are_per_owner_and_per_year() {
     let none = house.report(Query::Limits { year: Some(2024) });
     assert!(cell(&none.sections[0].notes[0]).contains("No limit was read in 2024"));
 }
-
 
 // ─── Claims ─────────────────────────────────────────────────────────────────
 
