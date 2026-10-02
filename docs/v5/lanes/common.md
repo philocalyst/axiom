@@ -36,7 +36,12 @@ want an MCP server and a GUI eventually."* Concretely:
 - **Functions:**
   - usually under 30 lines;
   - 60 needs a reason the reviewer accepts, and over 80 is rejected;
-  - at most 5 parameters, otherwise a borrowed context struct (`&Cx<'_, '_>`);
+  - more than 5 parameters is a smell, not a crime. The fix is the type the parameters are secretly part of: a
+    borrowed context struct (`&Cx<'_, '_>`) when they travel together through a whole phase, a domain value when
+    they describe one thing, a method when one of them is `self`. **Never bundle unrelated parameters into a
+    struct only to hit the count.** Coupling that the domain does not have is worse than a long signature.
+    These limits are tools for the reader. Where one fights the clearest code, write the clearest code and
+    justify it in one line in your report;
   - no `bool` parameters: use a two-variant enum that says what it means.
 - **Iterate.** Write it, read it back as a stranger would, and rewrite it shorter and clearer. The first version is
   never the one you hand in.
@@ -59,7 +64,9 @@ want an MCP server and a GUI eventually."* Concretely:
   - Every `unsafe` block carries a `// SAFETY:` comment naming the invariant. `debug_assert!` checks the invariant,
     and a unit test exercises every variant.
   - Every other crate keeps `#![forbid(unsafe_code)]`.
-  - No other `unsafe` anywhere without the orchestrator's agreement.
+  - `unsafe` is a tool, not a taboo. Where a tagless layout, an unchecked index the types already prove, or a SIMD
+    kernel needs it, use it: confined to a small module in `core`, with the safe API around it, a `// SAFETY:`
+    argument a reviewer can check, and a test. Anywhere else, say why in your report.
 
 ### The borrow checker does the bookkeeping
 
