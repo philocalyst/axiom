@@ -17,6 +17,7 @@
 pub mod book;
 pub mod journal;
 pub mod law;
+pub mod split;
 pub mod sync;
 
 mod collect;
@@ -46,6 +47,7 @@ mod values;
 pub use book::*;
 pub use journal::*;
 pub use law::*;
+pub use split::*;
 
 use axiom_core::{Diagnostic, Interner, Set};
 use axiom_syntax::File;

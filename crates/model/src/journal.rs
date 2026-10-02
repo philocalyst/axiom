@@ -6,9 +6,10 @@ use std::hash::{Hash, Hasher};
 
 use crate::book::{
     Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, Place, Policy, Purpose, ScheduleKind,
-    Sign, System, TemplateAmount, TemplateItemParent, TemplateProgram, Text,
+    Sign, System, TemplateItemParent, TemplateProgram, Text,
 };
 use crate::law::{Law, NodeId, Subject};
+use crate::split::{Expr, Part, Quantity};
 
 /// Value moving once, from one place to another. Balanced by construction.
 #[derive(Clone, PartialEq, Debug)]
@@ -630,7 +631,7 @@ pub struct WrittenOccurrence {
     pub schedule: ScheduleKind,
     /// An amount written after the contract name replaces the terms' amount
     /// for this occurrence only. Computed roots belong to `program` below.
-    pub amount: Option<TemplateAmount>,
+    pub amount: Option<Expr>,
     /// Computed amount, side and basis roots for this occurrence's overrides.
     pub program: Option<Id<JournalProgram>>,
     /// Source-ordered partial replacements; groups absent here inherit terms.
@@ -640,13 +641,11 @@ pub struct WrittenOccurrence {
 }
 
 /// A partial replacement of one contract template group by a written
-/// occurrence. Side quantities are explicit options: an omitted side inherits
-/// the template, while group offsets address the source Txn's flow range.
+/// occurrence. What it does not say it inherits from the template, and group
+/// offsets address the source Txn's flow range.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct WrittenGroup {
     pub template: u32,
-    pub out: Option<JournalQuantity>,
-    pub arrive: Option<JournalQuantity>,
     pub group: JournalGroup,
 }
 
@@ -706,21 +705,6 @@ pub struct JournalEnd {
     pub entity: Option<Id<Entity>>,
 }
 
-/// A split header's aggregate quantity when one named side is only group
-/// metadata. Literal amounts stay inline; a computed root, when present,
-/// replaces that literal during instantiation.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum JournalQuantity {
-    Amount(Amount, Option<NodeId>),
-    Pending(Amount, Option<NodeId>),
-    Target(Amount, Option<NodeId>),
-    Unknown(Id<Commodity>),
-    All(Option<Id<Commodity>>),
-    Rest,
-    Whole,
-    Derived,
-}
-
 /// A split header and its source-ordered legs and items.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct JournalGroup {
@@ -734,10 +718,10 @@ pub struct JournalGroup {
     pub side: FlowSide,
     /// The aggregate quantity only when `header` is absent. When a header
     /// flow exists, its own inline amount and `FlowExpressions` are canonical.
-    pub total: Option<JournalQuantity>,
+    pub total: Option<Quantity>,
     pub legs: Box<[u32]>,
-    /// Typed quantities parallel to `legs`, preserving Rest/All/zero distinctions.
-    pub leg_quantities: Box<[JournalQuantity]>,
+    /// What each leg takes, parallel to `legs`: it preserves the Rest, All and zero distinctions.
+    pub leg_quantities: Box<[Part]>,
     pub items: Box<[JournalItem]>,
 }
 
@@ -751,7 +735,7 @@ pub struct JournalItem {
     pub side: FlowSide,
     /// Exactly one typed literal magnitude or computed root. A purposeless
     /// Less item still retains its amount here while `flow` is `None`.
-    pub amount: TemplateAmount,
+    pub amount: Expr,
     pub loc: Loc,
 }
 

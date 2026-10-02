@@ -1041,7 +1041,7 @@ opening 2025-02-01
         assert_eq!(group.source.place, checking);
         assert!(matches!(
             group.total,
-            Some(axiom_model::JournalQuantity::Amount(amount, None))
+            Some(axiom_model::Quantity::Amount(axiom_model::Expr::Literal(amount)))
                 if amount.qty.0 == 315_000 && amount.unit == book.base
         ));
         assert_eq!(group.legs.len(), 3);

@@ -959,8 +959,8 @@ impl Ledger<'_, '_, '_> {
             item.parent == axiom_model::TemplateItemParent::Header && item.sign == axiom_model::Sign::Less
         }) {
             let amount = match item.amount {
-                axiom_model::TemplateAmount::Literal(amount) => amount,
-                axiom_model::TemplateAmount::Computed(_) => {
+                axiom_model::Expr::Literal(amount) => amount,
+                axiom_model::Expr::Computed(_) => {
                     self.record.report(
                         Diagnostic::error(
                             "asset-sale-cost",

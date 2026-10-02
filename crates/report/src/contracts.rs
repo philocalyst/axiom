@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use axiom_core::{Days, Id, Qty};
 use axiom_engine::Run;
 use axiom_model::{
-    Book, Cadence, Contract, FlowSide, On, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
-    TemplateQuantity, Terms, TermsState,
+    Book, Cadence, Contract, Expr, FlowSide, On, Part, Quantity, TemplateFlow, TemplateItem, TemplateItemParent, Terms,
+    TermsState,
 };
 
 use crate::lens::Lens;
@@ -109,10 +109,8 @@ pub(crate) fn template_flow_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s T
         " ",
         [
             Cell::text(route(book, flow)),
-            template_quantity(lens, flow, template.out, flow.out),
-            flow.is_exchange()
-                .then(|| template_quantity(lens, flow, template.arrive, flow.arrive))
-                .unwrap_or(Cell::Blank),
+            quantity_cell(lens, flow, template.out),
+            flow.is_exchange().then(|| quantity_cell(lens, flow, template.arrive)).unwrap_or(Cell::Blank),
         ]
         .into_iter()
         .chain(crate::table::code_labels(book, book.flow_view(flow).codes())),
@@ -128,15 +126,7 @@ pub(crate) fn template_flow_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s T
                 Cell::Word("split"),
                 Cell::text(route(book, &leg.flow)),
                 Cell::Word(side),
-                template_quantity(
-                    lens,
-                    &leg.flow,
-                    leg.quantity,
-                    match leg.side {
-                        FlowSide::Out => leg.flow.out,
-                        FlowSide::Arrive => leg.flow.arrive,
-                    },
-                ),
+                part_cell(lens, &leg.flow, leg.part),
             ],
         )
     });
@@ -144,33 +134,35 @@ pub(crate) fn template_flow_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s T
     Cell::list("; ", std::iter::once(header).chain(legs).chain(items))
 }
 
-fn template_quantity<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    flow: &axiom_model::Flow,
-    quantity: TemplateQuantity,
-    literal: axiom_model::Amount,
-) -> Cell<'s> {
+/// A header side as the terms promise it. A computed one is never shown as the placeholder the flow carries.
+fn quantity_cell<'s>(lens: Lens<'s, '_, '_, '_>, flow: &axiom_model::Flow, quantity: Quantity) -> Cell<'s> {
     let book = lens.book();
     match quantity {
-        TemplateQuantity::Amount(None) => Cell::amount(
+        Quantity::Amount(Expr::Literal(amount)) => Cell::amount(
             book,
-            axiom_model::Amount::new(crate::flow::scoped_movement_qty(lens, flow, literal.qty), literal.unit),
+            axiom_model::Amount::new(crate::flow::scoped_movement_qty(lens, flow, amount.qty), amount.unit),
         ),
-        TemplateQuantity::Amount(Some(_)) => Cell::Word("computed per occurrence"),
-        TemplateQuantity::Pending(None) => Cell::Word("pending amount"),
-        TemplateQuantity::Pending(Some(_)) => Cell::Word("computed pending amount"),
-        TemplateQuantity::Target(None) => Cell::Word("target amount"),
-        TemplateQuantity::Target(Some(_)) => Cell::Word("computed target amount"),
-        TemplateQuantity::Percent(rate) => Cell::Percent(rate),
-        TemplateQuantity::Unknown(unit) => {
+        Quantity::Amount(Expr::Computed(_)) => Cell::Word("computed per occurrence"),
+        Quantity::Pending(Expr::Literal(_)) => Cell::Word("pending amount"),
+        Quantity::Pending(Expr::Computed(_)) => Cell::Word("computed pending amount"),
+        Quantity::Target(Expr::Literal(_)) => Cell::Word("target amount"),
+        Quantity::Target(Expr::Computed(_)) => Cell::Word("computed target amount"),
+        Quantity::Unknown(unit) => {
             Cell::list(" ", [Cell::Word("unknown"), Cell::Name(book.name(book.commodities[unit].symbol))])
         }
-        TemplateQuantity::All(unit) => unit.map_or(Cell::Word("all"), |unit| {
+        Quantity::All(unit) => unit.map_or(Cell::Word("all"), |unit| {
             Cell::list(" ", [Cell::Word("all"), Cell::Name(book.name(book.commodities[unit].symbol))])
         }),
-        TemplateQuantity::Rest => Cell::Word("rest"),
-        TemplateQuantity::Whole => Cell::Word("whole"),
-        TemplateQuantity::Derived => Cell::Word("derived by contract rule"),
+        Quantity::Derived => Cell::Word("derived by contract rule"),
+    }
+}
+
+/// A leg as the terms promise it.
+fn part_cell<'s>(lens: Lens<'s, '_, '_, '_>, flow: &axiom_model::Flow, part: Part) -> Cell<'s> {
+    match part {
+        Part::Of(quantity) => quantity_cell(lens, flow, quantity),
+        Part::Share(rate) => Cell::Percent(rate),
+        Part::Rest => Cell::Word("rest"),
     }
 }
 
@@ -194,11 +186,11 @@ fn template_item_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s TemplateFlow
         TemplateItemParent::Leg(index) => template.legs.get(usize::from(index)).map_or(&template.flow, |leg| &leg.flow),
     };
     let amount = match item.amount {
-        TemplateAmount::Literal(amount) => Cell::amount(
+        Expr::Literal(amount) => Cell::amount(
             book,
             axiom_model::Amount::new(crate::flow::scoped_movement_qty(lens, flow, amount.qty), amount.unit),
         ),
-        TemplateAmount::Computed(_) => Cell::Word("computed per occurrence"),
+        Expr::Computed(_) => Cell::Word("computed per occurrence"),
     };
     let purpose =
         item.purpose.map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)));

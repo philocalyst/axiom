@@ -3,7 +3,7 @@
 
 use axiom_core::{Day, Days, Diagnostic, Groups, Id, Loc, Map, Run};
 use axiom_syntax as ast;
-use axiom_syntax::{Quantity, Subject};
+use axiom_syntax::Subject;
 
 use super::flow::{
     Codes, Ends, FlowCx, OtherSide, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, flow_roots,
@@ -16,18 +16,19 @@ use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
-use crate::book::{Amount, FlowSide, Place, ScheduleKind, TemplateAmount};
+use crate::book::{Amount, FlowSide, Place, ScheduleKind};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
-    Action, Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram,
-    JournalQuantity, Mode, OccurrenceTail, Origin, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
+    Action, Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram, Mode,
+    OccurrenceTail, Origin, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
 };
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
 use crate::scope::Home;
 use crate::sources::Site;
+use crate::split::{Part, Quantity};
 
 /// A dated record of the journal, whichever kind of item wrote it.
 #[derive(Clone, Copy)]
@@ -73,7 +74,7 @@ struct OccurrenceGroupDraft {
     source: JournalEnd,
     side: FlowSide,
     legs: Vec<u32>,
-    leg_quantities: Vec<JournalQuantity>,
+    leg_quantities: Vec<Part>,
     items: Box<[JournalItem]>,
 }
 
@@ -348,7 +349,7 @@ struct Split<'c, 's> {
 /// The legs of a split so far: where each flow went, and what each said it moved.
 struct SplitLegs {
     legs: Vec<u32>,
-    quantities: Vec<JournalQuantity>,
+    quantities: Vec<Part>,
 }
 
 /// A header that names one end is the source of its legs, which name the others, and of the items under it.
@@ -388,7 +389,7 @@ fn lower_split_flow<'s>(
         header: None,
         source: journal_end(source.end),
         side: source.side,
-        total: total.map(|total| total.group),
+        total: total.map(|total| total.quantity()),
         legs: made.legs.into_boxed_slice(),
         leg_quantities: made.quantities.into_boxed_slice(),
         items,
@@ -399,7 +400,7 @@ fn lower_split_flow<'s>(
 /// that compute it.
 struct MadeLeg {
     at: u32,
-    quantity: JournalQuantity,
+    quantity: Part,
     out: Option<NodeId>,
     arrive: Option<NodeId>,
     basis: Option<NodeId>,
@@ -429,8 +430,8 @@ impl<'s> Split<'_, 's> {
         let codes = Codes { header: self.txn.codes, local: leg_codes };
         let flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags)?;
         staged.book.flows.push(flow);
-        let (out, arrive) = if source_is_from { (None, quantity.root) } else { (quantity.root, None) };
-        Some(MadeLeg { at, quantity: quantity.group, out, arrive, basis })
+        let (out, arrive) = if source_is_from { (None, quantity.root()) } else { (quantity.root(), None) };
+        Some(MadeLeg { at, quantity: quantity.part, out, arrive, basis })
     }
 
     /// The items under the header: expenses of the legs, or what the source's own flow is, which each leg's end
@@ -531,7 +532,7 @@ fn lower_opening_leg<'s>(
     leg: &ast::Leg<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Flow, Option<NodeId>)> {
-    let whole = matches!(leg.amount, Quantity::Whole);
+    let whole = matches!(leg.amount, ast::Quantity::Whole);
     let whole_asset = if whole { staged.book.asset(leg.end.name.0) } else { None };
     let no_select = Run::new(Id::new(0), 0);
     let end = match whole_asset {
@@ -549,7 +550,7 @@ fn lower_opening_leg<'s>(
     };
     let fallback = whole_asset.map_or(staged.book.base, |asset| staged.book.assets[asset].unit);
     let quantity = resolve_quantity(staged, cx, leg.amount, fallback, FlowSide::Out, diags)?;
-    if !matches!(leg.amount, Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
+    if !matches!(leg.amount, ast::Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
         diags.push(
             Diagnostic::error("opening-amount", "an opening line needs a literal amount")
                 .label(leg.loc, "computed and inferred quantities cannot set an opening balance"),
@@ -700,10 +701,7 @@ fn lower_occurrence<'a, 's>(
     let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
     let txn_id = Id::new(staged.book.txns.len() as u32);
     let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
-    let occurrence_amount = amount.and_then(|amount| {
-        resolve_amount(&staged, &cx, amount, fallback, diags)
-            .map(|(literal, root)| root.map_or(TemplateAmount::Literal(literal), TemplateAmount::Computed))
-    });
+    let occurrence_amount = amount.and_then(|amount| resolve_amount(&staged, &cx, amount, fallback, diags));
     if amount.is_some() && occurrence_amount.is_none() {
         return;
     }
@@ -751,9 +749,8 @@ fn lower_occurrence<'a, 's>(
                 continue;
             }
             let literal = match leg.amount {
-                Quantity::Amount(ast::Amount::Literal(literal)) | Quantity::Target(ast::Amount::Literal(literal)) => {
-                    literal
-                }
+                ast::Quantity::Amount(ast::Amount::Literal(literal))
+                | ast::Quantity::Target(ast::Amount::Literal(literal)) => literal,
                 _ => {
                     diags.push(
                         Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
@@ -904,7 +901,7 @@ fn lower_occurrence<'a, 's>(
             arrive = quantity.amount;
         }
         if let Some((rate, quote, at)) = tail.price {
-            if quantity.root.is_some() {
+            if quantity.root().is_some() {
                 diags.push(
                     Diagnostic::error("price-shape", "a written price needs a literal occurrence quantity")
                         .label(at, "computed quantities cannot be priced here"),
@@ -972,20 +969,18 @@ fn lower_occurrence<'a, 's>(
         flow.detail = merge_detail_pool(&mut staged, base_flow.detail, flow.detail);
         let offset = staged.flows().len();
         staged.book.flows.push(flow);
-        push_flow_expressions(
-            &mut flow_roots,
-            offset,
-            (side == FlowSide::Out).then_some(quantity.root).flatten(),
-            (side == FlowSide::Arrive).then_some(quantity.root).flatten(),
-            tail.basis_root,
-        );
+        let (out_root, arrive_root) = match side {
+            FlowSide::Out => (quantity.root(), None),
+            FlowSide::Arrive => (None, quantity.root()),
+        };
+        push_flow_expressions(&mut flow_roots, offset, out_root, arrive_root, tail.basis_root);
         if written_groups[template_at].is_none() {
             let side = template_side(&staged, template);
             written_groups[template_at] = Some(occurrence_group_draft(template_at, template, side));
         }
         let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
         draft.legs.push(offset);
-        draft.leg_quantities.push(quantity.group);
+        draft.leg_quantities.push(quantity.part);
     }
     if !file[statement.body.items].is_empty() {
         let Some(template) = templates.first() else {
@@ -1017,8 +1012,6 @@ fn lower_occurrence<'a, 's>(
         .flatten()
         .map(|draft| WrittenGroup {
             template: draft.template,
-            out: None,
-            arrive: None,
             group: JournalGroup {
                 header: None,
                 source: draft.source,
@@ -1394,9 +1387,10 @@ fn lower_owes<'a, 's>(
     let mut groups = Vec::new();
     if let Some(written_amount) = amount {
         let base = staged.book.base;
-        let Some((amount, root)) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
+        let Some(expr) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
             return;
         };
+        let (amount, root) = (expr.stand_in(base), expr.root());
         let shape = Shape { ends: Ends { from, to }, out: amount, arrive: amount, infer: Infer::Known, mode };
         let codes = Codes { header: header_codes, local: empty_codes(&staged) };
         if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, header_tail.clone(), loc, diags) {
@@ -1425,7 +1419,7 @@ fn lower_owes<'a, 's>(
             header: None,
             source: journal_end(from),
             side: FlowSide::Out,
-            total: Some(JournalQuantity::Derived),
+            total: Some(Quantity::Derived),
             legs: Box::default(),
             leg_quantities: Box::default(),
             items,

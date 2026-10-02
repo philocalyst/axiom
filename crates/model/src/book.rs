@@ -19,6 +19,7 @@ use crate::journal::{
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
+use crate::split::{Expr, Part, Quantity};
 use crate::sync::{Format, Pattern, Source};
 
 pub use axiom_core::{Cadence, On, Period};
@@ -657,8 +658,8 @@ pub struct TemplateFlow {
     /// The typed quantities below specify how each side is produced.
     pub flow: Flow,
     /// The header quantities on both sides; exchanges may use two units.
-    pub out: TemplateQuantity,
-    pub arrive: TemplateQuantity,
+    pub out: Quantity,
+    pub arrive: Quantity,
     /// The split legs in source order. Their destinations and selectors stay
     /// attached to their own quantities.
     pub legs: Box<[TemplateLeg]>,
@@ -672,7 +673,7 @@ pub struct TemplateLeg {
     pub flow: Flow,
     /// The side supplied by this split leg.
     pub side: FlowSide,
-    pub quantity: TemplateQuantity,
+    pub part: Part,
 }
 
 /// Which quantity of the parent transfer a leg or item supplies.
@@ -682,29 +683,14 @@ pub enum FlowSide {
     Arrive,
 }
 
-/// A line item's typed value. A computed root is authoritative and must be
-/// evaluated for each occurrence; a literal retains its exact typed amount.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TemplateAmount {
-    Literal(Amount),
-    Computed(NodeId),
-}
-
-/// The amount form on a template header or split leg. Literal amounts already
-/// live in the corresponding side of `Flow`; a root replaces that literal.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TemplateQuantity {
-    Amount(Option<NodeId>),
-    Pending(Option<NodeId>),
-    Target(Option<NodeId>),
-    /// A literal percentage of the parent flow side, resolved per occurrence.
-    Percent(Ratio),
-    Unknown(Id<Commodity>),
-    All(Option<Id<Commodity>>),
-    Rest,
-    Whole,
-    /// The amount is supplied by another contract rule, such as a loan.
-    Derived,
+impl FlowSide {
+    /// The end of the flow whose quantity this side is.
+    pub fn end(self) -> crate::journal::End {
+        match self {
+            FlowSide::Out => crate::journal::End::From,
+            FlowSide::Arrive => crate::journal::End::To,
+        }
+    }
 }
 
 /// The exact endpoint pair an item bridges. For a split, `Leg(i)` points to
@@ -724,7 +710,7 @@ pub struct TemplateItem {
     /// Which parent quantity this item's unit contributes to. This is
     /// explicit because an exchange item may use a different unit per side.
     pub side: FlowSide,
-    pub amount: TemplateAmount,
+    pub amount: Expr,
     pub purpose: Option<crate::journal::Purposed>,
     pub description: Option<Text>,
     pub codes: axiom_core::Run<Sym>,
@@ -1217,10 +1203,10 @@ pub enum AlsoOn {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Implied {
     /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
-    Item { sign: Sign, amount: TemplateAmount },
+    Item { sign: Sign, amount: Expr },
     /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
     /// `None` ends mean the implying flow's own ends (`issuer -> self`).
-    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: TemplateAmount },
+    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: Expr },
 }
 
 /// How a line item bears on the flow it is under (LANGUAGE §3).
