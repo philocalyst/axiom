@@ -294,7 +294,7 @@ fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Rep
             Ok(flow::view_with_lens(lens.on(to.unwrap_or(run.today)), run, *by, *from))
         }
         Query::Flow { by: FlowBy::Party, from, to } => {
-            Ok(flow::view_by_party_with_lens(lens.on(to.unwrap_or(run.today)), run, *from, to.unwrap_or(run.today)))
+            Ok(flow::view_by_party_with_lens(lens.on(to.unwrap_or(run.today)), run, *from))
         }
         Query::Available { at } => Ok(available::view_with_lens(lens.on(at.unwrap_or(run.today)), run)),
         Query::Budget { at, by } => Ok(budget::view_with_lens(lens.on(at.unwrap_or(run.today)), run, *at, *by)),

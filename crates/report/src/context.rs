@@ -61,8 +61,8 @@ impl<'b, 's> Context<'b, 's> {
                 Ok(super::flow::view_with_lens(self.lens(to), &self.run, *by, *from))
             }
             Query::Flow { by: FlowBy::Party, from, to } => {
-                let cutoff = to.unwrap_or(self.run.today);
-                Ok(super::flow::view_by_party_with_lens(self.lens(cutoff), &self.run, *from, cutoff))
+                let to = to.unwrap_or(self.run.today);
+                Ok(super::flow::view_by_party_with_lens(self.lens(to), &self.run, *from))
             }
             Query::Available { at } => {
                 let at = at.unwrap_or(self.run.today);
