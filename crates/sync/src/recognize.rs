@@ -189,7 +189,7 @@ impl<'b, 's> Recognizer<'b, 's> {
                 let whole = matches!(book.patterns[pattern].program.as_ref(), [Op::Name(_)]);
                 entries.push(Entry { owner, pattern: Some(pattern), own: None, whole });
                 match patterns.starts(pattern) {
-                    Some(literals) => literals.iter().for_each(|literal| starts.insert(literal, entry)),
+                    Some(literals) => literals.for_each(|literal| starts.insert(literal, entry)),
                     None => floating.push(entry),
                 }
             }

@@ -4,33 +4,52 @@
 //! executes borrowed `model::sync::Pattern` values; it has no second pattern
 //! language or semantic representation.
 
-use axiom_core::Id;
+use axiom_core::{Arena, Groups, Id};
 use axiom_model::Book;
 use axiom_model::sync::{Capture, CharClass, Op, Pattern};
 use memchr::memmem;
 
 const MAX_DEPTH: usize = 64;
 
+/// A literal that starts a pattern: a run of bytes in [`Patterns`]' arena of them.
+type Literal = axiom_core::Run<u8>;
+
 /// A compiled program set borrows the book's canonical pattern arena. The
-/// start-literal lists are only a lookup index; the Op programs remain in the
-/// model arena and are never copied.
+/// start-literal index is only a lookup: every literal's bytes sit in one arena
+/// and a pattern's literals are a row of runs into it, so finding where a memo
+/// may match is a slice and a `memmem`. The Op programs remain in the model
+/// arena and are never copied.
 pub struct Patterns<'a, 's> {
     book: &'a Book<'s>,
-    starts: Vec<Option<Vec<Vec<u8>>>>,
+    /// What a match must begin with, one of these per pattern. A pattern that may begin anywhere has none.
+    starts: Groups<Pattern, Literal>,
+    literals: Arena<u8>,
 }
 
 impl<'a, 's> Patterns<'a, 's> {
     pub fn new(book: &'a Book<'s>) -> Patterns<'a, 's> {
-        let mut starts = vec![None; book.patterns.len()];
         let mut visiting = vec![false; book.patterns.len()];
+        let (mut literals, mut rows) = (Arena::new(), Vec::new());
         for (id, _) in book.patterns.iter() {
-            starts[id.index()] = starts_of(book, id, &mut visiting, 0);
+            for literal in starts_of(book, id, &mut visiting, 0).into_iter().flatten() {
+                rows.push((id, literals.extend(literal)));
+            }
         }
-        Patterns { book, starts }
+        Patterns { book, starts: Groups::build(book.patterns.len(), rows.iter().copied()), literals }
     }
 
-    pub fn starts(&self, id: Id<Pattern>) -> Option<&[Vec<u8>]> {
-        self.starts.get(id.index())?.as_deref()
+    /// The literals a match of `id` must begin with, one of them; `None` where it may begin anywhere.
+    pub fn starts(&self, id: Id<Pattern>) -> Option<impl ExactSizeIterator<Item = &[u8]> + '_> {
+        let row = &self.starts[id];
+        (!row.is_empty()).then(|| row.iter().map(|&literal| &self.literals[literal]))
+    }
+
+    /// What every match of `id` begins with, when that is one literal: what a search can jump to.
+    fn prefix(&self, id: Id<Pattern>) -> &[u8] {
+        match self.starts[id][..] {
+            [only] => &self.literals[only],
+            _ => &[],
+        }
     }
 
     fn pattern(&self, id: Id<Pattern>) -> Option<&Pattern> {
@@ -90,10 +109,7 @@ impl Run {
 
     pub fn find(&mut self, id: Id<Pattern>, hay: &[u8], from: usize, patterns: &Patterns<'_, '_>) -> Option<Found> {
         let text = std::str::from_utf8(hay).ok()?;
-        let prefix = match patterns.starts(id) {
-            Some([only]) => only.as_slice(),
-            _ => &[],
-        };
+        let prefix = patterns.prefix(id);
         let mut at = from.min(hay.len());
         if !text.is_char_boundary(at) {
             at = text.char_indices().find_map(|(at, _)| (at > from).then_some(at))?;
@@ -118,7 +134,8 @@ fn boundary(hay: &[u8], at: usize) -> bool {
     at <= hay.len() && (at == 0 || at == hay.len() || hay.get(at).is_some_and(|byte| byte & 0b1100_0000 != 0b1000_0000))
 }
 
-/// The fixed-start literals for a pattern, or `None` if it may start anywhere.
+/// The fixed-start literals for a pattern, or `None` if it may start anywhere. They are gathered per pattern
+/// in a short-lived vector, because the alternatives of a choice are as many as it has ways.
 fn starts_of(book: &Book<'_>, id: Id<Pattern>, visiting: &mut [bool], depth: usize) -> Option<Vec<Vec<u8>>> {
     if depth > MAX_DEPTH {
         return None;
