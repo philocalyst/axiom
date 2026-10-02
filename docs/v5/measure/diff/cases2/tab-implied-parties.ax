@@ -1,0 +1,9 @@
+use std
+base USD
+entity me : person
+account checking : bank
+2025-12-31 market -> checking 9_000 USD
+2026-01-02 checking -> zorb 50 USD
+2026-01-03 dana owes me 40 USD due 30d
+2026-01-04 checking -> frob 10 USD for kidz via paypl
+2026-03-05 me owes zorb 12 USD due 20d
