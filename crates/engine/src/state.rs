@@ -86,9 +86,9 @@ pub(crate) struct Record {
     pub passed: Vec<Headroom>,
     /// Every `!` a posted flow carried, and whether it waived anything.
     pub waivers: Map<Loc, bool>,
-    /// `always` laws currently failing, so a lasting condition is reported
+    /// `always` steps currently failing, so each lasting condition is reported
     /// when it starts rather than after every flow.
-    pub failing: Set<(Id<Law>, Subject)>,
+    pub failing: Set<(Id<Law>, u32, Subject)>,
     /// Laws already reported for a subject in a window, by law, step, subject
     /// and the window's first day: a limit is broken once per window, at the
     /// flow that crossed it.

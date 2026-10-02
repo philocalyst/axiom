@@ -149,7 +149,8 @@ opening 2026-01-01
         assert_eq!(
             run.violations.iter().map(|violation| violation.cause).collect::<Vec<_>>(),
             [crate::Cause::Flow(axiom_core::Id::new(1)), crate::Cause::Flow(axiom_core::Id::new(1))],
-            "the outgoing flow sees the earlier 200 USD peak and 100 USD low, not only its current 150 USD balance"
+            "the outgoing flow sees the earlier 200 USD peak and 100 USD low, not only its current 150 USD balance; got {:?}",
+            run.violations.iter().map(|violation| &run.diagnostics[violation.diagnostic as usize]).collect::<Vec<_>>()
         );
         let messages: Vec<_> = run
             .violations
@@ -158,6 +159,16 @@ opening 2026-01-01
             .collect();
         assert!(messages.iter().any(|message| message.contains("intraday peak exceeded")));
         assert!(messages.iter().any(|message| message.contains("intraday low fell short")));
+        let low = run
+            .violations
+            .iter()
+            .map(|violation| &run.diagnostics[violation.diagnostic as usize])
+            .find(|diagnostic| diagnostic.message.contains("intraday low fell short"))
+            .expect("the low warning has its own persistent step identity");
+        assert!(
+            low.labels.iter().any(|label| label.text.contains("100.00 USD")),
+            "the low is the balance after the opening, not the undefined pre-opening zero: {low:?}"
+        );
     });
 }
 

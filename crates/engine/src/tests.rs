@@ -1263,6 +1263,50 @@ fn balance_reads_in_the_display_sign_and_a_lasting_condition_is_reported_once() 
 }
 
 #[test]
+fn each_lasting_step_is_deduplicated_and_persisted_in_a_checkpoint() {
+    let mut f = Fixture::new();
+    let (equity, checking, food) = (f.equity, f.checking, f.food);
+    let name = f.sym("two-limits");
+    let mut law = LawBuilder::new(name, Trigger::Always);
+    let balance = law.var(Var::Balance, Ty::AMOUNT);
+    let first_limit = law.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
+    let second_limit = law.konst(Value::Amount(f.usd(50_00)), Ty::AMOUNT);
+    let first = law.bin(BinOp::Le, balance, first_limit, Ty::Bool);
+    let second = law.bin(BinOp::Le, balance, second_limit, Ty::Bool);
+    let law = f.law(law.warn(first).warn(second));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.always.push((checking, rule));
+    f.flow(1, equity, checking, 200_00);
+    f.flow(2, checking, food, 1_00);
+
+    let book = f.book();
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
+    ledger.advance(Day(1));
+    assert_eq!(ledger.record.violations.len(), 2, "both failed steps report independently");
+    let checkpoint = ledger.checkpoint();
+
+    let retained = ledger.record.failing.clone();
+    assert_eq!(retained.len(), 2);
+    ledger.record.failing.remove(&(law, 0, Subject::Place(checking)));
+    let one_step_checkpoint = ledger.checkpoint();
+    assert_ne!(
+        checkpoint.digest(),
+        one_step_checkpoint.digest(),
+        "the checkpoint digest includes each active failed step"
+    );
+    ledger.record.failing = retained;
+
+    let mut resumed = plan.resume(&checkpoint, options());
+    assert_eq!(resumed.record.failing.len(), 2, "forking preserves both active step identities");
+    resumed.advance(Day(2));
+    assert!(
+        resumed.record.violations.is_empty(),
+        "a still-broken Always step is not reported again after resume"
+    );
+}
+
+#[test]
 fn a_returned_flow_is_reversed_on_the_day_of_the_return() {
     let mut f = Fixture::new();
     let (equity, checking, food, usd) = (f.equity, f.checking, f.food, f.usd);

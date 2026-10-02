@@ -76,6 +76,7 @@ impl Ledger<'_, '_, '_> {
         }
         if watched {
             self.count(m);
+            self.sample_temporal(m.day);
             self.fire(
                 &book.rules.on_out[m.from],
                 &Occasion {
@@ -90,6 +91,7 @@ impl Ledger<'_, '_, '_> {
             || m.moves != Moves::Value
         {
             self.relieve(m);
+            self.sample_temporal(m.day);
             let keeps = self.price(m);
             self.arrive(m, keeps);
         } else {
@@ -99,8 +101,10 @@ impl Ledger<'_, '_, '_> {
             self.world
                 .holdings
                 .credit(m.to, m.arrive.unit, m.arrive.qty);
+            self.sample_temporal(m.day);
         }
         self.record_capital_outflow(m);
+        self.sample_temporal(m.day);
         if watched {
             self.fire(
                 &book.rules.on_in[m.to],
@@ -248,6 +252,7 @@ impl Ledger<'_, '_, '_> {
                 .relief
                 .slices
                 .push(fresh_slice(m, m.out.qty, is_base, now));
+            self.sample_temporal(m.day);
             return;
         }
         self.ask_ties(m);
@@ -465,6 +470,7 @@ impl Ledger<'_, '_, '_> {
             if m.moves == Moves::Loss {
                 self.keep_basis(m);
             }
+            self.sample_temporal(m.day);
             return;
         }
         let (stays, restricted) = (stays_with_owner(m), self.restricted_source(m));
@@ -548,9 +554,11 @@ impl Ledger<'_, '_, '_> {
         } else {
             !declared_asset
         };
+        self.sample_temporal(m.day);
         if !keeps && part_ready {
             if let Some(part) = fresh_part {
                 self.match_pending_carries(part, owner, m.arrive.unit, since, m.arrive.qty, m);
+                self.sample_temporal(m.day);
             }
         }
     }
@@ -885,6 +893,7 @@ impl Ledger<'_, '_, '_> {
             &request,
             &mut self.scratch.relief,
         );
+        self.sample_temporal(m.day);
         if self.scratch.relief.shortfall > Qty::ZERO {
             self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
             return;
@@ -945,6 +954,7 @@ impl Ledger<'_, '_, '_> {
         if let Err(error) = self.dispose_asset(asset, m.txn, self.source_flow(m), boundary) {
             self.report_asset_state_error(m, error);
         }
+        self.sample_temporal(m.day);
     }
 
     /// Matches future replacement acquisitions against losses already waiting
@@ -998,6 +1008,7 @@ impl Ledger<'_, '_, '_> {
             self.report_asset_state_error(motion, error);
             return;
         }
+        self.sample_temporal(motion.day);
         // `index` values refer to the pre-update queue. Removing in reverse
         // order preserves the remaining indices; all updated amounts were
         // precomputed while the basis guard was still untouched.

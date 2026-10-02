@@ -398,6 +398,9 @@ impl Ledger<'_, '_, '_> {
         };
         match self.consume_asset_part(asset, part, amount.qty) {
             Ok(consumption) => {
+                if !consumption.applied.is_zero() {
+                    self.sample_temporal(ctx.day);
+                }
                 if !consumption.excess.is_zero() {
                     self.record.report(
                         Diagnostic::error(
@@ -547,6 +550,7 @@ impl Ledger<'_, '_, '_> {
                 self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
                 return;
             }
+            self.sample_temporal(ctx.day);
             for addition in &additions {
                 self.record.adjustments.push(Adjustment {
                     day: ctx.day,
@@ -578,6 +582,7 @@ impl Ledger<'_, '_, '_> {
                 }
             }
         }
+        self.sample_temporal(ctx.day);
     }
 
     /// Reads a floor of nothing (`balance >= empty`) straight off the holdings
@@ -598,9 +603,9 @@ impl Ledger<'_, '_, '_> {
         let holds = balance >= Qty::ZERO;
         if holds {
             self.record.checks[rule.law.index()] += 1;
-            if !self.record.failing.is_empty() {
-                self.record.failing.remove(&(rule.law, rule.subject));
-            }
+            self.record
+                .failing
+                .retain(|&(law, _, subject)| (law, subject) != (rule.law, rule.subject));
         }
         holds
     }
@@ -619,10 +624,13 @@ impl Ledger<'_, '_, '_> {
             self.record.checks[rule.law.index()] += 1;
         }
         let mut outcomes = std::mem::take(&mut self.scratch.outcomes);
-        if law.trigger == Trigger::Always
-            && !outcomes.iter().any(|o| matches!(o, Outcome::Broken { .. }))
-        {
-            self.record.failing.remove(&(rule.law, rule.subject));
+        if law.trigger == Trigger::Always {
+            self.record.failing.retain(|&(failed_law, step, subject)| {
+                (failed_law, subject) != (rule.law, rule.subject)
+                    || outcomes.iter().any(|outcome| {
+                        matches!(outcome, Outcome::Broken { step: failed_step, .. } if *failed_step == step)
+                    })
+            });
         }
         for outcome in outcomes.drain(..) {
             match outcome {
@@ -637,6 +645,7 @@ impl Ledger<'_, '_, '_> {
                         {
                             self.world.tallies.add(house, day.year(), name, part);
                         }
+                        self.sample_temporal(ctx.day);
                         let amount = Amount::new(part, book.base);
                         let effect =
                             self.effect(rule, ctx, (day, name, amount), Consequence::Count);
@@ -767,7 +776,7 @@ impl Ledger<'_, '_, '_> {
         let facts = &self.plan.laws[rule.law.index()];
         let waiver = self.waiver(ctx);
         let fresh = match (law.trigger, facts.steps[step as usize].reads) {
-            (Trigger::Always, _) => self.record.failing.insert((rule.law, rule.subject)),
+            (Trigger::Always, _) => self.record.failing.insert((rule.law, step, rule.subject)),
             (_, Some(reads)) => self.record.reported.insert((
                 rule.law,
                 step,
