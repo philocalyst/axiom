@@ -13,7 +13,7 @@
 //! # Why the union is sound
 //!
 //! - Every field is `Copy`, so a union field has no drop glue and writing one is safe.
-//! - Every byte of a payload is initialized: [`Payload::EMPTY`] is zeroed, and writing a field overwrites part of it.
+//! - Every byte of a payload is initialized: `Payload::EMPTY` is zeroed, and writing a field overwrites part of it.
 //! - Every field accepts every bit pattern: they are integers, laid out without padding. The flag is a byte, not a
 //!   `bool`, which would not.
 //!
