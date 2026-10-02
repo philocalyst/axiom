@@ -1137,7 +1137,15 @@ impl<'a, 's> Machine<'a, 's> {
         let book = self.book();
         let named = |pattern: Sym, path: Sym| glob(book.name(pattern), book.name(path));
         match (left, alternative) {
-            (Value::Place(p), Value::Kind(k)) => book.is_a(book.places[p].kind, k),
+            (Value::Place(p), Value::Kind(k)) => match book.places[p].role {
+                axiom_model::Role::Outside(Some(party))
+                | axiom_model::Role::Tab(party)
+                | axiom_model::Role::Holding(party) => book.is_a(book.entities[party].kind, k),
+                axiom_model::Role::Issuer(unit) => book.is_a(book.commodities[unit].kind, k),
+                axiom_model::Role::Outside(None)
+                | axiom_model::Role::Account { .. }
+                | axiom_model::Role::Asset(_) => book.is_a(book.places[p].kind, k),
+            },
             (Value::Entity(e), Value::Kind(k)) => book.is_a(book.entities[e].kind, k),
             (Value::Unit(u), Value::Kind(k)) => book.is_a(book.commodities[u].kind, k),
             (Value::Kind(a), Value::Kind(k)) => book.is_a(a, k),

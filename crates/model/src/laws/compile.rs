@@ -40,6 +40,8 @@ enum Role {
     ParamBase,
     /// An alternative of `is`: a kind, place, entity or pattern, never a variable.
     Pattern,
+    /// The `subject.lives` syntax node inside the special residence predicate.
+    ResidenceField,
 }
 
 #[derive(Clone, Copy)]
@@ -550,9 +552,18 @@ impl<'s> Compiler<'_, '_, 's> {
                 ExprKind::Select(keys) => self.file[keys]
                     .iter()
                     .for_each(|&key| mark(key, Role::Keyword)),
-                ExprKind::Is(_, alternatives) => self.file[alternatives]
-                    .iter()
-                    .for_each(|&alt| mark(alt, Role::Pattern)),
+                ExprKind::Is(subject, alternatives) => {
+                    if matches!(self.file.exprs[subject].kind, ExprKind::Field(_, field) if field.0 == "lives") {
+                        mark(subject, Role::ResidenceField);
+                        self.file[alternatives]
+                            .iter()
+                            .for_each(|&alt| mark(alt, Role::Keyword));
+                    } else {
+                        self.file[alternatives]
+                            .iter()
+                            .for_each(|&alt| mark(alt, Role::Pattern));
+                    }
+                }
                 _ => {}
             }
         }
@@ -635,6 +646,12 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn check(&mut self, at: usize, expr: &ast::Expr<'s>) -> Check<(Op, Ty)> {
+        if self.roles[at] == Role::ResidenceField {
+            // This Field node is only the syntactic marker for the special
+            // `entity.lives is SYSTEM` predicate. Its parent compiles directly
+            // to Op::Resides and does not evaluate this child.
+            return Ok((Op::Const(Value::Empty), Ty::Bool));
+        }
         if let Some((value, ty)) = self.world.literal(self.home, self.file, expr)? {
             return Ok((Op::Const(value), ty));
         }
@@ -716,6 +733,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 Ok((Op::Const(Value::Name(sym)), Ty::Name))
             }
             Role::Pattern => self.constant(word),
+            Role::ResidenceField => Err(Bad::Cascade),
             Role::Normal => {
                 if let Some(&(_, bound)) = self
                     .locals
