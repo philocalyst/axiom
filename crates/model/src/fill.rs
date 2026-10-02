@@ -94,7 +94,7 @@ pub(crate) fn fill<'s>(world: &mut World<'s>, at: &At<'_, 's>, slot: &Slot) -> R
         return Err(Diagnostic::error("property-value", format!("`{name}` needs a value"))
             .label(line.loc, "write a value here"));
     }
-    if args.len() % width != 0 {
+    if !args.len().is_multiple_of(width) {
         let last = at.file.exprs[args[args.len() - 1]].loc;
         return Err(problem::missing_weight(name, world.book.name(slot.weight.expect("a weight").name), last));
     }

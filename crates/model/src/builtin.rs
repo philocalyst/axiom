@@ -25,7 +25,7 @@ use crate::book::{Basis, Books, Commodity, Entity, Place, Purpose, System};
 /// Declares the keys, numbered in the order written.
 macro_rules! own_slots {
     ($($(#[$doc:meta])* $key:ident: $ty:ty;)*) => {
-        #[allow(non_camel_case_types)]
+        #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
         enum Number { $($key),* }
 
         $($(#[$doc])* pub const $key: Key<$ty> = Key::new(SlotId(Number::$key as u32));)*

@@ -179,13 +179,16 @@ const BUILTINS: [(&str, &[Target], Reader); 24] = [
     ("claim", &[Target::Kind], |a| a.say(slot::CLAIM, true)),
 ];
 
+/// What a `takes` line says: what is taken, what it becomes, and where it is written.
+type Take = (Id<Purpose>, Id<Purpose>, Loc);
+
 /// What the lines of the language say that is not said as they are read, because it takes all of them: the
 /// residences of an entity are its kinds' and its own, whole; a kind's `takes` replace one another by what they take;
 /// and a commodity's precision is its own, else its kinds'.
 #[derive(Default)]
 struct Pending {
     lives: Map<Holder, Vec<Residence>>,
-    takes: Map<Holder, Vec<(Id<Purpose>, Id<Purpose>, Loc)>>,
+    takes: Map<Holder, Vec<Take>>,
     shares: Map<Holder, Vec<Id<Entity>>>,
     precision: Map<Holder, u8>,
 }

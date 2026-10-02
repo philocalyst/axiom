@@ -4,13 +4,13 @@
 //! lowerers and by the engine. These tests focus on the model boundary: typed
 //! names, stable trees, ownership and once-stored property defaults.
 
-use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
+use axiom_core::{Day, Days, Diagnostic, FileId, Id, Many, Ratio};
 use axiom_syntax::{Folder, parse};
 
 use crate::builtin::{self, Coded};
 use crate::{
-    Amount, Basis, Book, Conversion, ConversionError, Holder, PurposeRoot, RatePolicy, RateSource, Role, Sort, Source,
-    Value, build,
+    Amount, Basis, Book, Conversion, ConversionError, Entity, Holder, PurposeRoot, RatePolicy, RateSource, Role, Sort,
+    Source, Value, build,
 };
 
 const STD: &str = "\
@@ -215,6 +215,61 @@ account retirement : residential
     assert!(book.is_deferred(account) && book.is_claim(account), "a place has what its kinds say");
     assert_eq!(book.basis(account), Basis::Cost, "and the nearest kind that says it");
     assert_eq!(book.select(account), Some(crate::Policy::Hifo));
+}
+
+#[test]
+fn an_entity_counts_in_the_currency_of_where_it_lives_else_the_books() {
+    let std = "\
+system std
+kind person : entity
+kind currency : commodity
+commodity USD : currency
+commodity EUR : currency
+";
+    let germany = "system de\nuse std\ncurrency EUR\n";
+    let project = "\
+use std
+use de
+base USD
+entity me : person
+  lives de
+entity jo : person
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "de.ax", germany, true),
+        parsed_source(2, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let unit = |name| book.commodity(name).unwrap();
+    assert_eq!(book.currency(book.entity("me").unwrap()), unit("EUR"), "what the system it lives under counts in");
+    assert_eq!(book.currency(book.entity("jo").unwrap()), unit("USD"), "and the book's where nothing says");
+}
+
+#[test]
+fn a_kinds_share_says_whom_the_flows_with_its_parties_are_shared_with() {
+    let project = "\
+use std
+base USD
+kind grocer : entity
+  share 60% for me
+  sales-tax 8%
+entity me : person
+entity shop : grocer
+";
+    let (book, diagnostics) = build_project(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let grocer = Holder::Kind(book.kind("grocer").unwrap());
+    let sharing: Option<Many<Id<Entity>>> = book.fact(builtin::SHARE, grocer);
+    let members: Vec<_> = book.facts.members(sharing.unwrap()).collect();
+    assert_eq!(members, [book.entity("me").unwrap()]);
+    assert_eq!(book.fact(builtin::SALES_TAX, grocer), Ratio::percent(8, 0));
+    assert_eq!(
+        book.fact(builtin::SALES_TAX, book.entity("shop").unwrap()),
+        Ratio::percent(8, 0),
+        "and so do its things"
+    );
 }
 
 #[test]
