@@ -98,6 +98,13 @@ struct Reading<'a> {
     inputs: &'a [Option<Amount>],
 }
 
+/// What a leg takes from: the header's flow as it was resolved, and the side of it the group takes from.
+#[derive(Clone, Copy)]
+struct Taking<'a> {
+    side: FlowSide,
+    header: &'a Flow,
+}
+
 /// What the occurrence itself says of every flow it makes: whose it is, how real, when it is recognized, and the
 /// codes and waiver its tail gives them.
 #[derive(Clone, Copy)]
@@ -647,9 +654,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 Some((source_flow, part)) => (source_flow.clone(), part, &written_at),
                 None => (leg.flow.clone(), leg.part, &template_at),
             };
-            // A share is of the header as it was resolved, before any leg has carved it.
-            let header_side = out[group_start].flow.amount_at(template.side.end());
-            let value = self.leg(at, &flow, part, template.side.end(), flow_ordinal, header_side, missing)?;
+            let from = Taking { side: template.side, header: &out[group_start].flow };
+            let value = self.leg(at, &flow, part, from, flow_ordinal, missing)?;
             stamp.on(&mut flow);
             if matches!(value, ResolvedLeg::Rest) {
                 let side = match template.side {
@@ -682,10 +688,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 let flow_ordinal = ordinal(ordinal_base, 1 + leg_flows.len(), flow.loc)?;
                 let mut flow = flow.clone();
                 stamp.on(&mut flow);
-                let side = written_group.side;
-                let header_side = out[group_start].flow.amount_at(side.end());
-                let value =
-                    self.leg(&written_at, &flow, written_leg.part, side.end(), flow_ordinal, header_side, missing)?;
+                let from = Taking { side: written_group.side, header: &out[group_start].flow };
+                let value = self.leg(&written_at, &flow, written_leg.part, from, flow_ordinal, missing)?;
                 if matches!(value, ResolvedLeg::Rest) {
                     let side = match written_group.side {
                         FlowSide::Out => 0,
@@ -864,22 +868,23 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         }
     }
 
-    /// What a leg takes of its header's side, which `header` is as it was resolved: its own quantity, a share
-    /// of it, or the rest, which the caller settles once every other leg and item has taken its part.
+    /// What a leg takes of its header's side: its own quantity, a share of the side as the header resolved it
+    /// (before any leg has carved it), or the rest, which the caller settles once every other leg and item has
+    /// taken its part.
     fn leg(
         &mut self,
         at: &Reading<'_>,
         flow: &Flow,
         part: Part,
-        end: End,
+        from: Taking<'_>,
         ordinal: u32,
-        header: Amount,
         missing: &mut Vec<u16>,
     ) -> Result<ResolvedLeg, TemplateError> {
+        let end = from.side.end();
         Ok(match part {
             Part::Rest => ResolvedLeg::Rest,
             Part::Share(rate) => {
-                let amount = scale_template_amount(header, rate)
+                let amount = scale_template_amount(from.header.amount_at(end), rate)
                     .map_err(|fault| TemplateError::Expression { fault, loc: flow.loc })?;
                 ResolvedLeg::Value(ResolvedQuantity { amount, infer: Infer::Known, mode: flow.mode })
             }

@@ -199,3 +199,32 @@ engine arm of 1.1, 1.2 and 2: a scratch copy, not committed. Projects that reach
 | the engine's `Percent` arm | 141; the two `Err(InvalidTemplate)` arms for `Percent` and `Rest` in `template_quantity`: 0 |
 
 So the table in 1.3 is what the code does, with one cell the generator does not exercise: a promise's `Unknown` leg.
+
+## 7. What was built, and where it departs from section 5
+
+`crates/model/src/split.rs` is the module (`Expr`, `Quantity`, `Part`, `Group<H, F, I>`, `Promised`, `Made`, `Leg`,
+`Item`, `Says`, `Header`, `Heading`, `Endpoint`, `FlowSide`, `Sign`); `journal::Program` is the one program. Decisions 1,
+2, 3 and 5 of section 5 are as written. Where it differs, and what was found on the way:
+
+- **4, the groups did not leave the program.** `Program { nodes, roots, group: Option<Box<Made>> }`. A transaction has at
+  most one group (each of the lowering paths makes one, and `lower_split_flow` always), so the `Box<[Made]>` that every
+  reader searched is an `Option`, and everything that reads the roots of a statement reads its group too. Contract terms,
+  assertions and laws have nodes only; a written occurrence's program has nodes only, because its `flow_roots` were written
+  and never read (section 2.2).
+- **Roots stored with the leg do not remove the `partition_point` lookup.** A split's leg and an item hold their own
+  root (the `Expr` in the `Part`, the item's amount), but `post_journal` also needs the root of a flow that is in no group
+  (a plain transfer with a computed amount; an opening line's basis), of a named header (which holds none), and the basis
+  root of any flow, which neither `Leg` nor `Item` has. So the sparse roots stay, sorted by flow offset, and the lookup,
+  which was written out in `post_journal` and in `infer.rs::computed_amount`, is `Program::roots_of`; the flow's offset in
+  its transaction, computed five ways, is `Txn::offset`.
+- **`Heading::Source { end, total }` is kept although nothing in the engine reads it** (section 2): the tests that name
+  the typed split assert on it (`source_tests.rs`, `native_records.rs`), and K4b is the one to decide whether the solver
+  wants it.
+- **`side` is the group's, and it still means two things** (section 3): the source's side for a statement, the carved
+  side for a promise and an occurrence. `Made` says which in its doc; K4b decides the one.
+- **`template_side` (a written occurrence's side when the template has no leg) and `template.side` agree for every book the
+  generator writes** (a party that is an organisation, or the owner; a holding that is a bank, a wallet or an outside
+  place), and the mutants that swap them survive. The code is kept, because it is the baseline's.
+- **A quantity is a word wider than the template's was** (32 bytes, was 24) because `Expr` sits inside the variant
+  instead of beside it. A promise's group is 296 bytes (was 272); a record's group is 88 (was 104), its item 48 (56), its
+  program 48 (56).
