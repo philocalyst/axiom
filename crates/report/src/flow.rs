@@ -674,7 +674,7 @@ fn add_facts<'s>(
     }
 }
 
-fn object_name<'s>(book: &'s Book<'_>, object: Object) -> &'s str {
+pub(crate) fn object_name<'s>(book: &'s Book<'_>, object: Object) -> &'s str {
     match object {
         Object::Asset(asset) => book.name(book.assets[asset].name),
         Object::Place(place) => path(book, place),

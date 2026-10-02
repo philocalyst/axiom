@@ -2,11 +2,12 @@
 
 use std::collections::BTreeSet;
 
-use axiom_core::{Id, Loc};
+use axiom_core::{Id, Loc, Sym};
 use axiom_engine::{Cause, Run};
-use axiom_model::{Amount, Book, Flow, Object, Provenance, TemplateFlow, Terms};
+use axiom_model::{Action, Amount, Book, Flow, Provenance, Purposed, Subject, TemplateFlow, Terms};
 
 use super::event_words;
+use crate::flow::{object_name, scoped_movement_qty};
 use crate::history::Posting;
 use crate::lens::Lens;
 use crate::places::{path, route};
@@ -18,7 +19,7 @@ pub fn line<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Loc) -> Report<'s> {
     let book = lens.book();
     let flows = flows_on(book, at, lens);
     let mut written = Section::new([Column::left("On this line"), Column::left("Source")]);
-    for (text, loc) in items(book, run, lens, at, &flows) {
+    for (text, loc) in (OnLine { lens, run, at }).items(&flows) {
         written.push(Row::new([Cell::text(text), Cell::Source(loc)]));
     }
     if written.rows.is_empty() {
@@ -55,136 +56,148 @@ fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
         .collect()
 }
 
-/// Everything whose source overlaps the line, described in a sentence.
-fn items(book: &Book, run: &Run, lens: Lens<'_, '_, '_, '_>, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Loc)> {
-    let mut items = Vec::new();
-    let visible_codes = scoped_codes(book, lens);
-    for &id in flows {
-        let posting = Posting::at(book, run, id);
+/// What the book records on one source line, as a lens sees it: each thing a sentence, and where it is written.
+struct OnLine<'a> {
+    lens: Lens<'a, 'a, 'a, 'a>,
+    run: &'a Run,
+    at: Loc,
+}
+
+impl OnLine<'_> {
+    /// Everything whose source overlaps the line, described in a sentence.
+    fn items(&self, flows: &[Id<Flow>]) -> Vec<(String, Loc)> {
+        let book = self.lens.book();
+        let codes = scoped_codes(book, self.lens);
+        let mut items: Vec<_> = flows.iter().map(|&id| self.flow(id)).collect();
+        items.extend(self.assertions());
+        items.extend(self.events(&codes));
+        items.extend(self.prices());
+        items.extend(self.laws());
+        items.extend(self.measures());
+        items.extend(self.filed());
+        items.extend(self.readings(&codes));
+        items.extend(declarations(book, self.at));
+        items
+    }
+
+    fn flow(&self, id: Id<Flow>) -> (String, Loc) {
+        let (book, lens) = (self.lens.book(), self.lens);
+        let posting = Posting::at(book, self.run, id);
         let flow = posting.flow;
-        let out = posting.out();
-        let out = Amount::new(crate::flow::scoped_movement_qty(lens, flow, out.qty), out.unit);
-        let arrive = posting.arrive();
-        let arrive = Amount::new(crate::flow::scoped_movement_qty(lens, flow, arrive.qty), arrive.unit);
+        let scoped = |amount: Amount| Amount::new(scoped_movement_qty(lens, flow, amount.qty), amount.unit);
+        let (out, arrive) = (scoped(posting.out()), scoped(posting.arrive()));
         let amounts = if flow.is_exchange() {
             format!("{} for {}", book.show(out), book.show(arrive))
         } else {
             book.show(out).to_string()
         };
-        let purpose = flow.purpose.map_or_else(String::new, |purposed| {
-            let object = purposed.of.map_or_else(String::new, |object| match object {
-                Object::Asset(id) => format!(" of {}", book.name(book.assets[id].name)),
-                Object::Place(id) => format!(" of {}", book.name(book.places[id].path)),
-                Object::Entity(id) => format!(" of {}", book.name(book.entities[id].path)),
-            });
-            let source = match purposed.source {
-                Provenance::Written => "written".to_string(),
-                Provenance::Contract(id) => {
-                    format!("contract {}", book.name(book.contracts[id].name))
-                }
-                Provenance::Entity(id) => format!("party {}", book.name(book.entities[id].path)),
-                Provenance::Party(id) => format!("party kind {}", book.name(book.kinds[id].name)),
-                Provenance::Commodity(id) => {
-                    format!("commodity kind {}", book.name(book.kinds[id].name))
-                }
-                Provenance::Account(id) => {
-                    format!("account kind {}", book.name(book.kinds[id].name))
-                }
-                Provenance::Derived => "derived".to_string(),
-            };
-            format!(" for #{}{object} ({source})", book.name(book.purposes[purposed.purpose].name))
-        });
+        let purpose = flow.purpose.map_or_else(String::new, |purposed| purpose_words(book, purposed));
         let codes = book.flow_view(flow).codes().map(|code| format!(" ^{}", book.name(code))).collect::<String>();
-        items.push((format!("flow: {}, {amounts}{purpose}{codes}", route(book, flow)), flow.loc));
+        (format!("flow: {}, {amounts}{purpose}{codes}", route(book, flow)), flow.loc)
     }
-    for (index, assertion) in book
-        .asserts
-        .iter()
-        .enumerate()
-        .filter(|(_, assertion)| overlaps(assertion.loc, at) && lens.owns(assertion.place))
-    {
-        let gap = run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
-        let gap = gap.map_or(String::new(), |words| format!(", {words}"));
-        items.push((
-            format!(
-                "assertion: {} = {}{gap}",
-                path(book, assertion.place),
-                book.show(Amount::new(lens.place_qty(assertion.place, assertion.amount.qty), assertion.amount.unit,))
-            ),
-            assertion.loc,
-        ));
+
+    fn assertions(&self) -> impl Iterator<Item = (String, Loc)> {
+        let (book, lens, run, at) = (self.lens.book(), self.lens, self.run, self.at);
+        let on_line = book.asserts.iter().enumerate();
+        on_line.filter(move |(_, assertion)| overlaps(assertion.loc, at) && lens.owns(assertion.place)).map(
+            move |(index, assertion)| {
+                let gap = run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
+                let gap = gap.map_or(String::new(), |words| format!(", {words}"));
+                let held = Amount::new(lens.place_qty(assertion.place, assertion.amount.qty), assertion.amount.unit);
+                (format!("assertion: {} = {}{gap}", path(book, assertion.place), book.show(held)), assertion.loc)
+            },
+        )
     }
-    for event in book
-        .events
-        .iter()
-        .filter(|event| overlaps(event.loc, at) && (lens.whose.is_everyone() || visible_codes.contains(&event.code)))
-    {
-        items.push((format!("event: ^{} {}", book.name(event.code), event_words(event.state)), event.loc));
+
+    fn events(&self, codes: &BTreeSet<Sym>) -> impl Iterator<Item = (String, Loc)> {
+        let (book, at, visible) = (self.lens.book(), self.at, self.sees_every_code(codes));
+        let on_line = book.events.iter().filter(move |event| overlaps(event.loc, at) && visible(event.code));
+        on_line.map(move |event| (format!("event: ^{} {}", book.name(event.code), event_words(event.state)), event.loc))
     }
-    for quote in book.prices.quotes().iter().filter(|quote| overlaps(quote.loc, at)) {
-        let (unit, priced_in) = (&book.commodities[quote.unit], &book.commodities[quote.quote]);
-        let text = format!(
-            "price: 1 {} = {} {} on {}",
-            book.name(unit.symbol),
-            quote.rate,
-            book.name(priced_in.symbol),
-            quote.day
-        );
-        items.push((text, quote.loc));
+
+    fn prices(&self) -> impl Iterator<Item = (String, Loc)> {
+        let (book, at) = (self.lens.book(), self.at);
+        book.prices.quotes().iter().filter(move |quote| overlaps(quote.loc, at)).map(move |quote| {
+            let (unit, priced_in) = (&book.commodities[quote.unit], &book.commodities[quote.quote]);
+            let text = format!(
+                "price: 1 {} = {} {} on {}",
+                book.name(unit.symbol),
+                quote.rate,
+                book.name(priced_in.symbol),
+                quote.day
+            );
+            (text, quote.loc)
+        })
     }
-    items.extend(
+
+    fn laws(&self) -> impl Iterator<Item = (String, Loc)> {
+        let (book, at) = (self.lens.book(), self.at);
         book.laws
             .values()
-            .filter(|law| overlaps(law.loc, at))
-            .map(|law| (format!("law {}", book.name(law.name)), law.loc)),
-    );
-    items.extend(
-        book.measures
-            .iter()
-            .map(|(_, measure)| measure)
-            .filter(|measure| overlaps(measure.loc, at) && lens.owns_entity(measure.owner))
-            .map(|measure| {
-                let action = match measure.action {
-                    axiom_model::Action::Work => "worked",
-                    axiom_model::Action::Use => "used",
-                };
-                let subject = match measure.subject {
-                    axiom_model::Subject::Entity(id) => book.name(book.entities[id].path),
-                    axiom_model::Subject::Place(id) => book.name(book.places[id].path),
-                    axiom_model::Subject::Asset(id) => book.name(book.assets[id].name),
-                    axiom_model::Subject::Contract(id) => book.name(book.contracts[id].name),
-                };
-                let purpose = measure.purpose.map_or_else(String::new, |purpose| {
-                    format!(" for #{}", book.name(book.purposes[purpose.purpose].name))
-                });
-                (format!("measure: {subject} {action} {}{purpose}", book.show(measure.quantity)), measure.loc)
-            }),
-    );
-    items.extend(book.filed.iter().filter(|filed| overlaps(filed.loc, at) && lens.owns_entity(filed.owner)).map(
-        |filed| {
-            (
-                format!(
-                    "filed: {} for {} by {}",
-                    filed.year,
-                    book.name(book.systems[filed.system].path),
-                    book.name(book.entities[filed.owner].path)
-                ),
-                filed.loc,
-            )
-        },
-    ));
-    items.extend(
-        book.readings
-            .iter()
-            .filter(|reading| {
-                overlaps(reading.loc, at) && (lens.whose.is_everyone() || visible_codes.contains(&reading.code))
-            })
-            .map(|reading| {
-                (format!("reading: ^{} = {}", book.name(reading.code), book.show(reading.amount)), reading.loc)
-            }),
-    );
-    items.extend(declarations(book, at));
-    items
+            .filter(move |law| overlaps(law.loc, at))
+            .map(move |law| (format!("law {}", book.name(law.name)), law.loc))
+    }
+
+    fn measures(&self) -> impl Iterator<Item = (String, Loc)> {
+        let (book, lens, at) = (self.lens.book(), self.lens, self.at);
+        let on_line =
+            book.measures.values().filter(move |measure| overlaps(measure.loc, at) && lens.owns_entity(measure.owner));
+        on_line.map(move |measure| {
+            let action = match measure.action {
+                Action::Work => "worked",
+                Action::Use => "used",
+            };
+            let subject = match measure.subject {
+                Subject::Entity(id) => book.name(book.entities[id].path),
+                Subject::Place(id) => book.name(book.places[id].path),
+                Subject::Asset(id) => book.name(book.assets[id].name),
+                Subject::Contract(id) => book.name(book.contracts[id].name),
+            };
+            let purpose = measure.purpose.map_or_else(String::new, |purpose| {
+                format!(" for #{}", book.name(book.purposes[purpose.purpose].name))
+            });
+            (format!("measure: {subject} {action} {}{purpose}", book.show(measure.quantity)), measure.loc)
+        })
+    }
+
+    fn filed(&self) -> impl Iterator<Item = (String, Loc)> {
+        let (book, lens, at) = (self.lens.book(), self.lens, self.at);
+        let on_line = book.filed.iter().filter(move |filed| overlaps(filed.loc, at) && lens.owns_entity(filed.owner));
+        on_line.map(move |filed| {
+            let (system, owner) =
+                (book.name(book.systems[filed.system].path), book.name(book.entities[filed.owner].path));
+            (format!("filed: {} for {system} by {owner}", filed.year), filed.loc)
+        })
+    }
+
+    fn readings(&self, codes: &BTreeSet<Sym>) -> impl Iterator<Item = (String, Loc)> {
+        let (book, at, visible) = (self.lens.book(), self.at, self.sees_every_code(codes));
+        let on_line = book.readings.iter().filter(move |reading| overlaps(reading.loc, at) && visible(reading.code));
+        on_line.map(move |reading| {
+            (format!("reading: ^{} = {}", book.name(reading.code), book.show(reading.amount)), reading.loc)
+        })
+    }
+
+    /// Events and readings have no owner, so an owner's view shows those whose code something it owns refers to.
+    fn sees_every_code<'c>(&self, codes: &'c BTreeSet<Sym>) -> impl Fn(Sym) -> bool + 'c {
+        let everyone = self.lens.whose.is_everyone();
+        move |code| everyone || codes.contains(&code)
+    }
+}
+
+/// A flow's purpose in words: what for, of what, and who said so.
+fn purpose_words(book: &Book, purposed: Purposed) -> String {
+    let object = purposed.of.map_or_else(String::new, |object| format!(" of {}", object_name(book, object)));
+    let source = match purposed.source {
+        Provenance::Written => "written".to_string(),
+        Provenance::Contract(id) => format!("contract {}", book.name(book.contracts[id].name)),
+        Provenance::Entity(id) => format!("party {}", book.name(book.entities[id].path)),
+        Provenance::Party(id) => format!("party kind {}", book.name(book.kinds[id].name)),
+        Provenance::Commodity(id) => format!("commodity kind {}", book.name(book.kinds[id].name)),
+        Provenance::Account(id) => format!("account kind {}", book.name(book.kinds[id].name)),
+        Provenance::Derived => "derived".to_string(),
+    };
+    format!(" for #{}{object} ({source})", book.name(book.purposes[purposed.purpose].name))
 }
 
 /// Codes named by data visible in this owner scope. Events and readings have
