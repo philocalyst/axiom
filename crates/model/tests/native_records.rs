@@ -395,6 +395,38 @@ account checking
 }
 
 #[test]
+fn an_explicit_purpose_cannot_conflict_with_an_account_take() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose pretax-deferral : income
+kind payroll-agency : entity
+  purpose wages
+kind retirement-account : asset
+  takes pretax-deferral from wages
+entity acme : payroll-agency
+account retirement : retirement-account
+2026-01-01 acme -> retirement 400 USD #wages
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    let problem = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "purpose-disagreement")
+        .unwrap();
+    assert_eq!(problem.labels.len(), 3);
+    assert!(book.flows.is_empty());
+}
+
+#[test]
 fn quoted_unit_price_records_both_typed_flow_quantities() {
     let path = "journal/2026/01.ax";
     let text = "\
