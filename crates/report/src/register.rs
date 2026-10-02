@@ -392,7 +392,8 @@ fn contract_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, fl
     ])
 }
 
-fn contract_flow(origin: Origin, contract: Id<Contract>) -> bool {
+/// Whether a flow is one the contract wrote or derived.
+pub(crate) fn contract_flow(origin: Origin, contract: Id<Contract>) -> bool {
     match origin {
         Origin::Occurrence(found) => found == contract,
         Origin::Derived(
