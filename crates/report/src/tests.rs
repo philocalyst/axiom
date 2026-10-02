@@ -1574,42 +1574,6 @@ fn limits_are_per_owner_and_per_year() {
     assert!(cell(&none.sections[0].notes[0]).contains("No limit was read in 2024"));
 }
 
-#[test]
-fn a_budget_reads_its_window_from_headroom_and_a_year_lists_its_months() {
-    let house = household().with_headroom();
-    // The month: food against 500, and the year's insurance envelope that this month is part of.
-    let february = table(
-        &house,
-        Query::Budget {
-            at: Some(day(2026, 2, 10)),
-            by: Period::Month,
-        },
-    );
-    assert!(
-        february.contains(
-            "expenses/food | budget | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%"
-        )
-    );
-    assert!(february.contains(
-        "!expenses/insurance | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%"
-    ));
-    // The year: each envelope's year, then its months up to today (March, which
-    // nothing has reached yet, is wholly unspent). Insurance is one yearly reading.
-    let year = house.report(Query::Budget {
-        at: Some(day(2026, 2, 10)),
-        by: Period::Year,
-    });
-    assert_eq!(
-        lines(&year.sections[0]),
-        [
-            "expenses/food | budget | 2026 | 204.20 USD | 1,500.00 USD | 1,295.80 USD | 1021/75%",
-            "~   |  | 2026-01 | 84.20 USD | 500.00 USD | 415.80 USD | 16.84%",
-            "~   |  | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
-            "~   |  | 2026-03 | 0.00 USD | 500.00 USD | 500.00 USD | 0%",
-            "!expenses/insurance | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
-        ]
-    );
-}
 
 // ─── Claims ─────────────────────────────────────────────────────────────────
 

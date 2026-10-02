@@ -1600,6 +1600,60 @@ fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
     });
 }
 
+#[test]
+fn native_budget_rows_include_empty_months_and_keep_yearly_caps() {
+    const SOURCE: &str = "\
+base USD
+entity grocer : grocer
+entity insurer : insurer
+purpose meals : spending
+budget meals 500 USD monthly
+purpose coverage : spending
+budget coverage 1_000 USD yearly
+account checking : bank
+
+opening 2026-01-01
+  checking 5_000 USD
+
+2026-01-10 checking -> grocer 84.20 USD #meals
+2026-02-02 checking -> grocer 120.00 USD #meals
+2026-02-03 checking -> insurer 1_200 USD #coverage
+";
+    with_std(SOURCE, day(2026, 3, 31), |book, run| {
+        assert_eq!(
+            rows(
+                book,
+                run,
+                Query::Budget {
+                    at: Some(day(2026, 2, 10)),
+                    by: axiom_model::Period::Month,
+                },
+            ),
+            [
+                "!coverage | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
+                "meals | me | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
+            ]
+        );
+        assert_eq!(
+            rows(
+                book,
+                run,
+                Query::Budget {
+                    at: Some(day(2026, 2, 10)),
+                    by: axiom_model::Period::Year,
+                },
+            ),
+            [
+                "!coverage | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
+                "meals | budget | 2026 | 204.20 USD | 1,500.00 USD | 1,295.80 USD | 1021/75%",
+                "~   |  | 2026-01 | 84.20 USD | 500.00 USD | 415.80 USD | 16.84%",
+                "~   |  | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
+                "~   |  | 2026-03 | 0.00 USD | 500.00 USD | 500.00 USD | 0%",
+            ]
+        );
+    });
+}
+
 // ─── Looking ahead to the day a return closes ───────────────────────────────
 
 /// An account whose withdrawals count as income (it has only its opening
