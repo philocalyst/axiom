@@ -32,7 +32,7 @@ pub(crate) fn view_with_lens<'s>(
 
     let mut table = Section::new(iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)));
     let mut unpriced = 0;
-    for place in book.places.ids() {
+    for place in book.listed_places() {
         match selection.mark(place) {
             Mark::Hidden => {}
             Mark::Context => table.push(context_row(book, place, snapshots.days().len())),

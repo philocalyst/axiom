@@ -1,6 +1,6 @@
-//! What the owners hold and are owed: accounts, assets, and the tabs claims keep between parties.
+//! What the owners hold: accounts and assets.
 
-use axiom_core::{Arena, Diagnostic, Id, Interner, Loc, Map, Set};
+use axiom_core::{Arena, Diagnostic, Id, Interner, Loc, Map};
 use axiom_syntax::DeclKind;
 
 use super::commodities::{Commodities, commodity};
@@ -9,7 +9,6 @@ use super::{Resolving, first_name_prop};
 use crate::book::{Asset, Class, Entity, Kind, Share, Sort};
 use crate::collect::Collected;
 use crate::errors::Word;
-use crate::lower::{JournalSurvey, Mention};
 use crate::problem::{self, Noun};
 
 pub(super) struct AccountDraft<'s> {
@@ -87,11 +86,6 @@ pub(super) fn declare_accounts<'a, 's>(
     drafts
 }
 
-/// The owner of each account, by its path.
-pub(super) fn owners_by_path<'s>(accounts: &[AccountDraft<'s>]) -> Map<&'s str, Id<Entity>> {
-    accounts.iter().map(|account| (account.path, account.owner)).collect()
-}
-
 /// The assets written, each with the commodity that counts it.
 pub(super) struct Assets<'s> {
     pub arena: Arena<Asset>,
@@ -142,74 +136,4 @@ pub(super) fn declare_assets<'a, 's>(
         assets.paths.push((path, asset));
     }
     assets
-}
-
-/// A claim between two parties, kept in the owner's books as a place of its own.
-pub(super) struct TabDraft {
-    pub party: Id<Entity>,
-    pub owner: Id<Entity>,
-    pub class: Class,
-    pub loc: Loc,
-}
-
-/// The tabs the claims, contracts and `for` clauses a survey found need. They have no source path; their
-/// identity is the (party, owner, class) they are between.
-pub(super) fn find_tabs<'s>(
-    survey: &JournalSurvey<'s>,
-    entities: &Entities<'s>,
-    account_owners: &Map<&'s str, Id<Entity>>,
-) -> Vec<TabDraft> {
-    let mut tabs: Vec<TabDraft> = Vec::new();
-    let mut seen = Set::default();
-    let mut add = |party: Id<Entity>, owner: Id<Entity>, class: Class, loc: Loc| {
-        if party != owner && seen.insert((party, owner, class)) {
-            tabs.push(TabDraft { party, owner, class, loc });
-        }
-    };
-    let (me, entity) = (entities.me, |name: &str| entities.ids.get(name).copied());
-    let account_owner =
-        |name: Option<axiom_syntax::Name<'s>>| name.and_then(|name| account_owners.get(name.0).copied());
-    for mention in &survey.mentions {
-        match *mention {
-            Mention::Claim { subject, creditor, loc } => {
-                if let (Some(subject), Some(creditor)) = (entity(subject.0), entity(creditor.0)) {
-                    let (party, owner, class) = if entities.holds[creditor.index()] {
-                        (subject, creditor, Class::Asset)
-                    } else if entities.holds[subject.index()] {
-                        (creditor, subject, Class::Debt)
-                    } else {
-                        (subject, creditor, Class::Asset)
-                    };
-                    add(party, owner, class, loc);
-                }
-            }
-            Mention::Promise { party, holding, loc, .. } => {
-                if let Some(party) = entity(party.0) {
-                    let owner = account_owner(holding).unwrap_or(me);
-                    add(party, owner, Class::Asset, loc);
-                    add(party, owner, Class::Debt, loc);
-                }
-            }
-            Mention::For { other, ends, loc } => {
-                if let Some(party) = entity(other.0) {
-                    let owner = account_owner(ends.from).or_else(|| account_owner(ends.to)).unwrap_or(me);
-                    add(party, owner, Class::Asset, loc);
-                    add(party, owner, Class::Debt, loc);
-                }
-            }
-            Mention::Due { ends, loc } | Mention::Ends { ends, loc } => {
-                if let (Some(from), Some(to)) = (ends.from, ends.to) {
-                    let (from_entity, to_entity) = (entity(from.0), entity(to.0));
-                    let (from_owner, to_owner) = (account_owner(Some(from)), account_owner(Some(to)));
-                    if let (Some(party), Some(owner)) = (from_entity, to_owner) {
-                        add(party, owner, Class::Asset, loc);
-                    }
-                    if let (Some(party), Some(owner)) = (to_entity, from_owner) {
-                        add(party, owner, Class::Debt, loc);
-                    }
-                }
-            }
-        }
-    }
-    tabs
 }

@@ -1,0 +1,15 @@
+use std
+base USD
+entity me : person
+entity bank-co : org
+entity shop : org
+account checking : bank
+2025-12-31 market -> checking 9_000 USD
+contract mortgage with bank-co
+  loan 100_000 USD on 2026-01-01 at 5% over 10y
+  monthly on 1 from checking
+  from 2026-02-01
+contract payments with shop
+  100 USD monthly on 2 from checking
+  from 2026-02-01
+  mortgage 20 USD

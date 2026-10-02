@@ -4,11 +4,11 @@ use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Set, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind};
 
 use super::commodities::Commodities;
+use super::mentions::Mentions;
 use super::{Resolving, Said, add_path_spellings, owner_names_in, strict_path_suffixes};
 use crate::book::{At, Entity, Purpose, Sort};
 use crate::collect::{Collected, Written};
 use crate::errors::Word;
-use crate::lower::Mention;
 use crate::names::Scoped;
 use crate::problem::{self, Noun};
 use crate::scope::Home;
@@ -123,7 +123,7 @@ fn implied_parties<'a, 's>(
     written: &Map<&'s str, Written_<'a, 's>>,
 ) -> Map<&'s str, Loc> {
     let collected = said.collected;
-    let (mentioned, roles) = mentions(said);
+    let Mentions { first: mentioned, parties } = Mentions::of(said.sites);
     let mut places = Set::default();
     for decl in collected.decls.iter().filter(|decl| matches!(decl.node.what, DeclKind::Account | DeclKind::Asset)) {
         add_path_spellings(&mut places, decl.node.name.0);
@@ -156,42 +156,12 @@ fn implied_parties<'a, 's>(
             continue;
         }
         // A contract may be named for its party, but is not a party for being named.
-        if matches!(path, "self" | "issuer") || (contracts.contains(path) && !roles.contains(path)) {
+        if matches!(path, "self" | "issuer") || (contracts.contains(path) && !parties.contains(path)) {
             continue;
         }
         implied.insert(path, loc);
     }
     implied
-}
-
-/// Every name the endpoints of the journal and the survey mention, with where it is first mentioned, and the
-/// names mentioned as parties (a claim's, a `for`'s, a promise's) rather than only as ends.
-fn mentions<'s>(said: Said<'_, '_, 's>) -> (Map<&'s str, Loc>, Set<&'s str>) {
-    // Only one borrowed name and its first source location is kept, even when it occurs in many journal rows.
-    let mut mentioned: Map<&'s str, Loc> = Map::default();
-    let mut roles: Set<&'s str> = Set::default();
-    crate::lower::visit_endpoints(said.sites, |_, name, loc, _| {
-        mentioned.entry(name.0).or_insert(loc);
-    });
-    for mention in &said.survey.mentions {
-        match *mention {
-            Mention::Claim { subject, creditor, loc } => {
-                mentioned.entry(subject.0).or_insert(loc);
-                mentioned.entry(creditor.0).or_insert(loc);
-                roles.extend([subject.0, creditor.0]);
-            }
-            Mention::For { other, loc, .. } => {
-                mentioned.entry(other.0).or_insert(loc);
-                roles.insert(other.0);
-            }
-            Mention::Promise { party, loc, .. } => {
-                mentioned.entry(party.0).or_insert(loc);
-                roles.insert(party.0);
-            }
-            Mention::Ends { .. } | Mention::Due { .. } => {}
-        }
-    }
-    (mentioned, roles)
 }
 
 /// The entities made from the drafts, with their kinds and purposes resolved, indexed, and owned.

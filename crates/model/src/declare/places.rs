@@ -1,4 +1,5 @@
-//! The place tree: somewhere to put a flow for every account, asset, party, issuer and claim, frozen once.
+//! The place tree: somewhere to put a flow for every account, asset, party and issuer, frozen once. Claim tabs are not in it: each
+//! is made, at the end of the tree, by the first claim that asks for it.
 //!
 //! Account, entity and asset paths are kept in disjoint namespaces while each gets a stable id in the tree, and
 //! every path and prefix is borrowed from the source.
@@ -7,9 +8,9 @@ use axiom_core::{Id, Interner, Map, Set, Tree};
 use axiom_syntax::DeclKind;
 
 use super::commodities::Commodities;
-use super::holdings::{AccountDraft, Assets, TabDraft};
+use super::holdings::{AccountDraft, Assets};
 use super::parties::Entities;
-use super::{Resolving, Tabs, is_path_child, path_key};
+use super::{Resolving, is_path_child, path_key};
 use crate::book::{Asset, Class, Commodity, Entity, Place, Role, Sort};
 use crate::collect::Collected;
 use crate::names::Names;
@@ -27,7 +28,6 @@ pub(super) struct PlaceInputs<'x, 'a, 's> {
     pub resolving: &'x Resolving<'x>,
     pub commodities: &'x Commodities<'s>,
     pub accounts: &'x [AccountDraft<'s>],
-    pub tabs: &'x [TabDraft],
 }
 
 /// The tree, and the places that have a name of their own.
@@ -35,8 +35,6 @@ pub(super) struct Places {
     pub tree: Tree<Place>,
     /// The place each commodity that pays is issued from.
     pub issuers: Map<Id<Commodity>, Id<Place>>,
-    /// The place of each claim, by (party, owner, class).
-    pub tabs: Tabs,
     pub names: Names<Place>,
 }
 
@@ -51,7 +49,7 @@ pub(super) fn declare<'s>(
     let positions: Map<Key<'s>, usize> = paths.iter().enumerate().map(|(at, &key)| (key, at)).collect();
     let issuer_units = issuer_units(inputs);
     let nodes = Nodes::of(inputs, entities, assets);
-    let mut place_nodes = Vec::with_capacity(paths.len() + inputs.tabs.len() + issuer_units.len());
+    let mut place_nodes = Vec::with_capacity(paths.len() + issuer_units.len());
     let mut parents = Vec::with_capacity(place_nodes.capacity());
     let mut indexed: Map<Key<'s>, (usize, bool)> = Map::default();
     for &(namespace, path) in &paths {
@@ -66,15 +64,6 @@ pub(super) fn declare<'s>(
             place_nodes.push(issuer_node(inputs, entities, unit));
             parents.push(None);
             (unit, place_nodes.len() - 1)
-        })
-        .collect();
-    let tab_at: Vec<_> = inputs
-        .tabs
-        .iter()
-        .map(|tab| {
-            place_nodes.push(tab_node(inputs, entities, tab));
-            parents.push(None);
-            place_nodes.len() - 1
         })
         .collect();
     let (tree, remap) = Tree::build(place_nodes, &parents).expect("place parents are prefixes without cycles");
@@ -95,17 +84,7 @@ pub(super) fn declare<'s>(
             assets.arena[asset].place = remap[old];
         }
     }
-    Places {
-        tree,
-        issuers: issuer_at.into_iter().map(|(unit, old)| (unit, remap[old])).collect(),
-        tabs: inputs
-            .tabs
-            .iter()
-            .zip(tab_at)
-            .map(|(tab, old)| ((tab.party, tab.owner, tab.class), remap[old]))
-            .collect(),
-        names: place_names,
-    }
+    Places { tree, issuers: issuer_at.into_iter().map(|(unit, old)| (unit, remap[old])).collect(), names: place_names }
 }
 
 /// Every path of the three namespaces and each of its prefixes, ordered as the tree will have them.
@@ -292,21 +271,5 @@ fn issuer_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, unit: 
         known_as: Box::default(),
         doc: commodity.doc,
         loc: commodity.loc,
-    }
-}
-
-/// A claim's place. Its printed label is the party's name, while its identity is the typed (party, owner, class).
-fn tab_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, tab: &TabDraft) -> Place {
-    let roots = &inputs.resolving.kind_roots;
-    Place {
-        path: entities.tree[tab.party].path,
-        class: tab.class,
-        role: Role::Tab(tab.party),
-        kind: if tab.class == Class::Debt { roots.debt } else { roots.asset },
-        owner: tab.owner,
-        shares: Box::default(),
-        known_as: Box::default(),
-        doc: None,
-        loc: Some(tab.loc),
     }
 }

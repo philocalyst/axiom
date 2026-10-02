@@ -205,6 +205,29 @@ impl Facts {
         self.rows.len() - 1
     }
 
+    /// Adds holders that have said nothing, up to `holders` in all: things that came to be after the store was frozen.
+    /// A store never shrinks, and one that has that many already is as it was.
+    ///
+    /// ```
+    /// use axiom_core::{Day, Facts, Key, SlotId};
+    ///
+    /// const RENT: Key<u32> = Key::new(SlotId(0));
+    /// let mut said = Facts::builder(1);
+    /// said.paint_always(0, RENT, 1_200);
+    /// let mut facts = said.freeze();
+    ///
+    /// facts.grow(3);
+    /// assert_eq!(facts.holders(), 3);
+    /// assert_eq!(facts.at(RENT, 0, Day(0)), Some(1_200), "what was said is as it was");
+    /// assert_eq!(facts.at(RENT, 2, Day(0)), None, "and a holder made since has said nothing");
+    /// ```
+    pub fn grow(&mut self, holders: usize) {
+        let end = *self.rows.last().expect("a row closes the store");
+        if holders + 1 > self.rows.len() {
+            self.rows.resize(holders + 1, end);
+        }
+    }
+
     /// What holds of `holder`'s `key` on `day`, or `None` if nothing is said then. Two searches and no allocation.
     ///
     /// ```
@@ -661,6 +684,12 @@ impl Sets {
 const CHUNK: usize = 1 << 10;
 
 impl Builder {
+    /// Adds holders, up to `holders` in all, for things that came to be after the first were painted. A builder never
+    /// has fewer.
+    pub fn grow(&mut self, holders: usize) {
+        self.holders = self.holders.max(u32::try_from(holders).expect("fewer than 2^32 holders"));
+    }
+
     /// `value` holds of `holder`'s `key` over `days`: `from … until …`, or `Days::new(from, Day::MAX)` from a day on.
     pub fn paint<V: Field>(&mut self, holder: u32, key: Key<V>, days: Days, value: V) {
         assert!(holder < self.holders, "holder {holder} of a store of {}", self.holders);
@@ -930,6 +959,34 @@ mod tests {
         assert_eq!((facts.at(LETTER, 1, Day(0)), facts.at(LETTER, 3, Day(0))), (Some(3), Some(4)));
         assert_eq!(facts.at(OTHER, 1, Day(0)), None, "a slot nobody set");
         assert_eq!(Facts::builder(0).freeze().holders(), 0);
+    }
+
+    #[test]
+    fn holders_added_after_a_freeze_say_nothing_and_a_builder_that_grew_says_what_was_painted_of_them() {
+        let mut builder = Facts::builder(2);
+        builder.paint_always(1, LETTER, 3);
+        let mut frozen = builder.freeze();
+        let before: Vec<_> = (0..2).map(|holder| frozen.at(LETTER, holder, Day(0))).collect();
+
+        frozen.grow(5);
+        frozen.grow(3);
+        assert_eq!(frozen.holders(), 5, "a store never shrinks");
+        let after: Vec<_> = (0..2).map(|holder| frozen.at(LETTER, holder, Day(0))).collect();
+        assert_eq!(after, before);
+        for holder in 2..5 {
+            assert_eq!(frozen.at(LETTER, holder, Day(0)), None);
+            assert!(!frozen.says(LETTER.slot(), holder));
+            assert_eq!(frozen.steps(LETTER, holder).len(), 0);
+            assert_eq!(frozen.slots(holder).len(), 0);
+        }
+
+        builder.grow(5);
+        builder.grow(1);
+        builder.paint_always(4, LETTER, 9);
+        let refrozen = builder.freeze();
+        assert_eq!(refrozen.holders(), 5);
+        assert_eq!((refrozen.at(LETTER, 1, Day(0)), refrozen.at(LETTER, 4, Day(0))), (Some(3), Some(9)));
+        assert_eq!(refrozen.at(LETTER, 3, Day(0)), None);
     }
 
     #[test]
