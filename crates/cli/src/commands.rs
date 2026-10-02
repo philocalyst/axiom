@@ -1,6 +1,7 @@
 //! What each command does: load the project, build the book, run it, and show
 //! what was asked for.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -11,11 +12,11 @@ use axiom_engine::{Options, Run};
 use axiom_model::{Book, sync::Fetch};
 use axiom_report::json::{JsonRenderer, string as json_string};
 use axiom_report::{Context, Query, ReportRenderer, Summary};
-use axiom_sync::{Change, PlanOutcome, SourceFailure};
+use axiom_sync::{Change, PlanOutcome, SourceFailure, SourceResult};
 
 use crate::args::{Command, Invocation};
 use crate::project::{Project, SourceFile, Sources};
-use crate::render::{Renderer, Tally};
+use crate::render::{Limit, Renderer, Tally};
 use crate::style::{Ink, Line};
 use crate::text::plural;
 use crate::{Outcome, Terminals, help, sync, table};
@@ -23,7 +24,7 @@ use crate::{Outcome, Terminals, help, sync, table};
 /// Runs the command. An `Err` means there was nothing to run it on: the
 /// project could not be found or read.
 pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Diagnostic> {
-    let Invocation { command, .. } = invocation;
+    let command = &invocation.command;
     match command {
         Command::Help => return Ok(Outcome::ok(help::screen(terminals.out))),
         Command::Version => return Ok(Outcome::ok(help::version())),
@@ -41,61 +42,43 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     diagnostics.extend(built);
 
     let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
-    if let Command::Sync { names, dry } = command {
-        let run = axiom_engine::run(&book, options);
-        let planned = {
-            let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
-            sync::plan(&book, &run, &project, options.today, names, files, auxiliary)?
-        };
-        let mut sync_diagnostics = diagnostics;
-        sync_diagnostics.extend(run.diagnostics);
-        return Ok(render_sync(planned, &mut sources, &project.root, *dry, terminals, &sync_diagnostics));
-    }
-    if let Command::Report(query, whose) = command {
-        let context = match Context::new(&book, options, *whose) {
-            Ok(context) => context,
-            Err(problem) => {
-                // Preserve the report command's diagnostics and exit status if
-                // owner resolution fails before Context can create its run.
-                let run = axiom_engine::run(&book, options);
-                let mut shown: Vec<&Diagnostic> =
-                    diagnostics.iter().chain(&run.diagnostics).filter(|diagnostic| diagnostic.is_error()).collect();
-                shown.push(&problem);
-                return Ok(report_error(&shown, &sources, terminals, invocation.all, invocation.json));
-            }
-        };
-        let run = context.run();
-        let session = Session {
-            book: &book,
-            run,
-            sources: &sources,
-            diagnostics: diagnostics.iter().chain(&run.diagnostics).collect(),
-            terminals,
-            all: invocation.all,
-            json: invocation.json,
-        };
-        return Ok(session.report(&context, query));
-    }
-
-    // `check` needs only the final run summary; constructing a report context
-    // would also retain the pre-close checkpoint that no check view uses.
-    let run = axiom_engine::run(&book, options);
-    let (reader_diagnostics, suggestions) = if matches!(command, Command::Check) {
-        check_memos(&book, &project, &sources.files, &mut sources.auxiliary)
-    } else {
-        (Vec::new(), Vec::new())
-    };
-    diagnostics.extend(reader_diagnostics);
-    let session = Session {
-        book: &book,
-        run: &run,
-        sources: &sources,
-        diagnostics: diagnostics.iter().chain(&run.diagnostics).collect(),
+    let shown = Shown {
         terminals,
-        all: invocation.all,
-        json: invocation.json,
+        limit: if invocation.all { Limit::Every } else { Limit::Capped },
+        form: if invocation.json { Form::Json } else { Form::Text },
     };
-    Ok(session.check(&suggestions))
+    match command {
+        Command::Sync { names, dry } => {
+            let run = axiom_engine::run(&book, options);
+            let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
+            let planned = sync::plan(&book, &run, &project, options.today, names, files, auxiliary)?;
+            diagnostics.extend(run.diagnostics);
+            let fate = if *dry { Fate::Shown } else { Fate::apply(&diagnostics, &project.root, &planned.changes) };
+            Ok(render_sync(planned, fate, &sources, terminals, &diagnostics))
+        }
+        Command::Report(query, whose) => match Context::new(&book, options, *whose) {
+            Ok(context) => {
+                Ok(Session::new(&book, context.run(), &sources, &diagnostics, shown).report(&context, query))
+            }
+            Err(problem) => {
+                // Owner resolution failed before the context could make its run, whose diagnostics are still shown.
+                let run = axiom_engine::run(&book, options);
+                Ok(Session::new(&book, &run, &sources, &diagnostics, shown).refuse(&problem))
+            }
+        },
+        _ => {
+            // `check` needs only the final run summary; constructing a report context
+            // would also retain the pre-close checkpoint that no check view uses.
+            let run = axiom_engine::run(&book, options);
+            let (reader_diagnostics, suggestions) = if matches!(command, Command::Check) {
+                check_memos(&book, &project, &sources.files, &mut sources.auxiliary)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            diagnostics.extend(reader_diagnostics);
+            Ok(Session::new(&book, &run, &sources, &diagnostics, shown).check(&suggestions))
+        }
+    }
 }
 
 /// Reads only declared local `read` sources for check's unknown-memo hints.
@@ -107,43 +90,20 @@ fn check_memos(
     parsed_files: &[SourceFile],
     auxiliary: &mut Vec<SourceFile>,
 ) -> (Vec<Diagnostic>, Vec<MemoSuggestion>) {
-    let mut diagnostics = Vec::new();
+    let mut files = LocalFiles::new(project, parsed_files.len(), auxiliary);
     let mut inputs = Vec::new();
-    let mut registered: HashMap<String, FileId> =
-        auxiliary.iter().map(|file| (file.path.to_string(), file.id)).collect();
     for (source_index, source) in book.sources.iter().enumerate() {
         let Fetch::Read(pattern) = source.fetch else {
             continue;
         };
-        let pattern = book.text(pattern);
-        let paths = match axiom_sync::matching_paths(&project.root, pattern) {
-            Ok(paths) => paths,
-            Err(problem) => {
-                diagnostics.push(problem);
-                continue;
+        match axiom_sync::matching_paths(&project.root, book.text(pattern)) {
+            Ok(paths) => {
+                inputs.extend(paths.into_iter().filter_map(|path| files.register(path)).map(|id| (source_index, id)))
             }
-        };
-        for path in paths {
-            if let Some(&file) = registered.get(&path) {
-                inputs.push((source_index, file));
-                continue;
-            }
-            let text = match project.read_local(&path) {
-                Ok(text) => text,
-                Err(problem) => {
-                    diagnostics.push(problem);
-                    continue;
-                }
-            };
-            match Sources::append_auxiliary_to(auxiliary, parsed_files.len(), path.clone(), text) {
-                Ok(file) => {
-                    registered.insert(path, file);
-                    inputs.push((source_index, file));
-                }
-                Err(problem) => diagnostics.push(problem),
-            }
+            Err(problem) => files.diagnostics.push(problem),
         }
     }
+    let LocalFiles { auxiliary, mut diagnostics, .. } = files;
 
     // Appending is finished before any memo borrows begin. Auxiliary strings
     // live in a disjoint vector, so the parsed Book keeps borrowing `files`.
@@ -157,19 +117,50 @@ fn check_memos(
             Err(problems) => diagnostics.extend(problems),
         }
     }
+    (diagnostics, MemoSuggestion::of_unrecognized(&memos))
+}
 
-    let groups = axiom_sync::unrecognized(memos.iter().map(|memo| memo.as_ref()));
-    let suggestions = groups
-        .into_iter()
-        .map(|group| MemoSuggestion {
-            stem: group.stem.to_owned(),
-            count: group.count,
-            example: group.example.to_owned(),
-            pattern: group.pattern(),
-            known_as: group.known_as(),
-        })
-        .collect();
-    (diagnostics, suggestions)
+/// The local files that `read` sources name, each registered once so that its text can be borrowed.
+struct LocalFiles<'p, 'a> {
+    project: &'p Project,
+    /// How many files the book was parsed from: the id of the first one registered here.
+    parsed: usize,
+    auxiliary: &'a mut Vec<SourceFile>,
+    registered: HashMap<String, FileId>,
+    /// Why a file could not be registered.
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl<'p, 'a> LocalFiles<'p, 'a> {
+    fn new(project: &'p Project, parsed: usize, auxiliary: &'a mut Vec<SourceFile>) -> LocalFiles<'p, 'a> {
+        let registered = auxiliary.iter().map(|file| (file.path.to_string(), file.id)).collect();
+        LocalFiles { project, parsed, auxiliary, registered, diagnostics: Vec::new() }
+    }
+
+    /// The id of the file at `path`, which is read and registered the first time. A file that cannot be is a
+    /// diagnostic, and no input.
+    fn register(&mut self, path: String) -> Option<FileId> {
+        if let Some(&id) = self.registered.get(&path) {
+            return Some(id);
+        }
+        let text = match self.project.read_local(&path) {
+            Ok(text) => text,
+            Err(problem) => {
+                self.diagnostics.push(problem);
+                return None;
+            }
+        };
+        match Sources::append_auxiliary_to(self.auxiliary, self.parsed, path.clone(), text) {
+            Ok(id) => {
+                self.registered.insert(path, id);
+                Some(id)
+            }
+            Err(problem) => {
+                self.diagnostics.push(problem);
+                None
+            }
+        }
+    }
 }
 
 fn source_by_id<'a>(files: &'a [SourceFile], auxiliary: &'a [SourceFile], id: FileId) -> Option<&'a SourceFile> {
@@ -184,6 +175,23 @@ struct MemoSuggestion {
     example: String,
     pattern: String,
     known_as: String,
+}
+
+impl MemoSuggestion {
+    /// A suggestion for each group of memos that nothing recognized.
+    fn of_unrecognized(memos: &[Cow<'_, str>]) -> Vec<MemoSuggestion> {
+        let groups = axiom_sync::unrecognized(memos.iter().map(|memo| memo.as_ref()));
+        groups
+            .into_iter()
+            .map(|group| MemoSuggestion {
+                stem: group.stem.to_owned(),
+                count: group.count,
+                example: group.example.to_owned(),
+                pattern: group.pattern(),
+                known_as: group.known_as(),
+            })
+            .collect()
+    }
 }
 
 fn suggestion_lines(suggestions: &[MemoSuggestion]) -> Vec<String> {
@@ -223,103 +231,103 @@ fn json_suggestions(suggestions: &[MemoSuggestion]) -> String {
     out
 }
 
-/// Shows a query-construction error in the same channels as a report error.
-fn report_error(
-    diagnostics: &[&Diagnostic],
-    sources: &Sources,
-    terminals: Terminals,
-    all: bool,
-    json: bool,
-) -> Outcome {
-    if json {
-        return Outcome {
-            answer: axiom_report::json::diagnostics(diagnostics, sources),
-            diagnostics: String::new(),
-            failed: true,
-        };
-    }
-    let (mut text, tally) = Renderer::new(sources, terminals.err).present(diagnostics, all);
-    if let Some(line) = tally.line() {
-        text += &terminals.err.painter.paint(&[line]);
-    }
-    Outcome { answer: String::new(), diagnostics: text, failed: true }
+/// What became of the changes a sync planned.
+enum Fate {
+    /// `--dry`: they are shown as diffs and nothing is written.
+    Shown,
+    /// The project has errors, so nothing is written.
+    Blocked,
+    /// They were written, and these are what stopped any of them.
+    Applied(Vec<Diagnostic>),
 }
 
-/// Presents a no-write sync plan, and applies its changes only when the user
-/// did not ask for `--dry`.
+impl Fate {
+    /// `changes` are written under the project at `root`, unless the book's `diagnostics` hold an error.
+    fn apply(diagnostics: &[Diagnostic], root: &Path, changes: &[Change]) -> Fate {
+        if diagnostics.iter().any(Diagnostic::is_error) {
+            Fate::Blocked
+        } else {
+            Fate::Applied(axiom_sync::apply(root, changes))
+        }
+    }
+
+    fn problems(&self) -> &[Diagnostic] {
+        match self {
+            Fate::Applied(problems) => problems,
+            Fate::Shown | Fate::Blocked => &[],
+        }
+    }
+}
+
+/// Presents a sync plan, and what became of its changes.
 fn render_sync(
     planned: PlanOutcome,
-    sources: &mut Sources,
-    root: &Path,
-    dry: bool,
+    fate: Fate,
+    sources: &Sources,
     terminals: Terminals,
     prior: &[Diagnostic],
 ) -> Outcome {
-    let blocked_by_book_errors = prior.iter().any(Diagnostic::is_error);
-    let write_problems =
-        if dry || blocked_by_book_errors { Vec::new() } else { axiom_sync::apply(root, &planned.changes) };
     let mut diagnostics: Vec<&Diagnostic> = prior.iter().chain(&planned.problems).chain(&planned.incomplete).collect();
-    for source in &planned.sources {
-        match source.failure.as_ref() {
-            Some(SourceFailure::Read(problem) | SourceFailure::Generated(problem)) => {
-                diagnostics.push(problem);
-            }
-            Some(SourceFailure::Output(problems)) => diagnostics.extend(problems),
-            Some(SourceFailure::Command(_)) | None => {}
-        }
-    }
-    diagnostics.extend(&write_problems);
+    diagnostics.extend(
+        planned.sources.iter().filter_map(|source| source.failure.as_ref()).flat_map(SourceFailure::diagnostics),
+    );
+    diagnostics.extend(fate.problems());
 
-    let mut answer = String::new();
-    for source in &planned.sources {
-        let mut line = match &source.failure {
-            None => Line::text("✓ ", Ink::GREEN.bold()),
-            Some(_) => Line::text("✗ ", Ink::RED.bold()),
-        };
-        line.push(&source.path, Ink::BOLD);
-        line.push("  ", Ink::PLAIN);
-        match &source.failure {
-            None if source.added == 0 => line.push("no new items", Ink::DIM),
-            None => line.push(&format!("{} added", plural(source.added, "item")), Ink::PLAIN),
-            Some(SourceFailure::Command(failure)) => {
-                line.push(&failure.summary, Ink::RED);
-                if !failure.stderr.trim().is_empty() {
-                    answer.push_str(&failure.stderr);
-                    if !failure.stderr.ends_with('\n') {
-                        answer.push('\n');
-                    }
-                }
-            }
-            Some(SourceFailure::Read(_) | SourceFailure::Generated(_) | SourceFailure::Output(_)) => {
-                line.push("see diagnostics", Ink::RED);
-            }
-        }
-        answer.push_str(&terminals.out.painter.paint(&[line]));
-    }
-
-    if dry {
-        for change in &planned.changes {
-            answer.push_str(&change_diff(change));
-        }
-    } else if blocked_by_book_errors && !planned.changes.is_empty() {
-        answer.push_str("sync changes were not applied because the project has errors\n");
-    } else {
-        if write_problems.is_empty() {
-            for change in &planned.changes {
-                answer.push_str(&format!("updated {}\n", change.path));
-            }
-        }
-    }
+    let mut answer: String = planned.sources.iter().map(|source| source_report(source, terminals)).collect();
+    answer.push_str(&changes_report(&planned.changes, &fate));
     if planned.sources.is_empty() && planned.changes.is_empty() {
         answer.push_str("no sync sources selected\n");
     } else if planned.changes.is_empty() {
         answer.push_str("no changes\n");
     }
 
-    let (diagnostic_text, tally) = Renderer::new(sources, terminals.err).present(&diagnostics, true);
-    let failed =
-        tally.errors > 0 || !write_problems.is_empty() || planned.sources.iter().any(|source| source.failure.is_some());
+    let (diagnostic_text, tally) = Renderer::new(sources, terminals.err).present(&diagnostics, Limit::Every);
+    let failed = tally.errors > 0
+        || !fate.problems().is_empty()
+        || planned.sources.iter().any(|source| source.failure.is_some());
     Outcome { answer, diagnostics: diagnostic_text, failed }
+}
+
+/// What one source of a sync came to: its line, preceded by what a failed command printed.
+fn source_report(source: &SourceResult, terminals: Terminals) -> String {
+    let mut line = match &source.failure {
+        None => Line::text("✓ ", Ink::GREEN.bold()),
+        Some(_) => Line::text("✗ ", Ink::RED.bold()),
+    };
+    line.push(&source.path, Ink::BOLD);
+    line.push("  ", Ink::PLAIN);
+    let mut report = String::new();
+    match &source.failure {
+        None if source.added == 0 => line.push("no new items", Ink::DIM),
+        None => line.push(&format!("{} added", plural(source.added, "item")), Ink::PLAIN),
+        Some(SourceFailure::Command(failure)) => {
+            line.push(&failure.summary, Ink::RED);
+            if !failure.stderr.trim().is_empty() {
+                report.push_str(&failure.stderr);
+                if !failure.stderr.ends_with('\n') {
+                    report.push('\n');
+                }
+            }
+        }
+        Some(SourceFailure::Read(_) | SourceFailure::Generated(_) | SourceFailure::Output(_)) => {
+            line.push("see diagnostics", Ink::RED);
+        }
+    }
+    report + &terminals.out.painter.paint(&[line])
+}
+
+/// The changes as they were shown, refused, or written.
+fn changes_report(changes: &[Change], fate: &Fate) -> String {
+    match fate {
+        Fate::Shown => changes.iter().map(change_diff).collect(),
+        Fate::Blocked if !changes.is_empty() => {
+            "sync changes were not applied because the project has errors\n".to_string()
+        }
+        Fate::Applied(problems) if problems.is_empty() => {
+            changes.iter().map(|change| format!("updated {}\n", change.path)).collect()
+        }
+        Fate::Blocked | Fate::Applied(_) => String::new(),
+    }
 }
 
 /// A compact unified hunk: the common prefix and suffix stay context, and the
@@ -328,66 +336,69 @@ fn change_diff(change: &Change) -> String {
     let before = change.before.as_deref().unwrap_or("");
     let old: Vec<&str> = before.split_inclusive('\n').collect();
     let new: Vec<&str> = change.after.split_inclusive('\n').collect();
-    let mut prefix = 0;
-    while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
-        prefix += 1;
-    }
-    let mut suffix = 0;
-    while suffix < old.len().saturating_sub(prefix)
-        && suffix < new.len().saturating_sub(prefix)
-        && old[old.len() - suffix - 1] == new[new.len() - suffix - 1]
-    {
-        suffix += 1;
-    }
-    let old_end = old.len() - suffix;
-    let new_end = new.len() - suffix;
+    let (prefix, suffix) = shared_lines(&old, &new);
+    let (old_end, new_end) = (old.len() - suffix, new.len() - suffix);
     let start = prefix.saturating_sub(1);
     let old_count = old_end.saturating_sub(start) + usize::from(suffix > 0);
     let new_count = new_end.saturating_sub(start) + usize::from(suffix > 0);
     let mut out = format!(
-        "--- a/{}\n+++ b/{}\n@@ -{},{} +{},{} @@\n",
-        change.path,
-        change.path,
-        start + 1,
-        old_count,
-        start + 1,
-        new_count,
+        "--- a/{path}\n+++ b/{path}\n@@ -{first},{old_count} +{first},{new_count} @@\n",
+        path = change.path,
+        first = start + 1,
     );
     if start < prefix {
-        out.push(' ');
-        out.push_str(old[start]);
-        if !old[start].ends_with('\n') {
-            out.push('\n');
-        }
+        push_line(&mut out, ' ', old[start]);
     }
     for line in &old[prefix..old_end] {
-        out.push('-');
-        out.push_str(line);
-        if !line.ends_with('\n') {
-            out.push('\n');
-        }
+        push_line(&mut out, '-', line);
     }
     for line in &new[prefix..new_end] {
-        out.push('+');
-        out.push_str(line);
-        if !line.ends_with('\n') {
-            out.push('\n');
-        }
+        push_line(&mut out, '+', line);
     }
     if suffix > 0 {
-        out.push(' ');
-        out.push_str(old[old.len() - suffix]);
-        if !old[old.len() - suffix].ends_with('\n') {
-            out.push('\n');
-        }
+        push_line(&mut out, ' ', old[old.len() - suffix]);
     }
     out
+}
+
+/// How many lines two versions of a file share at their start, and then at their end.
+fn shared_lines(old: &[&str], new: &[&str]) -> (usize, usize) {
+    let prefix = old.iter().zip(new).take_while(|(before, after)| before == after).count();
+    let (old, new) = (&old[prefix..], &new[prefix..]);
+    let suffix = old.iter().rev().zip(new.iter().rev()).take_while(|(before, after)| before == after).count();
+    (prefix, suffix)
+}
+
+/// Adds `line` to a diff, marked, and ended if it was the last of its file and had no line ending.
+fn push_line(diff: &mut String, mark: char, line: &str) {
+    diff.push(mark);
+    diff.push_str(line);
+    if !line.ends_with('\n') {
+        diff.push('\n');
+    }
 }
 
 /// The current day, by the system clock, in UTC.
 fn system_today() -> Day {
     let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs());
     Day((seconds / 86_400) as i32)
+}
+
+/// How an answer is shown: where it goes, and in what form.
+#[derive(Clone, Copy)]
+struct Shown {
+    terminals: Terminals,
+    limit: Limit,
+    form: Form,
+}
+
+/// What an answer is written as.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Form {
+    /// For a reader at a terminal.
+    Text,
+    /// For a program: independent of terminal width and colour.
+    Json,
 }
 
 /// A book that has been run, and everything found on the way.
@@ -397,30 +408,37 @@ struct Session<'a, 's> {
     sources: &'a Sources,
     /// From parsing, building, and running.
     diagnostics: Vec<&'a Diagnostic>,
-    terminals: Terminals,
-    /// Show every diagnostic, however many.
-    all: bool,
-    /// Machine-readable rendering is independent of terminal width and colour.
-    json: bool,
+    shown: Shown,
 }
 
-impl Session<'_, '_> {
+impl<'a, 's> Session<'a, 's> {
+    /// The book as run, with what was found before the run and by it.
+    fn new(
+        book: &'a Book<'s>,
+        run: &'a Run,
+        sources: &'a Sources,
+        before: &'a [Diagnostic],
+        shown: Shown,
+    ) -> Session<'a, 's> {
+        Session { book, run, sources, diagnostics: before.iter().chain(&run.diagnostics).collect(), shown }
+    }
+
     /// Every diagnostic; and if none is an error, the book in one line.
     fn check(&self, suggestions: &[MemoSuggestion]) -> Outcome {
         let (diagnostics, tally) = self.show(&self.diagnostics);
-        if self.json {
+        if self.shown.form == Form::Json {
             let mut answer = diagnostics;
             answer.push_str(&json_suggestions(suggestions));
             return Outcome { answer, diagnostics: String::new(), failed: tally.errors > 0 };
         }
         if tally.errors > 0 {
             let mut diagnostics = diagnostics;
-            diagnostics.push_str(&self.suggestions(suggestions, self.terminals.err));
+            diagnostics.push_str(&self.suggestions(suggestions, self.shown.terminals.err));
             return Outcome { answer: String::new(), diagnostics, failed: true };
         }
         let summary = axiom_report::summary(self.book, self.run);
-        let mut answer = self.terminals.out.painter.paint(&[summary_line(self.book, &summary)]);
-        answer.push_str(&self.suggestions(suggestions, self.terminals.out));
+        let mut answer = self.shown.terminals.out.painter.paint(&[summary_line(self.book, &summary)]);
+        answer.push_str(&self.suggestions(suggestions, self.shown.terminals.out));
         Outcome { answer, diagnostics, failed: false }
     }
 
@@ -436,25 +454,35 @@ impl Session<'_, '_> {
     /// The errors, and the report. A report runs whatever the book's errors, so
     /// that a reader can investigate them; it says at its head what it rests on.
     fn report(&self, context: &Context<'_, '_>, query: &Query<'_>) -> Outcome {
-        let result = context.report_with_sources(query, self.sources);
-        let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
-        shown.extend(result.as_ref().err());
-        let (diagnostics, tally) = self.show(&shown);
-        let Ok(report) = result else {
-            return if self.json {
-                Outcome { answer: diagnostics, diagnostics: String::new(), failed: true }
-            } else {
-                Outcome { answer: String::new(), diagnostics, failed: true }
-            };
-        };
-        if self.json {
+        match context.report_with_sources(query, self.sources) {
+            Ok(report) => self.answer(&report),
+            Err(problem) => self.refuse(&problem),
+        }
+    }
+
+    /// The errors, and why there is no report.
+    fn refuse(&self, problem: &Diagnostic) -> Outcome {
+        let mut errors = self.errors();
+        errors.push(problem);
+        let (diagnostics, _) = self.show(&errors);
+        if self.shown.form == Form::Json {
+            Outcome { answer: diagnostics, diagnostics: String::new(), failed: true }
+        } else {
+            Outcome { answer: String::new(), diagnostics, failed: true }
+        }
+    }
+
+    /// The report, and the errors it rests on.
+    fn answer(&self, report: &axiom_report::Report<'_>) -> Outcome {
+        let (diagnostics, tally) = self.show(&self.errors());
+        if self.shown.form == Form::Json {
             return Outcome {
-                answer: JsonRenderer.render(&report, self.sources),
+                answer: JsonRenderer.render(report, self.sources),
                 diagnostics,
                 failed: tally.errors > 0,
             };
         }
-        let mut answer = table::TableRenderer { terminal: self.terminals.out }.render(&report, self.sources);
+        let mut answer = table::TableRenderer { terminal: self.shown.terminals.out }.render(report, self.sources);
         if tally.errors > 0 {
             let caveat = format!(
                 "rests on a book with {} (`axiom check` lists them): what they touch may be wrong",
@@ -462,22 +490,27 @@ impl Session<'_, '_> {
             );
             let mut line = Line::text("✗ ", Ink::RED.bold());
             line.push(&caveat, Ink::DIM);
-            answer.insert_str(0, &self.terminals.out.painter.paint(&[line, Line::new()]));
+            answer.insert_str(0, &self.shown.terminals.out.painter.paint(&[line, Line::new()]));
         }
         Outcome { answer, diagnostics, failed: tally.errors > 0 }
     }
 
+    fn errors(&self) -> Vec<&'a Diagnostic> {
+        self.diagnostics.iter().copied().filter(|found| found.is_error()).collect()
+    }
+
     /// The diagnostics, and after them how many of each there were.
     fn show(&self, diagnostics: &[&Diagnostic]) -> (String, Tally) {
-        if self.json {
+        if self.shown.form == Form::Json {
             return (
                 crate::render::json::diagnostics(diagnostics, self.sources),
                 Tally::of(diagnostics.iter().copied()),
             );
         }
-        let (mut text, tally) = Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
+        let (mut text, tally) =
+            Renderer::new(self.sources, self.shown.terminals.err).present(diagnostics, self.shown.limit);
         if let Some(line) = tally.line() {
-            text += &self.terminals.err.painter.paint(&[line]);
+            text += &self.shown.terminals.err.painter.paint(&[line]);
         }
         (text, tally)
     }
@@ -545,25 +578,19 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         dir.write("prices.ax", "old\n");
         let project = Project::find(dir.path()).unwrap();
-        let mut sources = project.load().unwrap();
-        let outcome = render_sync(
-            PlanOutcome {
-                sources: Vec::new(),
-                changes: vec![Change {
-                    path: "prices.ax".to_owned(),
-                    before: Some("old\n".to_owned()),
-                    after: "new\n".to_owned(),
-                }],
-                problems: Vec::new(),
-                incomplete: Vec::new(),
-                generated: Vec::new(),
-            },
-            &mut sources,
-            &project.root,
-            true,
-            Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) },
-            &[],
-        );
+        let sources = project.load().unwrap();
+        let changes =
+            vec![Change { path: "prices.ax".to_owned(), before: Some("old\n".to_owned()), after: "new\n".to_owned() }];
+        let fate = Fate::Shown;
+        let planned = PlanOutcome {
+            sources: Vec::new(),
+            changes,
+            problems: Vec::new(),
+            incomplete: Vec::new(),
+            generated: Vec::new(),
+        };
+        let terminals = Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) };
+        let outcome = render_sync(planned, fate, &sources, terminals, &[]);
 
         assert!(!outcome.failed);
         assert!(outcome.answer.contains("-old\n"));
@@ -581,25 +608,19 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         symlink(outside.path(), dir.path().join("link")).unwrap();
         let project = Project::find(dir.path()).unwrap();
-        let mut sources = project.load().unwrap();
-        let outcome = render_sync(
-            PlanOutcome {
-                sources: Vec::new(),
-                changes: vec![Change {
-                    path: "link/new-folder/prices.ax".to_owned(),
-                    before: None,
-                    after: "new\n".to_owned(),
-                }],
-                problems: Vec::new(),
-                incomplete: Vec::new(),
-                generated: Vec::new(),
-            },
-            &mut sources,
-            &project.root,
-            false,
-            Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) },
-            &[],
-        );
+        let sources = project.load().unwrap();
+        let changes =
+            vec![Change { path: "link/new-folder/prices.ax".to_owned(), before: None, after: "new\n".to_owned() }];
+        let fate = Fate::apply(&[], &project.root, &changes);
+        let planned = PlanOutcome {
+            sources: Vec::new(),
+            changes,
+            problems: Vec::new(),
+            incomplete: Vec::new(),
+            generated: Vec::new(),
+        };
+        let terminals = Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) };
+        let outcome = render_sync(planned, fate, &sources, terminals, &[]);
 
         assert!(outcome.failed);
         assert!(!outside.path().join("new-folder").exists());
@@ -611,26 +632,20 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         dir.write("prices.ax", "old\n");
         let project = Project::find(dir.path()).unwrap();
-        let mut sources = project.load().unwrap();
-        let invalid_book = Diagnostic::error("invalid-book", "the project has a model error");
-        let outcome = render_sync(
-            PlanOutcome {
-                sources: Vec::new(),
-                changes: vec![Change {
-                    path: "prices.ax".to_owned(),
-                    before: Some("old\n".to_owned()),
-                    after: "new\n".to_owned(),
-                }],
-                problems: Vec::new(),
-                incomplete: Vec::new(),
-                generated: Vec::new(),
-            },
-            &mut sources,
-            &project.root,
-            false,
-            Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) },
-            &[invalid_book],
-        );
+        let sources = project.load().unwrap();
+        let invalid_book = [Diagnostic::error("invalid-book", "the project has a model error")];
+        let changes =
+            vec![Change { path: "prices.ax".to_owned(), before: Some("old\n".to_owned()), after: "new\n".to_owned() }];
+        let fate = Fate::apply(&invalid_book, &project.root, &changes);
+        let planned = PlanOutcome {
+            sources: Vec::new(),
+            changes,
+            problems: Vec::new(),
+            incomplete: Vec::new(),
+            generated: Vec::new(),
+        };
+        let terminals = Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) };
+        let outcome = render_sync(planned, fate, &sources, terminals, &invalid_book);
 
         assert!(outcome.failed);
         assert!(outcome.answer.contains("not applied because the project has errors"));

@@ -59,6 +59,17 @@ pub enum SourceFailure {
     Output(Vec<Diagnostic>),
 }
 
+impl SourceFailure {
+    /// What the failure says as diagnostics. A failed command says it in its summary and its stderr instead.
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        match self {
+            SourceFailure::Read(problem) | SourceFailure::Generated(problem) => std::slice::from_ref(problem),
+            SourceFailure::Output(problems) => problems,
+            SourceFailure::Command(_) => &[],
+        }
+    }
+}
+
 /// Everything the CLI needs to render a dry-run or apply the changes later.
 /// This function never writes a project file.
 pub struct PlanOutcome {

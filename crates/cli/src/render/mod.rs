@@ -31,6 +31,15 @@ use crate::text::plural;
 const NAMED: usize = 4;
 
 /// Draws diagnostics against the sources they point into.
+/// How many of the findings are drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Limit {
+    /// No more than [`SHOWN`]; the rest are counted.
+    Capped,
+    /// Every one.
+    Every,
+}
+
 pub struct Renderer<'a> {
     sources: &'a Sources,
     terminal: Terminal,
@@ -44,12 +53,15 @@ impl<'a> Renderer<'a> {
 
     /// The diagnostics as a reader wants them, each followed by a blank line:
     /// errors first, each kind in source order, and those that say the same
-    /// thing once, naming where else. Unless `all` is asked for, no more than
-    /// [`SHOWN`] are drawn, and the rest are counted. Also how many of every
-    /// kind there were, drawn or not.
-    pub fn present(&self, diagnostics: &[&Diagnostic], all: bool) -> (String, Tally) {
+    /// thing once, naming where else. Unless `limit` is [`Limit::Every`], no
+    /// more than [`SHOWN`] are drawn, and the rest are counted. Also how many
+    /// of every kind there were, drawn or not.
+    pub fn present(&self, diagnostics: &[&Diagnostic], limit: Limit) -> (String, Tally) {
         let findings = arrange(diagnostics, |diagnostic| self.lead(diagnostic));
-        let shown = if all { findings.keys() } else { findings.keys().min(SHOWN) };
+        let shown = match limit {
+            Limit::Every => findings.keys(),
+            Limit::Capped => findings.keys().min(SHOWN),
+        };
         let mut text = String::new();
         for (_, group) in findings.iter().take(shown) {
             let mut first = group[0].clone();
