@@ -5,7 +5,7 @@
 
 use std::fmt::Write as _;
 
-use crate::{Cell, Fact, Report, ReportRenderer, SourceProvider, When};
+use crate::{Align, Cell, Column, Fact, Report, ReportRenderer, Row, Section, SourceProvider, Style, When};
 use axiom_core::{Days, Diagnostic, Loc, Qty, calendar::Window};
 use axiom_model::{Closing, Period, Trigger};
 
@@ -26,224 +26,160 @@ pub fn render(report: &Report<'_>, sources: &dyn SourceProvider) -> String {
     let mut out = String::new();
     out.push_str("{\"title\":");
     plain_string(&mut out, &report.title, sources);
-    out.push_str(",\"sections\":[");
-    for (section_index, section) in report.sections.iter().enumerate() {
-        comma(&mut out, section_index);
-        out.push_str("{\"heading\":");
-        if let Some(heading) = &section.heading {
-            plain_string(&mut out, heading, sources);
-        } else {
-            out.push_str("null");
-        }
-        out.push_str(",\"columns\":[");
-        for (column_index, column) in section.columns.iter().enumerate() {
-            comma(&mut out, column_index);
-            out.push_str("{\"title\":");
-            plain_string(&mut out, &column.title, sources);
-            out.push_str(",\"align\":");
-            string(
-                &mut out,
-                match column.align {
-                    crate::Align::Left => "left",
-                    crate::Align::Right => "right",
-                },
-            );
-            out.push('}');
-        }
-        out.push_str("],\"rows\":[");
-        for (row_index, row) in section.rows.iter().enumerate() {
-            comma(&mut out, row_index);
-            let _ = write!(out, "{{\"depth\":{},\"style\":", row.depth);
-            string(
-                &mut out,
-                match row.style {
-                    crate::Style::Normal => "normal",
-                    crate::Style::Total => "total",
-                    crate::Style::Muted => "muted",
-                    crate::Style::Alert => "alert",
-                },
-            );
-            out.push_str(",\"cells\":[");
-            for (cell_index, cell) in row.cells.iter().enumerate() {
-                comma(&mut out, cell_index);
-                write_cell(&mut out, cell, sources);
-            }
-            out.push_str("]}");
-        }
-        out.push_str("],\"notes\":[");
-        for (note_index, note) in section.notes.iter().enumerate() {
-            comma(&mut out, note_index);
-            plain_string(&mut out, note, sources);
-        }
-        out.push_str("]}");
-    }
-    out.push_str("],\"facts\":[");
-    let mut first = true;
-    for fact in report.sections.iter().flat_map(|section| &section.facts) {
-        if !first {
-            out.push(',');
-        }
-        first = false;
-        write_fact(&mut out, fact);
-    }
-    out.push_str("]}\n");
+    out.push_str(",\"sections\":");
+    array(&mut out, &report.sections, |out, section| write_section(out, section, sources));
+    out.push_str(",\"facts\":");
+    array(&mut out, report.sections.iter().flat_map(|section| &section.facts), write_fact);
+    out.push_str("}\n");
     out
+}
+
+/// A JSON array of `items`, each written by `write`.
+fn array<T>(out: &mut String, items: impl IntoIterator<Item = T>, mut write: impl FnMut(&mut String, T)) {
+    out.push('[');
+    for (index, item) in items.into_iter().enumerate() {
+        comma(out, index);
+        write(out, item);
+    }
+    out.push(']');
+}
+
+fn write_section(out: &mut String, section: &Section<'_>, sources: &dyn SourceProvider) {
+    out.push_str("{\"heading\":");
+    match &section.heading {
+        Some(heading) => plain_string(out, heading, sources),
+        None => out.push_str("null"),
+    }
+    out.push_str(",\"columns\":");
+    array(out, &section.columns, |out, column| write_column(out, column, sources));
+    out.push_str(",\"rows\":");
+    array(out, &section.rows, |out, row| write_row(out, row, sources));
+    out.push_str(",\"notes\":");
+    array(out, &section.notes, |out, note| plain_string(out, note, sources));
+    out.push('}');
+}
+
+fn write_column(out: &mut String, column: &Column<'_>, sources: &dyn SourceProvider) {
+    out.push_str("{\"title\":");
+    plain_string(out, &column.title, sources);
+    out.push_str(",\"align\":");
+    string(
+        out,
+        match column.align {
+            Align::Left => "left",
+            Align::Right => "right",
+        },
+    );
+    out.push('}');
+}
+
+fn write_row(out: &mut String, row: &Row<'_>, sources: &dyn SourceProvider) {
+    let _ = write!(out, "{{\"depth\":{},\"style\":", row.depth);
+    string(
+        out,
+        match row.style {
+            Style::Normal => "normal",
+            Style::Total => "total",
+            Style::Muted => "muted",
+            Style::Alert => "alert",
+        },
+    );
+    out.push_str(",\"cells\":");
+    array(out, &row.cells, |out, cell| write_cell(out, cell, sources));
+    out.push('}');
 }
 
 /// One JSON object per diagnostic, in input order, as required by `check --json`.
 pub fn diagnostics(diagnostics: &[&Diagnostic], sources: &dyn SourceProvider) -> String {
     let mut out = String::new();
     for diagnostic in diagnostics {
-        out.push('{');
-        out.push_str("\"code\":");
-        string(&mut out, &diagnostic.code);
-        out.push_str(",\"severity\":");
-        string(
-            &mut out,
-            match diagnostic.severity {
-                axiom_core::Severity::Error => "error",
-                axiom_core::Severity::Warning => "warning",
-                axiom_core::Severity::Note => "note",
-            },
-        );
-        out.push_str(",\"headline\":");
-        string(&mut out, diagnostic.message.lines().next().unwrap_or_default());
-        out.push_str(",\"message\":");
-        string(&mut out, &diagnostic.message);
-        out.push_str(",\"labels\":[");
-        for (index, label) in diagnostic.labels.iter().enumerate() {
-            comma(&mut out, index);
-            out.push('{');
-            location(&mut out, label.loc, sources);
-            out.push_str(",\"text\":");
-            string(&mut out, &label.text);
-            let _ = write!(out, ",\"primary\":{}}}", label.primary);
-        }
-        out.push_str("],\"notes\":[");
-        for (index, note) in diagnostic.notes.iter().enumerate() {
-            comma(&mut out, index);
-            string(&mut out, note);
-        }
-        out.push_str("],\"helps\":[");
-        for (index, help) in diagnostic.help.iter().enumerate() {
-            comma(&mut out, index);
-            string(&mut out, &help.text);
-        }
-        out.push_str("],\"fixes\":[");
-        let mut fix_index = 0;
-        for help in &diagnostic.help {
-            let Some((loc, replacement)) = &help.edit else {
-                continue;
-            };
-            comma(&mut out, fix_index);
-            fix_index += 1;
-            out.push('{');
-            location(&mut out, *loc, sources);
-            // Edits use half-open ranges; the end position is the cursor just
-            // after the replaced text, which stays on a UTF-8 boundary.
-            let end = Loc { start: loc.end, end: loc.end, ..*loc };
-            let end_position = SourceProvider::describe(sources, end);
-            out.push_str(",\"end_line\":");
-            optional_number(&mut out, end_position.map(|position| position.line));
-            out.push_str(",\"end_column\":");
-            optional_number(&mut out, end_position.map(|position| position.column));
-            out.push_str(",\"replacement\":");
-            string(&mut out, replacement);
-            out.push('}');
-        }
-        out.push_str("]}\n");
+        write_diagnostic(&mut out, diagnostic, sources);
+        out.push('\n');
     }
     out
+}
+
+fn write_diagnostic(out: &mut String, diagnostic: &Diagnostic, sources: &dyn SourceProvider) {
+    out.push_str("{\"code\":");
+    string(out, &diagnostic.code);
+    out.push_str(",\"severity\":");
+    string(
+        out,
+        match diagnostic.severity {
+            axiom_core::Severity::Error => "error",
+            axiom_core::Severity::Warning => "warning",
+            axiom_core::Severity::Note => "note",
+        },
+    );
+    out.push_str(",\"headline\":");
+    string(out, diagnostic.message.lines().next().unwrap_or_default());
+    out.push_str(",\"message\":");
+    string(out, &diagnostic.message);
+    out.push_str(",\"labels\":");
+    array(out, &diagnostic.labels, |out, label| {
+        out.push('{');
+        location(out, label.loc, sources);
+        out.push_str(",\"text\":");
+        string(out, &label.text);
+        let _ = write!(out, ",\"primary\":{}}}", label.primary);
+    });
+    out.push_str(",\"notes\":");
+    array(out, &diagnostic.notes, |out, note| string(out, note));
+    out.push_str(",\"helps\":");
+    array(out, &diagnostic.help, |out, help| string(out, &help.text));
+    out.push_str(",\"fixes\":");
+    let edits = diagnostic.help.iter().filter_map(|help| help.edit.as_ref());
+    array(out, edits, |out, (loc, replacement)| write_fix(out, *loc, replacement, sources));
+    out.push('}');
+}
+
+/// A fix: where the text it replaces is, where that ends, and what to put there.
+fn write_fix(out: &mut String, loc: Loc, replacement: &str, sources: &dyn SourceProvider) {
+    out.push('{');
+    location(out, loc, sources);
+    // Edits use half-open ranges; the end position is the cursor just
+    // after the replaced text, which stays on a UTF-8 boundary.
+    let end = Loc { start: loc.end, end: loc.end, ..loc };
+    let end_position = SourceProvider::describe(sources, end);
+    out.push_str(",\"end_line\":");
+    optional_number(out, end_position.map(|position| position.line));
+    out.push_str(",\"end_column\":");
+    optional_number(out, end_position.map(|position| position.column));
+    out.push_str(",\"replacement\":");
+    string(out, replacement);
+    out.push('}');
 }
 
 fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
     match cell {
         Cell::Blank => out.push_str("{\"type\":\"blank\"}"),
-        Cell::Word(word) => {
-            out.push_str("{\"type\":\"word\",\"value\":");
-            string(out, word);
-            out.push('}');
-        }
-        Cell::Text(text) => {
-            out.push_str("{\"type\":\"text\",\"value\":");
-            string(out, text);
-            out.push('}');
-        }
-        Cell::Name(name) => {
-            out.push_str("{\"type\":\"name\",\"value\":");
-            string(out, name);
-            out.push('}');
-        }
-        Cell::Code(code) => {
-            out.push_str("{\"type\":\"code\",\"value\":");
-            string(out, code);
-            out.push('}');
-        }
-        Cell::Purpose(purpose) => {
-            out.push_str("{\"type\":\"purpose\",\"value\":");
-            string(out, purpose);
-            out.push('}');
-        }
-        Cell::Said(text) => {
-            out.push_str("{\"type\":\"text\",\"value\":");
-            string(out, text);
-            out.push('}');
-        }
+        Cell::Word(word) => text_cell(out, "word", word),
+        Cell::Text(text) | Cell::Said(text) => text_cell(out, "text", text),
+        Cell::Name(name) => text_cell(out, "name", name),
+        Cell::Code(code) => text_cell(out, "code", code),
+        Cell::Purpose(purpose) => text_cell(out, "purpose", purpose),
         Cell::Amount { qty, scale, unit } => {
-            out.push_str("{\"type\":\"amount\",\"value\":");
-            out.push('"');
-            let _ = write!(Escaped(out), "{} {unit}", qty.show(*scale));
-            out.push('"');
+            start_cell(out, "amount", |value| write!(value, "{} {unit}", qty.show(*scale)));
             out.push_str(",\"unit\":");
             string(out, unit);
             out.push('}');
         }
-        Cell::Day(day) => {
-            out.push_str("{\"type\":\"day\",\"value\":");
-            out.push('"');
-            let _ = write!(Escaped(out), "{day}");
-            out.push('"');
-            out.push('}');
-        }
-        Cell::Span(span) => {
-            out.push_str("{\"type\":\"span\",\"value\":");
-            out.push('"');
-            let _ = write!(Escaped(out), "{span}");
-            out.push('"');
-            out.push('}');
-        }
+        Cell::Day(day) => shown_cell(out, "day", |value| write!(value, "{day}")),
+        Cell::Span(span) => shown_cell(out, "span", |value| write!(value, "{span}")),
         Cell::Period(days) => {
             out.push_str("{\"type\":\"period\",\"value\":");
             write_period(out, *days);
             out.push('}');
         }
-        Cell::Percent(ratio) => {
-            out.push_str("{\"type\":\"percent\",\"value\":");
-            out.push('"');
-            let _ = write_percent(&mut Escaped(out), *ratio);
-            out.push('"');
-            out.push('}');
-        }
-        Cell::Number(ratio) => {
-            out.push_str("{\"type\":\"number\",\"value\":");
-            out.push('"');
-            let _ = write!(Escaped(out), "{ratio}");
-            out.push('"');
-            out.push('}');
-        }
+        Cell::Percent(ratio) => shown_cell(out, "percent", |value| write_percent(value, *ratio)),
+        Cell::Number(ratio) => shown_cell(out, "number", |value| write!(value, "{ratio}")),
         Cell::Count(count, noun) => {
             out.push_str("{\"type\":\"count\",\"value\":");
             let _ = write!(out, "{count},\"noun\":");
             string(out, noun);
             out.push('}');
         }
-        Cell::Trigger(trigger) => {
-            out.push_str("{\"type\":\"trigger\",\"value\":");
-            out.push('"');
-            let _ = write_trigger_words(&mut Escaped(out), *trigger);
-            out.push('"');
-            out.push('}');
-        }
+        Cell::Trigger(trigger) => shown_cell(out, "trigger", |value| write_trigger_words(value, *trigger)),
         Cell::Source(loc) => {
             out.push_str("{\"type\":\"source\",");
             location(out, *loc, sources);
@@ -252,14 +188,35 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
         Cell::Join(between, parts) => {
             out.push_str("{\"type\":\"sentence\",\"separator\":");
             string(out, between);
-            out.push_str(",\"parts\":[");
-            for (index, part) in parts.iter().enumerate() {
-                comma(out, index);
-                write_cell(out, part, sources);
-            }
-            out.push_str("]}");
+            out.push_str(",\"parts\":");
+            array(out, parts, |out, part| write_cell(out, part, sources));
+            out.push('}');
         }
     }
+}
+
+/// `{"type":KIND,"value":TEXT}`.
+fn text_cell(out: &mut String, kind: &str, text: &str) {
+    out.push_str("{\"type\":");
+    string(out, kind);
+    out.push_str(",\"value\":");
+    string(out, text);
+    out.push('}');
+}
+
+/// `{"type":KIND,"value":"…"}`, the value being what `write` says, escaped.
+fn shown_cell(out: &mut String, kind: &str, write: impl FnOnce(&mut Escaped<'_>) -> std::fmt::Result) {
+    start_cell(out, kind, write);
+    out.push('}');
+}
+
+/// `{"type":KIND,"value":"…"`: a cell whose value is what `write` says, escaped, and which goes on.
+fn start_cell(out: &mut String, kind: &str, write: impl FnOnce(&mut Escaped<'_>) -> std::fmt::Result) {
+    out.push_str("{\"type\":");
+    string(out, kind);
+    out.push_str(",\"value\":\"");
+    let _ = write(&mut Escaped(out));
+    out.push('"');
 }
 
 fn plain_string(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
