@@ -11,6 +11,13 @@ pub(crate) struct Cell<'t> {
     pub span: Span,
 }
 
+impl Cell<'_> {
+    /// What a value is before anything has been found for it.
+    pub(crate) fn absent() -> Cell<'static> {
+        Cell { text: Cow::Borrowed(""), span: ABSENT }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct MemoJoin<'t> {
     first: Option<Cow<'t, str>>,
