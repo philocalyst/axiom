@@ -1753,3 +1753,41 @@ fn basis_consumption_and_later_replay_preserve_the_native_purchase_economics() {
         }
     });
 }
+
+/// Three parties that owe the book's owner on one day, written in the opposite order to their names.
+const OWED: &str = "\
+use std
+base USD
+entity me : person
+entity ann : org
+entity bob : org
+entity cy : org
+account checking : bank
+2026-01-01 market -> checking 100 USD
+2026-01-02 cy owes me 30 USD
+2026-01-02 bob owes me 20 USD
+2026-01-02 ann owes me 10 USD
+";
+
+/// A claim tab is made when its claim is lowered, in the order the journal is read: that is nothing a reader sees,
+/// so every report that lists claims lists them by whom they are with.
+#[test]
+fn claims_are_listed_by_whom_they_are_with_and_not_in_the_order_their_tabs_were_made() {
+    with_std(OWED, day(2026, 2, 1), |book, run| {
+        let tabs = book.places.values().filter(|place| matches!(place.role, axiom_model::Role::Tab(_)));
+        let made: Vec<_> = tabs.map(|place| book.name(place.path)).collect();
+        assert_eq!(made, ["cy", "bob", "ann"], "the tree has the tabs in the order the claims were recorded");
+
+        let balance = Query::Balance { globs: vec![], at: None, value: false, monthly: false };
+        let held = ["=checking | 100.00 USD", "=ann | 10.00 USD", "=bob | 20.00 USD", "=cy | 30.00 USD"];
+        assert_eq!(rows(book, run, balance), held);
+
+        let first_cell =
+            |query| rows(book, run, query).into_iter().map(|row| row.split(" | ").next().unwrap().to_string());
+        let owed: Vec<_> = first_cell(Query::Claims { at: None }).take(3).collect();
+        assert_eq!(owed, ["ann", "bob", "cy"], "claims made and due on one day: by whom they are with");
+        let parcels = first_cell(Query::Lots { place: None, at: None });
+        let parcels: Vec<_> = parcels.filter(|name| ["ann", "bob", "cy"].contains(&name.as_str())).collect();
+        assert_eq!(parcels, ["ann", "bob", "cy"]);
+    });
+}

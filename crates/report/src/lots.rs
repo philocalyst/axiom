@@ -31,9 +31,13 @@ pub(crate) fn view_from<'h, 's>(
     ]);
 
     let mut sum = Sum::default();
-    let held = holdings.into_iter().filter(|holding| {
-        lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
-    });
+    let mut held: Vec<&Holding> = holdings
+        .into_iter()
+        .filter(|holding| {
+            lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
+        })
+        .collect();
+    held.sort_by_key(|holding| book.listing(holding.place));
     for holding in held {
         for lot in &holding.lots {
             let quantity = lens.place_qty(holding.place, lot.qty);

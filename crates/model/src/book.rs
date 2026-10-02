@@ -248,6 +248,19 @@ pub struct Place {
     pub loc: Option<Loc>,
 }
 
+/// Where a report lists a place. The places the book declares come in the tree's order, which is by path. The claim tabs
+/// come after them, and the tree has them in the order their claims were first recorded, which nothing a reader sees
+/// says: a reader finds a claim by whom it is with, so they are listed by that party's name, what is owed to the owner
+/// before what the owner owes, then by owner.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Listing<'s> {
+    /// The place's number in the tree, and past every one of them for a tab.
+    at: u32,
+    with: &'s str,
+    class: Class,
+    owner: Option<Id<Entity>>,
+}
+
 /// What a place is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Role {
@@ -264,7 +277,8 @@ pub enum Role {
     Issuer(Id<Commodity>),
     /// Claims between a party and an owner: an `Asset`-class tab holds what the
     /// party owes, a `Debt`-class tab what the owner owes it. Tabs are `claim`
-    /// places: each claim stays its own parcel.
+    /// places: each claim stays its own parcel. A tab is not declared: the first claim or loan that
+    /// needs it makes it, as the last root of the tree, and `Book::listing` says where reports list it.
     Tab(Id<Entity>),
     /// An identified thing's place: its one unit, and its parts' basis.
     Asset(Id<Asset>),
@@ -1449,6 +1463,24 @@ impl<T> std::fmt::Debug for Miss<T> {
 impl<'s> Book<'s> {
     pub fn name(&self, sym: Sym) -> &'s str {
         self.names.name(sym)
+    }
+
+    /// Where a report lists `place`, so that no report lists places in the order the model made them in.
+    pub fn listing(&self, place: Id<Place>) -> Listing<'s> {
+        let tab = &self.places[place];
+        match tab.role {
+            Role::Tab(_) => {
+                Listing { at: u32::MAX, with: self.name(tab.path), class: tab.class, owner: Some(tab.owner) }
+            }
+            _ => Listing { at: place.index() as u32, with: "", class: Class::Asset, owner: None },
+        }
+    }
+
+    /// Every place in the order a report lists them: see [`Listing`].
+    pub fn listed_places(&self) -> Vec<Id<Place>> {
+        let mut places: Vec<_> = self.places.ids().collect();
+        places.sort_by_key(|&place| self.listing(place));
+        places
     }
 
     /// Adds unescaped source text without an allocation.

@@ -127,6 +127,47 @@ fn a_party_only_a_journal_writes_is_an_entity_and_a_contract_named_for_its_party
 }
 
 #[test]
+fn places_are_listed_in_the_trees_order_and_the_tabs_after_them_by_whom_they_are_with() {
+    let claims = "2026-01-10 me owes jo 5 USD\n2026-01-11 jo owes me 20 USD\n2026-01-12 bank owes me 7 USD\n\
+2026-01-13 pat owes jo 3 USD\n";
+    with_book(&format!("{PARTIES}{claims}"), |book| {
+        let made: Vec<_> = tabs(book).into_iter().map(|(_, party, owner, class)| (party, owner, class)).collect();
+        assert_eq!(
+            made,
+            [
+                of(book, "jo", "me", Class::Debt),
+                of(book, "jo", "me", Class::Asset),
+                of(book, "bank", "me", Class::Asset),
+                of(book, "jo", "pat", Class::Debt),
+            ],
+            "the tree has them in the order their claims were recorded"
+        );
+
+        let listed = book.listed_places();
+        let mut every: Vec<_> = listed.clone();
+        every.sort();
+        assert_eq!(every, book.places.ids().collect::<Vec<_>>(), "every place is listed once");
+        let (declared, after): (Vec<_>, Vec<_>) =
+            listed.iter().copied().partition(|&place| !matches!(book.places[place].role, Role::Tab(_)));
+        assert!(declared.windows(2).all(|pair| pair[0] < pair[1]), "the places of the tree keep its order");
+        assert_eq!(listed[..declared.len()], declared[..], "and come first");
+        let by_whom: Vec<_> = after
+            .iter()
+            .map(|&place| (book.places[place].role, book.places[place].owner, book.places[place].class))
+            .collect();
+        let wanted = [
+            of(book, "bank", "me", Class::Asset),
+            of(book, "jo", "me", Class::Asset),
+            of(book, "jo", "me", Class::Debt),
+            of(book, "jo", "pat", Class::Debt),
+        ];
+        let expected: Vec<_> = wanted.iter().map(|&(party, owner, class)| (Role::Tab(party), owner, class)).collect();
+        assert_eq!(by_whom, expected, "by the party's name, what is owed to the owner first, then by owner");
+        assert!(after.iter().all(|&place| book.listing(place) > book.listing(*declared.last().unwrap())));
+    });
+}
+
+#[test]
 fn a_loan_whose_lender_is_the_owner_is_refused_and_makes_no_tab() {
     // The survey never made a tab between a party and itself, so the lowering found none and said `unregistered-tab`:
     // a refusal by accident. It is one by design now.
