@@ -55,7 +55,10 @@ for round_ in range(count):
     shutil.rmtree(project, ignore_errors=True)
     shutil.copytree(random.choice(projects), project)
     target = random.choice(sorted(glob.glob(project + "/**/*.ax", recursive=True)))
-    open(target, "w").write(mutate(open(target).read()))
+    text = open(target).read()
+    if not text.strip():
+        continue
+    open(target, "w").write(mutate(text))
     (old_panicked, _), (new_panicked, stderr) = panics(old, project), panics(new, project)
     old_panics += old_panicked
     new_panics += new_panicked
