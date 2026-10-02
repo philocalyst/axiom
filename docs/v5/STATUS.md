@@ -10,7 +10,8 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 |---|---|---|
 | **C** core primitives | `tagless`, `dayset`, `sparse`, `postings`, `placement`, `trail` | **merged** (`8704e75`) |
 | **K0a** model groundwork | `Staged`, one `problem` catalog, `Word::of`, one collect pass, dead code, one lowering of a literal | running |
-| **K0b** outer groundwork | owners, JSON writers, sync dates, sync apply, `RuntimeRange` | running |
+| **K0b** outer groundwork | owners, JSON writers, sync dates, sync apply, `RuntimeRange`, short functions | **merged** (`daf104e`) |
+| **C3** `postings` SIMD | the `fearless_simd` block-compare kernel, kept only if it is 1.3× | running |
 | **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral | running |
 | **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | brief written; starts when K0a merges |
 | K3 positions and addresses | | after K12 |
@@ -36,16 +37,23 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
 
 ## Waiting on you
 
-1. **The `fearless_simd` kernel for `postings` is not built.** The measured headroom is real: a hand-written SSE or
-   AVX2 block-compare is 1.7–2.4× faster than the scalar merge on lists of 10⁴–10⁶. The lane was refused permission
-   to read the crate's source in the cargo registry, and docs.rs is blocked by the network policy, so nobody could
-   learn the `fearless_simd` API. Nothing was worked around. Either allow reading
-   `~/.cargo/registry/src/*/fearless_simd-*` (or allow `docs.rs`), or tell me to ship the `std::arch` version as a
-   stopgap. `postings` works and is fast without it.
+1. **`fearless_simd` source access.** The registry source is unreadable to the lanes (a permission refusal) and docs.rs is
+   blocked by the network policy, and nothing was worked around. The API was recovered from our own scratch
+   prototypes, which compile against `fearless_simd = "1"`, and lane C3 builds the `postings` kernel from them. If you
+   would rather lanes read the crate directly, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
    20,000 (PROPOSAL §7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3): whether a prorata sale carries basis per unit or by exact share. The lane keeps the
    current behaviour until you say.
+
+## What K0b found, routed
+
+- `check` on `examples/02-household` takes 24.6 s, from `Ledger::sample_temporal_through` sampling daily. K12 deletes it.
+- `totals::History::read` is 6.5% of a 100k `check`, mostly an edge-block scan over about 62 facts. A prefix sum per day
+  removes it (about 5%). A `fearless_simd` kernel on structure-of-arrays columns gave only −1.6%, below the bar, so it
+  was not kept. Belongs to K7's position steppers.
+- A smaller or interned `Diagnostic` in `core` would remove the boxed-error aliases the groundwork needed.
+- The CLI and report render cells twice. K7.
 
 ## Known gaps, not hidden
 
