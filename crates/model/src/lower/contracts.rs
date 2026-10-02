@@ -63,6 +63,11 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
         world.book.lookup.contracts.insert(name, id);
         written.push(WrittenContract { site, node, id, name, loc });
     }
+    for written in written.iter().copied() {
+        if let Some(end) = loan_endpoint(world, written) {
+            world.contract_endpoints.insert(written.name, end);
+        }
+    }
 
     for written in written.iter().copied() {
         if let Some(contract) = lower_contract(world, written, diags) {
@@ -117,15 +122,42 @@ struct Facts {
     inputs: Box<[Input]>,
 }
 
+/// The entity a contract is with: the one written after `with`, else the one the contract's own name says.
+fn contract_party<'s>(world: &World<'s>, written: WrittenContract<'_, 's>) -> Result<Id<Entity>, Diagnostic> {
+    let name = written.node.party.unwrap_or(written.node.name);
+    world.entity(written.home(), Word::of(written.file(), name.0))
+}
+
+/// The owner of a contract: whoever owns the place its schedule is paid from or into, else the book's owner.
+fn contract_owner<'s>(
+    world: &World<'s>,
+    written: WrittenContract<'_, 's>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Id<Entity>> {
+    match written.node.schedule.or(written.node.standing) {
+        Some(schedule) => schedule_owner(world, written.home(), written.file(), Some(schedule), diags),
+        None => Some(world.book.roots.me),
+    }
+}
+
+/// The debt tab a loan contract's name stands for, asked for before any template is lowered: a template may name a loan
+/// that is declared after it, or the loan it is part of. It is the tab `contract_loan` asks for later, for the same party
+/// and owner resolved the same way, so that asks again for what exists; what is wrong with the header, a lender who is
+/// also the borrower among it, is said then.
+fn loan_endpoint<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>) -> Option<End> {
+    let loan = written.file()[written.node.props].iter().find(|prop| prop.name.0 == "loan")?;
+    let party = contract_party(world, written).ok()?;
+    let owner = contract_owner(world, written, &mut Vec::new()).filter(|&owner| owner != party)?;
+    Some(End { place: world.tab(party, owner, Class::Debt, loan.loc), entity: Some(party) })
+}
+
 fn contract_facts<'a, 's>(
     world: &mut World<'s>,
     written: WrittenContract<'a, 's>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Facts> {
     let (node, file) = (written.node, written.file());
-    let name_word = Word::of(file, node.name.0);
-    let party_word = node.party.map_or(name_word, |party| Word::of(file, party.0));
-    let party = world.entity(written.site.home, party_word).or_report(diags)?;
+    let party = contract_party(world, written).or_report(diags)?;
     let days = contract_days(file, node.props, diags)?;
     let area = contract_area(world, file, node.props, diags).ok()?;
     let purpose = contract_purpose(world, written, diags)?;
@@ -149,10 +181,7 @@ fn lower_contract<'a, 's>(
     };
     let (regular, standing) = (compile(world, &roots.regular, diags), compile(world, &roots.standing, diags));
 
-    let owner = match node.schedule.or(node.standing) {
-        Some(schedule) => schedule_owner(world, home, file, Some(schedule), diags)?,
-        None => world.book.roots.me,
-    };
+    let owner = contract_owner(world, written, diags)?;
     let default_holding = node
         .schedule
         .or(node.standing)
@@ -244,6 +273,15 @@ fn contract_loan<'s>(
     let LoanFields { principal, on, rate, term, asset } = loan_fields(world, file, prop, diags)?;
     let resets = loan_resets(world, home, file, prop.lines, on, diags)?;
     let prepay = loan_prepay(file, prop.lines, diags)?;
+    if party == owner {
+        let lender = world.book.name(world.book.entities[party].path);
+        diags.push(
+            Diagnostic::error("contract-loan-party", format!("`{lender}` cannot be both the lender and the borrower"))
+                .label(prop.loc, "a loan is with someone other than the owner of the account it is paid from")
+                .help("write the lender after `with`, as in `contract mortgage with bank`"),
+        );
+        return None;
+    }
     let debt = world.tab(party, owner, Class::Debt, prop.loc);
     Some(Some((Loan { principal, on, term, asset, debt, resets, prepay }, rate)))
 }

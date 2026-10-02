@@ -86,8 +86,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let collected = Collected::of(&sites);
     let settings = declare::settings(&collected, &mut diags);
     let scopes = declare::scopes(&collected, &systems, &systems_tree, &mut diags);
-    let survey = lower::survey(&sites);
-    let said = declare::Said { sites: &sites, collected: &collected, survey: &survey };
+    let said = declare::Said { sites: &sites, collected: &collected };
     let systems = declare::Systems { tree: systems_tree, index: systems, scopes };
     let mut world = declare::declare(said, &settings, names, systems, &mut diags);
     slots::declare(&mut world, &collected, &mut diags);

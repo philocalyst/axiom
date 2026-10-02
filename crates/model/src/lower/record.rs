@@ -1337,8 +1337,7 @@ fn lower_owes<'a, 's>(
     } else if debtor_is_owner {
         (creditor, debtor, crate::book::Class::Debt, creditor)
     } else {
-        // The declaration survey uses this same default when neither end is
-        // an owner: the subject owes the creditor, who holds the claim.
+        // Neither end is an owner: the subject owes the creditor, who holds the claim.
         (debtor, creditor, crate::book::Class::Asset, debtor)
     };
     let tab = world.tab(party, owner, class, loc);
