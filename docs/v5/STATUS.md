@@ -14,7 +14,9 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **C3** `postings` SIMD | the `fearless_simd` block-compare kernel, kept only if it is 1.3× | **merged**: kept, 1.8-2.7× |
 | **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral, sets as `Many` | **merged** (after K0a) |
 | **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | **merged** (`e5a3554`) |
-| **K4a** one split vocabulary | `Quantity`, `Part`, `Expr`, `Group<H,F,I>`, one `Program` replace the two parallel Template*/Journal* families | running; has merged K12 |
+| **K4a** one split vocabulary | `Quantity`, `Part`, `Expr`, `Group<H,F,I>`, one `Program` replace the two parallel Template*/Journal* families | **merged** (`d1daf1f`) |
+| **K3a** positions that need no prediction | tabs created lazily; delete the survey, `find_tabs`, `contract_endpoints`, `unregistered-tab` | running |
+| **K4b** one `solve` | `solve` over an `Env`, constant folding at model time, a static conservation check | brief written; starts when verification of K4a is clean |
 | K3 positions and addresses | | after K12 |
 | K4 events | | after K3 |
 | K5 promises | | after K4 |
@@ -64,6 +66,17 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
   was not kept. Belongs to K7's position steppers.
 - A smaller or interned `Diagnostic` in `core` would remove the boxed-error aliases the groundwork needed.
 - The CLI and report render cells twice. K7.
+
+## K4a, in numbers
+
+| | |
+|---|---|
+| deleted | 13 types (`TemplateAmount`, `TemplateQuantity`, `TemplateFlow`, `TemplateLeg`, `TemplateItem`, `TemplateItemParent`, `JournalQuantity`, `JournalGroup`, `JournalItem`, `WrittenGroup`, `JournalEnd`, `TemplateProgram`, `JournalProgram`) |
+| built | `Expr`, `Quantity` (what a side may be), `Part` (what a leg takes: `Of`, `Share`, `Rest`), `Group<Header, Flow, Item>` as `Promised` and `Made`, one `Program`. A header cannot be a share or a remainder by type |
+| lines | **−481 against a target of −1,200**: the two quantity transliterations were smaller than assumed and `split.rs` adds about 250 with docs. `materialize_group` 600 → 324 lines; the bulk is in the three resolvers K4b merges |
+| proof | a generator of split-heavy books (2,000 books, 55,722 commands) and an internals dump (1,543 promises, 22,636 forecast occurrences): zero differences. The oracle was mutation-tested: 38 mutants, 32 killed, 6 argued equivalent |
+| found | `TemplateItemParent::Leg` was never constructed; `WrittenGroup.out/arrive` never set; `flow_roots` written and never read; a template index always 0 |
+| tooling | `docs/v5/measure/splits.py`, `docs/v5/measure/internals/`, `K4a-map.md`. `fuzz.py` on `examples/` at `--today 2026-06-01` is vacuous for engine changes: every mutant is rejected by `check`, so use the splits oracle and the goldens |
 
 ## K12, in numbers
 
