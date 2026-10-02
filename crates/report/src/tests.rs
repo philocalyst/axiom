@@ -826,6 +826,8 @@ fn holdings(cast: &Cast, journal: &Journal) -> Vec<Holding> {
         qty,
         basis: Qty(basis),
         acquired,
+        held_since: acquired,
+        wash_matched: false,
         txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
         part: None,
         codes: axiom_model::FlowCodes {
