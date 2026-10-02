@@ -419,7 +419,7 @@ mod tests {
             black_box(logged.get(0));
         }
         eprintln!(
-            "{:>6} KB, {name:>7}: Vec {:.3} ns/write, Trailed<_, ()> {:.3}, Trailed<_, Undo> {:.3} to set, {:.3} to undo",
+            "{:>6} KB, {name:>7}: Vec {:.3} ns/write, Trailed<_, ()> {:.3}, Undo {:.3} to set and {:.3} to undo",
             cells * 8 / 1024,
             per_write(plain),
             per_write(bare),

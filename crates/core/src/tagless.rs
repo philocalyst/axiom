@@ -271,7 +271,7 @@ impl Column {
 mod tests {
     use super::*;
     use crate::sym::Interner;
-    use crate::testing::Rng;
+    use crate::testing::{Rng, best_of};
 
     /// Every kind of value a column holds, as an enum: what the column is checked against, and what a generic
     /// reader makes of a slot it knows nothing about.
@@ -475,5 +475,45 @@ mod tests {
             }
             assert_eq!((column.len(), column.is_empty()), (model.len(), model.is_empty()));
         }
+    }
+
+    /// `cargo test -p axiom-core --release tagless::tests::bench -- --ignored --nocapture`
+    #[test]
+    #[ignore = "a benchmark"]
+    fn bench_scanning_a_mixed_stream_for_its_days() {
+        let syms = [Interner::default().intern("a")];
+        let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
+        let values: Vec<Value> = (0..1 << 22).map(|_| random_value(&mut rng, &syms)).collect();
+        let mut column = Column::with_capacity(values.len());
+        for &value in &values {
+            push(&mut column, value);
+        }
+        let per_value = |time: std::time::Duration| time.as_nanos() as f64 / values.len() as f64;
+        let enums = best_of(9, || {
+            values.iter().map(|value| if let Value::Day(day) = value { i64::from(day.0) } else { 0 }).sum::<i64>()
+        });
+        let paired = best_of(9, || {
+            column.iter().filter_map(|(tag, payload)| payload.read::<Day>(tag)).map(|day| i64::from(day.0)).sum::<i64>()
+        });
+        let selected = best_of(9, || {
+            let day_or_zero =
+                |(tag, payload): (Tag, Payload)| i64::from(Day::pull(payload).0) * i64::from(tag == Tag::Day);
+            column.iter().map(day_or_zero).sum::<i64>()
+        });
+        let counted_in_enums = best_of(9, || values.iter().filter(|value| matches!(value, Value::Day(_))).count());
+        let counted_in_tags = best_of(9, || column.tags().iter().filter(|&&tag| tag == Tag::Day).count());
+        let (enum_size, columns_size) = (size_of::<Value>(), size_of::<Tag>() + size_of::<Payload>());
+        eprintln!("{} mixed values, {enum_size} bytes each as an enum and {columns_size} in two columns", values.len());
+        eprintln!(
+            "  summing the days: enum {:.2} ns/value, columns {:.2}, columns without a branch {:.2}",
+            per_value(enums),
+            per_value(paired),
+            per_value(selected)
+        );
+        eprintln!(
+            "  counting the days: enum {:.2} ns/value, tags {:.2}",
+            per_value(counted_in_enums),
+            per_value(counted_in_tags)
+        );
     }
 }

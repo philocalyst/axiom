@@ -2,7 +2,10 @@
 //! and the ranges, months and schedules built on them, values that change on
 //! days, the dimensions amounts are counted in, interned names, typed ids,
 //! pre-ordered trees, grouped tables, source locations, diagnostics, and scoped
-//! parallelism.
+//! parallelism; and the primitives the kernels are made of: columns of mixed
+//! values, sets of days, range extremes in constant time, intersection of
+//! sorted lists, forced placement of words into slots, and dense state with an
+//! undo log.
 
 pub mod calendar;
 pub mod day;
