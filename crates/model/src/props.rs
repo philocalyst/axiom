@@ -13,7 +13,7 @@
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
 use axiom_syntax::{
     BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting,
-    Subject, Verb,
+    Statement, Subject, Verb,
 };
 
 use crate::book::{
@@ -733,6 +733,16 @@ struct PropertyChange {
 /// Kind defaults stay on their kind and are inherited by the law evaluator via
 /// the kind tree; this pass never clones a default into every instance.
 pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+    declare_has(world, collected, diags);
+    native_builtins(world, collected, diags);
+    let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
+    stage_declared_values(world, collected, &mut seen, diags);
+    let changes = property_changes(world, collected, &mut seen, diags);
+    stage_changes(world, changes);
+}
+
+/// The properties each kind says it has: its own `has` lines and every ancestor's.
+fn declare_has<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
     let mut kind_decls: Map<Id<Kind>, Written<'a, 's, Decl<'s>>> = Map::default();
     for written in collected.decls_of(DeclKind::Kind) {
         let word = Word { text: written.node.name.0, loc: written.item.loc };
@@ -760,10 +770,15 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
         let inherited = inherited.iter().filter(|above| !own.iter().any(|child| child.name == above.name));
         world.book.kinds[kind].has = own.iter().chain(inherited).copied().collect();
     }
+}
 
-    native_builtins(world, collected, diags);
-
-    let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
+/// The values the property lines of declarations give, from the beginning of time.
+fn stage_declared_values<'a, 's>(
+    world: &mut World<'s>,
+    collected: &Collected<'a, 's>,
+    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    diags: &mut Vec<Diagnostic>,
+) {
     for &written in &collected.decls {
         if written.node.what == DeclKind::Purpose {
             continue;
@@ -771,8 +786,7 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
         let Some(target) = native_target(world, written) else {
             continue;
         };
-        let lines = &written.file()[written.node.props];
-        for line in lines {
+        for line in &written.file()[written.node.props] {
             if is_builtin_line(line.name.0) {
                 continue;
             }
@@ -783,236 +797,295 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
             let Some(value) = property_value(world, written.home(), written.file(), line, has, diags) else {
                 continue;
             };
-            stage_unique(
-                world,
-                &mut seen,
-                target.target,
-                Prop { name: has.name, value, since: Day::MIN, loc: Some(line.loc) },
-                diags,
-            );
+            let prop = Prop { name: has.name, value, since: Day::MIN, loc: Some(line.loc) };
+            stage_unique(world, seen, target.target, prop, diags);
         }
     }
+}
 
-    let mut updates = Vec::new();
-    let mut order = 0;
+/// The changes `now PROPERTY VALUE` statements make, in the order written.
+fn property_changes<'a, 's>(
+    world: &mut World<'s>,
+    collected: &Collected<'a, 's>,
+    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<PropertyChange> {
+    let mut changes = Vec::new();
     for written in &collected.statements {
-        let (file, statement) = (written.file(), written.node);
-        let Verb::Now(Change::Property(line)) = &statement.verb else {
+        let Verb::Now(Change::Property(line)) = &written.node.verb else {
             continue;
         };
         if is_builtin_line(line.name.0) {
             continue;
         }
-        let property_name = world.book.names.intern(line.name.0);
-        let Some(target) =
-            native_statement_target(world, written.home(), statement.subject, property_name, written.item.loc, diags)
-        else {
-            // The statement pass owns unresolved subjects. This pass only
-            // consumes a custom property after its target kind is known.
-            continue;
-        };
-        let Some(has) = has_named(world, target.kind, line.name.0) else {
-            diags.push(unknown_native_property(world, target, line));
-            continue;
-        };
-        let Some(value) = property_value(world, written.home(), file, line, has, diags) else {
-            continue;
-        };
-        let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
-            ClauseKind::Until(day) => Some(day),
-            _ => None,
-        });
-        if until.is_some_and(|day| day < statement.date) {
-            diags.push(
-                Diagnostic::error("property-until-order", "this property change ends before it begins")
-                    .label(line.loc, "`until` is earlier than the change")
-                    .help("move the end date to the change date or later"),
-            );
-            continue;
+        if let Some(change) = property_change(world, written, line, changes.len(), seen, diags) {
+            changes.push(change);
         }
-        let key = (target_key(target.target), has.name, statement.date);
-        if let Some(first) = seen.get(&key).copied() {
-            diags.push(problem::twice("property change", line.loc, first));
-            continue;
-        }
-        seen.insert(key, line.loc);
-        updates.push(PropertyChange {
-            target: target.target,
-            name: has.name,
-            since: statement.date,
-            until,
-            value,
-            loc: line.loc,
-            order,
-        });
-        order += 1;
     }
-    stage_changes(world, updates);
+    changes
+}
+
+/// One statement's change of a property a kind declared, or nothing after what is wrong with it is said.
+fn property_change<'a, 's>(
+    world: &mut World<'s>,
+    written: &Written<'a, 's, Statement<'s>>,
+    line: &Line<'s>,
+    order: usize,
+    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<PropertyChange> {
+    let (file, statement) = (written.file(), written.node);
+    let property_name = world.book.names.intern(line.name.0);
+    // The statement pass owns unresolved subjects. This pass only consumes a custom property after its target
+    // kind is known.
+    let target =
+        native_statement_target(world, written.home(), statement.subject, property_name, written.item.loc, diags)?;
+    let Some(has) = has_named(world, target.kind, line.name.0) else {
+        diags.push(unknown_native_property(world, target, line));
+        return None;
+    };
+    let value = property_value(world, written.home(), file, line, has, diags)?;
+    let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
+        ClauseKind::Until(day) => Some(day),
+        _ => None,
+    });
+    if until.is_some_and(|day| day < statement.date) {
+        diags.push(
+            Diagnostic::error("property-until-order", "this property change ends before it begins")
+                .label(line.loc, "`until` is earlier than the change")
+                .help("move the end date to the change date or later"),
+        );
+        return None;
+    }
+    let key = (target_key(target.target), has.name, statement.date);
+    if let Some(first) = seen.get(&key).copied() {
+        diags.push(problem::twice("property change", line.loc, first));
+        return None;
+    }
+    seen.insert(key, line.loc);
+    Some(PropertyChange {
+        target: target.target,
+        name: has.name,
+        since: statement.date,
+        until,
+        value,
+        loc: line.loc,
+        order,
+    })
 }
 
 /// Reads built-in kind defaults and applies them oldest-ancestor first to the
 /// native entities, commodities and places. Custom property values are read
 /// separately below and remain stored once on their declaring kind.
-fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    let mut kinds_written = Map::default();
-    let mut entities_written = Map::default();
-    let mut commodities_written = Map::default();
-    let mut places_written = Map::default();
-    let mut assets_written = Map::default();
+/// The first declaration written for each thing that has properties.
+struct WrittenBy<'a, 's> {
+    kinds: Map<Id<Kind>, Written<'a, 's, Decl<'s>>>,
+    entities: Map<Id<Entity>, Written<'a, 's, Decl<'s>>>,
+    commodities: Map<Id<Commodity>, Written<'a, 's, Decl<'s>>>,
+    places: Map<Id<Place>, Written<'a, 's, Decl<'s>>>,
+    assets: Map<Id<Asset>, Written<'a, 's, Decl<'s>>>,
+}
+
+fn written_by<'a, 's>(world: &World<'s>, collected: &Collected<'a, 's>) -> WrittenBy<'a, 's> {
+    let mut by = WrittenBy {
+        kinds: Map::default(),
+        entities: Map::default(),
+        commodities: Map::default(),
+        places: Map::default(),
+        assets: Map::default(),
+    };
     for &written in &collected.decls {
         let Some(target) = native_target(world, written) else {
             continue;
         };
         match target.target {
-            PropTarget::Kind(id) => {
-                kinds_written.entry(id).or_insert(written);
-            }
-            PropTarget::Entity(id) => {
-                entities_written.entry(id).or_insert(written);
-            }
-            PropTarget::Commodity(id) => {
-                commodities_written.entry(id).or_insert(written);
-            }
-            PropTarget::Place(id) => {
-                places_written.entry(id).or_insert(written);
-            }
-            PropTarget::Asset(id) => {
-                assets_written.entry(id).or_insert(written);
-            }
-        }
+            PropTarget::Kind(id) => by.kinds.entry(id).or_insert(written),
+            PropTarget::Entity(id) => by.entities.entry(id).or_insert(written),
+            PropTarget::Commodity(id) => by.commodities.entry(id).or_insert(written),
+            PropTarget::Place(id) => by.places.entry(id).or_insert(written),
+            PropTarget::Asset(id) => by.assets.entry(id).or_insert(written),
+        };
     }
+    by
+}
 
+/// The built-in properties of everything declared, inherited down the kind tree: a kind's own lines first, then
+/// each commodity, entity, place and asset has its kind's defaults and then its own.
+fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+    let written = written_by(world, collected);
     for target in [Target::Commodity, Target::Entity, Target::Place, Target::Asset] {
-        let kind_ids: Vec<Id<Kind>> =
-            world.book.kinds.ids().filter(|&id| Target::of(world.book.kinds[id].sort) == target).collect();
-        let mut defaults = Defaults::empty(world.book.kinds.len());
-        for kind in kind_ids {
-            if world.book.kinds.parent(kind).is_some() {
-                let (above, child) = world.book.kinds.with_parent_mut(kind).expect("kind parent exists");
-                child.inherit(above);
-            }
-            let has = world.book.kinds[kind].has.clone();
-            if let Some(written) = kinds_written.get(&kind).copied() {
-                let at = Lines::from_native(written);
-                let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], &has, kind, diags);
-                for assign in &assigns {
-                    world.book.kinds[kind].set(assign);
-                    if assign.is_default() {
-                        defaults.by_kind[kind.index()].push(assign.clone());
-                    }
-                }
-            }
-        }
-
+        let defaults = kind_defaults(world, target, &written.kinds, diags);
         match target {
             Target::Commodity => {
-                let ids: Vec<_> = world.book.commodities.ids().collect();
-                let mut path = Vec::new();
-                for id in ids {
-                    let kind = world.book.commodities[id].kind;
-                    let own = commodities_written.get(&id).copied().map_or_else(Vec::new, |written| {
-                        let at = Lines::from_native(written);
-                        let has = world.book.kinds[kind].has.clone();
-                        read_builtin_lines(world, &at, &[Target::Commodity], &has, kind, diags)
-                    });
-                    let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
-                    defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
-                    for assign in &own {
-                        commodities[id].set(assign);
-                    }
-                }
+                builtin_commodities(world, &written.commodities, &defaults, diags);
                 native_system_currencies(world, collected, diags);
             }
-            Target::Entity => {
-                let ids: Vec<_> = world.book.entities.ids().collect();
-                let mut path = Vec::new();
-                let mut currency_set = vec![false; world.book.entities.len()];
-                for id in ids {
-                    let kind = world.book.entities[id].kind;
-                    let own = entities_written.get(&id).copied().map_or_else(Vec::new, |written| {
-                        let at = Lines::from_native(written);
-                        let has = world.book.kinds[kind].has.clone();
-                        read_builtin_lines(world, &at, &[Target::Entity], &has, kind, diags)
-                    });
-                    let (kinds, entities) = (&world.book.kinds, &mut world.book.entities);
-                    let entity = &mut entities[id];
-                    defaults.apply(kinds, kind, &mut path, |assign| {
-                        if matches!(assign, Assign::Currency(_)) {
-                            currency_set[id.index()] = true;
-                        }
-                        entity.set(assign);
-                    });
-                    for assign in &own {
-                        if matches!(assign, Assign::Currency(_)) {
-                            currency_set[id.index()] = true;
-                        }
-                        entity.set(assign);
-                    }
-                    entity.purpose = entity.purpose.or(kinds[kind].purpose);
-                    entity.restricted = kinds[kind].restricted;
-                    let mut lives = entity.lives.to_vec();
-                    lives.sort_by_key(|residence| residence.days.first());
-                    entity.lives = lives.into_boxed_slice();
-                }
-                for id in world.book.entities.ids().collect::<Vec<_>>() {
-                    if !currency_set[id.index()] {
-                        let residence_currency = world.book.entities[id]
-                            .lives
-                            .iter()
-                            .find_map(|residence| world.book.systems[residence.system].currency);
-                        world.book.entities[id].currency = residence_currency.unwrap_or(world.book.base);
-                    }
-                }
-            }
-            Target::Place => {
-                let ids: Vec<_> = world.book.places.ids().collect();
-                let mut path = Vec::new();
-                for id in ids {
-                    let kind = world.book.places[id].kind;
-                    let own = places_written.get(&id).copied().map_or_else(Vec::new, |written| {
-                        let at = Lines::from_native(written);
-                        let has = world.book.kinds[kind].has.clone();
-                        read_builtin_lines(world, &at, &[Target::Place], &has, kind, diags)
-                    });
-                    let (kinds, places) = (&world.book.kinds, &mut world.book.places);
-                    defaults.apply(kinds, kind, &mut path, |assign| places[id].set(assign));
-                    for assign in &own {
-                        places[id].set(assign);
-                    }
-                    inherit_place_traits(&mut places[id], &kinds[kind]);
-                }
-            }
-            Target::Asset => {
-                let ids: Vec<_> = world.book.assets.ids().collect();
-                let mut path = Vec::new();
-                for id in ids {
-                    let kind = world.book.assets[id].kind;
-                    let own = assets_written.get(&id).copied().map_or_else(Vec::new, |written| {
-                        let at = Lines::from_native(written);
-                        let has = world.book.kinds[kind].has.clone();
-                        read_builtin_lines(world, &at, &[Target::Asset], &has, kind, diags)
-                    });
-                    let (kinds, assets) = (&world.book.kinds, &mut world.book.assets);
-                    let (places, assets) = (&mut world.book.places, assets);
-                    let asset = &mut assets[id];
-                    let place = &mut places[asset.place];
-                    defaults.apply(kinds, kind, &mut path, |assign| match assign {
-                        Assign::PartOf(_) => asset.set(assign),
-                        _ => place.set(assign),
-                    });
-                    for assign in &own {
-                        match assign {
-                            Assign::PartOf(_) => asset.set(assign),
-                            _ => place.set(assign),
-                        }
-                    }
-                    inherit_place_traits(place, &kinds[kind]);
-                }
-                diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
-            }
+            Target::Entity => builtin_entities(world, &written.entities, &defaults, diags),
+            Target::Place => builtin_places(world, &written.places, &defaults, diags),
+            Target::Asset => builtin_assets(world, &written.assets, &defaults, diags),
             Target::Kind => unreachable!(),
         }
     }
+}
+
+/// What each kind of a sort sets: its parent's settings inherited, then its own lines, and the settings that
+/// instances inherit gathered for them.
+fn kind_defaults<'a, 's>(
+    world: &mut World<'s>,
+    target: Target,
+    written: &Map<Id<Kind>, Written<'a, 's, Decl<'s>>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Defaults {
+    let kind_ids: Vec<Id<Kind>> =
+        world.book.kinds.ids().filter(|&id| Target::of(world.book.kinds[id].sort) == target).collect();
+    let mut defaults = Defaults::empty(world.book.kinds.len());
+    for kind in kind_ids {
+        if world.book.kinds.parent(kind).is_some() {
+            let (above, child) = world.book.kinds.with_parent_mut(kind).expect("kind parent exists");
+            child.inherit(above);
+        }
+        let has = world.book.kinds[kind].has.clone();
+        if let Some(written) = written.get(&kind).copied() {
+            let at = Lines::from_native(written);
+            let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], &has, kind, diags);
+            for assign in &assigns {
+                world.book.kinds[kind].set(assign);
+                if assign.is_default() {
+                    defaults.by_kind[kind.index()].push(assign.clone());
+                }
+            }
+        }
+    }
+    defaults
+}
+
+/// The lines a declaration writes for the built-in properties of a thing of `kind`, read.
+fn own_builtins<'a, 's>(
+    world: &mut World<'s>,
+    written: Option<Written<'a, 's, Decl<'s>>>,
+    target: Target,
+    kind: Id<Kind>,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<Assign> {
+    let Some(written) = written else {
+        return Vec::new();
+    };
+    let at = Lines::from_native(written);
+    let has = world.book.kinds[kind].has.clone();
+    read_builtin_lines(world, &at, &[target], &has, kind, diags)
+}
+
+fn builtin_commodities<'a, 's>(
+    world: &mut World<'s>,
+    written: &Map<Id<Commodity>, Written<'a, 's, Decl<'s>>>,
+    defaults: &Defaults,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let ids: Vec<_> = world.book.commodities.ids().collect();
+    let mut path = Vec::new();
+    for id in ids {
+        let kind = world.book.commodities[id].kind;
+        let own = own_builtins(world, written.get(&id).copied(), Target::Commodity, kind, diags);
+        let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
+        defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
+        for assign in &own {
+            commodities[id].set(assign);
+        }
+    }
+}
+
+fn builtin_entities<'a, 's>(
+    world: &mut World<'s>,
+    written: &Map<Id<Entity>, Written<'a, 's, Decl<'s>>>,
+    defaults: &Defaults,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let ids: Vec<_> = world.book.entities.ids().collect();
+    let mut path = Vec::new();
+    let mut currency_set = vec![false; world.book.entities.len()];
+    for id in ids {
+        let kind = world.book.entities[id].kind;
+        let own = own_builtins(world, written.get(&id).copied(), Target::Entity, kind, diags);
+        let (kinds, entities) = (&world.book.kinds, &mut world.book.entities);
+        let entity = &mut entities[id];
+        defaults.apply(kinds, kind, &mut path, |assign| {
+            if matches!(assign, Assign::Currency(_)) {
+                currency_set[id.index()] = true;
+            }
+            entity.set(assign);
+        });
+        for assign in &own {
+            if matches!(assign, Assign::Currency(_)) {
+                currency_set[id.index()] = true;
+            }
+            entity.set(assign);
+        }
+        entity.purpose = entity.purpose.or(kinds[kind].purpose);
+        entity.restricted = kinds[kind].restricted;
+        let mut lives = entity.lives.to_vec();
+        lives.sort_by_key(|residence| residence.days.first());
+        entity.lives = lives.into_boxed_slice();
+    }
+    // An entity that sets no currency counts in that of the first system it lives under, else the book's.
+    for id in world.book.entities.ids().collect::<Vec<_>>() {
+        if !currency_set[id.index()] {
+            let residence_currency = world.book.entities[id]
+                .lives
+                .iter()
+                .find_map(|residence| world.book.systems[residence.system].currency);
+            world.book.entities[id].currency = residence_currency.unwrap_or(world.book.base);
+        }
+    }
+}
+
+fn builtin_places<'a, 's>(
+    world: &mut World<'s>,
+    written: &Map<Id<Place>, Written<'a, 's, Decl<'s>>>,
+    defaults: &Defaults,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let ids: Vec<_> = world.book.places.ids().collect();
+    let mut path = Vec::new();
+    for id in ids {
+        let kind = world.book.places[id].kind;
+        let own = own_builtins(world, written.get(&id).copied(), Target::Place, kind, diags);
+        let (kinds, places) = (&world.book.kinds, &mut world.book.places);
+        defaults.apply(kinds, kind, &mut path, |assign| places[id].set(assign));
+        for assign in &own {
+            places[id].set(assign);
+        }
+        inherit_place_traits(&mut places[id], &kinds[kind]);
+    }
+}
+
+fn builtin_assets<'a, 's>(
+    world: &mut World<'s>,
+    written: &Map<Id<Asset>, Written<'a, 's, Decl<'s>>>,
+    defaults: &Defaults,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let ids: Vec<_> = world.book.assets.ids().collect();
+    let mut path = Vec::new();
+    for id in ids {
+        let kind = world.book.assets[id].kind;
+        let own = own_builtins(world, written.get(&id).copied(), Target::Asset, kind, diags);
+        let (kinds, assets, places) = (&world.book.kinds, &mut world.book.assets, &mut world.book.places);
+        let asset = &mut assets[id];
+        let place = &mut places[asset.place];
+        // `part of` is the asset's; every other setting is its place's.
+        defaults.apply(kinds, kind, &mut path, |assign| match assign {
+            Assign::PartOf(_) => asset.set(assign),
+            _ => place.set(assign),
+        });
+        for assign in &own {
+            match assign {
+                Assign::PartOf(_) => asset.set(assign),
+                _ => place.set(assign),
+            }
+        }
+        inherit_place_traits(place, &kinds[kind]);
+    }
+    diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
 }
 
 fn inherit_place_traits(place: &mut Place, kind: &Kind) {

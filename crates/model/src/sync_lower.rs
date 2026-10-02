@@ -7,7 +7,7 @@ use axiom_core::{DateLayout, Diagnostic, Id, Interner, Loc, Map, Sym};
 use axiom_syntax as ast;
 
 use crate::book::{Book, CodeRule, CodeScope, Role};
-use crate::collect::Collected;
+use crate::collect::{Collected, Written};
 use crate::declare::World;
 use crate::errors::{Candidate, Reported, Word};
 use crate::problem::{self, Noun};
@@ -300,114 +300,112 @@ fn lower_known_as<'s>(
         let file = &site.source.file;
         for item in &file.items {
             match item.kind {
-                ast::ItemKind::Decl(id) => {
-                    let decl = &file[id];
-                    match decl.what {
-                        ast::DeclKind::Entity => {
-                            let mut patterns = anonymous_patterns(
-                                file,
-                                &mut world.book,
-                                &decl.known_as,
-                                item.loc,
-                                named,
-                                &world.scopes,
-                                site.home,
-                                diags,
-                            );
-                            match world.entity(site.home, Word::of(file, decl.name.0)) {
-                                Ok(id) => {
-                                    let path = world.book.entities[id].path;
-                                    add_name_patterns(&mut world.book, &mut patterns, path, file.loc(decl.name.0));
-                                    world.book.entities[id].known_as = patterns.into_boxed_slice();
-                                }
-                                Err(_) if !patterns.is_empty() => diags.push(
-                                    Diagnostic::error(
-                                        "sync-binding",
-                                        format!("could not bind known-as patterns for `{}`", decl.name.0),
-                                    )
-                                    .label(file.loc(decl.name.0), "this entity did not resolve"),
-                                ),
-                                Err(_) => {}
-                            }
-                        }
-                        ast::DeclKind::Account => {
-                            let mut patterns = anonymous_patterns(
-                                file,
-                                &mut world.book,
-                                &decl.known_as,
-                                item.loc,
-                                named,
-                                &world.scopes,
-                                site.home,
-                                diags,
-                            );
-                            match world.place(Word::of(file, decl.name.0)) {
-                                Ok(id) => {
-                                    let path = world.book.places[id].path;
-                                    add_name_patterns(&mut world.book, &mut patterns, path, file.loc(decl.name.0));
-                                    world.book.places[id].known_as = patterns.into_boxed_slice();
-                                }
-                                Err(_) if !patterns.is_empty() => diags.push(
-                                    Diagnostic::error(
-                                        "sync-binding",
-                                        format!("could not bind known-as patterns for `{}`", decl.name.0),
-                                    )
-                                    .label(file.loc(decl.name.0), "this account did not resolve"),
-                                ),
-                                Err(_) => {}
-                            }
-                        }
-                        _ if !file[decl.known_as].is_empty() => diags.push(
-                            Diagnostic::error(
-                                "unsupported-known-as",
-                                "`known-as` is supported on entities and accounts",
-                            )
-                            .label(file.loc(decl.name.0), "this declaration is not a matchable party or account"),
-                        ),
-                        _ => {}
-                    }
-                }
-                ast::ItemKind::Code(id) => {
-                    let rule = &file[id];
-                    let pattern = world.book.names.intern(rule.pattern.0);
-                    let known_as = anonymous_patterns(
-                        file,
-                        &mut world.book,
-                        &rule.known_as,
-                        item.loc,
-                        named,
-                        &world.scopes,
-                        site.home,
-                        diags,
-                    );
-                    let mut on = Vec::new();
-                    for name in &file[rule.on] {
-                        let text = name.0;
-                        let word = Word::of(file, text);
-                        if axiom_core::glob::is_pattern(text) {
-                            on.push(CodeScope::Places(world.book.names.intern(text)));
-                        } else {
-                            match world.kind(site.home, word) {
-                                Ok(kind) => on.push(CodeScope::Kind(kind)),
-                                Err(kind_error) => match world.seek_place(word) {
-                                    Ok(Some(_)) => on.push(CodeScope::Places(world.book.names.intern(text))),
-                                    Ok(None) | Err(_) => diags.push(kind_error),
-                                },
-                            }
-                        }
-                    }
-                    if world.scopes.of(Home::Project).sees(site.home) {
-                        world.book.code_rules.push(CodeRule {
-                            pattern,
-                            on: on.into_boxed_slice(),
-                            known_as: known_as.into_boxed_slice(),
-                            loc: file.loc(rule.pattern.0),
-                        });
-                    }
-                }
+                ast::ItemKind::Decl(id) => known_as_decl(world, site, item, &file[id], named, diags),
+                ast::ItemKind::Code(id) => lower_code_rule(world, site, item, &file[id], named, diags),
                 _ => {}
             }
         }
+    }
+}
+
+/// What the patterns of a `known-as` are bound to.
+enum Bearer {
+    Entity(Id<crate::book::Entity>),
+    Place(Id<crate::book::Place>),
+}
+
+/// The `known-as` patterns of an entity or an account, bound to it; any other declaration may not have them.
+fn known_as_decl<'s>(
+    world: &mut World<'s>,
+    site: &Site<'_, 's>,
+    item: &ast::Item<'s>,
+    decl: &ast::Decl<'s>,
+    named: &[Named<Pattern>],
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let here = file.loc(decl.name.0);
+    let is_entity = match decl.what {
+        ast::DeclKind::Entity => true,
+        ast::DeclKind::Account => false,
+        _ => {
+            if !file[decl.known_as].is_empty() {
+                diags.push(
+                    Diagnostic::error("unsupported-known-as", "`known-as` is supported on entities and accounts")
+                        .label(here, "this declaration is not a matchable party or account"),
+                );
+            }
+            return;
+        }
+    };
+    let mut patterns =
+        anonymous_patterns(file, &mut world.book, &decl.known_as, item.loc, named, &world.scopes, site.home, diags);
+    let word = Word::of(file, decl.name.0);
+    let found = if is_entity {
+        world.entity(site.home, word).map(Bearer::Entity)
+    } else {
+        world.place(word).map(Bearer::Place)
+    };
+    match found {
+        Ok(bearer) => {
+            let path = match bearer {
+                Bearer::Entity(id) => world.book.entities[id].path,
+                Bearer::Place(id) => world.book.places[id].path,
+            };
+            add_name_patterns(&mut world.book, &mut patterns, path, here);
+            let patterns = patterns.into_boxed_slice();
+            match bearer {
+                Bearer::Entity(id) => world.book.entities[id].known_as = patterns,
+                Bearer::Place(id) => world.book.places[id].known_as = patterns,
+            }
+        }
+        Err(_) if !patterns.is_empty() => {
+            let what = if is_entity { "entity" } else { "account" };
+            diags.push(
+                Diagnostic::error("sync-binding", format!("could not bind known-as patterns for `{}`", decl.name.0))
+                    .label(here, format!("this {what} did not resolve")),
+            );
+        }
+        Err(_) => {}
+    }
+}
+
+/// A rule that gives codes their meaning: the places and kinds it is for, and the patterns that stand for it.
+fn lower_code_rule<'s>(
+    world: &mut World<'s>,
+    site: &Site<'_, 's>,
+    item: &ast::Item<'s>,
+    rule: &ast::CodeRule<'s>,
+    named: &[Named<Pattern>],
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let pattern = world.book.names.intern(rule.pattern.0);
+    let known_as =
+        anonymous_patterns(file, &mut world.book, &rule.known_as, item.loc, named, &world.scopes, site.home, diags);
+    let mut on = Vec::new();
+    for name in &file[rule.on] {
+        let text = name.0;
+        let word = Word::of(file, text);
+        if axiom_core::glob::is_pattern(text) {
+            on.push(CodeScope::Places(world.book.names.intern(text)));
+            continue;
+        }
+        match world.kind(site.home, word) {
+            Ok(kind) => on.push(CodeScope::Kind(kind)),
+            Err(kind_error) => match world.seek_place(word) {
+                Ok(Some(_)) => on.push(CodeScope::Places(world.book.names.intern(text))),
+                Ok(None) | Err(_) => diags.push(kind_error),
+            },
+        }
+    }
+    if world.scopes.of(Home::Project).sees(site.home) {
+        world.book.code_rules.push(CodeRule {
+            pattern,
+            on: on.into_boxed_slice(),
+            known_as: known_as.into_boxed_slice(),
+            loc: file.loc(rule.pattern.0),
+        });
     }
 }
 
@@ -513,6 +511,14 @@ fn decode_quoted(raw: &str) -> Result<std::borrow::Cow<'_, str>, usize> {
     Ok(std::borrow::Cow::Owned(decoded))
 }
 
+/// What the lines of a format have said so far.
+struct FormatParts {
+    specs: Vec<Spec>,
+    categories: Vec<(Text, Id<crate::book::Purpose>)>,
+    /// Which fields have been given, by `Field as usize`.
+    seen: [bool; 17],
+}
+
 fn lower_format<'s>(
     file: &ast::File<'s>,
     source: &ast::Format<'s>,
@@ -521,11 +527,38 @@ fn lower_format<'s>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Format> {
     let lines = &file[source.lines];
+    let shape = format_shape(file, lines, book, diags);
+    let mut parts = FormatParts { specs: Vec::new(), categories: Vec::new(), seen: [false; 17] };
+    for (line_at, line) in lines.iter().enumerate() {
+        read_format_line(
+            file,
+            line,
+            &shape,
+            category_purposes.get(line_at).copied().flatten(),
+            book,
+            &mut parts,
+            diags,
+        );
+    }
+    require_format_fields(file, source, &parts.seen, diags);
+    Some(Format {
+        name: book.names.intern(source.name.0),
+        shape,
+        specs: parts.specs.into_boxed_slice(),
+        categories: parts.categories.into_boxed_slice(),
+        loc: file.loc(source.name.0),
+    })
+}
+
+/// Rows, unless a `records TAG` line says the format is of tagged records.
+fn format_shape<'s>(
+    file: &ast::File<'s>,
+    lines: &[ast::FormatLine<'s>],
+    book: &mut Book<'s>,
+    diags: &mut Vec<Diagnostic>,
+) -> Shape {
     let mut shape = Shape::Rows;
-    for line in lines {
-        if line.key.0 != "records" {
-            continue;
-        }
+    for line in lines.iter().filter(|line| line.key.0 == "records") {
         let args = format_args(file, line);
         if args.len() != 1 || args[0].quoted || matches!(shape, Shape::Tagged { .. }) {
             diags.push(
@@ -536,116 +569,148 @@ fn lower_format<'s>(
         }
         shape = Shape::Tagged { records: book.names.intern(args[0].text) };
     }
-    let mut specs = Vec::new();
-    let mut categories: Vec<(Text, Id<crate::book::Purpose>)> = Vec::new();
-    let mut seen = [false; 17];
-    for (line_at, line) in lines.iter().enumerate() {
-        let key = line.key.0;
-        let args = format_args(file, line);
-        let fail = |code, message: String| Diagnostic::error(code, message).label(line.loc, "this format line");
-        if args.iter().any(|arg| arg.quoted && decode_quoted(arg.text).is_err()) {
-            diags.push(fail("bad-string-escape", "a quoted format value has an invalid escape".into()));
-            continue;
-        }
-        if key == "records" {
-            continue;
-        }
-        if key == "category" {
-            if args.len() != 3 || args[1].text != "is" || !args[2].text.starts_with('#') {
-                diags.push(fail("bad-format", "a category line is `category VALUE is #purpose`".into()));
-                continue;
-            }
-            let Some(Some(purpose)) = category_purposes.get(line_at).copied() else {
-                continue;
-            };
-            categories.push((format_text(book, args[0]), purpose));
-            continue;
-        }
-        let Some(field) = field(key) else {
-            diags.push(fail("unknown-format-field", format!("`{key}` is not a field of a format")));
-            continue;
-        };
-        if seen[field as usize] {
-            diags.push(fail("duplicate-format-field", format!("`{key}` is given twice")));
-            continue;
-        }
-        seen[field as usize] = true;
-        if args.is_empty() {
-            diags.push(fail("bad-format", format!("`{key}` needs a column or field path")));
-            continue;
-        }
-        let column = |arg: FormatArg<'s>, book: &mut Book<'s>| -> Result<Column, Diagnostic> {
-            let text = format_text(book, arg);
-            match shape {
-                Shape::Tagged { .. } => Ok(Column::Path(text)),
-                Shape::Rows if !arg.quoted => match arg.text.parse::<u16>() {
-                    Ok(0) => Err(fail("bad-format", "columns are counted from 1".into())),
-                    Ok(index) => Ok(Column::Index(index)),
-                    Err(_) => Ok(Column::Header(text)),
-                },
-                Shape::Rows => Ok(Column::Header(text)),
-            }
-        };
-        let Some(place) = column(args[0], book).or_report(diags) else {
-            continue;
-        };
-        let mut rule = Rule::None;
-        let mut layout = None;
-        match field {
-            Field::Date if args.len() > 1 => {
-                if args.len() != 2 {
-                    diags.push(fail("bad-format", "`date` takes a column and one date layout".into()));
-                    continue;
-                }
-                let text = format_text(book, args[1]);
-                layout = DateLayout::parse(book.text(text));
-                if layout.is_none() {
-                    diags.push(fail("bad-date-layout", format!("`{}` is not a date layout", book.text(text))));
-                    continue;
-                }
-            }
-            Field::Amount => match args.get(1).map(|arg| arg.text) {
-                None => {}
-                Some("flipped") if args.len() == 2 => rule = Rule::Flipped,
-                Some("sign") if args.len() == 4 => {
-                    let marker = match column(args[2], book) {
-                        Ok(column) => column,
-                        Err(problem) => {
-                            diags.push(problem);
-                            continue;
-                        }
-                    };
-                    let into = format_text(book, args[3]);
-                    rule = Rule::Sign { place: marker, into };
-                }
-                Some(_) => {
-                    diags.push(fail("bad-format", "amount takes `flipped` or `sign COLUMN VALUE`".into()));
-                    continue;
-                }
-            },
-            Field::Pending if args.len() == 2 => rule = Rule::Is(format_text(book, args[1])),
-            Field::Memo => {}
-            _ if args.len() != 1 => {
-                diags.push(fail("bad-format", format!("`{key}` takes one column")));
-                continue;
-            }
-            _ => {}
-        }
-        let places = if field == Field::Memo {
-            args.iter().map(|arg| column(*arg, book)).collect::<Result<Vec<_>, _>>()
-        } else {
-            Ok(vec![place])
-        };
-        let Some(places) = places.or_report(diags) else {
-            continue;
-        };
-        specs.push(Spec { field, places: places.into_boxed_slice(), layout, rule, loc: line.loc });
+    shape
+}
+
+fn format_error(line: &ast::FormatLine<'_>, code: &'static str, message: String) -> Diagnostic {
+    Diagnostic::error(code, message).label(line.loc, "this format line")
+}
+
+/// One line of a format: a category, or the spec of a field. `purpose` is what a category line's `#purpose` named,
+/// if it named one.
+fn read_format_line<'s>(
+    file: &ast::File<'s>,
+    line: &ast::FormatLine<'s>,
+    shape: &Shape,
+    purpose: Option<Id<crate::book::Purpose>>,
+    book: &mut Book<'s>,
+    parts: &mut FormatParts,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let key = line.key.0;
+    let args = format_args(file, line);
+    if args.iter().any(|arg| arg.quoted && decode_quoted(arg.text).is_err()) {
+        diags.push(format_error(line, "bad-string-escape", "a quoted format value has an invalid escape".into()));
+        return;
     }
+    match key {
+        "records" => {}
+        "category" => {
+            if args.len() != 3 || args[1].text != "is" || !args[2].text.starts_with('#') {
+                diags.push(format_error(line, "bad-format", "a category line is `category VALUE is #purpose`".into()));
+            } else if let Some(purpose) = purpose {
+                parts.categories.push((format_text(book, args[0]), purpose));
+            }
+        }
+        _ => {
+            let Some(field) = field(key) else {
+                diags.push(format_error(line, "unknown-format-field", format!("`{key}` is not a field of a format")));
+                return;
+            };
+            if parts.seen[field as usize] {
+                diags.push(format_error(line, "duplicate-format-field", format!("`{key}` is given twice")));
+                return;
+            }
+            parts.seen[field as usize] = true;
+            if args.is_empty() {
+                diags.push(format_error(line, "bad-format", format!("`{key}` needs a column or field path")));
+                return;
+            }
+            if let Some(spec) = read_spec(line, field, &args, shape, book, diags) {
+                parts.specs.push(spec);
+            }
+        }
+    }
+}
+
+/// A column: a position or a header in rows, a path in tagged records.
+fn format_column<'s>(
+    book: &mut Book<'s>,
+    line: &ast::FormatLine<'s>,
+    shape: &Shape,
+    arg: FormatArg<'s>,
+) -> Result<Column, Diagnostic> {
+    let text = format_text(book, arg);
+    match shape {
+        Shape::Tagged { .. } => Ok(Column::Path(text)),
+        Shape::Rows if !arg.quoted => match arg.text.parse::<u16>() {
+            Ok(0) => Err(format_error(line, "bad-format", "columns are counted from 1".into())),
+            Ok(index) => Ok(Column::Index(index)),
+            Err(_) => Ok(Column::Header(text)),
+        },
+        Shape::Rows => Ok(Column::Header(text)),
+    }
+}
+
+/// What a field's line says: the columns it is read from, and its date layout or rule.
+fn read_spec<'s>(
+    line: &ast::FormatLine<'s>,
+    field: Field,
+    args: &[FormatArg<'s>],
+    shape: &Shape,
+    book: &mut Book<'s>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Spec> {
+    let key = line.key.0;
+    let fail = |message: String| format_error(line, "bad-format", message);
+    let place = format_column(book, line, shape, args[0]).or_report(diags)?;
+    let mut rule = Rule::None;
+    let mut layout = None;
+    match field {
+        Field::Date if args.len() > 1 => {
+            if args.len() != 2 {
+                diags.push(fail("`date` takes a column and one date layout".into()));
+                return None;
+            }
+            let text = format_text(book, args[1]);
+            layout = DateLayout::parse(book.text(text));
+            if layout.is_none() {
+                diags.push(format_error(
+                    line,
+                    "bad-date-layout",
+                    format!("`{}` is not a date layout", book.text(text)),
+                ));
+                return None;
+            }
+        }
+        Field::Amount => match args.get(1).map(|arg| arg.text) {
+            None => {}
+            Some("flipped") if args.len() == 2 => rule = Rule::Flipped,
+            Some("sign") if args.len() == 4 => {
+                let marker = format_column(book, line, shape, args[2]).or_report(diags)?;
+                rule = Rule::Sign { place: marker, into: format_text(book, args[3]) };
+            }
+            Some(_) => {
+                diags.push(fail("amount takes `flipped` or `sign COLUMN VALUE`".into()));
+                return None;
+            }
+        },
+        Field::Pending if args.len() == 2 => rule = Rule::Is(format_text(book, args[1])),
+        Field::Memo => {}
+        _ if args.len() != 1 => {
+            diags.push(fail(format!("`{key}` takes one column")));
+            return None;
+        }
+        _ => {}
+    }
+    let places = if field == Field::Memo {
+        args.iter().map(|arg| format_column(book, line, shape, *arg)).collect::<Result<Vec<_>, _>>().or_report(diags)?
+    } else {
+        vec![place]
+    };
+    Some(Spec { field, places: places.into_boxed_slice(), layout, rule, loc: line.loc })
+}
+
+/// A record format needs a date and an amount, or the debit and credit of one, or a gross.
+fn require_format_fields(
+    file: &ast::File<'_>,
+    source: &ast::Format<'_>,
+    seen: &[bool; 17],
+    diags: &mut Vec<Diagnostic>,
+) {
+    let here = file.loc(source.name.0);
     if !seen[Field::Date as usize] {
-        diags.push(
-            Diagnostic::error("bad-format", "a record format needs a date field")
-                .label(file.loc(source.name.0), "this format"),
-        );
+        diags.push(Diagnostic::error("bad-format", "a record format needs a date field").label(here, "this format"));
     }
     if !seen[Field::Amount as usize]
         && !(seen[Field::Debit as usize] && seen[Field::Credit as usize])
@@ -653,16 +718,9 @@ fn lower_format<'s>(
     {
         diags.push(
             Diagnostic::error("bad-format", "a record format needs `amount`, both `debit` and `credit`, or `gross`")
-                .label(file.loc(source.name.0), "this format"),
+                .label(here, "this format"),
         );
     }
-    Some(Format {
-        name: book.names.intern(source.name.0),
-        shape,
-        specs: specs.into_boxed_slice(),
-        categories: categories.into_boxed_slice(),
-        loc: file.loc(source.name.0),
-    })
 }
 
 fn format_purposes<'s>(
@@ -748,115 +806,139 @@ fn lower_sources<'s>(
             continue;
         }
         declared.insert((written.home(), name), file.loc(sync.name.0));
-
-        let fetch = match (sync.read, sync.run) {
-            (Some(path), None) => Fetch::Read(world.book.quoted_text(path.0)),
-            (None, Some(command)) => Fetch::Run(world.book.intern_text(command.0)),
-            _ => {
-                diags.push(
-                    Diagnostic::error("sync-fetch", "a sync source needs exactly one `read` or `run` line")
-                        .label(written.item.loc, "this source has no usable input"),
-                );
-                continue;
-            }
-        };
-
-        let format = match sync.format {
-            None => None,
-            Some(reference) => {
-                let written_format = &file[reference];
-                if file[written_format.lines].is_empty() {
-                    let (names, scopes) = (&world.book.names, &world.scopes);
-                    match resolve_named(Noun::Format, file, names, formats, scopes, written.home(), written_format.name)
-                    {
-                        Ok(id) => Some(id),
-                        Err(problem) => {
-                            diags.push(problem);
-                            continue;
-                        }
-                    }
-                } else {
-                    let category_purposes = format_purposes(world, file, written_format, written.home(), diags);
-                    match lower_format(file, written_format, &mut world.book, &category_purposes, diags) {
-                        Some(format) => Some(world.book.formats.push(format)),
-                        None => continue,
-                    }
-                }
-            }
-        };
-
-        let sink = match sync.into {
-            Some(into) => {
-                let mut words = into.0.split_whitespace();
-                match (words.next(), words.next(), words.next()) {
-                    (Some("param"), Some(param), None) => {
-                        let word = Word { text: param, loc: file.loc(into.0) };
-                        match world.seek_param(written.home(), word) {
-                            Ok(Some(param)) => Sink::Param(param),
-                            Ok(None) => {
-                                diags.push(world.missing_param(written.home(), word));
-                                continue;
-                            }
-                            Err(problem) => {
-                                diags.push(problem);
-                                continue;
-                            }
-                        }
-                    }
-                    (Some("param"), _, _) => {
-                        diags.push(
-                            Diagnostic::error("sync-sink", "`into param` needs one parameter name")
-                                .label(file.loc(into.0), "this sink is malformed"),
-                        );
-                        continue;
-                    }
-                    _ => Sink::File(world.book.intern_text(into.0)),
-                }
-            }
-            None => {
-                let word = Word::of(file, sync.name.0);
-                match world.seek_place(word) {
-                    Ok(Some(account)) => match world.book.places[account].role {
-                        Role::Account { .. } => {
-                            if format.is_none() {
-                                diags.push(
-                                    Diagnostic::error("sync-format", "a feed needs a record format")
-                                        .label(written.item.loc, "this account source has no format"),
-                                );
-                                continue;
-                            }
-                            Sink::Feed { account }
-                        }
-                        _ => {
-                            diags.push(
-                                Diagnostic::error("sync-feed", format!("`{}` is not an account", sync.name.0))
-                                    .label(file.loc(sync.name.0), "a feed must name an account"),
-                            );
-                            continue;
-                        }
-                    },
-                    Ok(None) => Sink::Journal,
-                    Err(problem) => {
-                        diags.push(problem);
-                        continue;
-                    }
-                }
-            }
-        };
-
-        world.book.sources.push(Source {
-            name,
-            fetch,
-            format,
-            sink,
-            system: match written.home() {
-                Home::System(system) => Some(system),
-                Home::Builtin | Home::Project => None,
-            },
-            doc: written.item.doc.map(|doc| world.book.names.intern(doc.0)),
-            loc: written.item.loc,
-        });
+        if let Some(source) = lower_source(world, written, name, formats, diags) {
+            world.book.sources.push(source);
+        }
     }
+}
+
+/// One sync source: where its records come from, how they are read, and where they go.
+fn lower_source<'a, 's>(
+    world: &mut World<'s>,
+    written: &Written<'a, 's, ast::Sync<'s>>,
+    name: Sym,
+    formats: &[Named<Format>],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Source> {
+    let sync = written.node;
+    let fetch = match (sync.read, sync.run) {
+        (Some(path), None) => Fetch::Read(world.book.quoted_text(path.0)),
+        (None, Some(command)) => Fetch::Run(world.book.intern_text(command.0)),
+        _ => {
+            diags.push(
+                Diagnostic::error("sync-fetch", "a sync source needs exactly one `read` or `run` line")
+                    .label(written.item.loc, "this source has no usable input"),
+            );
+            return None;
+        }
+    };
+    let format = source_format(world, written, formats, diags)?;
+    let sink = source_sink(world, written, format, diags)?;
+    Some(Source {
+        name,
+        fetch,
+        format,
+        sink,
+        system: match written.home() {
+            Home::System(system) => Some(system),
+            Home::Builtin | Home::Project => None,
+        },
+        doc: written.item.doc.map(|doc| world.book.names.intern(doc.0)),
+        loc: written.item.loc,
+    })
+}
+
+/// The format a source reads its records by: none, one named, or one written under it. Nothing at all, after it is
+/// said, when the format named is not one.
+fn source_format<'a, 's>(
+    world: &mut World<'s>,
+    written: &Written<'a, 's, ast::Sync<'s>>,
+    formats: &[Named<Format>],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Id<Format>>> {
+    let (file, home) = (written.file(), written.home());
+    let Some(reference) = written.node.format else {
+        return Some(None);
+    };
+    let written_format = &file[reference];
+    if file[written_format.lines].is_empty() {
+        let (names, scopes) = (&world.book.names, &world.scopes);
+        let id =
+            resolve_named(Noun::Format, file, names, formats, scopes, home, written_format.name).or_report(diags)?;
+        return Some(Some(id));
+    }
+    let category_purposes = format_purposes(world, file, written_format, home, diags);
+    let format = lower_format(file, written_format, &mut world.book, &category_purposes, diags)?;
+    Some(Some(world.book.formats.push(format)))
+}
+
+/// Where a source's records go: a file, a param, an account's feed, or the journal. Nothing at all, after it is
+/// said, when the sink is wrong.
+fn source_sink<'a, 's>(
+    world: &mut World<'s>,
+    written: &Written<'a, 's, ast::Sync<'s>>,
+    format: Option<Id<Format>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Sink> {
+    let (file, sync, home) = (written.file(), written.node, written.home());
+    let Some(into) = sync.into else {
+        return source_feed(world, written, format, diags);
+    };
+    let mut words = into.0.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("param"), Some(param), None) => {
+            let word = Word { text: param, loc: file.loc(into.0) };
+            match world.seek_param(home, word) {
+                Ok(Some(param)) => Some(Sink::Param(param)),
+                Ok(None) => {
+                    diags.push(world.missing_param(home, word));
+                    None
+                }
+                Err(problem) => {
+                    diags.push(problem);
+                    None
+                }
+            }
+        }
+        (Some("param"), _, _) => {
+            diags.push(
+                Diagnostic::error("sync-sink", "`into param` needs one parameter name")
+                    .label(file.loc(into.0), "this sink is malformed"),
+            );
+            None
+        }
+        _ => Some(Sink::File(world.book.intern_text(into.0))),
+    }
+}
+
+/// A source that names no sink goes where its own name says: an account's feed, or, naming no place, the journal.
+fn source_feed<'a, 's>(
+    world: &World<'s>,
+    written: &Written<'a, 's, ast::Sync<'s>>,
+    format: Option<Id<Format>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Sink> {
+    let (file, sync) = (written.file(), written.node);
+    let word = Word::of(file, sync.name.0);
+    let account = match world.seek_place(word).or_report(diags)? {
+        Some(account) => account,
+        None => return Some(Sink::Journal),
+    };
+    if !matches!(world.book.places[account].role, Role::Account { .. }) {
+        diags.push(
+            Diagnostic::error("sync-feed", format!("`{}` is not an account", sync.name.0))
+                .label(file.loc(sync.name.0), "a feed must name an account"),
+        );
+        return None;
+    }
+    if format.is_none() {
+        diags.push(
+            Diagnostic::error("sync-format", "a feed needs a record format")
+                .label(written.item.loc, "this account source has no format"),
+        );
+        return None;
+    }
+    Some(Sink::Feed { account })
 }
 
 fn anonymous_patterns<'s>(
