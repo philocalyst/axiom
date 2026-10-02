@@ -332,6 +332,60 @@ account checking
 }
 
 #[test]
+fn written_ancestor_purpose_agrees_with_party_kind_refinement() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose tax-paid : spending
+purpose german-income-tax : tax-paid
+kind tax-authority : entity
+  purpose german-income-tax
+entity wa-dor : tax-authority
+account checking
+2026-01-01 checking -> wa-dor 180 USD #tax-paid
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
+    assert_eq!(purpose.purpose, book.purpose("tax-paid").unwrap());
+    assert_eq!(purpose.source, axiom_model::Provenance::Written);
+}
+
+#[test]
+fn sibling_purposes_still_disagree_under_the_same_root() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose salary : wages
+purpose honoraria : wages
+account checking
+entity employer : entity
+  purpose salary
+2026-01-01 employer -> checking 1_000 USD #honoraria
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
+    assert!(book.flows.is_empty());
+}
+
+#[test]
 fn account_takes_maps_the_source_purpose_on_incoming_flows() {
     let path = "journal/2026/01.ax";
     let text = "\

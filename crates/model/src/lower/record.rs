@@ -4020,7 +4020,7 @@ pub(super) fn infer_for_flow(
     let from_purpose = endpoint_purpose(world, from, from_entity, true);
     let to_purpose = endpoint_purpose(world, to, to_entity, false);
     if let (Some(from), Some(to)) = (from_purpose, to_purpose)
-        && !same_purpose(from.purposed, to.purposed)
+        && !same_purpose(world, from.purposed, to.purposed)
     {
         diags.push(purpose_disagreement(world, loc, from, to));
         return Err(());
@@ -4029,7 +4029,7 @@ pub(super) fn infer_for_flow(
         .or(to_purpose)
         .map(|source| taken_purpose(world, to, source).unwrap_or(source));
     if let (Some((written, written_loc)), Some(inferred)) = (written, inferred)
-        && !same_purpose(written, inferred.purposed)
+        && !same_purpose(world, written, inferred.purposed)
     {
         diags.push(purpose_disagreement(
             world,
@@ -4068,14 +4068,18 @@ fn taken_purpose(
     })
 }
 
-fn same_purpose(left: Purposed, right: Purposed) -> bool {
-    left.purpose == right.purpose
-        && match (left.of, right.of) {
-            (Some(left), Some(right)) => left == right,
-            // An unqualified purpose carries no object fact to contradict an
-            // explicit `of` target from another source.
-            _ => true,
-        }
+/// Ancestor and descendant purposes refine the same classification; sibling
+/// purposes remain distinct even when they share a broad spending/income root.
+fn same_purpose(world: &World<'_>, left: Purposed, right: Purposed) -> bool {
+    let related = world.book.purposes.covers(left.purpose, right.purpose)
+        || world.book.purposes.covers(right.purpose, left.purpose);
+    let object_compatible = match (left.of, right.of) {
+        (Some(left), Some(right)) => left == right,
+        // An unqualified purpose carries no object fact to contradict an
+        // explicit `of` target from another source.
+        _ => true,
+    };
+    related && object_compatible
 }
 
 fn purpose_disagreement(
