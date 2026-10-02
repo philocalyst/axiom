@@ -18,6 +18,7 @@ use crate::events::{self, Events};
 use crate::facts::{self, LawFacts, PurposeReaders, Readers};
 use crate::ledger::{Ledger, fold, fold_to_view, fold_to_view_and_effects_prefix};
 use crate::motion::Amounts;
+use crate::owners::Owners;
 use crate::scope::containing;
 use crate::sides::Sides;
 use crate::state::World;
@@ -83,8 +84,7 @@ pub struct Plan<'b, 's> {
     /// Places inside each identified asset, including every part's place.
     asset_places: Groups<Asset, Id<Place>>,
     /// Effective financial owners for each declared entity and place.
-    entity_owners: Groups<Entity, OwnerShare>,
-    place_owners: Groups<Place, OwnerShare>,
+    owners: Owners,
     /// Places under kinds read by a widened total. Only law-referenced kinds
     /// are indexed, so books without those reads pay no grouping cost.
     pub(crate) kind_places: Map<Id<Kind>, Box<[Id<Place>]>>,
@@ -129,9 +129,8 @@ impl<'b, 's> Plan<'b, 's> {
             })
         });
         let kind_places = kind_places(book);
-        let entity_owners = entity_owners(book, &mut problems);
-        let place_owners = place_owners(book, &entity_owners, &mut problems);
-        let (temporal, temporal_dates, daily_temporal) = temporal_queries(book, &entity_owners, &place_owners);
+        let owners = Owners::of(book, &mut problems);
+        let (temporal, temporal_dates, daily_temporal) = temporal_queries(book, &owners);
         let mut occurrence_txns: Vec<_> =
             book.txns.iter().filter_map(|(id, txn)| txn.occurrence.is_some().then_some(id)).collect();
         occurrence_txns.sort_unstable_by_key(|&id| (book.txns[id].day, id));
@@ -148,8 +147,7 @@ impl<'b, 's> Plan<'b, 's> {
             watch,
             members: Groups::build(book.entities.len(), held),
             asset_places: asset_places(book),
-            entity_owners,
-            place_owners,
+            owners,
             kind_places,
             occurrence_txns: occurrence_txns.into_boxed_slice(),
             period_start: timeline::start(book, &events),
@@ -190,12 +188,12 @@ impl<'b, 's> Plan<'b, 's> {
     /// Effective financial owners of `place`, including nested business
     /// ownership. Household membership remains governance/scope only.
     pub fn owners_of(&self, place: Id<Place>) -> &[OwnerShare] {
-        &self.place_owners[place]
+        self.owners.place(place)
     }
 
     /// Effective financial owners of an entity, including nested businesses.
     pub fn owners_of_entity(&self, entity: Id<Entity>) -> &[OwnerShare] {
-        &self.entity_owners[entity]
+        self.owners.entity(entity)
     }
 
     /// Splits a signed quantity among a place's effective owners. Cumulative
@@ -301,23 +299,16 @@ fn allocate_owners(owners: &[OwnerShare], amount: Qty) -> impl Iterator<Item = (
     )
 }
 
-fn temporal_queries(
-    book: &Book,
-    entity_owners: &Groups<Entity, OwnerShare>,
-    place_owners: &Groups<Place, OwnerShare>,
-) -> (Vec<Query>, Vec<Day>, bool) {
+fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, Vec<Day>, bool) {
     let mut queries = Vec::new();
     let mut daily = false;
     for rule in book.rules.all() {
         let law = &book.laws[rule.law];
-        let owners: Vec<Id<Entity>> = match rule.subject {
-            Subject::Place(place) => place_owners[place].iter().map(|share| share.owner).collect(),
-            Subject::Entity(entity) => entity_owners[entity].iter().map(|share| share.owner).collect(),
-            Subject::Asset(asset) => place_owners[book.assets[asset].place].iter().map(|share| share.owner).collect(),
-            Subject::Contract(contract) => {
-                let entity = book.contracts[contract].owner;
-                entity_owners[entity].iter().map(|share| share.owner).collect()
-            }
+        let owners = match rule.subject {
+            Subject::Place(place) => ownership.place(place),
+            Subject::Entity(entity) => ownership.entity(entity),
+            Subject::Asset(asset) => ownership.place(book.assets[asset].place),
+            Subject::Contract(contract) => ownership.entity(book.contracts[contract].owner),
         };
         for (id, node) in law.nodes.iter() {
             let Op::Call(func @ (Func::Peak | Func::Low | Func::Days), args) = &node.op else {
@@ -325,9 +316,15 @@ fn temporal_queries(
             };
             let Some(&root) = args.first() else { continue };
             let call = axiom_model::NodeId(id.index() as u32);
-            for &owner in &owners {
+            for share in owners {
                 queries.push(Query {
-                    key: crate::temporal::Key { law: rule.law, subject: rule.subject, owner, call, part: None },
+                    key: crate::temporal::Key {
+                        law: rule.law,
+                        subject: rule.subject,
+                        owner: share.owner,
+                        call,
+                        part: None,
+                    },
                     func: *func,
                     root,
                 });
@@ -383,164 +380,6 @@ fn temporal_queries(
 
 fn add_prop_dates(dates: &mut Vec<Day>, props: &[axiom_model::Prop]) {
     dates.extend(props.iter().map(|prop| prop.since).filter(|&day| day != Day::MIN));
-}
-
-fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entity, OwnerShare> {
-    let edges: Vec<Vec<(Id<Entity>, Ratio, axiom_core::Loc)>> = book
-        .entities
-        .ids()
-        .map(|entity| {
-            let declaration = &book.entities[entity];
-            if declaration.owned_by.is_empty() {
-                declaration
-                    .owner
-                    .filter(|&owner| owner != entity)
-                    .map(|owner| vec![(owner, Ratio::ONE, declaration.loc.unwrap_or_default())])
-                    .unwrap_or_default()
-            } else {
-                declaration.owned_by.iter().map(|share| (share.entity, share.rate, share.loc)).collect()
-            }
-        })
-        .collect();
-    let mut state = vec![0u8; book.entities.len()];
-    let mut active_at = vec![None; book.entities.len()];
-    let mut invalid = vec![false; book.entities.len()];
-    let mut flattened: Vec<Option<Vec<OwnerShare>>> = vec![None; book.entities.len()];
-
-    for root in book.entities.ids() {
-        if state[root.index()] != 0 {
-            continue;
-        }
-        let mut stack = vec![(root, 0usize)];
-        state[root.index()] = 1;
-        active_at[root.index()] = Some(0);
-        while let Some(&(current, edge_at)) = stack.last() {
-            if edge_at < edges[current.index()].len() {
-                let (parent, _, loc) = edges[current.index()][edge_at];
-                stack.last_mut().expect("the current ownership node is on the stack").1 += 1;
-                match state[parent.index()] {
-                    0 => {
-                        state[parent.index()] = 1;
-                        active_at[parent.index()] = Some(stack.len());
-                        stack.push((parent, 0));
-                    }
-                    1 => {
-                        let first = active_at[parent.index()].unwrap_or(0);
-                        for (member, _) in &stack[first..] {
-                            invalid[member.index()] = true;
-                        }
-                        diagnostics.push(
-                            Diagnostic::error("ownership-cycle", "entity ownership contains a cycle")
-                                .label(loc, "this ownership edge closes the cycle"),
-                        );
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            let (entity, _) = stack.pop().expect("the current ownership node is on the stack");
-            active_at[entity.index()] = None;
-            state[entity.index()] = 2;
-            if edges[entity.index()].iter().any(|(parent, _, _)| invalid[parent.index()]) {
-                invalid[entity.index()] = true;
-            }
-            if invalid[entity.index()] {
-                flattened[entity.index()] = Some(Vec::new());
-                continue;
-            }
-            if edges[entity.index()].is_empty() {
-                flattened[entity.index()] = Some(vec![OwnerShare { owner: entity, share: Ratio::ONE }]);
-                continue;
-            }
-
-            let mut rates = Map::default();
-            let mut overflow = None;
-            for &(parent, weight, loc) in &edges[entity.index()] {
-                for owner in flattened[parent.index()].as_deref().unwrap_or_default() {
-                    let Some(rate) = weight.checked_mul(owner.share) else {
-                        overflow = Some(loc);
-                        break;
-                    };
-                    let total = rates.get(&owner.owner).copied().unwrap_or(Ratio::ZERO);
-                    let Some(total) = total.checked_add(rate) else {
-                        overflow = Some(loc);
-                        break;
-                    };
-                    rates.insert(owner.owner, total);
-                }
-                if overflow.is_some() {
-                    break;
-                }
-            }
-            if let Some(loc) = overflow {
-                diagnostics.push(
-                    Diagnostic::error("ownership-overflow", "effective ownership share is too large to represent")
-                        .label(loc, "this share overflows while ownership is composed"),
-                );
-                invalid[entity.index()] = true;
-                flattened[entity.index()] = Some(Vec::new());
-            } else {
-                flattened[entity.index()] = Some(sorted_shares(rates));
-            }
-        }
-    }
-
-    let pairs = book.entities.ids().flat_map(|entity| {
-        flattened[entity.index()].as_deref().unwrap_or_default().iter().copied().map(move |owner| (entity, owner))
-    });
-    Groups::build(book.entities.len(), pairs)
-}
-
-fn place_owners(
-    book: &Book,
-    entity_owners: &Groups<Entity, OwnerShare>,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Groups<Place, OwnerShare> {
-    let mut pairs = Vec::new();
-    for place in book.places.ids() {
-        let declared = &book.places[place].shares;
-        if declared.is_empty() {
-            pairs.extend(entity_owners[book.places[place].owner].iter().copied().map(|share| (place, share)));
-        } else {
-            let mut rates = Map::default();
-            let mut overflow = None;
-            for share in declared {
-                for owner in &entity_owners[share.entity] {
-                    let Some(rate) = share.rate.checked_mul(owner.share) else {
-                        overflow = Some(share.loc);
-                        break;
-                    };
-                    let total = rates.get(&owner.owner).copied().unwrap_or(Ratio::ZERO);
-                    let Some(total) = total.checked_add(rate) else {
-                        overflow = Some(share.loc);
-                        break;
-                    };
-                    rates.insert(owner.owner, total);
-                }
-                if overflow.is_some() {
-                    break;
-                }
-            }
-            if let Some(loc) = overflow {
-                diagnostics.push(
-                    Diagnostic::error("ownership-overflow", "effective ownership share is too large to represent")
-                        .label(loc, "this place share overflows while ownership is composed"),
-                );
-                rates.clear();
-            }
-            pairs.extend(sorted_shares(rates).into_iter().map(|share| (place, share)));
-        }
-    }
-    let owners = Groups::build(book.places.len(), pairs.iter().copied());
-    drop(pairs);
-    owners
-}
-
-fn sorted_shares(rates: Map<Id<Entity>, Ratio>) -> Vec<OwnerShare> {
-    let mut shares: Vec<_> = rates.into_iter().map(|(owner, share)| OwnerShare { owner, share }).collect();
-    shares.sort_unstable_by_key(|share| share.owner);
-    shares
 }
 
 /// Whether some list of rules brings one law to one subject twice, as two
