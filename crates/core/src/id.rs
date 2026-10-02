@@ -66,6 +66,10 @@ impl<T> fmt::Debug for Id<T> {
     }
 }
 
+fn index(len: usize) -> u32 {
+    u32::try_from(len).expect("fewer than 2^32 items")
+}
+
 /// A vector indexed by `Id<T>`.
 #[derive(Clone, PartialEq)]
 pub struct Arena<T> {
@@ -78,9 +82,17 @@ impl<T> Arena<T> {
     }
 
     pub fn push(&mut self, item: T) -> Id<T> {
-        let id = Id::new(u32::try_from(self.items.len()).expect("fewer than 2^32 items"));
+        let id = Id::new(index(self.items.len()));
         self.items.push(item);
         id
+    }
+
+    /// Appends `items`, and returns the run they now occupy: how a variable-length
+    /// part joins one flat arena.
+    pub fn extend(&mut self, items: impl IntoIterator<Item = T>) -> Run<T> {
+        let start = index(self.items.len());
+        self.items.extend(items);
+        Run::new(Id::new(start), index(self.items.len()) - start)
     }
 
     /// Reserves room for `additional` items without changing any existing id.
@@ -271,6 +283,16 @@ mod tests {
         assert_eq!((run.len(), run.ids().len()), (3, 3));
         let inside = |at: u32| run.contains(Id::new(at));
         assert_eq!([0, 1, 2, 3, 4].map(inside), [false, true, true, true, false]);
+    }
+
+    #[test]
+    fn extending_an_arena_returns_the_run_it_appended() {
+        let mut arena = Arena::from(vec!['a']);
+        let first = arena.extend("bc".chars());
+        let none = arena.extend(std::iter::empty());
+        let last = arena.extend(['d']);
+        assert_eq!((&arena[first], &arena[none], &arena[last]), (&['b', 'c'][..], &[][..], &['d'][..]));
+        assert_eq!((first.start(), first.len(), none.is_empty(), last.start()), (Id::new(1), 2, true, Id::new(3)));
     }
 
     #[test]
