@@ -64,12 +64,7 @@ impl<'b, 's> Context<'b, 's> {
                 let to = to.unwrap_or(self.run.today);
                 Ok(super::flow::view_by_party_with_lens(self.lens(to), &self.run, *from))
             }
-            Query::Available { at } => {
-                let at = at.unwrap_or(self.run.today);
-                let horizon = closings::judged_through(self.plan.book(), at);
-                let ledger = self.ledger_at(at, horizon);
-                Ok(super::available::from_ledger(self.lens(at), &self.run, &ledger, horizon))
-            }
+            Query::Available { at } => Ok(self.available(at.unwrap_or(self.run.today))),
             Query::Budget { at, by } => {
                 Ok(super::budget::view_with_lens(self.lens(at.unwrap_or(self.run.today)), &self.run, *at, *by))
             }
@@ -88,19 +83,24 @@ impl<'b, 's> Context<'b, 's> {
                 let ledger = self.ledger_at(at, self.run.today);
                 Ok(super::lots::view_from(self.lens(at), scope, ledger.holdings()))
             }
-            Query::Forecast { until, paths } => Ok(super::forecast::view_from(
-                &self.plan,
-                &self.checkpoint,
-                &self.run,
-                &self.run.effects[..self.effects_prefix_len],
-                self.lens(self.run.today),
-                self.relaxed,
-                *until,
-                *paths,
-            )),
+            Query::Forecast { until, paths } => Ok(self.forecast(*until, *paths)),
             Query::Why { target } => super::why::target_with_lens(self.lens(self.run.today), &self.run, target),
             Query::Line { loc } => Ok(super::why::line_with_lens(self.lens(self.run.today), &self.run, *loc)),
         }
+    }
+
+    /// What can be spent at `at`, and what more costs.
+    fn available(&self, at: Day) -> Report<'b> {
+        let horizon = closings::judged_through(self.plan.book(), at);
+        let ledger = self.ledger_at(at, horizon);
+        super::available::from_ledger(self.lens(at), &self.run, &ledger, horizon)
+    }
+
+    /// The forecast from the stored pre-close state, over `paths` simulated futures.
+    fn forecast(&self, until: Option<Day>, paths: u32) -> Report<'b> {
+        let effects = &self.run.effects[..self.effects_prefix_len];
+        let lens = self.lens(self.run.today);
+        super::forecast::view_from(&self.plan, &self.checkpoint, &self.run, effects, lens, self.relaxed, until, paths)
     }
 
     /// Resolves source-backed `why FILE:LINE` queries through the client's
