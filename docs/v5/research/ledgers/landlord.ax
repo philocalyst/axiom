@@ -1,0 +1,269 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Marta Kowalski's triplex at 418 Alder St, Rochester NY, 2026-01-01 .. 2026-06-30. She lives in unit A and rents B and C
+// through a property manager at 8%. Tenants with deposits, repairs against improvements, depreciation per part, and a
+// vacancy: unit C is empty from 03-21 to 05-14.
+//
+// Written against PROPOSAL §6 and ASSOCIATIONS.md. After examples/explore-v5/03-triplex, whose units had to be owners so
+// that a share could be borne by them. Here a unit is a part of the building with an area, a lease is a relator, and
+// nobody is invented.
+//
+//   ✗ cannot say     ✎ says it badly     ? unclear     ⇄ what sync would need     ▸ derived, never typed
+// Ids: ll-c02 is landlord, c = cannot say, 02; [A12] is the change in REPORT.md that closes it.
+// Numbers: the mortgage is the ACTUS annuity (374,400 at 5.25% over 30 years, 2,067.45, first payment 2022-10-01,
+// 39 payments made by 12-31); depreciation is 27.5 years straight line, mid-month; every balance is a replay.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use us/ny
+use us/rental
+
+/// Marta, a nurse practitioner. Her pay is outside this book's interest: a net amount lands on the last day.
+entity marta : person
+  born    1979-05-30
+  filing  single
+  lives   us/ny
+
+entity elena, devon, jordan-lee : person      // tenants. Nothing about them says so: the lease does, on the days it runs  [A12]
+
+// ── the building and its parts ─────────────────────────────────────────────────────────────────────
+
+/// 3,200 sqft. Bought 2022-08-12 for 468,000.00, 62,000.00 of it land. The kind `building` has a many-slot, `parts`, whose
+/// weights are the parts' own `area`: the price, the land, the interest, the tax and every bill of the whole are divided by
+/// them. The v4 file made each unit an owner of a rental-business to carry the percentages by hand.
+asset triplex : building
+  owner marta
+  land  62_000 USD
+  unit-a : home           area 1_150 SQFT              // marta's own: personal use, never depreciated
+  unit-b : rental-home    area 1_050 SQFT  in-service 2022-09-01
+  unit-c : rental-home    area 1_000 SQFT  in-service 2022-09-01
+
+// ── the manager, and the money it holds ───────────────────────────────────────────────────────────
+
+entity elm-pm : property-manager
+  marta/trust : trust-account               // custody: marta's money and her tenants' deposits, with the manager; `pays out monthly on 10`
+    pays out monthly on 10 all before the 1st   // ✗ ll-c05 [A6]
+
+/// Elm keeps 8% of rent and half a month's rent for placing a tenant. `scope` is a many-slot of the agreement; a lease picks
+/// its agent from whichever agreement has its unit in scope.
+contract elm-agreement : management
+  owner marta
+  manager elm-pm
+  scope unit-b, unit-c
+  fee 8% of rent #management
+  leasing 50% of a month's rent when a lease starts #leasing-fee
+
+// ── leases: a relator among tenant, unit, landlord and agent ───────────────────────────────────────
+
+contract lease-b : lease
+  tenant elena                              // landlord = unit-b's owner (marta); agent = elm-pm; both by default
+  unit unit-b
+  1_850.00 USD monthly on 1 into trust #rent of unit
+  deposit 1_850.00 USD                      // held by the agent, in the trust, tied for elena
+  from 2025-07-01 until 2026-06-30
+contract lease-c : lease
+  tenant devon
+  unit unit-c
+  1_950.00 USD monthly on 1 into trust #rent of unit
+  deposit 1_950.00 USD
+  from 2025-09-01 until 2026-08-31
+contract lease-c2 : lease
+  tenant jordan-lee
+  unit unit-c
+  2_050.00 USD monthly on 1 into trust #rent of unit prorated
+  deposit 2_050.00 USD
+  from 2026-05-15 until 2027-05-31
+  // the journal starts it on its day with `jordan-lee rents unit-c from 2026-05-15`, a verb of the kind
+
+// ── what the kinds above declare (a sketch) ─────────────────────────────────────────────────────────
+
+kind lease : contract
+  has tenant    person | org
+  has unit      asset
+  has landlord  person | org = unit.owner
+  has agent     org optional = management[scope unit].manager
+  has deposit   amount optional
+  covers the month
+  input water USD
+  also + water * unit.area / unit.whole.area #utilities        // the tenant's share of the building's bill, by area
+  also + 5% of rent #late-fees  when date > due + 5d
+  law vacancy
+    always
+    warn any lease where unit is self  "unit has no lease"      // ✗ ll-c02 [A12] needs an existential over the inverse of `unit`
+  verb rents ... from                                          // `DATE TENANT rents UNIT from DAY`
+
+// ── the loan, and the rest ──────────────────────────────────────────────────────────────────────────
+
+entity first-federal : lender
+  marta/mortgage : loan 374_400.00 USD on 2022-08-12 at 5.25% over 30y for triplex
+    monthly on 1 from checking
+    also -> escrow 870.00 USD #escrow                          // `escrow` is a position the loan kind implies: marta's, with first-federal
+entity flour-city-bank : bank
+  marta/checking : deposit
+  marta/savings  : deposit
+entity rochester-general : employer
+entity monroe-county : tax-authority
+entity state-farm : insurer
+entity national-grid, rochester-water : utility
+entity ace-plumbing, ace-painting, floors-plus, northeast-heating : contractor
+
+// ═════ 2025-12-31 ═════════════════════════════════════════════════════════════════════════════════════
+
+opening 2025-12-31
+  checking                       14_822.40 USD
+  savings                        21_300.00 USD
+  first-federal/escrow            5_240.00 USD
+  marta/trust                     3_496.00 USD          // December's rents, less 8%: marta's, not yet paid out
+  marta/trust                     1_850.00 USD for elena     // the deposits are the tenants'
+  marta/trust                     1_950.00 USD for devon
+  triplex                          basis 468_000.00 USD since 2022-08-12   // ▸ parts by area: unit-a 168_187.50 · unit-b 153_562.50 · unit-c 146_250.00 · land 62_000.00 in them
+
+
+2026-01
+
+01 lease-b                                                       // ▸ 1,850.00 USD into marta/trust · - 148.00 USD #management via elm-pm · 1,702.00 is marta's · ⇄ ll-s08 the tenant ledger
+01 lease-c                                                       // ▸ 1,950.00 USD into marta/trust · - 156.00 USD #management · 1,794.00 is marta's
+01 first-federal/mortgage                                        // ▸ 2,937.45 USD from checking: interest 1,558.29 of triplex · principal 509.16 · escrow 870.00 into first-federal/escrow
+                                                             // ▸ the interest is the building's, shared by area: unit-a 560.01 (marta's home, itemized) · unit-b 511.31 · unit-c 486.97 (Schedule E)
+
+10 marta/trust                                                   // ▸ elm-pm pays out 3,496.00 USD to checking: what it held on the 1st, net of its fee · ⇄ ll-s07 its owner statement
+                                                             // ✗ ll-c05 [A6] "everything held before the 1st of this month" is a sweep of one position by the acquisition day of its parcels, relative to the day it runs
+
+20 checking -> national-grid 46.30 USD #utilities of triplex
+
+31 first-federal/escrow -> monroe-county 3_920.00 USD #property-tax of triplex   // the January half; shared by area, 35.94% of it is itemized
+31 job                                                           // ▸ 4,300.00 USD net pay into checking
+
+31 checking = 19_634.65 USD
+31 first-federal/escrow = 2_190.00 USD
+31 marta/trust = 7_296.00 USD                                    // ▸ 3,496.00 is marta's, 3,800.00 is held for tenants
+
+2026-02
+
+01 lease-c                                                       // ▸ 1,950.00 · - 156.00
+01 first-federal/mortgage                                        // ▸ 2,937.45 USD: interest 1,556.06 · principal 511.39 · escrow 870.00
+
+09 lease-b                                                       // ▸ 1,942.50 USD: 1,850.00 rent + 92.50 late fee (5% after 5 days: due 02-06, paid 02-09) · - 148.00 #management
+
+10 savings -> northeast-heating 11_400.00 USD #improvement of triplex "boiler"   // capital: it joins the building as parts
+                                                             // ▸ parts by area: unit-a 4,096.88 (marta's home: basis, never depreciated) · unit-b 3,740.62 · unit-c 3,562.50
+                                                             // ▸ each rental part depreciates on its own 27.5 years from February: unit-b 11.34 a month · unit-c 10.80
+                                                             // ? ll-u01 [A4] §10 divides a flow of the whole by area; nothing says an improvement of the whole becomes a part of each unit
+10 checking -> rochester-water 612.40 USD #utilities of triplex ^water-q4   // the quarterly bill, in marta's name
+                                                             // ▸ by area, 1,150 · 1,050 · 1,000 of 3,200 sqft: unit-a 220.08 (hers) · unit-b 200.94 · unit-c 191.38: the last two are claims, billed with March's rent
+10 marta/trust                                                   // ▸ elm-pm pays out 3,496.00 USD to checking: what it held on the 1st, net of its fee · ⇄ ll-s07 its owner statement
+
+14 checking -> ace-plumbing 240.00 USD #repair of unit-b "leak under the sink"   // spent: it keeps the unit as it was, so no part
+
+20 checking -> national-grid 48.15 USD #utilities of triplex
+
+28 job
+
+28 checking = 23_592.65 USD
+28 first-federal/escrow = 3_060.00 USD
+28 marta/trust = 7_388.50 USD                                    // ▸ 3,588.50 is marta's, 3,800.00 is held for tenants
+
+2026-03
+
+01 lease-b                                                       // ▸ 2,050.94 USD: 1,850.00 rent + 200.94 water (1,050 of 3,200 sqft of ^water-q4) · - 148.00 #management
+01 lease-c                                                       // ▸ 2,141.38 USD: 1,950.00 rent + 191.38 water · - 156.00 #management
+01 first-federal/mortgage                                        // ▸ 2,937.45 USD: interest 1,553.83 · principal 513.62 · escrow 870.00
+
+10 marta/trust                                                   // ▸ elm-pm pays out 3,588.50 USD to checking: what it held on the 1st, net of its fee
+
+20 lease-c ends                                                  // devon leaves nine months early, by agreement
+                                                             // ▸ the lease's `covers the month` makes the unused 11 of 31 days of March a claim of devon on marta: 691.94 USD
+                                                             // ▸ unit-c has no lease from 03-21. check: `unit-c is vacant`; the forecast carries 0.00 rent for it
+                                                             // ✗ ll-c02 [A12] a vacancy is the absence of a lease relator on a rentable unit; v4 has no way to see an absence
+20 checking -> national-grid 45.80 USD #utilities of triplex
+
+24 checking -> ace-painting 860.00 USD #repair of unit-c "turnover paint"
+24 checking -> floors-plus 1_480.00 USD #improvement of unit-c "new carpet"   // a part of its own: 1,480.00 over 27.5 years, 4.48 a month
+                                                             // ? ll-u04 [open] both are under the 2,500.00 per-invoice de minimis safe harbor: the carpet could be expensed. That is an election, and nothing in the language says a choice is made once for a year
+
+31 job
+
+31 checking = 26_157.90 USD
+31 first-federal/escrow = 3_930.00 USD
+31 marta/trust = 7_688.32 USD                                    // ▸ 3,888.32 is marta's, 3,800.00 is held for tenants
+
+2026-04
+
+01 lease-b                                                       // ▸ 1,850.00 · - 148.00
+01 first-federal/mortgage                                        // ▸ 2,937.45 USD: interest 1,551.58 · principal 515.87 · escrow 870.00
+
+03 marta/trust -> devon 1_950.00 USD against ^dep-c              // the deposit, returned on day 14 (NY requires 14)
+     - 320.00 USD #cleaning "carpet clean and paint touch-up"    // kept: marta's income, #deposit-retained
+     + 691.94 USD #rent "unused 03-21..03-31"                    // the refund of March, owed to him
+                                                             // ▸ 2,321.94 USD to devon · the tie on his 1,950.00 is released · ✎ ll-b03 [A3] what an ending lease settles is written by hand here; the lease kind should say it
+                                                             // ▸ check: us/ny §7-103 returns within 14 days: kept
+// ▸ 04-01 .. 05-14: check says `unit-c vacant 41 days`; the forecast for unit-c is empty
+
+10 marta/trust                                                   // ▸ elm-pm pays out 3,516.38 USD: March's 3,888.32 less devon's 691.94 refund, plus the 320.00 it kept
+
+20 checking -> national-grid 44.20 USD #utilities of triplex
+
+30 job
+
+30 checking = 30_992.63 USD
+30 first-federal/escrow = 4_800.00 USD
+30 marta/trust = 3_552.00 USD                                    // ▸ 1,702.00 is marta's, 1,850.00 is held for tenants
+
+2026-05
+
+01 lease-b                                                       // ▸ 1,850.00 · - 148.00
+01 first-federal/mortgage                                        // ▸ 2,937.45 USD: interest 1,549.32 · principal 518.13 · escrow 870.00
+
+10 marta/trust                                                   // ▸ elm-pm pays out 1,702.00 USD to checking: what it held on the 1st, net of its fee
+
+15 jordan-lee rents unit-c from 2026-05-15                       // a statement of the kind `lease`: tenant jordan-lee, unit unit-c
+     2_050.00 USD monthly on 1 into trust #rent of unit prorated
+     deposit 2_050.00 USD
+     until 2027-05-31
+                                                             // ▸ 1,124.19 USD (17 of 31 days) into marta/trust · - 89.94 #management · deposit 2,050.00 USD tied for jordan-lee
+                                                             // ▸ the management agreement owes elm-pm a leasing fee, half a month: 1,025.00 USD, taken from the trust (#leasing-fee)
+
+20 checking -> national-grid 47.60 USD #utilities of triplex
+
+31 job
+
+31 checking = 34_009.58 USD
+31 first-federal/escrow = 5_670.00 USD
+31 marta/trust = 5_611.25 USD                                    // ▸ 1,711.25 is marta's, 3,900.00 is held for tenants
+
+2026-06
+
+01 lease-c2 waived "first full month free"                       // ▸ nothing is late, nothing is owed: 0.00
+01 lease-b                                                       // ▸ 1,850.00 · - 148.00
+01 first-federal/escrow -> state-farm 2_600.00 USD #insurance of triplex for 2026-06-01..2027-05-31   // from escrow; 216.67 a month, shared by area
+01 first-federal/mortgage                                        // ▸ 2,937.45 USD: interest 1,547.06 · principal 520.39 · escrow 870.00
+
+10 marta/trust                                                   // ▸ elm-pm pays out 1,711.25 USD to checking: what it held on the 1st, net of its fee
+
+20 lease-b now 1_924.00 USD monthly from 2026-07-01 until 2027-06-30 "renewal, +4%"   // a statement dated before its day is a plan
+20 checking -> national-grid 49.05 USD #utilities of triplex
+
+30 job
+
+30 checking = 37_034.33 USD
+30 first-federal/escrow = 3_940.00 USD
+30 marta/trust = 5_602.00 USD                                    // ▸ 1,702.00 is marta's, 3,900.00 is held for tenants
+   // ▸ depreciation 2026 to date: unit-b 2,473.17 (purchase part 2,422.14 · boiler 51.03) · unit-c 2,371.10 (purchase 2,306.82 · boiler 48.60 · carpet 15.68) · unit-a none: it is marta's home
+
+
+// ═════ what Axiom derives ═════════════════════════════════════════════════════════════════════════════
+// ▸ axiom flow --by purpose --for marta (rental, H1 2026)                         Schedule E, by unit
+//   rent of unit-b   11_100.00 (6 × 1,850.00) + 92.50 late fee · rent of unit-c  6_282.25 (3 × 1,950.00 - 691.94 + 1,124.19)
+//   management -1,445.94 (unit-b 888.00 · unit-c 557.94) · leasing -1,025.00 · repair of unit-b -240.00 · repair of unit-c -860.00
+//   interest of triplex 9,316.14, of which 5,968.15 is rental (unit-b and unit-c: 64.06% by area) · utilities of the building, by area
+//   depreciation unit-b 2,473.17 · unit-c 2,371.10
+// ▸ axiom check
+//   note[vacant]: unit-c had no lease 03-21..05-14 (55 days); at devon's 1,950.00 a month that is 3,522.59 of rent not collected
+//
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   ll-b03  ✎     [A3]     an ending lease settles by a rule of its kind: unused prepaid rent, deposit deductions, the 14-day return; written by hand today
+//   ll-c02  ✗     [A12]    a vacancy is the absence of a lease relator on a rentable unit: an existential over the inverse of the `unit` slot, and a forecast that knows it
+//   ll-c05  ✗     [A6]     the manager pays out "everything held before the 1st of this month": a sweep by acquisition day, relative to the day it runs
+//   ll-s07  ⇄     [sync]   the manager's owner statement: one line per unit (a CSV column that is the purpose's object), its fee and the payout, tied to the trust
+//   ll-s08  ⇄     [sync]   the tenant ledger (late fee posted, water billed) and the utility PDF that carries the building's area
+//   ll-u01  ?     [A4]     an improvement of the whole becomes a part of each unit by area; v4 §10 divides flows of the whole, not capital parts
+//   ll-u04  ?     [open]   repair against improvement under the de minimis safe harbor is an election made once a year; nothing says a choice was made

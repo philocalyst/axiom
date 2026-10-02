@@ -1,0 +1,197 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// The flat on Pillsbury Ave, Minneapolis, 2026-01-01 .. 2026-05-31. Priya holds the lease and pays the landlord; Marcus and
+// Jules pay her their rooms by Venmo. Bills are paid by whoever is home and split by who lived there; Jules leaves on 04-30
+// and Tomas takes his room on 05-01. The book has no money of its own: it is a ledger of who has paid what for whom, and its
+// settlements go through Venmo.
+//
+// Written against PROPOSAL §6 and ASSOCIATIONS.md.   ✗ cannot say  ✎ says it badly  ? unclear  ⇄ sync  ▸ derived
+// Ids: sh-c03 is shared, c = cannot say, 03; [A12] is the change in REPORT.md that closes it. Bills are illustrative; every
+// split, rounding (the payer keeps the odd cent) and balance below is a replay of the lines.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use us/mn
+
+sync venmo                 // ⇄ sh-s01 Venmo's CSV: handle, memo ("rent jan"), amount. One row per payment, so sync can match a payment to the claim it settles
+  read "imports/venmo-*.csv"
+  format csv
+
+// ── people and the household ────────────────────────────────────────────────────────────────────────────
+
+entity priya, marcus, jules, tomas : person       // ? sh-u01 [A1] none of them has a position in this book: "marcus -> xcel" is money out of his pocket, from a place the book does not track.
+                                                  //   The book's boundary is the group, not each person's money; a position-less end works in v5 §6.1, but nothing says why it is right here
+
+/// The household is whoever the lease names. `members` is not typed twice: it is the projection of the lease's `tenants`, read on the day.
+entity flat : household
+  members tenants of lease-2025                   // derived (A12): the lease is the relator, the household its collective
+  lives   us/mn
+
+asset couch : furniture                           // bought 03-20; owned by the flat, so by its members, by rent
+  owner flat
+
+entity northline : landlord
+entity xcel, centerpoint : utility
+entity comcast : isp
+entity costco, ikea : merchant
+entity venmo : payments                           // a rail: money passes through it (`via venmo`) and nothing stays
+
+// ── the lease: one relator, and the household's members are its tenants ─────────────────────────────────────────────────────
+
+/// `tenants` is a many-slot whose weights are each one's rent. `master` is the one the landlord bills: the others owe her
+/// their weight on the 1st, with the house rule's late fee. `deposit` is held by the landlord for the tenants, equally.
+contract lease-2025 : lease with northline
+  tenants  priya 1_150.00 USD, marcus 950.00 USD, jules 900.00 USD       // [A4] weights by rent; `by rent` below reads them
+  master   priya                                                         // by default the first tenant: written because it matters
+  3_000.00 USD monthly on 1 from master #rent                            // checked: it must equal the sum of the weights
+  deposit  3_000.00 USD paid 2025-08-20 equally                          // a claim of northline's, owed to "the tenants": a role, see 05-01
+  due 5d else 25.00 USD #late-fee                                         // ✎ sh-b02 [A3] the house rule is a term of the lease kind, not of the month
+  from 2025-09-01 until 2026-08-31
+
+/// What the kind `lease` adds for a shared flat (a sketch, next to the one in landlord.ax):
+kind lease : contract
+  has tenants  person some by rent                 // many: each one's weight is the rent they pay
+  has master   person = first of tenants           // the one the landlord bills
+  also each tenant but master -> master, their weight monthly on 1       // the claim that rent's Venmo settles
+
+// ═════ 2025-12-31 ═════════════════════════════════════════════════════════════════════════════════════
+
+opening 2025-12-31
+  northline owes flat 3_000.00 USD ^deposit                              // held by the landlord for the tenants
+  jules owes marcus 40.00 USD ^concert-1220                              // a concert ticket marcus bought for him: a loan, not the flat's
+
+2026-01
+
+01 lease-2025                                                     // ▸ priya -> northline 3,000.00 USD #rent · marcus owes priya 950.00 USD · jules owes priya 900.00 USD, both due 01-05
+
+02 marcus -> priya 950.00 USD via venmo                           // ▸ settles rent-2601-m
+                                                                  // ✎ sh-b01 [A8] no code on a Venmo payment: the payment settles the oldest open claim between the two. ⇄ sh-s01 Venmo's memo ("rent jan") and handle are what sync reads
+
+04 jules -> priya 900.00 USD via venmo                            // ▸ settles rent-2601-j
+
+12 marcus -> xcel 138.42 USD #utilities for flat for 2025-12-05..2026-01-04  // ▸ priya owes marcus 46.14 USD · jules owes marcus 46.14 USD; marcus's own 46.14 USD
+                                                                  // the split is the household's members on each day of the period, equally: nobody changed, so thirds
+
+15 jules -> comcast 79.99 USD #internet for flat for 2026-01      // ▸ priya owes jules 26.66 USD · marcus owes jules 26.66 USD; jules's own 26.67 USD: the payer keeps the odd cent
+
+20 priya -> centerpoint 96.18 USD #utilities for flat for 2025-12-12..2026-01-11  // ▸ marcus owes priya 32.06 USD · jules owes priya 32.06 USD
+
+26 jules -> marcus 40.00 USD via venmo ^concert-1220              // ▸ settles the opening claim
+
+31 priya -> marcus 14.08 USD via venmo net                        // ▸ priya owes marcus 46.14 USD, marcus owes priya 32.06 USD: the difference settles both, oldest first
+31 jules -> priya 5.40 USD via venmo net                          // ▸ priya owes jules 26.66 USD, jules owes priya 32.06 USD: the difference settles both, oldest first
+31 jules -> marcus 19.48 USD via venmo net                        // ▸ marcus owes jules 26.66 USD, jules owes marcus 46.14 USD: the difference settles both, oldest first
+                                                                  // ✗ sh-c01 [A8] set-off: claims in both directions between two members net, and one payment settles the difference. v4 settles a claim by its code and has no `net`: the tail is invented here, and `via venmo net` is only a name for the rule
+                                                                  // ? sh-u02 [open] three payments (14.08, 19.48, 5.40) where two would leave everyone at zero: priya pays marcus 8.68, jules pays marcus 24.88. Pairwise set-off cannot find it; only the household as the counterparty of all three can
+
+2026-02
+
+01 lease-2025                                                     // ▸ priya -> northline 3,000.00 USD #rent · marcus owes priya 950.00 USD · jules owes priya 900.00 USD
+
+02 marcus -> priya 950.00 USD via venmo
+
+03 jules -> priya 900.00 USD via venmo
+
+10 marcus -> xcel 151.07 USD #utilities for flat for 2026-01-05..02-04  // ▸ priya owes marcus 50.36 USD · jules owes marcus 50.36 USD; marcus's own 50.35 USD
+
+15 jules -> comcast 79.99 USD #internet for flat for 2026-02
+
+19 priya -> centerpoint 118.40 USD #utilities for flat for 2026-01-12..02-11  // ▸ marcus owes priya 39.47 USD · jules owes priya 39.47 USD; priya's own 39.46 USD
+                                                                  // ▸ not settled this month: every claim between members is open, and `claims` shows them per pair, with no set-off
+
+2026-03
+
+01 lease-2025                                                     // ▸ priya -> northline 3,000.00 USD #rent · marcus owes priya 950.00 USD · jules owes priya 900.00 USD
+
+02 jules -> priya 900.00 USD via venmo
+
+06 lease-2025                                                     // ▸ marcus's rent is a day past 03-05: the house rule's 25.00 USD #late-fee joins the claim: marcus owes priya 25.00 USD
+                                                                  // ✎ sh-b02 [A3] a house rule is a norm of the lease kind (`due 5d else 25.00 USD #late-fee`): written in the lease, blaming the debtor, not typed per month. v4's `else` fires once and has no per-member form (the schedule's `Every` is K5)
+
+09 marcus -> priya 975.00 USD via venmo                           // ▸ settles rent-2603-m and late-2603-m
+
+10 marcus -> xcel 134.90 USD #utilities for flat for 2026-02-05..03-04  // ▸ priya owes marcus 44.97 USD · jules owes marcus 44.97 USD; marcus's own 44.96 USD
+
+14 jules -> costco 212.30 USD #household for flat                 // ▸ priya owes jules 57.97 USD · marcus owes jules 57.97 USD; jules's own 57.96 USD
+     38.40 USD #pets "dog food" for jules                         // the item is jules's: `for` the payer's own name means nobody owes it. The 173.90 USD that is left is the flat's
+
+15 jules -> comcast 79.99 USD #internet for flat for 2026-03
+
+20 priya -> ikea 346.00 USD #purchase of couch for flat by rent   // ▸ by rent, the weights of the lease's tenants: marcus owes priya 109.57 USD · jules owes priya 103.80 USD; priya's own 132.63 USD
+                                                                  // ✎ sh-b03 [A4] `by rent` takes the weights from an attribute of the relator (the lease's `tenants`), `for flat` alone means equal: one word picks the weight set, v4 has none
+
+22 priya -> centerpoint 87.60 USD #utilities for flat for 2026-02-12..03-11
+
+31 marcus -> priya 82.91 USD via venmo net                        // ▸ priya owes marcus 95.33 USD, marcus owes priya 178.24 USD: the difference settles both, oldest first
+31 jules -> priya 61.18 USD via venmo net                         // ▸ priya owes jules 111.29 USD, jules owes priya 172.47 USD: the difference settles both, oldest first
+31 marcus -> jules 15.96 USD via venmo net                        // ▸ marcus owes jules 111.29 USD, jules owes marcus 95.33 USD: the difference settles both, oldest first
+
+2026-04
+
+01 lease-2025                                                     // ▸ priya -> northline 3,000.00 USD #rent · marcus owes priya 950.00 USD · jules owes priya 900.00 USD
+
+02 marcus -> priya 950.00 USD via venmo
+
+03 jules -> priya 900.00 USD via venmo
+
+08 marcus -> xcel 127.35 USD #utilities for flat for 2026-03-05..04-04  // ▸ priya owes marcus 42.45 USD · jules owes marcus 42.45 USD
+
+12 marcus -> jules 200.00 USD via venmo due 04-28 ^loan-0412      // ▸ jules owes marcus 200.00 USD: a loan between two members, not the flat's
+
+15 jules -> comcast 79.99 USD #internet for flat for 2026-04
+
+20 priya -> centerpoint 74.20 USD #utilities for flat for 2026-03-12..04-11
+
+30 jules stops living at flat                                     // ▸ his last day; he settles with each of them today. The lease's tenants change tomorrow, below
+30 priya -> marcus 17.72 USD via venmo net                        // ▸ priya owes marcus 42.45 USD, marcus owes priya 24.73 USD: the difference settles both, oldest first
+30 priya -> jules 1.93 USD via venmo net                          // ▸ priya owes jules 26.66 USD, jules owes priya 24.73 USD: the difference settles both, oldest first
+30 jules -> marcus 215.79 USD via venmo net                       // ▸ marcus owes jules 26.66 USD, jules owes marcus 242.45 USD (with the 200.00 USD loan of 04-12): the difference settles both, oldest first
+
+2026-05
+
+01 lease-2025 now tenants priya 1_150.00 USD, marcus 950.00 USD, tomas 900.00 USD  // ▸ the household's members from today: priya, marcus, tomas. The deposit's creditors are the lease's tenants, so they follow
+                                                                  // ✗ sh-c02 [A12] northline's debt (the deposit, 3,000.00 USD) is owed to "the tenants of lease-2025": a role, not three names. When the occupant of the role changes the creditor changes, and nobody typed it. v4 claims have fixed parties
+01 lease-2025                                                     // ▸ priya -> northline 3,000.00 USD #rent · marcus owes priya 950.00 USD · tomas owes priya 900.00 USD
+01 tomas -> jules 1_000.00 USD via venmo #deposit "takes his third"  // ▸ not the flat's money and not a claim: it is the price of an assignment, and nothing links it to the change of creditor above
+                                                                  // ✗ sh-c03 [A8] a claim assigned for consideration: the old holder is paid, the new one steps in, the debtor (northline) is not asked. A transfer of a claim between two people is not in K3
+
+02 marcus -> priya 950.00 USD via venmo
+
+03 tomas -> priya 900.00 USD via venmo
+
+06 marcus -> xcel 121.50 USD #utilities for flat for 2026-04-05..05-04  // ▸ per day the members share equally, so by days present: priya owes marcus 40.50 USD · jules owes marcus 35.10 USD · tomas owes marcus 5.40 USD; marcus's own 40.50 USD
+                                                                  // the three on 04-05..04-30 and the three on 05-01..05-04: each day's slice is 4.05 USD, split three ways. jules left on 04-30 and still owes his 26 days
+
+08 jules -> marcus 35.10 USD via venmo                            // ▸ settles his part of xcel-2605: a former member, still a debtor
+
+15 priya -> comcast 79.99 USD #internet for flat for 2026-05      // ▸ marcus owes priya 26.66 USD · tomas owes priya 26.66 USD
+
+20 priya -> centerpoint 68.40 USD #utilities for flat for 2026-04-12..05-11  // ▸ by days present: marcus owes priya 22.80 USD · jules owes priya 14.44 USD · tomas owes priya 8.36 USD; priya's own 22.80 USD
+
+31 marcus -> priya 8.96 USD via venmo net                         // ▸ priya owes marcus 40.50 USD, marcus owes priya 49.46 USD: the difference settles both, oldest first
+31 tomas -> priya 35.02 USD via venmo net                         // ▸ tomas owes priya 35.02 USD
+31 jules -> priya 14.44 USD via venmo net                         // ▸ jules owes priya 14.44 USD
+31 tomas -> marcus 5.40 USD via venmo net                         // ▸ tomas owes marcus 5.40 USD
+
+// ═════ closing 2026-05-31 ════════════════════════════════════════════════════════════════════════════════
+//
+// ▸ open claims between members: none. Every month's difference was paid by Venmo, and `net` cleared the set-off with them
+// ▸ five months of costs paid `for flat`: 2,037.87 USD: what each paid and what each one's share was (by days present; the couch by rent), before the monthly payments
+//     priya  paid 870.77 USD · share 696.59 USD · owed to them 174.18 USD
+//     marcus paid 673.24 USD · share 673.50 USD · owed by them 0.26 USD
+//     jules  paid 493.86 USD · share 627.36 USD · owed by them 133.50 USD
+//     tomas  paid 0.00 USD · share 40.42 USD · owed by them 40.42 USD
+//   those differences are what the monthly `net` payments settled: a view of the flat's claims, by member, would say the same without a payment having been typed
+// ▸ rent: priya paid northline 15,000.00 USD (5 x 3,000.00) and was repaid 1,850.00 USD a month by the other two, 9,250.00 in all; deposit 3,000.00 USD held for priya, marcus and tomas, 1,000.00 USD each
+//
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   id      mark  closed by  what
+//   sh-b01  ✎     [A8]     a Venmo payment carries no claim code: it settles the oldest open claim between the two
+//   sh-b02  ✎     [A3]     a house rule is a term of the lease kind (`due 5d else 25.00 USD #late-fee`), blaming the member who is late
+//   sh-b03  ✎     [A4]     `for flat by rent` takes weights from the lease's `tenants`; `for flat` alone means equal, and a period means by days present
+//   sh-c01  ✗     [A8]     set-off: claims in both directions between two members net, and one payment settles the difference (`net`). v4 settles a claim by its code only
+//   sh-c02  ✗     [A12]    the deposit is owed to a role, "the tenants of the lease"; when the occupant changes, so does the creditor, and nobody types it
+//   sh-c03  ✗     [A8]     a claim assigned for consideration (tomas pays jules 1,000.00 USD for his third), the debtor not asked
+//   sh-s01  ⇄     [sync]   Venmo's rows: handle, memo and amount, matched to the oldest open claim of the pair
+//   sh-u01  ?     [A1]     no member has a position here: the book is a ledger among agents, and money "out of his pocket" has no place in it
+//   sh-u02  ?     [open]   multilateral netting: two payments would zero three people where pairwise `net` makes three; it needs the household as the common counterparty
+//   sh-u03  ?     [A4]     the couch is the flat's: jules's third of it leaves with him and tomas's starts with nothing paid; who owns it, and what the change is worth, are not in the lease
