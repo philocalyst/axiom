@@ -10,6 +10,7 @@ mod contracts;
 mod flow;
 mod record;
 mod staged;
+mod statements;
 mod tail;
 
 pub(crate) use contracts::contracts;
