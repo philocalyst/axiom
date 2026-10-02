@@ -91,6 +91,12 @@ impl Payload {
     pub fn read<V: Field>(self, tag: Tag) -> Option<V> {
         (tag == V::TAG).then(|| V::pull(self))
     }
+
+    /// The sixteen bytes as one number, for comparing and ordering payloads without knowing their type.
+    fn bits(self) -> u128 {
+        // SAFETY: every byte of a payload is initialized and `[u8; 16]` takes every bit pattern, as for `Field::pull`.
+        u128::from_le_bytes(unsafe { self.bytes })
+    }
 }
 
 mod sealed {
@@ -200,6 +206,87 @@ impl<T> Field for Run<T> {
     }
 }
 
+/// A value and its tag, out of any column: what two columns trade, and what is compared when the type is not known.
+///
+/// Only this module makes one (from a value, with its own tag, or from a column, with the tag it holds), so a datum
+/// is always a tag and the payload it names, and a column that is given one keeps its invariant.
+///
+/// # Equality
+///
+/// Two data are equal when their tags are and the sixteen bytes of their payloads are. For every type a [`Field`]
+/// is, that is `==` on the values: each is canonical, so equal values are the same bytes. A [`Ratio`] is in lowest
+/// terms with a positive denominator, a [`Qty`], [`Day`], [`Sym`] or id is one integer, a flag is 0 or 1, and
+/// [`Field::put`] zeroes every byte that a value does not use.
+///
+/// What would break it is a type with two spellings of one value (a ratio not in lowest terms, a float's two zeros),
+/// a type with padding, whose bytes `put` does not decide, or a value whose meaning is not in its bytes: two [`Sym`]s
+/// of different interners, and a [`Run`], which is equal when it is the same stretch of an arena and not when its
+/// stretch holds the same things.
+///
+/// Data are ordered by tag and then by bytes: no meaning to the order but that it is total and agrees with equality,
+/// so that sets of values have a sorted, canonical form.
+#[derive(Clone, Copy)]
+pub struct Datum {
+    tag: Tag,
+    payload: Payload,
+}
+
+const _: () = assert!(size_of::<Datum>() == 24);
+
+impl Datum {
+    /// Nothing: a slot with no value.
+    pub const EMPTY: Datum = Datum { tag: Tag::Empty, payload: Payload::EMPTY };
+
+    pub fn of<V: Field>(value: V) -> Datum {
+        Datum { tag: V::TAG, payload: value.put() }
+    }
+
+    pub fn tag(self) -> Tag {
+        self.tag
+    }
+
+    /// The value, if it is a `V`.
+    pub fn read<V: Field>(self) -> Option<V> {
+        self.payload.read(self.tag)
+    }
+
+    fn key(self) -> (u8, u128) {
+        (self.tag as u8, self.payload.bits())
+    }
+}
+
+impl PartialEq for Datum {
+    fn eq(&self, other: &Datum) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for Datum {}
+
+impl PartialOrd for Datum {
+    fn partial_cmp(&self, other: &Datum) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Datum {
+    fn cmp(&self, other: &Datum) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
+impl std::hash::Hash for Datum {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key().hash(state);
+    }
+}
+
+impl std::fmt::Debug for Datum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}:{:#x}", self.tag, self.payload.bits())
+    }
+}
+
 /// A column of tagged values: two parallel vectors, one byte and sixteen bytes a value.
 #[derive(Clone, Default)]
 pub struct Column {
@@ -231,7 +318,12 @@ impl Column {
 
     /// Appends a slot with no value.
     pub fn push_empty(&mut self) -> u32 {
-        self.append(Tag::Empty, Payload::EMPTY)
+        self.push_datum(Datum::EMPTY)
+    }
+
+    /// Appends a value that came out of a column, or out of [`Datum::of`].
+    pub fn push_datum(&mut self, datum: Datum) -> u32 {
+        self.append(datum.tag, datum.payload)
     }
 
     fn append(&mut self, tag: Tag, payload: Payload) -> u32 {
@@ -239,6 +331,11 @@ impl Column {
         self.tags.push(tag);
         self.payloads.push(payload);
         at
+    }
+
+    /// The value at `at` with its tag, whatever its type. Panics if `at` is past the end.
+    pub fn datum(&self, at: u32) -> Datum {
+        Datum { tag: self.tags[at as usize], payload: self.payloads[at as usize] }
     }
 
     /// The tags alone, for a scan that wants only the values of one kind.
@@ -425,6 +522,60 @@ mod tests {
         assert_eq!(<(u32, u32)>::pull(Day(-1).put()), (u32::MAX, 0));
         assert_eq!(<(u32, u32)>::pull(Payload::EMPTY), (0, 0));
         assert_eq!(Ratio::pull(Ratio::new(1, 3).unwrap().put()), Ratio::new(1, 3).unwrap());
+    }
+
+    /// The datum a column gives for `value`, which is how data are read.
+    fn datum_of(value: Value) -> Datum {
+        let mut column = Column::new();
+        push(&mut column, value);
+        column.datum(0)
+    }
+
+    #[test]
+    fn data_are_equal_when_their_tags_and_bytes_are() {
+        let ratio = |num, den| Value::Ratio(Ratio::new(num, den).unwrap());
+        assert_eq!(datum_of(ratio(1, 2)), datum_of(ratio(-3, -6)), "one ratio, two spellings, one set of bytes");
+        assert_ne!(datum_of(ratio(1, 2)), datum_of(ratio(2, 1)));
+        assert_ne!(datum_of(Value::Id(1)), datum_of(Value::Day(Day(1))), "the same bytes of another type");
+        assert_ne!(datum_of(Value::Day(Day(-1))), datum_of(Value::Day(Day(1))));
+        assert_eq!(datum_of(Value::Empty), Datum::EMPTY);
+    }
+
+    #[test]
+    fn a_datum_moves_between_columns_whole() {
+        let (mut from, mut to) = (Column::new(), Column::new());
+        for tag in TAGS {
+            let at = push(&mut from, sample(tag));
+            let copied = to.push_datum(from.datum(at));
+            assert_eq!(read(&to, copied), sample(tag), "{tag:?}");
+        }
+        assert_eq!(to.tags(), TAGS);
+        assert_eq!(Datum::of(Day(5)).read::<Day>(), Some(Day(5)));
+        assert_eq!(Datum::of(Day(5)).read::<u32>(), None);
+    }
+
+    #[test]
+    fn data_equal_exactly_when_their_values_do_and_are_ordered_and_hashed_to_agree() {
+        use std::hash::{Hash, Hasher};
+        let hash = |datum: Datum| {
+            let mut hasher = crate::hash::FxHasher::default();
+            datum.hash(&mut hasher);
+            hasher.finish()
+        };
+        let mut interner = Interner::default();
+        let syms: Vec<Sym> = ["a", "b"].map(|name| interner.intern(name)).into();
+        let mut rng = Rng::new(0xD1B5_4A32_D192_ED03);
+        let mut values: Vec<Value> = (0..40).map(|_| random_value(&mut rng, &syms)).collect();
+        values.extend_from_within(..);
+        for &a in &values {
+            for &b in &values {
+                let (da, db) = (datum_of(a), datum_of(b));
+                assert_eq!(da == db, a == b, "{a:?} and {b:?}");
+                assert_eq!(da.cmp(&db) == std::cmp::Ordering::Equal, da == db);
+                assert_eq!(da.cmp(&db), db.cmp(&da).reverse());
+                assert!(da != db || hash(da) == hash(db));
+            }
+        }
     }
 
     #[test]
