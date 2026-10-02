@@ -18,8 +18,8 @@
 use axiom_core::{Arena, Cadence, Day, Days, Diagnostic, Id, Qty, Ratio, Span, par};
 use axiom_model::{
     Amount, Book, Commodity, Contract, End, Expr, Fault, Flow, FlowExpressions, FlowSide, FlowView, Heading, Infer,
-    Item, JournalProgram, Leg, Made, Mode, OccurrenceTail, Origin, Part, Place, Promised, PurposeRoot, Quantity,
-    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Sign, Subject, TemplateProgram, Terms, Value,
+    Item, Leg, Made, Mode, OccurrenceTail, Origin, Part, Place, Program, Promised, PurposeRoot, Quantity,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Sign, Subject, Terms, Value,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -91,7 +91,7 @@ enum OccurrenceAmount {
 struct Reading<'a> {
     contract: Id<Contract>,
     terms: &'a Terms,
-    program: &'a TemplateProgram,
+    program: &'a Program,
     scale: Ratio,
     due: Day,
     txn: RuntimeTxn,
@@ -367,9 +367,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let runtime_txn = RuntimeTxn::contract_occurrence(contract_id, schedule, due, ordinal, source);
         let (flow_start, detail_start, missing_start) = (flows.len(), details.len(), missing_inputs.len());
 
-        let occurrence_journal =
+        let occurrence_program =
             written.and_then(|written| written.program).and_then(|program| book.journal_programs.get(program));
-        let occurrence_program = occurrence_journal.map(|journal| &journal.program);
         let amount_override = match written.and_then(|written| written.amount) {
             None => OccurrenceAmount::Inherit,
             Some(Expr::Literal(amount)) => OccurrenceAmount::Value(amount),
@@ -423,7 +422,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     written_group,
                     source_flows,
                     tail,
-                    occurrence_journal,
+                    occurrence_program,
                     inputs,
                     flows,
                     details,
@@ -476,14 +475,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         written_group: Option<&Made>,
         source_flows: &[Flow],
         tail: Option<&OccurrenceTail>,
-        occurrence_journal: Option<&JournalProgram>,
+        occurrence_program: Option<&Program>,
         inputs: &[Option<Amount>],
         out: &mut Vec<RuntimeFlow>,
         details: &mut Arena<RuntimeDetail>,
         missing: &mut Vec<u16>,
     ) -> Result<(), TemplateError> {
         let book = self.plan.book;
-        let no_program = TemplateProgram::default();
+        let no_program = Program::default();
         let template_at = Reading {
             contract: contract_id,
             terms,
@@ -493,11 +492,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             txn: runtime_txn,
             inputs,
         };
-        let written_at = Reading {
-            program: occurrence_journal.map_or(&no_program, |journal| &journal.program),
-            scale: Ratio::ONE,
-            ..template_at
-        };
+        let written_at =
+            Reading { program: occurrence_program.unwrap_or(&no_program), scale: Ratio::ONE, ..template_at };
         let group_start = out.len();
         let recognized = match book.contracts[contract_id].recognition_on_schedule(&template.header.flow, schedule, due)
         {
@@ -1296,26 +1292,13 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let source = &book.flows[id];
         let txn_id = source.txn;
         let transaction = &book.txns[txn_id];
-        let local = id.index().checked_sub(transaction.flows.start().index());
-        let offset = local.and_then(|local| u32::try_from(local).ok());
+        let offset = transaction.offset(id);
         let journal = transaction.program.and_then(|program_id| book.journal_programs.get(program_id));
-        let roots = journal.and_then(|journal| {
-            let offset = offset?;
-            // Lowering appends these sparse roots in source-flow order.
-            let at = journal.flow_roots.partition_point(|roots| roots.flow < offset);
-            journal.flow_roots.get(at).filter(|roots| roots.flow == offset).copied()
-        });
-        let roots = roots.filter(|roots| roots.out.is_some() || roots.arrive.is_some() || roots.basis.is_some());
-        let group = journal.and_then(|journal| {
-            let header = Heading::Flow(offset?);
-            journal.groups.iter().find(|group| group.header == header)
-        });
-        let item = journal.and_then(|journal| {
-            let offset = offset?;
-            journal
-                .groups
-                .iter()
-                .find_map(|group| group.items.iter().find(|item| item.flow == Some(offset)).map(|item| (group, item)))
+        let roots = journal.zip(offset).and_then(|(journal, offset)| journal.roots_of(offset));
+        let in_group = journal.and_then(|journal| journal.group.as_deref());
+        let group = in_group.filter(|group| offset.is_some_and(|offset| group.header == Heading::Flow(offset)));
+        let item = in_group.zip(offset).and_then(|(group, offset)| {
+            group.items.iter().find(|item| item.flow == Some(offset)).map(|item| (group, item))
         });
         let cost_item = item.filter(|(group, item)| is_exchange_cost(book, transaction.flows, group, item));
         let cost_header =
@@ -1329,7 +1312,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let roots =
             roots.unwrap_or(FlowExpressions { flow: offset.unwrap_or_default(), out: None, arrive: None, basis: None });
         let program_id = transaction.program.expect("flow roots belong to a journal program");
-        let program = &book.journal_programs[program_id].program;
+        let program = &book.journal_programs[program_id];
         let mut flow = source.clone();
         flow.day = day;
         let mut detail = *book.flow_view(source).detail();
@@ -2291,19 +2274,13 @@ fn journal_expression<'b, 's>(
     flow_id: Id<Flow>,
     txn_id: Id<axiom_model::Txn>,
     flow: &Flow,
-    program: &TemplateProgram,
+    program: &Program,
     root: axiom_model::NodeId,
 ) -> Value {
     let book = plan.book;
     let txn = RuntimeTxn::journal(txn_id).expect("journal expression cannot use the template transaction sentinel");
     let view = book.flow_view(flow);
-    let flow_ordinal = plan
-        .book
-        .txns
-        .get(txn_id)
-        .and_then(|txn| flow_id.index().checked_sub(txn.flows.start().index()))
-        .and_then(|at| u32::try_from(at).ok())
-        .unwrap_or(0);
+    let flow_ordinal = plan.book.txns.get(txn_id).and_then(|txn| txn.offset(flow_id)).unwrap_or(0);
     let motion =
         Motion::from_view_at(book, view, txn, Cause::Flow(flow_id), flow.day, Amounts::written(flow), flow_ordinal);
     let mut occasion = crate::eval::Occasion::flow(&motion);

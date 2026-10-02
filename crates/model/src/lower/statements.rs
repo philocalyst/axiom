@@ -6,20 +6,20 @@ use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity, Subject};
 
 use super::flow::{
-    Codes, Ends, FlowCx, ResolvedEnd, Shape, empty_codes, make_resolved_flow, push_flow_expressions, push_tail_roots,
+    Codes, Ends, FlowCx, ResolvedEnd, Shape, empty_codes, keep_program, make_resolved_flow, push_flow_expressions,
+    push_tail_roots,
 };
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::{Reach, Tail, written_purpose};
 use crate::book::{
-    Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, Role, TemplateProgram, Terms,
-    TermsState,
+    Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, Role, Terms, TermsState,
 };
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{
-    Action, Assert, ClaimChange, ClaimChangeAction, EndEvent, EndTarget, Event, Filed, Flow, Gap, Infer,
-    JournalProgram, Measure, Mode, Purposed, Quote, Reading, Split, Txn, Waive,
+    Action, Assert, ClaimChange, ClaimChangeAction, EndEvent, EndTarget, Event, Filed, Flow, Gap, Infer, Measure, Mode,
+    Program, Purposed, Quote, Reading, Split, Txn, Waive,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::problem::{self, CodeUse};
@@ -309,7 +309,7 @@ fn lower_quote<'s>(
 }
 
 /// What an assertion's amount is: written, or computed by a node of a program of its own.
-type Computed = Option<(Id<TemplateProgram>, NodeId)>;
+type Computed = Option<(Id<Program>, NodeId)>;
 
 fn assertion_amount<'s>(
     world: &mut World<'s>,
@@ -756,10 +756,7 @@ pub(super) fn lower_basis<'s>(
     if diags.len() != diagnostic_start {
         return;
     }
-    let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
-        let flow_roots = flow_roots.into_boxed_slice();
-        staged.book.journal_programs.push(JournalProgram { program, flow_roots, groups: Box::default() })
-    });
+    let program_id = keep_program(&mut staged, program, flow_roots, None);
     let record = Txn {
         program: program_id,
         codes: header_codes,
@@ -795,7 +792,7 @@ fn basis_cost<'s>(
     world: &World<'s>,
     at: Stated<'_, '_, 's>,
     written: ast::Amount<'s>,
-    (program, roots): (&TemplateProgram, &Map<ast::ExprId, NodeId>),
+    (program, roots): (&Program, &Map<ast::ExprId, NodeId>),
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Cost> {
     let file = at.file();

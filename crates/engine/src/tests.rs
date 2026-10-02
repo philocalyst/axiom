@@ -105,7 +105,7 @@ fn a_faulted_computed_assertion_is_not_treated_as_its_zero_placeholder() {
         loc: Loc::new(FileId(0), 0, 1),
         first: NodeId(0),
     });
-    let program = book.assertion_programs.push(TemplateProgram { nodes });
+    let program = book.assertion_programs.push(Program::of(nodes));
     book.asserts[0].computed = Some((program, NodeId(0)));
 
     let run = Plan::new(&book).run(options());

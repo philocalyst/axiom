@@ -12,12 +12,12 @@ use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
-    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, TemplateProgram, Terms, TermsState, Text,
+    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, Terms, TermsState, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
+use crate::journal::{Flow, Infer, Mode, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
 use crate::laws::Placement;
 use crate::problem::{self, Noun};
@@ -630,7 +630,7 @@ fn lower_terms<'a, 's>(
     world: &mut World<'s>,
     cx: &TermsCx<'a, 's>,
     schedule: ast::Schedule<'s>,
-    program: TemplateProgram,
+    program: Program,
     roots: Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {

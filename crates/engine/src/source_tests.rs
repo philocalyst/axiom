@@ -1036,7 +1036,7 @@ opening 2025-02-01
         let cleo = book.entity("cleo").unwrap();
         let (_, txn) = book.txns.iter().find(|(_, txn)| txn.day == day(2025, 3, 1)).unwrap();
         let program = &book.journal_programs[txn.program.expect("split retains its sparse group")];
-        let [group] = program.groups.as_ref() else { panic!("one grouped split: {:?}", program.groups) };
+        let Some(group) = program.group.as_deref() else { panic!("one grouped split: {:?}", program.group) };
         let axiom_model::Heading::Source { end, total } = group.header else {
             panic!("one-sided split has no independently posted header: {:?}", group.header)
         };

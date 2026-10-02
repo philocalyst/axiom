@@ -14,10 +14,10 @@ use axiom_core::{
 };
 
 use crate::journal::{
-    Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Prices, Purposed,
-    Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
+    Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
+    RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
+use crate::law::{Fault, Law, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
 use crate::split::{Expr, Item, Promised, Says, Sign};
 use crate::sync::{Format, Pattern, Source};
@@ -79,7 +79,7 @@ pub struct Book<'s> {
     pub txns: Arena<Txn>,
     /// Computed journal expressions and grouped line items. Only transactions
     /// that need them have a program handle in `Txn`.
-    pub journal_programs: Arena<JournalProgram>,
+    pub journal_programs: Arena<Program>,
     /// Exact scheduled identities for written contract occurrences. Ordinary
     /// transactions allocate nothing in this sparse pool.
     pub written_occurrences: Arena<WrittenOccurrence>,
@@ -96,7 +96,7 @@ pub struct Book<'s> {
     pub asserts: Vec<Assert>,
     /// Sparse typed expression programs retained by computed value assertions.
     /// Most assertions are written literals and allocate no program.
-    pub assertion_programs: Arena<TemplateProgram>,
+    pub assertion_programs: Arena<Program>,
     /// Sorted by day, then declaration order.
     pub events: Vec<Event>,
     /// Sorted by day, then source order. Includes promise/place ends and asset
@@ -595,7 +595,7 @@ pub struct Terms {
     /// `program`; the engine evaluates them with this occurrence's inputs.
     pub template: Box<[Promised]>,
     /// Shared law IR for the computed sides of this term's flow templates.
-    pub program: TemplateProgram,
+    pub program: Program,
     /// `input water USD`: names occurrences may state (`water = 155.00 USD`).
     pub inputs: Box<[Input]>,
     /// `about`: each occurrence states its own amount; the template's is the
@@ -640,13 +640,6 @@ pub struct Input {
     pub name: Sym,
     pub unit: Option<Id<Commodity>>,
     pub loc: Loc,
-}
-
-/// Typed expressions used by one stretch of contract terms. The node arena is
-/// immutable after lowering and can be evaluated with reusable engine scratch.
-#[derive(Clone, PartialEq, Debug, Default)]
-pub struct TemplateProgram {
-    pub nodes: Arena<Node>,
 }
 
 /// A deadline after the due day, and what its passing adds.

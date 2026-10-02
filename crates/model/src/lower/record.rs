@@ -7,8 +7,8 @@ use axiom_syntax::Subject;
 
 use super::flow::{
     Codes, Ends, FlowCx, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, endpoint, flow_roots,
-    lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root, push_tail_roots,
-    resolve_amount, resolve_end, resolve_quantity,
+    keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root,
+    push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
 };
 use super::push_amount_root;
 use super::staged::Staged;
@@ -21,7 +21,7 @@ use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
-    Action, Detail, Flow, FlowExpressions, Infer, JournalProgram, Mode, OccurrenceTail, Origin, Txn, TxnKind,
+    Action, Detail, Flow, FlowExpressions, Infer, Mode, OccurrenceTail, Origin, Program, Txn, TxnKind,
     WrittenOccurrence,
 };
 use crate::law::{NodeId, Ty};
@@ -197,7 +197,8 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
 /// What the lowering of one transaction has made so far.
 struct Built {
     flow_roots: Vec<FlowExpressions>,
-    groups: Vec<Made>,
+    /// The split, or the header with items, the transaction is: at most one.
+    group: Option<Made>,
     /// Whether anything said so far makes the transaction wrong.
     successful: bool,
 }
@@ -227,20 +228,14 @@ fn lower_txn<'a, 's>(
     let cx = FlowCx { file: record.file(), home, day: written.date, txn, loc: item.loc, roots: &root_ids, code_index };
     let (codes, tail) = cx.lower_tail(&mut staged, written.flow.tail, diags);
     let (waive, valid) = (tail.waive, tail.valid);
-    let mut built = Built { flow_roots: Vec::new(), groups: Vec::new(), successful: valid };
+    let mut built = Built { flow_roots: Vec::new(), group: None, successful: valid };
     lower_flows(&mut staged, TxnCx { cx, flow: &written.flow, tail, codes }, &mut built, diags);
 
     if diags.len() != diagnostic_start || !built.successful {
         push_rejected_txn(&mut staged, item, written.date);
         return;
     }
-    let program = (!program.nodes.is_empty() || !built.flow_roots.is_empty() || !built.groups.is_empty()).then(|| {
-        staged.book.journal_programs.push(JournalProgram {
-            program,
-            flow_roots: built.flow_roots.into_boxed_slice(),
-            groups: built.groups.into_boxed_slice(),
-        })
-    });
+    let program = keep_program(&mut staged, program, built.flow_roots, built.group);
     let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
     let record = Txn { program, codes, waive, doc, ..journal_txn(&staged, written.date, item.loc) };
     staged.book.txns.push(record);
@@ -255,10 +250,10 @@ fn compile_flow_roots<'s>(
     home: Home,
     flow: &ast::Flow<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<(crate::book::TemplateProgram, Map<ast::ExprId, NodeId>)> {
+) -> Option<(Program, Map<ast::ExprId, NodeId>)> {
     let roots = flow_roots(file, flow);
     if roots.is_empty() {
-        return Some((crate::book::TemplateProgram::default(), Map::default()));
+        return Some((Program::default(), Map::default()));
     }
     let name = staged.book.names.intern("journal");
     let (program, nodes) = crate::laws::compile_template(staged, diags, file, home, Ty::Flow, name, &[], &roots)?;
@@ -320,7 +315,7 @@ fn lower_named_flow<'s>(
     }
     let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
     let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots, diags);
-    built.groups.push(Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items });
+    built.group = Some(Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items });
 }
 
 /// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
@@ -374,7 +369,7 @@ fn lower_split_flow<'s>(
     if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && made.legs.is_empty() {
         built.successful = false;
     }
-    built.groups.push(Made {
+    built.group = Some(Made {
         header: Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) },
         side: source.side,
         legs: made.legs.into_boxed_slice(),
@@ -499,10 +494,7 @@ fn lower_opening_balances<'a, 's>(
         push_rejected_txn(&mut staged, item, opening.date);
         return;
     }
-    let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
-        let flow_roots = flow_roots.into_boxed_slice();
-        staged.book.journal_programs.push(JournalProgram { program, flow_roots, groups: Box::default() })
-    });
+    let program_id = keep_program(&mut staged, program, flow_roots, None);
     let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
     let record = Txn { program: program_id, doc, ..journal_txn(&staged, opening.date, item.loc) };
     staged.book.txns.push(record);
@@ -679,7 +671,7 @@ fn lower_occurrence<'a, 's>(
     }
     let name = staged.book.names.intern("journal");
     let compiled = if expressions.is_empty() {
-        Some((crate::book::TemplateProgram::default(), Box::<[NodeId]>::default()))
+        Some((Program::default(), Box::<[NodeId]>::default()))
     } else {
         crate::laws::compile_template(&mut staged, diags, file, site.home, Ty::Flow, name, &inputs, &expressions)
     };
@@ -1003,13 +995,9 @@ fn lower_occurrence<'a, 's>(
             })
         })
         .collect();
-    let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
-        staged.book.journal_programs.push(JournalProgram {
-            program,
-            flow_roots: flow_roots.into_boxed_slice(),
-            groups: Box::default(),
-        })
-    });
+    // The flows of an occurrence are never posted: the engine builds the occurrence's own from the groups and reads
+    // the nodes, so what its flows compute (`flow_roots`) is not kept.
+    let program_id = keep_program(&mut staged, program, Vec::new(), None);
     let occurrence_id = staged.book.written_occurrences.push(WrittenOccurrence {
         due,
         schedule,
@@ -1133,7 +1121,7 @@ fn lower_loan_origin<'a, 's>(
     push_tail_roots(file, statement.tail, &mut expressions);
     let name = staged.book.names.intern("journal");
     let compiled = if expressions.is_empty() {
-        Some((crate::book::TemplateProgram::default(), Box::<[NodeId]>::default()))
+        Some((Program::default(), Box::<[NodeId]>::default()))
     } else {
         crate::laws::compile_template(&mut staged, diags, file, site.home, Ty::Flow, name, &[], &expressions)
     };
@@ -1180,13 +1168,7 @@ fn lower_loan_origin<'a, 's>(
     if let Some(basis) = basis_root {
         push_flow_expressions(&mut flow_roots, 0, None, None, Some(basis));
     }
-    let program = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
-        staged.book.journal_programs.push(JournalProgram {
-            program,
-            flow_roots: flow_roots.into_boxed_slice(),
-            groups: Box::default(),
-        })
-    });
+    let program = keep_program(&mut staged, program, flow_roots, None);
     let doc = doc.map(|doc| staged.book.names.intern(doc.0));
     let txn = Txn {
         program,
@@ -1364,7 +1346,7 @@ fn lower_owes<'a, 's>(
     }
     let mode = if opening { Mode::Opening } else { Mode::Actual };
     let mut flow_roots = Vec::new();
-    let mut groups = Vec::new();
+    let mut group = None;
     if let Some(written_amount) = amount {
         let base = staged.book.base;
         let Some(expr) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
@@ -1380,25 +1362,19 @@ fn lower_owes<'a, 's>(
             if !statement.body.items.is_empty() {
                 let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
                 let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
-                groups.push(Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items });
+                group = Some(Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items });
             }
         }
     } else {
         let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
         let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
         let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
-        groups.push(Made { header, side: FlowSide::Out, legs: Box::default(), items });
+        group = Some(Made { header, side: FlowSide::Out, legs: Box::default(), items });
     }
     if diags.len() != diagnostic_start {
         return;
     }
-    let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty() || !groups.is_empty()).then(|| {
-        staged.book.journal_programs.push(JournalProgram {
-            program,
-            flow_roots: flow_roots.into_boxed_slice(),
-            groups: groups.into_boxed_slice(),
-        })
-    });
+    let program_id = keep_program(&mut staged, program, flow_roots, group);
     let txn = Txn {
         program: program_id,
         codes: header_codes,

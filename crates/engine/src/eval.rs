@@ -395,7 +395,7 @@ pub(crate) fn expression(env: Env, law: &Law, root: NodeId, ctx: &Context, value
 /// occurrence using caller-owned context and scratch storage.
 pub(crate) fn program_expression(
     env: Env,
-    program: &axiom_model::TemplateProgram,
+    program: &axiom_model::Program,
     root: NodeId,
     ctx: &Context,
     values: &mut Vec<Value>,

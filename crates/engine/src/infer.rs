@@ -255,20 +255,14 @@ impl Stretches<'_> {
         let txn = &self.book.txns[flow.txn];
         let Some(program_id) = txn.program else { return false };
         let Some(program) = self.book.journal_programs.get(program_id) else { return false };
-        let Some(offset) =
-            id.index().checked_sub(txn.flows.start().index()).and_then(|offset| u32::try_from(offset).ok())
-        else {
+        let Some(roots) = txn.offset(id).and_then(|offset| program.roots_of(offset)) else {
             return false;
         };
-        let at = program.flow_roots.partition_point(|roots| roots.flow < offset);
-        program.flow_roots.get(at).is_some_and(|roots| {
-            roots.flow == offset
-                && ((roots.out.is_some() || roots.arrive.is_some()) && !flow.is_exchange()
-                    || match end {
-                        End::From => roots.out.is_some(),
-                        End::To => roots.arrive.is_some(),
-                    })
-        })
+        (roots.out.is_some() || roots.arrive.is_some()) && !flow.is_exchange()
+            || match end {
+                End::From => roots.out.is_some(),
+                End::To => roots.arrive.is_some(),
+            }
     }
 }
 

@@ -989,7 +989,7 @@ contract invest with broker
         axiom_model::Expr::Computed(root) => root,
         _ => unreachable!(),
     };
-    assert!((root.index() as usize) < book.journal_programs[program].program.nodes.len());
+    assert!((root.index() as usize) < book.journal_programs[program].nodes.len());
 }
 
 #[test]
@@ -1435,13 +1435,13 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
         };
         let program = &book.journal_programs[program_id];
         let local_flow = |offset: u32| assert!(offset < txn.flows.len());
-        for root in program.flow_roots.iter() {
+        for root in program.roots.iter() {
             local_flow(root.flow);
             for node in [root.out, root.arrive, root.basis].into_iter().flatten() {
-                assert!(program.program.nodes[node].typed_ty().is_some());
+                assert!(program.nodes[node].typed_ty().is_some());
             }
         }
-        for group in program.groups.iter() {
+        for group in program.group.iter() {
             if let axiom_model::Heading::Flow(header) = group.header {
                 local_flow(header);
             }
@@ -1453,7 +1453,7 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
                     local_flow(flow);
                 }
                 if let axiom_model::Expr::Computed(root) = item.amount {
-                    assert!(program.program.nodes[root].typed_ty().is_some());
+                    assert!(program.nodes[root].typed_ty().is_some());
                 }
             }
         }

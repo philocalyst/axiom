@@ -12,11 +12,11 @@ use super::tail::Tail;
 use crate::book::{Amount, Commodity, Place};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Select, Txn};
+use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Program, Select, Txn};
 use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
-use crate::split::{Endpoint, Expr, FlowSide, Item, Part, Quantity, Sign};
+use crate::split::{Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedEnd {
@@ -509,6 +509,19 @@ pub(super) fn lower_items<'s>(
         });
     }
     lowered.into_boxed_slice()
+}
+
+/// A transaction's program, made of its compiled nodes and what its flows compute and are grouped as; the book
+/// keeps it only when there is something to keep, so that literal transactions pay no program.
+pub(super) fn keep_program(
+    staged: &mut Staged<'_, '_>,
+    nodes: Program,
+    roots: Vec<FlowExpressions>,
+    group: Option<Made>,
+) -> Option<Id<Program>> {
+    let program = Program { roots: roots.into_boxed_slice(), group: group.map(Box::new), ..nodes };
+    let says = !program.nodes.is_empty() || !program.roots.is_empty() || program.group.is_some();
+    says.then(|| staged.book.journal_programs.push(program))
 }
 
 pub(super) fn push_flow_expressions(

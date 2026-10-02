@@ -18,9 +18,10 @@ use axiom_syntax::{
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
 use super::vars::When;
-use crate::book::{Entity, Input, Param, TemplateProgram};
+use crate::book::{Entity, Input, Param};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
+use crate::journal::Program;
 use crate::law::{
     Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Rank, SelectKey, Step, StepKind, Trigger, Ty,
     Value, Var, Window,
@@ -251,7 +252,7 @@ pub(crate) fn compile_template<'s>(
     name: Sym,
     inputs: &[Input],
     roots: &[(ExprId, Ty)],
-) -> Option<(TemplateProgram, Box<[NodeId]>)> {
+) -> Option<(Program, Box<[NodeId]>)> {
     let mut compiler = Compiler {
         world,
         diags,
@@ -273,7 +274,7 @@ pub(crate) fn compile_template<'s>(
     if compiler.failed || compiled.len() != roots.len() {
         return None;
     }
-    Some((TemplateProgram { nodes: std::mem::take(&mut compiler.nodes) }, compiled.into()))
+    Some((Program::of(std::mem::take(&mut compiler.nodes)), compiled.into()))
 }
 
 /// Compiles a dated budget limit in its purpose-owner context. Unlike a
@@ -286,7 +287,7 @@ pub(crate) fn compile_budget_limit<'s>(
     home: Home,
     purpose: axiom_core::Id<crate::book::Purpose>,
     root: ExprId,
-) -> Option<(TemplateProgram, NodeId)> {
+) -> Option<(Program, NodeId)> {
     let name = world.book.purposes[purpose].name;
     let mut compiler = Compiler {
         world,
@@ -309,7 +310,7 @@ pub(crate) fn compile_budget_limit<'s>(
     if compiler.failed {
         return None;
     }
-    Some((TemplateProgram { nodes: std::mem::take(&mut compiler.nodes) }, root))
+    Some((Program::of(std::mem::take(&mut compiler.nodes)), root))
 }
 
 struct Compiler<'w, 'a, 's> {

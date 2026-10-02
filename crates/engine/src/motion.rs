@@ -93,12 +93,7 @@ impl<'f> Motion<'f> {
     pub fn new(book: &'f Book, flow: &'f Flow, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
         let txn = RuntimeTxn::journal(flow.txn).expect("journal motion cannot use the template transaction sentinel");
         let flow_ordinal = match cause {
-            Cause::Flow(id) => book
-                .txns
-                .get(flow.txn)
-                .and_then(|txn| id.index().checked_sub(txn.flows.start().index()))
-                .and_then(|at| u32::try_from(at).ok())
-                .unwrap_or(0),
+            Cause::Flow(id) => book.txns.get(flow.txn).and_then(|txn| txn.offset(id)).unwrap_or(0),
             _ => 0,
         };
         Motion::from_view_at(book, book.flow_view(flow), txn, cause, day, amounts, flow_ordinal)

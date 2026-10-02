@@ -1,14 +1,14 @@
 //! What the journal records: flows grouped into transactions, balance
 //! assertions, measures, settlement events, prices, and returns as filed.
 
-use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
+use axiom_core::{Arena, Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
     Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System,
-    TemplateProgram, Text,
+    Text,
 };
-use crate::law::{Law, NodeId, Subject};
+use crate::law::{Law, Node, NodeId, Subject};
 use crate::split::{Expr, Made};
 
 /// Value moving once, from one place to another. Balanced by construction.
@@ -584,7 +584,7 @@ pub struct Txn {
     /// Sparse typed roots and grouping for a transaction with computed
     /// amounts or line items. Literal ungrouped transactions pay no program
     /// allocation and carry `None`.
-    pub program: Option<Id<JournalProgram>>,
+    pub program: Option<Id<Program>>,
     pub codes: Run<Sym>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
@@ -617,6 +617,11 @@ impl Txn {
         self.kind == TxnKind::ContractEnd
     }
 
+    /// Where `flow` is among the transaction's own, if it is one of them.
+    pub fn offset(&self, flow: Id<Flow>) -> Option<u32> {
+        u32::try_from(flow.index().checked_sub(self.flows.start().index())?).ok()
+    }
+
     /// The contract whose principal is disbursed on its loan date.
     pub fn loan_origin(&self) -> Option<Id<Contract>> {
         if self.kind == TxnKind::LoanOrigin { self.contract } else { None }
@@ -633,7 +638,7 @@ pub struct WrittenOccurrence {
     /// for this occurrence only. Computed roots belong to `program` below.
     pub amount: Option<Expr>,
     /// Computed amount, side and basis roots for this occurrence's overrides.
-    pub program: Option<Id<JournalProgram>>,
+    pub program: Option<Id<Program>>,
     /// What it replaces of each of the terms' template groups, by position: a group it says nothing of is `None`
     /// and inherits the terms. Offsets in a group address the source transaction's flows.
     pub groups: Box<[Option<Made>]>,
@@ -670,13 +675,32 @@ impl Default for OccurrenceTail {
     }
 }
 
-/// Expression roots and allocation groups for one written transaction.
-/// Roots and members are indexed by offsets in the owning `Txn::flows` run.
-#[derive(Clone, PartialEq, Debug)]
-pub struct JournalProgram {
-    pub program: TemplateProgram,
-    pub flow_roots: Box<[FlowExpressions]>,
-    pub groups: Box<[Made]>,
+/// The expressions of one source, compiled, and what a transaction's flows take from them. The nodes are
+/// immutable once lowered and are evaluated with the engine's reusable scratch.
+///
+/// Contract terms, assertions and laws have nodes only: what they compute is named by an [`Expr`] in the template
+/// or by the assertion. A transaction's flows are in the book's flow arena, which has no room for one, so what a
+/// flow computes is told here, by its offset in the transaction's own flows, and so is the split it is in.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Program {
+    pub nodes: Arena<Node>,
+    /// The flows that compute an amount or a basis, sparse and in flow order.
+    pub roots: Box<[FlowExpressions]>,
+    /// The split, or the header with items, that the flows are. A transaction has at most one.
+    pub group: Option<Box<Made>>,
+}
+
+impl Program {
+    /// The nodes of a source that has no flows of its own to say which computes what.
+    pub fn of(nodes: Arena<Node>) -> Program {
+        Program { nodes, ..Program::default() }
+    }
+
+    /// What the flow at `offset` of the transaction computes, if anything.
+    pub fn roots_of(&self, offset: u32) -> Option<FlowExpressions> {
+        let at = self.roots.partition_point(|roots| roots.flow < offset);
+        self.roots.get(at).filter(|roots| roots.flow == offset).copied()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -715,7 +739,7 @@ pub struct Assert {
     /// A computed amount, when written; the literal `amount` slot otherwise.
     /// The sparse program pool belongs to `Book`, so ordinary assertions keep
     /// only an empty option and no expression arena allocation.
-    pub computed: Option<(Id<TemplateProgram>, NodeId)>,
+    pub computed: Option<(Id<Program>, NodeId)>,
     /// What becomes of a difference between the balance and the statement.
     pub gap: Gap,
     pub loc: Loc,

@@ -952,7 +952,7 @@ impl Ledger<'_, '_, '_> {
         let Some(program_id) = txn.program else { return Some(Qty::ZERO) };
         let program = &book.journal_programs[program_id];
         let header = axiom_model::Heading::Flow(m.flow_ordinal);
-        let Some(group) = program.groups.iter().find(|group| group.header == header) else {
+        let Some(group) = program.group.as_deref().filter(|group| group.header == header) else {
             return Some(Qty::ZERO);
         };
         let mut total = Qty::ZERO;
