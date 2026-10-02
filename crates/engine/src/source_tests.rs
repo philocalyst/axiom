@@ -113,12 +113,12 @@ base USD
 commodity USD
   precision 2
 account checking
-account reserve
-account incoming
   law intraday-history
-    on out
+    always
     warn peak(balance, year) <= 150 USD \"intraday peak exceeded\"
     warn low(balance, year) >= 150 USD \"intraday low fell short\"
+account reserve
+account incoming
 opening 2026-01-01
   checking 100 USD
 2026-02-01 incoming -> checking 100 USD
@@ -144,12 +144,12 @@ opening 2026-01-01
 #[test]
 fn temporal_days_count_an_inclusive_residence_before_the_first_flow() {
     let text = "\
-system foreign
+use std
 entity me
-  lives foreign from 2026-01-01 until 2026-01-10
+  lives std from 2026-01-01 until 2026-01-10
   law residence-days
     each year
-    warn days(self.lives is foreign, year) != 10 \"residence days must include both endpoints\"
+    warn days(self.lives is std, year) != 10 \"residence days must include both endpoints\"
 ";
 
     with_run(text, day(2026, 12, 31), |_, run| {
@@ -158,6 +158,64 @@ entity me
             "the ten-day residence is counted from its first day through its inclusive last day: {:?}",
             run.violations
         );
+    });
+}
+
+#[test]
+fn place_entity_tests_follow_endpoint_role_and_account_owner() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind payer : entity
+entity market
+entity me
+entity tax-office : payer
+account checking
+  law owner-is-owner
+    on out
+    when self.owner is me
+    warn true \"an account still matches its owner\"
+law from-is-counterparty
+  on out
+  when from is market
+  warn true \"outside source matches its named party\"
+law from-is-owner
+  on out
+  when from is me
+  warn true \"an owned account matches its owner, not an outside party\"
+law to-is-counterparty
+  on in
+  when to is payer
+  warn true \"outside recipient matches its named kind\"
+2026-01-01 market -> checking 10 USD
+2026-01-02 checking -> tax-office 4 USD
+";
+
+    with_run(text, day(2026, 1, 2), |book, run| {
+        let by_message: Vec<_> = run
+            .violations
+            .iter()
+            .map(|violation| {
+                (
+                    run.diagnostics[violation.diagnostic as usize].message.as_str(),
+                    violation.cause,
+                )
+            })
+            .collect();
+        assert_eq!(
+            by_message,
+            [
+                ("outside source matches its named party", crate::Cause::Flow(axiom_core::Id::new(0))),
+                ("an account still matches its owner", crate::Cause::Flow(axiom_core::Id::new(1))),
+                ("an owned account matches its owner, not an outside party", crate::Cause::Flow(axiom_core::Id::new(1))),
+                ("outside recipient matches its named kind", crate::Cause::Flow(axiom_core::Id::new(1))),
+            ],
+            "an Outside place matches its endpoint entity, while an account matches its owner"
+        );
+        let me = book.entity("me").unwrap();
+        let market = book.entity("market").unwrap();
+        assert_ne!(book.entities[market].place.unwrap(), book.entities[me].place.unwrap());
     });
 }
 

@@ -1148,8 +1148,17 @@ impl<'a, 's> Machine<'a, 's> {
                     })
             }
             (Value::Place(p), Value::Place(root)) => book.places.covers(root, p),
-            (Value::Place(p), Value::Entity(root)) => {
-                book.entities.covers(root, book.places[p].owner)
+            (Value::Place(place), Value::Entity(root)) => {
+                let endpoint = match book.places[place].role {
+                    axiom_model::Role::Outside(Some(party))
+                    | axiom_model::Role::Tab(party)
+                    | axiom_model::Role::Holding(party) => Some(party),
+                    axiom_model::Role::Outside(None) | axiom_model::Role::Issuer(_) => None,
+                    axiom_model::Role::Account { .. } | axiom_model::Role::Asset(_) => {
+                        Some(book.places[place].owner)
+                    }
+                };
+                endpoint.is_some_and(|entity| book.entities.covers(root, entity))
             }
             (Value::Entity(e), Value::Entity(root)) => book.entities.covers(root, e),
             (Value::Unit(a), Value::Unit(b)) => a == b,
