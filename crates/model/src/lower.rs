@@ -8,6 +8,7 @@
 pub(crate) mod also;
 mod contracts;
 mod record;
+mod staged;
 
 pub(crate) use contracts::contracts;
 pub(crate) use record::record;

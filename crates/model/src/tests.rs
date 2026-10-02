@@ -4,7 +4,7 @@
 //! lowerers and by the engine. These tests focus on the model boundary: typed
 //! names, stable trees, ownership and once-stored property defaults.
 
-use axiom_core::{Day, Days, Diagnostic, FileId, Ratio};
+use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
 use axiom_syntax::{Folder, parse};
 
 use crate::{
@@ -394,6 +394,30 @@ commodity GBP : currency
     let (_, diagnostics) = build_project(project);
 
     assert_eq!(codes(&diagnostics), ["base-currency-required"], "{diagnostics:?}");
+}
+
+#[test]
+fn a_rejected_record_leaves_nothing_of_itself_in_the_pooled_arenas() {
+    let project = "\
+use std
+base USD
+commodity USD : currency
+account checking : bank
+account savings : bank
+2026-01-01 checking -> savings 1 USD ^first
+2026-01-02 checking 10 USD -> ^lost
+  savings 6 USD ^lost-leg
+  savings 4 USD #nonsense
+2026-01-03 checking -> savings 3 USD ^third
+";
+    let (book, diagnostics) = build_project(project);
+
+    assert_eq!(codes(&diagnostics), ["unknown-purpose"], "{diagnostics:?}");
+    assert_eq!(book.flows.len(), 2, "the leg lowered before the failure is taken back");
+    let kept: Vec<_> = book.codes.values().map(|&code| book.name(code)).collect();
+    assert_eq!(kept, ["first", "third"]);
+    assert_eq!(book.txns.len(), 3, "the rejected record still owns a transaction");
+    assert!(book.txns[Id::new(1)].flows.is_empty());
 }
 
 #[test]
