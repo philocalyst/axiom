@@ -48,19 +48,24 @@ pub fn intersect_all(lists: &mut [&[u32]], out: &mut Vec<u32>) {
     }
 }
 
-/// The ids in both lists, which are of similar length: a block at a time if each fills one, else an id at a time. The
-/// machine is asked what it can do here, once for the call and not for each block.
+/// The ids in both lists, which are of similar length: a block at a time if each is at least [`BLOCKS_FROM`] long, else
+/// an id at a time. The machine is asked what it can do here, once for the call and not for each block.
 fn merge(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
-    if a.len().min(b.len()) < BLOCK {
+    if a.len().min(b.len()) < BLOCKS_FROM {
         merge_scalar(a, b, out);
     } else {
         merge_blocks(Level::new(), a, b, out);
     }
 }
 
+/// How long both lists must be for blocks to pay. The blocks leave the scalar loop the ends of the lists, up to a block
+/// and a half of ids, and a short list is nearly all end: at 9 to 15 ids each the block merge is no faster than the
+/// loop (0.95 to 1.05 times, in the benchmark in the tests), from 16 it is 1.4 to 1.9 times faster, and at 256, 2.4.
+const BLOCKS_FROM: usize = 2 * BLOCK;
+
 /// Ids compared at once: the lanes of a `u32x8`, a 256-bit register, which `fearless_simd` makes of two on a machine
-/// with only 128-bit ones. A sweep of 4, 8 and 16 lanes at every level this machine has found 8 the fastest at all of
-/// them: 4 was about 1.3 times slower, 16 from 1.1 to 1.5 times.
+/// with only 128-bit ones. A sweep of 4, 8 and 16 lanes at every level of two machines found 8 the fastest or tied at
+/// all of them: 4 lanes was up to 1.35 times slower, and a tie on 128-bit registers; 16 lanes from 1.05 to 1.5 times.
 const BLOCK: usize = 8;
 
 /// One bit for each lane of a block.
@@ -68,8 +73,9 @@ type Mask = u8;
 const _: () = assert!(Mask::BITS as usize == BLOCK);
 
 /// For each mask, the lanes it has set, in order and packed to the front, then zeros that [`pack`] writes and the
-/// caller does not keep. A table because the alternative, a loop over the set bits, runs as many times as the data
-/// says: a branch that is mispredicted half the time on lists that share half their ids.
+/// caller does not keep. A table, because both alternatives lose: a loop over the set bits runs as many times as the
+/// data says, a branch mispredicted half the time on lists that share half their ids, and storing every lane and
+/// stepping on by its bit is 1.4 times slower with 256-bit registers and 1.1 times with 128-bit ones.
 static LANES_SET: [[u8; BLOCK]; 1 << BLOCK] = lanes_set();
 
 const fn lanes_set() -> [[u8; BLOCK]; 1 << BLOCK] {
@@ -238,22 +244,21 @@ mod tests {
     #[test]
     fn the_shapes_of_two_lists_that_fill_blocks() {
         let ids = |range: std::ops::Range<u32>| range.collect::<Vec<_>>();
-        assert_eq!(intersection(&ids(0..8), &ids(0..8)), ids(0..8), "one block, identical");
-        assert_eq!(intersection(&ids(0..16), &ids(8..24)), ids(8..16), "blocks that overlap by one");
-        assert_eq!(intersection(&ids(0..24), &ids(24..48)), [], "blocks that touch and share nothing");
-        assert_eq!(
-            intersection(&ids(0..8), &ids(7..15)),
-            [7],
-            "one id in the last lane of one block and the first of the next"
-        );
+        // Every way, not `intersect`: that sends lists under two blocks long to the scalar loop.
+        let all_ways_give = |a: &[u32], b: &[u32], expected: &[u32], shape: &str| {
+            for (way, got) in every_way(a, b) {
+                assert_eq!(got, expected, "{way}: {shape}");
+            }
+        };
+        all_ways_give(&ids(0..8), &ids(0..8), &ids(0..8), "one block, identical");
+        all_ways_give(&ids(0..16), &ids(8..24), &ids(8..16), "blocks that overlap by one");
+        all_ways_give(&ids(0..24), &ids(24..48), &[], "blocks that touch and share nothing");
+        all_ways_give(&ids(0..8), &ids(7..15), &[7], "the last lane of one block and the first of the next");
+        all_ways_give(&ids(0..40), &ids(20..60), &ids(20..40), "more blocks than one, half shared");
         let evens: Vec<u32> = (0..40).map(|n| 2 * n).collect();
-        assert_eq!(
-            intersection(&evens, &ids(0..40)),
-            ids(0..20).iter().map(|n| 2 * n).collect::<Vec<_>>(),
-            "every other id"
-        );
+        all_ways_give(&evens, &ids(0..40), &ids(0..20).iter().map(|n| 2 * n).collect::<Vec<_>>(), "every other id");
         let top: Vec<u32> = (u32::MAX - 15..=u32::MAX).collect();
-        assert_eq!(intersection(&top, &top), top, "the last ids there are");
+        all_ways_give(&top, &top, &top, "the last ids there are");
     }
 
     #[test]
@@ -560,11 +565,15 @@ mod tests {
     #[test]
     #[ignore = "a benchmark"]
     fn bench_merge_on_short_lists_where_it_decides_between_blocks_and_ids() {
+        type Merge = fn(&[u32], &[u32], &mut Vec<u32>);
+        // Called through pointers, so that neither is inlined into the loop: a call is most of what a short list costs.
+        // `merge` is one call more here than inside `intersect`, which inlines it: about 2 ns, the shortfall under 16 ids.
+        let (by_ids, by_choice): (Merge, Merge) = (black_box(merge_scalar), black_box(merge));
         let mut rng = Rng::new(0x1234_5678_9ABC_DEF1);
-        for len in [2, 4, 7, 8, 12, 16, 32, 64, 256] {
-            let pairs: Vec<_> = (0..64).map(|which| pair_sharing(&mut rng, len, [1, 50][which % 2])).collect();
-            let scalar = time(15, |out| pairs.iter().for_each(|(a, b)| merge_scalar(a, b, out)));
-            let chosen = time(15, |out| pairs.iter().for_each(|(a, b)| merge(a, b, out)));
+        for len in [8, 9, 12, 15, 16, 18, 24, 32, 64, 256] {
+            let pairs: Vec<_> = (0..1024).map(|which| pair_sharing(&mut rng, len, [1, 50][which % 2])).collect();
+            let scalar = time(15, |out| pairs.iter().for_each(|(a, b)| by_ids(a, b, out)));
+            let chosen = time(15, |out| pairs.iter().for_each(|(a, b)| by_choice(a, b, out)));
             let per_pair = pairs.len() as f64;
             eprintln!(
                 "{len:>4} ids each: scalar {:>7.1} ns, merge {:>7.1} ns ({:.2}x)",
