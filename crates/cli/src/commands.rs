@@ -3,9 +3,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::fs::{self, OpenOptions};
-use std::io::Write as IoWrite;
-use std::path::{Component, Path};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axiom_core::{Day, Diagnostic, FileId};
@@ -258,7 +256,8 @@ fn render_sync(
     prior: &[Diagnostic],
 ) -> Outcome {
     let blocked_by_book_errors = prior.iter().any(Diagnostic::is_error);
-    let write_problems = if dry || blocked_by_book_errors { Vec::new() } else { apply_changes(root, &planned.changes) };
+    let write_problems =
+        if dry || blocked_by_book_errors { Vec::new() } else { axiom_sync::apply(root, &planned.changes) };
     let mut diagnostics: Vec<&Diagnostic> = prior.iter().chain(&planned.problems).chain(&planned.incomplete).collect();
     for source in &planned.sources {
         match source.failure.as_ref() {
@@ -321,134 +320,6 @@ fn render_sync(
     let failed =
         tally.errors > 0 || !write_problems.is_empty() || planned.sources.iter().any(|source| source.failure.is_some());
     Outcome { answer, diagnostics: diagnostic_text, failed }
-}
-
-/// Writes planned targets through sibling temporary files. The canonical
-/// parent check catches symlinked folders that would otherwise leave the
-/// project, and rename replaces a final symlink without following it.
-fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
-    let canonical_root = match fs::canonicalize(root) {
-        Ok(root) => root,
-        Err(error) => {
-            return vec![Diagnostic::error("sync-project-root", format!("cannot resolve the project root: {error}"))];
-        }
-    };
-    let mut problems = Vec::new();
-    for (index, change) in changes.iter().enumerate() {
-        let relative = Path::new(&change.path);
-        if change.path.is_empty() || !relative.components().all(|component| matches!(component, Component::Normal(_))) {
-            problems.push(Diagnostic::error(
-                "sync-path-outside-project",
-                format!("`{}` is not a project-relative path", change.path),
-            ));
-            continue;
-        }
-        let target = canonical_root.join(relative);
-        let Some(parent) = target.parent() else {
-            problems.push(Diagnostic::error(
-                "sync-path-outside-project",
-                format!("`{}` has no project directory", change.path),
-            ));
-            continue;
-        };
-        // Check the nearest existing ancestor before creating missing folders.
-        // Otherwise `link/new-folder/file.ax` could create `new-folder` outside
-        // the project before the final-parent containment check noticed `link`.
-        let existing = match canonical_existing_ancestor(parent) {
-            Ok(existing) if existing.starts_with(&canonical_root) => existing,
-            Ok(_) => {
-                problems.push(Diagnostic::error(
-                    "sync-path-outside-project",
-                    format!("`{}` leaves the project through a symlink", change.path),
-                ));
-                continue;
-            }
-            Err(error) => {
-                problems.push(Diagnostic::error(
-                    "sync-write",
-                    format!("cannot resolve the folder for `{}`: {error}", change.path),
-                ));
-                continue;
-            }
-        };
-        let _ = existing;
-        if let Err(error) = fs::create_dir_all(parent) {
-            problems.push(Diagnostic::error(
-                "sync-write",
-                format!("cannot create the folder for `{}`: {error}", change.path),
-            ));
-            continue;
-        }
-        let canonical_parent = match fs::canonicalize(parent) {
-            Ok(parent) if parent.starts_with(&canonical_root) => parent,
-            Ok(_) => {
-                problems.push(Diagnostic::error(
-                    "sync-path-outside-project",
-                    format!("`{}` leaves the project through a symlink", change.path),
-                ));
-                continue;
-            }
-            Err(error) => {
-                problems.push(Diagnostic::error(
-                    "sync-write",
-                    format!("cannot resolve the folder for `{}`: {error}", change.path),
-                ));
-                continue;
-            }
-        };
-        let Some(name) = target.file_name() else {
-            continue;
-        };
-        let target = canonical_parent.join(name);
-        let mut temporary = None;
-        for suffix in 0..100 {
-            let candidate = canonical_parent.join(format!(
-                ".{}.axiom-sync-{}-{index}-{suffix}",
-                name.to_string_lossy(),
-                std::process::id(),
-            ));
-            match OpenOptions::new().write(true).create_new(true).open(&candidate) {
-                Ok(mut file) => {
-                    if let Err(error) = file.write_all(change.after.as_bytes()) {
-                        let _ = fs::remove_file(&candidate);
-                        problems
-                            .push(Diagnostic::error("sync-write", format!("cannot write `{}`: {error}", change.path)));
-                    } else {
-                        temporary = Some(candidate);
-                    }
-                    break;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => {
-                    problems
-                        .push(Diagnostic::error("sync-write", format!("cannot prepare `{}`: {error}", change.path)));
-                    break;
-                }
-            }
-        }
-        let Some(temporary) = temporary else {
-            continue;
-        };
-        if let Err(error) = fs::rename(&temporary, &target) {
-            let _ = fs::remove_file(&temporary);
-            problems.push(Diagnostic::error("sync-write", format!("cannot replace `{}`: {error}", change.path)));
-        }
-    }
-    problems
-}
-
-/// Resolves the closest existing ancestor, following any symlink in its path.
-fn canonical_existing_ancestor(path: &Path) -> std::io::Result<std::path::PathBuf> {
-    let mut ancestor = path;
-    loop {
-        match fs::symlink_metadata(ancestor) {
-            Ok(_) => return fs::canonicalize(ancestor),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                ancestor = ancestor.parent().ok_or(error)?;
-            }
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 /// A compact unified hunk: the common prefix and suffix stay context, and the
@@ -630,6 +501,8 @@ fn summary_line(book: &Book, summary: &Summary) -> Line {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use crate::project::Project;
     use crate::testing::TempDir;
