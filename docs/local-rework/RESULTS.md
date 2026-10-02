@@ -1,5 +1,11 @@
 # Verified local Axiom rework
 
+> This report describes the earlier bounded rework. The subsequent native
+> cutover stopped on 2026-10-02 at product commit `1be566d`, with 734 tests passed,
+> four failed and eight ignored. Its full example checks and formatting still
+> fail. Read [the current handoff](STOPPING-POINT-2026-10-02.md) for present status;
+> the historical green results below do not certify the promoted native workspace.
+
 Completed on October 1, 2026 in the independent checkout
 `/Users/mileswirht/Documents/Codex/2026-10-01/task/axiom-local`, branch
 `rework/recovered-client-boundaries`. The verified source commit is `03368b3`;

@@ -1,0 +1,324 @@
+commit	subject
+df76d70fc8a5667133a346327e0b35013b41ba4d	syntax: promote recovered S5 v4 parser and AST
+148722b87bd56a80e3d75eb727351c30bdf14714	Document local cutover scope and verification requirements
+1b337ebf083c865a9ec4d02a8d0c9d5e189ddcc9	syntax: bound piece indices and tighten parser contracts
+13207436971a474da075a47944336a4abdcf9653	syntax: fold parallel parse results in source order
+1c54f5cd0f6cc5e61b5956a6133c05883ec72f68	model: expose pooled v4 journal metadata and sync schema
+b613f3f0597dab17abc88d8c29735383b4883657	docs: define model journal handoff
+914f4aa4fbbc18fb4de646d40aa7d8c5cc0b8270	engine: bind flow purpose and sparse running totals
+1a2c09faa23cc0e3725bbe6f961cec8d74d1141f	examples: add Sam v4 fixture and independent oracle
+e9cf7588c80f4b2d92ef54fd3cd0798168388b55	examples: read Sam oracle inputs from v4 sources
+67c230225b0aac9e57d420696f8163979f8b35fc	model: avoid matching absent param rows
+cb7673093e1d2fc204660aed28c47e9cbd258e61	test model: cover absent param key tuples
+6e0f2a30c6db8646aa069d6b3f221aa2542fff39	syntax: allow typed unit expressions in carry laws
+788d9444fa47892f1d7d729aed9bf50c8f78b9c3	report: type client report cells and renderers
+6df93b3b6548e432b42ee6bab3234590d884a752	model: preserve declaration source facts
+f3162484169e8e2c01616c4ea8349156adae47e7	examples: move opening ledgers to v4 source
+a1d449d86b70aa1d1a0960e11c23dfa29e3482c8	systems: add rental and securities laws
+d882691fe6ce94e4214c49eed71c1302e3e90de6	Record reviewed cutover checkpoints and pending execution checks
+7930c5cf7e64534d57aed978d7936fc26108c7c3	examples: preserve dated deadline and part-level oracle
+c1f50215bf1dd484b32dfcba93888a3af90e2f26	verify: read abbreviated v4 journal dates and codes
+6d60f723abc58ffabbb3f128c42ffe34ee07a624	examples: isolate restricted grant in violation case
+f0c8f409d6b24ab4531d8a77bdaea213d62e9941	model: survey native journal tab relationships
+7f8712adb3c4180f274a5a0918508b2810d73c38	model: add typed contract template program API
+6e524861f26d1054f30579f6fc9eff2d3b952d0a	model: scope purpose fields to flow laws
+c2373785a9da7d2dd5c766fb4cdc50b2ddc90db0	model: survey restated contract holdings
+c1e077d1d11ec8939dc0c7288fdf0449bbf582eb	model: retain typed deadline and deposit flows
+e7232a03d57c999afdcc7eb15935b9d147f86661	model: expose native law compilation hooks
+914e2541ea6065ab071760a376ead62c809d40af	model: collect typed contract amount roots
+601997cb21845c8578a16150e23ae762a66203be	core: reserve typed arena capacity
+7941f37efb7205c138c27423f335b1dc09e8e4a5	model: pool occurrence input bindings
+c37881b9a02e245801a5d59c1ff1040d9e3146dc	model: read settings and scopes from S5 sites
+9e9345a163518b06bd690e7eeec02ff3196e1dde	model: build kind hierarchy from S5 sites
+046c068aaf7d78db1803887a99c265669cfb7dec	model: declare typed params from S5 sites
+ba75dde449d742688ee16bc7cfa5634bb1767657	engine: add cumulative depreciation and pooled flow metadata
+86fd5d880b17d7941bf5591c665f1fa73edde8d2	engine: preserve parcel identity and exact shortfalls
+22a8d334dfaedfef117c51da2aa3f5886b6effea	docs: record native checkpoints and allocation baseline
+acda8aef6474382f9a5885d2fa9a579a872e7834	model: stage custom properties by typed target
+0b9e137f5c59f6f1c272df3d0586e48e3d3c8403	sync: own only decoded format and pattern text
+afb4e849ecda955df0c0899944bec6c21bc733fc	report: add native-purpose report surfaces
+df9752b4c1d7ec2957f3a27eff7fa15b587dd8b0	report: keep net-zero purpose detail
+0816097a32cde1ab6224dd085e3edcc2b38d0c4e	report: preserve scoped native report detail
+b7c0fe7b19128a4a25cd734880c17f7104386a56	model: retain typed contract flow groups and cadence identity
+5b6d38458607d9c30a6a455bf4b43049492e0cea	model: match coverage across grouped contract legs
+983277a2fdb3acbb829d019de7778b08ee7cf333	model: store decoded source text safely
+52205bc1381b0d5126dd2fea3c630b8d33136366	engine: count purpose refunds and schedule future windows
+399e38ee0d092bdb0d01898bf4ae1abd458306ea	engine: schedule only purpose window readers
+fb2af99af585f610a0de2e493d6a62714c9c3ffb	model: mark template transaction identity
+7c12884628704f5bc5d1aa1b7031d29f2e782837	model: lower native custom properties from S5
+340ee962ea2d1670a4c7970d4910edc9bbd0c30d	examples: correct cumulative rental depreciation oracle
+25e112ad35334c537e427b19220715b93f46cf7e	model: keep template descriptions in text pool
+3c30b3531fc225234f4cfd68d3b4da88c6f765b6	report: scope source events and resolve explicit targets
+6a800146a90fcdf1b2a5d4d2154747ecc3507610	sync: add canonical model lowering and readers
+35399aff497973e8637de2989a86c19c574ccc31	sync: reconcile typed original currency captures
+f43051335f5342434747c7535dd28ddac1621d05	sync: test path aliases and capture slots
+3a50d566353cf55f6aed77f46cbfa6110f7ff2e7	sync: bound recursive matching and unit keys
+d9dfeeab6d3a6ec1409c5d4573c27556122d3db0	docs: record reviewed native cutover checkpoints
+cb9c4feb001487da90c0e3a3df83f4c17c0e77b5	examples: round rental depreciation at cumulative boundaries
+f6deefb03d9aa353b0bc1be88f01cbeb8d522981	docs: correct basis effect of cumulative rounding
+e9864df8d4b849f1309b449ce59dbb27e6bccd5b	engine: filter purpose window reader steps
+549edc30c366802b2d25be24a7acc0a1c93a417b	report: borrow decoded text from model book
+48df7ec132cf3f11acd1643b5dfb566bd79d731a	docs: distinguish active cutover from recovered status
+f682e52cfc0702f181e319562decdbf52e8d2433	Lower native S5 contract templates
+711f4a7081c8691514adfd8740c61eb870539ff1	report: keep decoded template text and scope traces
+9587c4019a4ba695f83aa48a5c7c8d8bdd282b49	report: flatten party flow period storage
+1acd2b2737cd8b813c11f919f1d5888b3d2c66e9	Represent absent regular contract schedules
+d8775c1f30bc7e8cdad2de23c21da794fab98ca8	report: compact measure period storage
+62a611cbfbef766f52747ca7ea54d8864375471e	report: index each party row once per flow
+4c0b8a3b84aca28afc264529c922e90a9971c1c0	cli: expose source paths in file id order
+2dfe40a8ee79fafe7948a9572f3ede433dfd0c28	model: build native S5 declarations and world indexes
+e4bc7dbc7b9ea22ab4c5182af33353433b7a1a93	Retain typed metadata on implied contract flows
+88c5dcc2eb2c8b545a05ff7b4ed6690b7024928c	report: flatten forecast history categories
+2b2186351d0365c4473ce62361e69173c62b7af1	report: align forecast history rows
+d918dae8da881c9b77db5831ecb7c28c57d56de9	report: verify forecast sampling compatibility
+be3a4d684cd4593f2d2e68e5d4d78990637f82eb	model: invoke native contract declaration pass
+6932fb93eda1091f1d9757b7babf8ba0771eb051	model: type runtime transaction identity
+b642a0b597a7033b4c921032a8d77d01068d1503	docs: record native builder and sampling verification checkpoints
+9f1079397b15d06c483e0076e0b0c4ec07c73b75	sync: checkpoint readers and matching fixes
+901967a1b17b687d247c7a605f5827e7cadff636	sync: retain currency decoration in negative amounts
+df4f12401d6bc77b2d20fcdffb7ed01dd8990997	Resolve native contract endpoints in source scope
+9b65350285bea8be7b5cdb590e3442c351e0d01f	report: drop v3 place classification fallbacks
+3cdf647aac747ef4dcc9531dcb8813f37d55f63f	model: lower native builtin properties and rate settings
+a477c1f9c23bcf94a67a3a91447975401e156c52	sync: close reader and matcher review gaps
+3a3f4a049ec60549592a4c44c9c22393e48f5576	sync: remove duplicate memo join helper
+146b94a6352dc58de431eeac0855838c9f7c77df	Pool sparse journal expression and group metadata
+56655fe915ebc9b54779bb039d9e0b3cc12d7644	sync: fix portable path prefix guard
+4341eb69aecfcda25d5bc0a3ad8c3270d509b3cb	Represent source-only split aggregates explicitly
+dd88c76bccb083888cd1aef0aa0b80c598be6bbf	sync: fix joined memo finish and isolate cells
+c765451dbd5e044d6d94d9241130e7e079e7e883	engine: expose effective owner shares
+563a3a672f1e1a8876b4c92a12167e4f02e057c7	model: register native laws and contract rules
+f98abebd1e3eb9ca50684b05d897754e08bc1f74	model: compile native law effects and S5 expression refs
+a511cd2876656c2de12caca85f51614d54be7405	Report invalid effective ownership graphs
+dab2b66e71eb46e85e6be8e2c44576324798847a	cli: support named sync and reader source locations
+01bc510000c97d8fe68b90f99346553b752f1c32	cli: isolate auxiliary reader sources from syntax borrows
+da1f56dea8d647467c9dcb5537e6ceff8d244d83	cli: retain disjoint borrows while parsing sources
+b2f2e4b4c042fd0ab823493a89e3dd629491035d	sync: validate short dates with full days
+e4701d5195dcd75ffbb5d44cdd0cc6d3a73e59af	model: type native purpose laws and dynamic amounts
+ccb555ea21383110c337c1f607ca69c3fa4a1a5a	Record reviewed native APIs and integrated sync verification
+c1d1eb0bf309f0869c7c1b3f4e9f2be9b6b26972	model: infer law amount dimensions from context
+62138e71c7ddc4601f7e2fd3944a1943d2ec2d95	Carry typed runtime transaction identities through parcels
+d822b11bf7bc4856517a6220cf5fca2ccef6c410	sync: expose safe local read glob expansion
+6bb370a10b7fb6f4863a256d71a4237ef79469ac	model: complete native property defaults and remove S3 bridges
+0f17b1b21153a6d463eea1b8fca974e222f38d59	model: type owner-scoped amounts in owner currency
+d90f9130b6b7e932ff484f3bad534e3c0166d008	Expose borrowed journal endpoint visitor
+4da5435bbbeda21afee50d4df21b41de24c61110	Locate sync verification evidence outside source checkout
+2b4bd5e6eb638625a7068e5fada7277c1d5921f1	model: predeclare native flow parties and resolve typed ends
+7d28acfac2ac027146608a5c0101486cd40d40fb	model: type selectors and law specificity
+8a59c0c0e2a607f8d42557ba0590cbac092b5f1f	sync: borrow read callbacks and join CAMT text nodes
+67ee82af3a22b912cd59e9d93b7b3a4617c36c8b	engine: preserve typed units and runtime identities
+01476f51400f884b7c8133dfff984cf3bf66c9b7	engine: define borrowed promise and claim result ranges
+686311bb1178dacfad43e55749eb5a4a12bc982b	model: wire native laws and stabilize endpoint resolution
+5e611a4c07938fc8ef590adb4791c42e18fda031	model: retire legacy S3 collection and flow lowering
+63f744e12f2d2e3eebf8d340f0be98c4585985b2	Parse years as typed expression selector keys
+964ba19400b30bd9e276e4f54528be6a925f5e06	Record native cutover integration and review failures
+44070b1db17d38e9b98f51b04d0583bbcaf169b4	sync: fix nested CAMT text and model format lowering
+ac23af5ec6536a31b942136554071f564c7aaa85	model: remove legacy contract forecast adapter
+f2f983ef6503f94b03c32531e67d632a30cbb3a2	model: store typed law programs in arenas
+5ecf04f289ea38dbea4b4bf2e7a9dd140715e5c0	model: pass scope into literal resolution
+e7d533a2b3181913dbac799f2f4cfcc4f15bfb26	Lower native journal records from S5 syntax
+e5303d91db3369830973e720547e67e2340ae9b7	Adapt engine facts to typed law arenas
+b2918f099d03116665b3183c2d2e3663f8ae685a	Adapt engine facts to typed law arenas
+00c0a73aeff4bf05496e5993841ce4987d029b12	model: run native journal lowering in build
+3ddf35671b00cfee92fbaf5fb70c340135062f22	Fix native record symbol interning and share Also tail lowering
+3090f71c3e81def54937b6acef46efbe164cec6e	engine: render native values and diagnostics
+16332638611edf0ca887ba639d8381d305becbd0	engine: scope purpose diagnostics by owners
+48a770b14ff843c80a298c0027cdcda3249700d8	model: distinguish purpose budget caps
+9b72267a7212af322820b3e9ec33c02461dbffec	Record native journal verification and remaining cutover failures
+063607e6191cd56f8120287941f954763b33df1e	engine: add native typed evaluation and contract totals
+1e6f1a79e9ac8d29bdbb9ffc975be3c0781cdfac	Fix native record symbol interning and share Also tail lowering
+feb549cd3bca1ed46fed212dbc4ff40b4f4a2c6d	engine: render native values and diagnostics
+8199f3eaed20058d26531f1ebd312cc55d88f24d	engine: scope purpose diagnostics by owners
+a80bffc60fd287be137dea1205a745a7a0616aae	model: distinguish purpose budget caps
+86796b660985f30cdbe2dc84319e02d9ed10679b	engine: read purpose caps from purpose windows
+9d2138d401ae8bb1031c874d81757f34743ed23a	Merge branch 'cutover/promote-workspace' into cutover/engine
+893567c3f075cc6838e37a1cb1def226a9ce983e	sync: add native source planning boundary
+eca9704226e44f1291302a0655f4e5f1f950cc3c	sync: add registered model-native planning
+993796755a8ed266026c8d496dd0cb8e6f24edbe	cli: pass sync dry option through command dispatch
+e68ee88d52a7ad0a863a03ac6be4630a302211be	Support computed assertions and populate native flow index
+64281c4d30d304273b2f8f8ad65c7d17426b4d00	model: initialize computed assertion programs
+4e401b61a5917c1ea210fcf9173cb6553cae3b59	sync: preserve source offsets in diagnostics
+b039051cf7e45c0539f203b01c12bd3eb5b814a0	model: diagnose cross-namespace name collisions
+a0344ad1cb437b938fd392229dede6a5eb7fbd5c	engine: guard cap shortcuts by unit
+0aea933a21b316d29cbba3248aee343acde25596	Type computed asset assertions and signed expressions
+e094144aabb4a20b16b4e0a7172f0a9d85e71da9	Merge commit '0aea933a21b316d29cbba3248aee343acde25596' into cutover/engine
+02128d98db342e9a7a96a020dfc55b4453b9f98a	Parse computed terms in dated changes
+917544486f59936d56455c70f95c8f1aa06c76b7	Lower filed returns and settlement events natively
+b840ce1b284936be644ac0275eb21ddde7ec9e8c	sync: adapt runtime to native typed model API
+300ee6f77b52c6ae4e7c59d01f348ac871316add	engine: evaluate computed balance assertions
+83d030a7b23b1ce6c6c19aa1a2e75eaa91b9f2ec	model: lower native budgets and declaration also
+28a9079040cf23ad94eddebc956c25c0737097e8	model: repair focused native tests
+fb28a3d2b39595f59c638769d6f065abb5301ddf	Record native cutover verification and review gaps
+b57ae7db472ce44bee84fd6af6811751794dc0df	model: retain assertion evaluation subject
+bd46f33dd8a800698321759e8bee1645e4226832	sync: avoid duplicate source reads for planned changes
+21b7bf9349c7e22f4e627c6a0a688c877849b9cf	model: remove obsolete endpoint shadowing bridge
+464d7bdb7142db77ea5f1a63b2d85ffe83d1bcf8	engine: respect assertion subjects and repair regressions
+7e69057d00f0158706023aaf69c79cbe1dd69950	model: delete obsolete v3 path roots
+013afcb4d8f30a2d159938df9445e456318c183e	model: resolve transaction references in journal tails
+95f75e72552c93800db4f2ae30b0b4b65feb4fa5	engine: evaluate native budget limits
+b574f8f627b34a8326df1bcb5e0176d1b29a4f96	docs: record native model test migration status
+45a530f3f6c44b11890a1471e55340e9704f0e45	model: expand native declaration regression coverage
+5ea30b4370bdb0f5883fc21dd113c724f5ffb1a0	model: lower journal code refs and asset openings
+8783fb3dc497d8cefb81ee62a0765fa05f54bbf5	report: route views through plan-backed lens
+95b070330d18337d7dae217c3b8217d9032d2bef	report: scope views and use canonical runtime flows
+61effa8ddcfbdf7b7eb87edfaf9ca3463a66fd32	report: derive lens inputs from prepared plan
+e5043071c883056bc529e7965dba5353eb3862e3	cli: suggest unrecognized local read memos during check
+e4a3d071a9f4f516f5d90cbe2e0a2f538595a36e	cli: preserve grouped check hints in JSON
+9f4a2ccf0e6512bb0fa6094f1bbcf6101ac9c2f1	engine: add typed asset part state and adjustments
+cc872c7dd13821c2cbae7fe10bad8558917f5ced	syntax: preserve omitted budget carry setting
+4f80a4c02e7f257af6267a09d40ead8125e79503	model: preserve dated budget terms and validate also lines
+4c2f89308d2787cf5f999423de2447f084e7d5e8	core: fill grouped tables without pair index copies
+aee7de8042a359aa642530b891f9aa8b18edbe2c	engine: avoid cloned vectors in grouped table builds
+8dc82451371e788db91eef59421f2beda481a3c3	model: reject incomplete native budgets
+19591e763150588151992ba9518fb81614af6d47	engine: index asset parts and validate time bounds
+d39ae3d32be82b74f5865bbaf7e6006087792dfe	report: scope available and forecast values by owner
+298bcc861c7b5147b6a4b5c60ff6be40236a7fcd	docs: record native consumer integration and measured index gains
+f89a86848d9475a4b70e445c4cd65abc2456e3d8	model: preserve claim tabs through kind finalization
+b1b90313b778c83bfc3ace3e5726e570eec0825f	model: verify diagnostic edits and reserved names
+b74bcf92c8c183663524828c0acb635e98ec95b9	engine: evaluate dated carrying budgets
+9c9e96f80936bc15d3c4a051fdb84328aa07c0f9	model: avoid duplicate budget dependencies
+067ff0837f95958701d72243161a6344fdbc71c2	model: lower claims and preserve ending events
+fd86f17334f58f215e490de519f1764a371606f3	model: cover overlapping native residences
+bd4ca6d41ac344f1053e3ac31bd6d19202fce460	model: remove unused declaration staging
+33e6519cce87159f55f4c4b19bdfeedecc14d4a1	model: expose surveyed claim tab lookup
+31f7f293640464051c2891900a987fe1b474c54e	model: preserve the native claim tab trait
+f870226042365c0c9e5c06622e455dfa36141950	model: let laws extend built-in purpose roots
+acff61bf6539a05610b16b414cee7cd1e261d448	systems: port shared vocabulary to native purposes and kinds
+101a56bc869cee1423f47dfbc54868649581cbe0	examples: use native 529 kind in refusal fixture
+9274b75308a609ec39f24519c116179c68b076a3	sync: keep records and recognition in shared borrowed buffers
+bcdf4141657fc6d7236daab11a112b85268ad2c2	engine: include canonical asset parts in world checkpoints
+8b3593399e4244f4402d9da289bbac6c4e8e6745	examples: disambiguate account, party and contract names
+4f076a9104d30275c2852b8565e2210289696653	docs: record native systems and sync dependency verification
+419c628994f8debf3c277ffcbaf325c9296e9945	model: retain contract areas for measured shares
+d433ec60423d4718e81043df2c8f101ec99de924	report: apply effective ownership to financial views
+0d03c13093431189e501cb0a13d1338d8e61c1e3	engine: split budget history at dated cadence changes
+0c289cd4559df4bb96f11db764f57172e676cae7	sync: keep reconciliation rows in one paired buffer
+966a4063430e2da6f30b0af83dc3152bfb61a357	cli: adapt sync planning to registered sources
+31238a6fff4ec2602bfa72615c19a4f02b80e7a6	sync: restore native world behavior coverage
+0571e257751e8233df0177ab02f3036bb7f4d3c3	sync: migrate end-to-end tests to native project planning
+4f69c7685b1711e6a8fe37a0dc8625c6395d40e1	engine: update contract fixture for measured areas
+de9bd189c835523fe8b7d0a2ed557d487ffe4d6d	Preserve staged property rows across finalization
+09a6954720968aea98f18079ba9538e664f00ae8	bench: use native for and code query syntax
+cd84139669fe5236b0d50648eab456d9cdb777b0	core: fast-forward bounded calendar schedules
+bff03728000e1824589e2fc0d8348cf90cc18fdb	core: bound due schedule seeking
+1e6d8ece290e9ec3dc8ddbdc388ccd99da602fb9	model: record dated contract occurrences
+cf794496adb407cd3101c90fa932c62c60f035cf	docs: record native consumer and complete sync verification
+029ed94dde6e607146a07038838cbfab097d89ef	engine: bridge asset basis and held parcels
+c0b3638e0958f66c582bc4757b50d82c306f73fd	engine: preflight asset basis updates atomically
+6d9ee560116e03fc5cec6f024f1298946b2d0ef8	engine: borrow asset update guards through commit
+172052e9a2d3ccecc2773d74d6dcc5c113b72256	sync: derive pending settlement from book codes
+ea674f295e998d37734977061ef55a26d02537b3	core: speed common bounded schedule enumeration
+afdcc1c90b3d4c0f71722bfac8d1574e51326deb	sync: avoid replaying settled pending flows
+ab7cc03229a5748f76e6a1d3676f67b1c96c63db	cli: render and safely apply sync plans
+79bc39e7419ef76ee39f1af261ebac3dd9cb7ea2	cli: preflight sync writes within project root
+b7d86bc64f614c7f3285f98a5959f832accee74d	model: retain exact written occurrence identity
+bf465f974b4a723597ea66175faa204813e1f623	cli: keep native check fixture valid
+dfc8901a7c3c0c8be4266917d1b6958d99956370	sync: remove legacy session API
+3b3ce4e84a1f8a9562845100958a8c6b05e62fb4	sync: expose only native planning API
+151452eb8fbb5d489d9739086be4ef4d2740034d	bench: generate native v4 workloads
+3d832ea217f40fb015471f221ea988f671d5c3bc	engine: evaluate computed journal amounts before posting
+2b84da28dfcd30282f5e85a73911640e510c4d12	engine: preserve explicit amounts on computed exchanges
+77fed62a05fce20ccceead52c0eb7a59c48e530c	test(engine): port source fixtures to native journal
+99cf2346c88432987dee8acec82f75b499bcfc9f	test: preserve native split and purpose fixtures
+052dce3bcfebfe18b473d0b2903c1edf339a00b1	engine: borrow journal details and account exchange costs
+83f6480b9b753e2e7ba57baa799ce560e9c62892	model: add typed commodity issuer endpoints
+1448daf1444400eef32bd0e65c12d5d471ce7b62	docs: record actual native execution and remaining cutover gates
+74b90fa645ba6b03fd9ac54ed5e486dd993bf4c9	report: scope shared movement facts by effective ownership
+5490c382757ec4970f38f1352b351065e5430005	model: bind outside flows to the owned endpoint
+01c8ff5f04e2f2ce4e8851b121679be47e0165bf	test(report): resolve duplicate fields after native fixture integration
+9d183828ce08fae2e44b35d1951e9a6ca11e7161	engine: track runtime flow ordinals
+b2b1c95d0f8d306033248bf5ce15127b5c8d8df4	Index carried budget history and inherit kind properties
+57f46fcfb8da8cdb68efd84144a0dad15a75c06b	report: conserve scoped movements across zero
+4e9b62fd8e603d606f412df6fb0c4b64eb31f732	report: migrate forecast fixtures to native contracts
+aad615decdad6886ae7745fbfbd6f4a9a0c63976	cli: port regression fixtures to v4 grammar
+9d64f9be167d73199fec596586345cfda8092fa0	examples: port landlord project to native v4
+1bd6931788db3d2d75a3240854dec30894e43559	Benchmark budget history against exact scans
+8bbb657d4004e595a2a37141ac9e3010616b7348	report: update fixtures for native schema
+3adc448391229d602ad848eec1cba69daa959408	model: lower quoted flow prices in either direction
+408b931be28c535849ae3fb45111310a9c549949	Correct inherited property expiry test oracle
+894960af765e105339c24f38359e1888ba85e1b0	report: align manual fixtures with native codes
+784c2bffda5ac3e74c71881420e28da010bf4c25	report: include accepted gaps in party registers
+22ef5e3023c9ef0712693ac7f06b2700a140d421	Count known recognition across active budget windows
+ca25a25a8304926256872fb8e48fdec34d52f3e3	model: add sparse written occurrence overlays
+44a24a8d5e9be35296bd85b989ba4bd435fdbc74	engine: track asset acquisition and sale basis
+3be50722b50dd1633d99aa640f56d1f52261b550	engine: materialize native contract occurrences
+72da508a9023de7fd4a703e48452c87acbfce539	bench: preserve native opening and education semantics
+7c2cfc90cc54f1ee3b5790bfb65f17118f1eac40	model: retain written contract occurrence overrides
+30a065de8eca0eb9707f0b09a7ef589d01bb0c12	examples: keep sale costs attached to landlord sale
+2af86b4bde95706760e38ad76b1160cab6f4d289	bench: describe end-to-end CLI timings
+f30a116347613c50d23900e0bac62c8090057be6	Match native budget violations by declaration
+32941820a520e52e4b82de09ccdd6f1ad4a40156	Remove superseded previous implementation tree
+35c9ce6030a555ff13d0a2e40a9ca4ac34d64c14	Record verified native execution and cleanup checkpoint
+ae6bac1e868141a53d62afe6e740761fcd3fde4e	Clarify combined education budget documentation
+f7aa8ffaa4fa1eeadf025c2030e0902951b05ef3	report: scope entity holdings and port source fixtures
+f41d8f3c67b215ea0826b3dcc912d11756030526	examples: port investor ledger to native parties
+92c1c861505060ebe5d6680717559a5f3e2603d2	systems: model party purposes and 401k deferrals
+33652b1ad0719beddc6d1119a6ce24a18923d3fe	model: share native also lowering
+4783128aaa2bd9acf43f50b4b325a699fd388dd1	model: lower contract split quantities and written overrides
+a59144ebc38ab32673744d28cb728a830ff5f652	engine: apply written occurrence amount and tail
+07c8a8e9e0aee2c69b6d5519b67931535d09ee2d	Apply terminal half-month depreciation before disposal
+86ac2b0dd7ba37524145197851dfff3f81cbd215	Promote native workspace and remove legacy implementation
+27e12513a2cbc7e344d3a7cd4d408ef8dbf525af	engine: materialize percentage split legs
+dd2455b10980b76585058f685a08e02da751de90	model: lower contract also templates
+e0bb23f3635a769cc1ff5f5f184c60c831175669	Document promoted paths and active acceptance checks
+2e78419fc28a4a9b33e8626273aef2b4821906c4	model: require positive loan term spans
+6b10d713e4aac42b5adc05c38ebb201c0394ac28	report: project native contract occurrences
+5aca4bdb9cd77341bdbd229022b11cc51d8e2a8b	Evaluate selected groups and asset part fields
+bc44d0f285a7f1cb18039d34ae9ff521a449e143	Retain realized asset lot identity and codes
+cae321ea01f0d1bb1879fe0a191f6251ae76ce68	Apply asset basis laws and sale disposal
+508cfdf2a21001bf39cf29eb8fc221f5311ee998	Track realized parcel quantity for wash sales
+19f4e3a68264bd8997e383a3175025a8041f586c	Reserve wash-sale quantity per realized lot
+02b7639b6f08e528b0184629505ebaa103b29365	model: preserve authored contract grace
+807aaa334bbec2e3e307c5986b6e6bb0194f3c05	model: allow added legs on written occurrences
+77e2c62601dd59e954ca22173d47a726ec565d3e	model: assert loan balances at the debt tab
+79c5f1ccf6fae34738a756207a9ec7cc8dbdb890	engine: apply grouped contract occurrence overrides
+a604bafe399f4d53bbbce262e749434bae53c334	examples: port family ledger to native v4
+8a5485c5d32c7efc2bca20083b6535c580bf3cb9	examples: verify family transfer rhythms
+230a726807190bd4c3f4bc9f007be74a59f0021e	engine: assign dense occurrence leg ordinals
+1c722098a8015def9c59f191f9edce94db51d3bd	Repair selector evaluator native fixture
+9dbedd04ee3c680b58f8fbc64f30835e8843b5b5	docs: clarify family forecast verification
+8c45d5436d8d0a5d983ababf200cafc75b8ac891	model: record loan origination funding
+07c3ae559e3b73a435786a46e252fb1c31444594	model: compact transaction kind markers
+0d242aafbfce19be0d097eedec7ecaf1393585e5	model: lower loan reset rules
+2350cf6dd4a794b2027b67f06bd865bce0f27ce1	Declare fee purpose in selector fixture
+da58437a0e5fbcf14428fc7fe15a72c3c08fe736	report: integrate native asset history and current model APIs
+7ac30ae943e029015f19b81235b25fcb2e6c72a7	report: index written contract occurrences once
+26b2d9965cebbec121b12a2265dbf8e92b8ece87	examples: port freelancer project to native v4
+e95abe586776511f88e6125abea8270e7767883d	syntax: accept currency keys and portable sketch fixtures
+34d9fc58c6a53b54199f78b77c93fe43529dea9d	Track sparse temporal law values
+25bd4d3070f08e60fe58bde5dc155490ae6a0e2c	Keep asset-part temporal histories distinct
+8ba80f49a79525db802a6f8efb7ce116b2329a85	Keep realized parcel acquisition day
+f9b1b079726c5bc886cd668c783a71f226d64e06	Support temporal residence predicates
+2d2e68dfcbc7fce971eb80cf8715b80f180e1eed	Read temporal fixture owner before moving it
+a0b1f1a2ef8768aff1c8798efdccbf01823d86a7	engine: persist and catch up temporal samples
+d8f04cf6171999a4bb59e4604ac85322e166befd	Preserve tacked holding-period start
+eef2551c2a9aaaf407c64dbf496007f0a417c6ee	Track matched wash-sale replacement slices
+48f8570684eaab504b492c5dded470acb91b6be8	docs: record resumed native cutover evidence and runtime gaps
+bd31c43016664d8d836eb6764abb4a67edbf7c32	examples: assert landlord loan contract balance
+14a3a5e7e377e21903137a3c96a598681b3d678b	Match entity tests against endpoint roles
+ae3ece5e4224a145e3bfc3ce528d9ab65824c10b	Make endpoint identity fixture assert mismatches
+d5901253fbe50270fba006dedffeb687050fbac9	model: lower source claim write-offs by unique code
+dcdb8519a3f415155ea1d1738ea7f8c19129c5e2	model: lower contract deposits into typed holdings
+9676bb6331e2808bc47beb480b1e8e5e7fd08f6d	Fix temporal and endpoint source fixtures
+90a4f0025f73a58dd8feffd354aed9fc83460477	tests: initialize claim changes in book fixtures
+cdac16d4d45c310aeed4bf0e094cd82276dedc03	tests: initialize wash-sale parcel metadata
+338acd9da942b1272df3c035faa3d8232526dbe0	report: include empty native budget periods
+542c6e554fab888c6058716d52fabb2c6ad4c7da	report: preserve typed scoped budget rows
+72c128b3b927d43b2270f2eb71c0d228105c7ffb	docs: record native claims and classification review checkpoint
+42f003d279b430daf015f2d6575ac24e062748c7	systems: classify prior-year California tax and pretax benefits
+7e1985d4278f80899d46a884db4881fa0f27093c	model: default deposits to contract holding
+3f02d79c1ba0dec115f4b3706b5799e9b194c283	Add owner-aware typed currency conversion
+3e09afe1620ba0d9808bffe1cf7e3064f5f5f702	Test written quotes against differing implied rates
+83d0f44c84027dbf838cb77058ec1dab119300df	Match endpoint kinds and compile residence predicates
+24c3324763c27bd679bb5f7277c60809b6aeccaf	report: port gain and premium regressions to source
+30af545e4c8b3bc1501a0befd79d834662ebdd4e	docs(report): record native source test replacements
+91d2238077732c3740a15add4487e71c134fd2ee	report: guard future budget windows and assert depreciation dates
+15bdc180442e4601258e3ca0a36cfc0470cee060	model: infer purposes from parties and accounts
+30ada830ee00bf540a911bb188dfa0356210ad09	test: reject account purpose take conflicts
+c22bc1b4c0c4137d895e7de96722eecd9d2760b7	docs: record full native review and closed tax comparison
+76d787eaae687f4f408c0b820edc82fcf9af63a3	model: remove obsolete journal plans
+65ae13fcb88c442928da0e43f4d1fab7a7ca4d13	model: allow compatible purpose refinements
+442947dec61b626816a693d4c43dfa2c53423263	docs: specify compatible purpose refinements
+1a357e7c1915c875d0181c54f2d6e1699eb8c510	Sample temporal state after posted mutations
+fc58a78d0abb1d7e537cc3a552b4ad758ffc00a9	Handle basis-zero HSA funding and reimbursements
+d63a7ce754e38873032d38c0562606398872ae82	report: use neutral parties in explicit-purpose fixtures
+1be566d4b1ddfbde419076dddb65ffc1e8f98a7c	engine: execute native kept occurrences in source order

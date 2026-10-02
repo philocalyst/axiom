@@ -1,5 +1,12 @@
 # Axiom — handoff plan
 
+> Stopped at the user's request, 2026-10-02. Verified product commit `1be566d`
+> compiles; the complete release suite has 734 passed, four failed and eight
+> ignored. [The current handoff](docs/local-rework/STOPPING-POINT-2026-10-02.md)
+> supersedes historical status below. [REMAINING.md](REMAINING.md) is the current
+> unfinished acceptance list. Luna workers are stopped and all WIP is preserved
+> in archived local worktrees; no pushing or publication occurred.
+
 > Current checkout, 2026-10-01: the native Cargo workspace is at this repository
 > root (`86ac2b0`). Both older implementations have been removed here; their
 > history is preserved in Git and the original recovery repositories are

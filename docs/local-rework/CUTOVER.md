@@ -1,5 +1,11 @@
 # Local v4 cutover
 
+> Stopping checkpoint, 2026-10-02: product commit `1be566d`. Compilation passes;
+> the release suite has 734 passed, four failed and eight ignored. Full family
+> and landlord checks still fail. See [the current handoff](STOPPING-POINT-2026-10-02.md)
+> and [current remaining work](../../REMAINING.md). Dated entries below retain
+> their original observations and are superseded by the final checks.
+
 This is new implementation guided by the recovered requirements. It does not
 restore the lost H16002 patches. The original checkout, recovery objects and
 cached evidence remain unchanged.
@@ -17,8 +23,9 @@ memory improvements. The earlier request specifies Luna implementation workers
 with Sol orchestration and review. Six existing Luna workers continue in separate
 local worktrees; their work is reviewed and integrated incrementally.
 
-The specification is `v2/LANGUAGE.md` and `v2/DESIGN.md`. The recovered migration
-checklist is `v2/REMAINING.md` as preserved at the starting commit. Its historical
+The specification is the promoted root `LANGUAGE.md` and `DESIGN.md`. The recovered migration
+checklist was `v2/REMAINING.md` at the starting commit; its original inventory is
+preserved in [the historical checklist](history/REMAINING-2026-09-30.md). Its historical
 branch descriptions and performance numbers are evidence of earlier work, not
 verification of this implementation. Its referenced lane briefs and audits supply
 acceptance details. The cached prompt inventory and source proofs are recorded in
