@@ -22,8 +22,8 @@ use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
-    Action, Detail, FlowExpressions, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity,
-    Mode, OccurrenceTail, Origin, Provenance, Purposed, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
+    Action, Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram,
+    JournalQuantity, Mode, OccurrenceTail, Origin, Provenance, Purposed, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
 };
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
@@ -156,10 +156,8 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
         let txn_start = world.book.txns.len();
         let diagnostic_start = diags.len();
         match record {
-            Record::Txn(written) => lower_txn(world, written.site, written.item, written.node, &code_index, diags),
-            Record::Opening(written) => {
-                lower_opening(world, written.site, written.item, written.node, &code_index, diags)
-            }
+            Record::Txn(written) => lower_txn(world, written, &code_index, diags),
+            Record::Opening(written) => lower_opening(world, written, &code_index, diags),
             Record::Statement(written) => {
                 let (site, item) = (written.site, written.item);
                 let at = Stated {
@@ -211,83 +209,41 @@ struct Built {
     successful: bool,
 }
 
+impl Built {
+    /// Says what is wrong with the transaction's shape, which makes it wrong.
+    fn reject(&mut self, problem: Diagnostic, diags: &mut Vec<Diagnostic>) {
+        diags.push(problem);
+        self.successful = false;
+    }
+}
+
+/// A transaction being lowered: what its flows are made against, and what its header says, which each carries.
+struct TxnCx<'c, 's> {
+    cx: FlowCx<'c, 's>,
+    flow: &'c ast::Flow<'s>,
+    tail: Tail,
+    codes: Run<Sym>,
+}
+
 fn lower_txn<'a, 's>(
     world: &mut World<'s>,
-    site: &Site<'a, 's>,
-    item: &ast::Item<'s>,
-    written: &ast::Txn<'s>,
+    record: Written<'a, 's, ast::Txn<'s>>,
     code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let (file, home) = (&site.source.file, site.home);
+    let (item, written, home) = (record.item, record.node, record.home());
     let mut staged = Staged::open(world);
     let txn = Id::new(staged.book.txns.len() as u32);
     let diagnostic_start = diags.len();
-    let Some((program, root_ids)) = compile_flow_roots(&mut staged, file, home, &written.flow, diags) else {
+    let Some((program, root_ids)) = compile_flow_roots(&mut staged, record.file(), home, &written.flow, diags) else {
         push_rejected_txn(&mut staged, item, written.date);
         return;
     };
-    let cx = FlowCx { file, home, day: written.date, txn, loc: item.loc, roots: &root_ids, code_index };
-    let (header_codes, header_tail) = cx.lower_tail(&mut staged, written.flow.tail, diags);
-    let txn_waive = header_tail.waive;
-    let mut built = Built { flow_roots: Vec::new(), groups: Vec::new(), successful: header_tail.valid };
-
-    let flow = &written.flow;
-    let from = flow.from.end.map(|end| resolve_end(&mut staged, &cx, end, diags));
-    let to = flow.to.end.map(|end| resolve_end(&mut staged, &cx, end, diags));
-    built.successful &= !from.is_some_and(|end| end.is_none()) && !to.is_some_and(|end| end.is_none());
-    match (from, to) {
-        (Some(Some(from)), Some(Some(to))) if file[flow.body.legs].is_empty() => {
-            let ends = Ends { from, to };
-            lower_named_flow(&mut staged, &cx, flow, ends, header_tail, header_codes, &mut built, diags)
-        }
-        (Some(Some(_)), Some(Some(_))) => {
-            diags.push(
-                Diagnostic::error("flow-shape", "a flow with both named ends cannot also have split legs")
-                    .label(item.loc, "these legs do not have an unnamed side to fill")
-                    .help("name one end in the header and put the other ends on its indented legs"),
-            );
-            built.successful = false;
-        }
-        _ if file[flow.body.legs].is_empty() => {
-            diags.push(
-                Diagnostic::error("flow-shape", "a flow needs a named end and at least one leg")
-                    .label(item.loc, "no complete flow can be formed here")
-                    .help("write both ends in the header, or write one end and indent the other legs"),
-            );
-            built.successful = false;
-        }
-        (Some(Some(source)), None) => lower_split_flow(
-            &mut staged,
-            &cx,
-            flow,
-            source,
-            FlowSide::Out,
-            &header_tail,
-            header_codes,
-            &mut built,
-            diags,
-        ),
-        (None, Some(Some(source))) => lower_split_flow(
-            &mut staged,
-            &cx,
-            flow,
-            source,
-            FlowSide::Arrive,
-            &header_tail,
-            header_codes,
-            &mut built,
-            diags,
-        ),
-        _ => {
-            diags.push(
-                Diagnostic::error("flow-shape", "a split header names exactly one end")
-                    .label(item.loc, "the named end of the split is missing or ambiguous"),
-            );
-            push_rejected_txn(&mut staged, item, written.date);
-            return;
-        }
-    }
+    let cx = FlowCx { file: record.file(), home, day: written.date, txn, loc: item.loc, roots: &root_ids, code_index };
+    let (codes, tail) = cx.lower_tail(&mut staged, written.flow.tail, diags);
+    let (waive, valid) = (tail.waive, tail.valid);
+    let mut built = Built { flow_roots: Vec::new(), groups: Vec::new(), successful: valid };
+    lower_flows(&mut staged, TxnCx { cx, flow: &written.flow, tail, codes }, &mut built, diags);
 
     if diags.len() != diagnostic_start || !built.successful {
         push_rejected_txn(&mut staged, item, written.date);
@@ -301,8 +257,7 @@ fn lower_txn<'a, 's>(
         })
     });
     let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
-    let record =
-        Txn { program, codes: header_codes, waive: txn_waive, doc, ..journal_txn(&staged, written.date, item.loc) };
+    let record = Txn { program, codes, waive, doc, ..journal_txn(&staged, written.date, item.loc) };
     staged.book.txns.push(record);
     staged.commit();
 }
@@ -326,19 +281,48 @@ fn compile_flow_roots<'s>(
     Some((program, by_expr))
 }
 
+/// What a header's ends make of the transaction: one flow, a split from the one end it names, or a mistake in
+/// the shape, which is said.
+fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut Built, diags: &mut Vec<Diagnostic>) {
+    let (cx, flow) = (txn.cx, txn.flow);
+    let from = flow.from.end.map(|end| resolve_end(staged, &cx, end, diags));
+    let to = flow.to.end.map(|end| resolve_end(staged, &cx, end, diags));
+    built.successful &= !from.is_some_and(|end| end.is_none()) && !to.is_some_and(|end| end.is_none());
+    let has_legs = !cx.file[flow.body.legs].is_empty();
+    match (from, to) {
+        (Some(Some(from)), Some(Some(to))) => {
+            assert!(!has_legs, "the parser rejects legs under a header that names both ends");
+            lower_named_flow(staged, txn, Ends { from, to }, built, diags)
+        }
+        _ if !has_legs => {
+            let problem = Diagnostic::error("flow-shape", "a flow needs a named end and at least one leg")
+                .label(cx.loc, "no complete flow can be formed here")
+                .help("write both ends in the header, or write one end and indent the other legs");
+            built.reject(problem, diags);
+        }
+        (Some(Some(end)), None) => lower_split_flow(staged, &txn, SplitEnd { end, side: FlowSide::Out }, built, diags),
+        (None, Some(Some(end))) => {
+            lower_split_flow(staged, &txn, SplitEnd { end, side: FlowSide::Arrive }, built, diags)
+        }
+        _ => {
+            let problem = Diagnostic::error("flow-shape", "a split header names exactly one end")
+                .label(cx.loc, "the named end of the split is missing or ambiguous");
+            built.reject(problem, diags);
+        }
+    }
+}
+
 /// A header that names both its ends is one flow, with the items under it as a group of their own.
 fn lower_named_flow<'s>(
     staged: &mut Staged<'_, 's>,
-    cx: &FlowCx<'_, 's>,
-    written: &ast::Flow<'s>,
+    txn: TxnCx<'_, 's>,
     ends: Ends,
-    header_tail: Tail,
-    header_codes: Run<Sym>,
     built: &mut Built,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let TxnCx { cx, flow: written, tail, codes } = txn;
     let flow_at = staged.flows().len();
-    let Some((flow, exprs)) = make_flow(staged, cx, written, ends, header_tail, header_codes, diags) else {
+    let Some((flow, exprs)) = make_flow(staged, &cx, written, ends, tail, codes, diags) else {
         built.successful = false;
         return;
     };
@@ -349,8 +333,8 @@ fn lower_named_flow<'s>(
     if cx.file[written.body.items].is_empty() {
         return;
     }
-    let parent = Parent { ends, side: FlowSide::Out, mode: Mode::Actual, header_codes, tail: None };
-    let items = lower_items(staged, cx, written.body.items, parent, &mut built.flow_roots, diags);
+    let parent = Parent { ends, side: FlowSide::Out, mode: Mode::Actual, header_codes: codes, tail: None };
+    let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots, diags);
     built.groups.push(JournalGroup {
         header: Some(flow_at),
         source: journal_end(ends.from),
@@ -362,62 +346,18 @@ fn lower_named_flow<'s>(
     });
 }
 
-/// A header that names one end is the source of its legs, which name the others, and of the items under it.
-fn lower_split_flow<'s>(
-    staged: &mut Staged<'_, 's>,
-    cx: &FlowCx<'_, 's>,
-    written: &ast::Flow<'s>,
-    source: ResolvedEnd,
-    source_side: FlowSide,
-    header_tail: &Tail,
-    header_codes: Run<Sym>,
-    built: &mut Built,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let source_qty = match source_side {
-        FlowSide::Out => written.from.amount,
-        FlowSide::Arrive => written.to.amount,
-    };
-    let base = staged.book.base;
-    let total = source_qty.and_then(|qty| resolve_quantity(staged, cx, qty, base, source_side, diags));
-    if source_qty.is_some() && total.is_none() {
-        built.successful = false;
-    }
-    let mut split = SplitLegs { legs: Vec::new(), quantities: Vec::new() };
-    for leg in &cx.file[written.body.legs] {
-        if !lower_leg(staged, cx, leg, source, source_side, total, header_tail, header_codes, &mut split, built, diags)
-        {
-            built.successful = false;
-        }
-    }
-    let leg_end = split.legs.first().map(|&offset| {
-        let leg = staged.flow(offset);
-        ResolvedEnd {
-            place: if source_side == FlowSide::Out { leg.to } else { leg.from },
-            entity: None,
-            select: Run::new(Id::new(0), 0),
-        }
-    });
-    let parent = Parent {
-        ends: Ends { from: source, to: leg_end.unwrap_or(source) },
-        side: source_side,
-        mode: Mode::Actual,
-        header_codes,
-        tail: None,
-    };
-    let items = lower_items(staged, cx, written.body.items, parent, &mut built.flow_roots, diags);
-    if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && split.legs.is_empty() {
-        built.successful = false;
-    }
-    built.groups.push(JournalGroup {
-        header: None,
-        source: journal_end(source),
-        side: source_side,
-        total: total.map(|total| total.group),
-        legs: split.legs.into_boxed_slice(),
-        leg_quantities: split.quantities.into_boxed_slice(),
-        items,
-    });
+/// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
+#[derive(Clone, Copy)]
+struct SplitEnd {
+    end: ResolvedEnd,
+    side: FlowSide,
+}
+
+/// A split being lowered: the transaction it is in, its source, and the total its header states, if it does.
+struct Split<'c, 's> {
+    txn: &'c TxnCx<'c, 's>,
+    source: SplitEnd,
+    total: Option<ResolvedQuantity>,
 }
 
 /// The legs of a split so far: where each flow went, and what each said it moved.
@@ -426,72 +366,125 @@ struct SplitLegs {
     quantities: Vec<JournalQuantity>,
 }
 
-/// One leg of a split: a flow between the source and the end it names. False after the problem is said.
-fn lower_leg<'s>(
+/// A header that names one end is the source of its legs, which name the others, and of the items under it.
+fn lower_split_flow<'s>(
     staged: &mut Staged<'_, 's>,
-    cx: &FlowCx<'_, 's>,
-    leg: &ast::Leg<'s>,
-    source: ResolvedEnd,
-    source_side: FlowSide,
-    total: Option<ResolvedQuantity>,
-    header_tail: &Tail,
-    header_codes: Run<Sym>,
-    split: &mut SplitLegs,
+    txn: &TxnCx<'_, 's>,
+    source: SplitEnd,
     built: &mut Built,
     diags: &mut Vec<Diagnostic>,
-) -> bool {
-    let Some(other) = resolve_end(staged, cx, leg.end, diags) else {
-        return false;
+) {
+    let (cx, written) = (&txn.cx, txn.flow);
+    let source_qty = match source.side {
+        FlowSide::Out => written.from.amount,
+        FlowSide::Arrive => written.to.amount,
     };
-    let source_is_from = source_side == FlowSide::Out;
-    let (from, to) = if source_is_from { (source, other) } else { (other, source) };
-    let (leg_codes, leg_tail) = cx.lower_tail(staged, leg.tail, diags);
-    let tail = header_tail.clone().merge(leg_tail);
-    let unit = total.map_or(staged.book.base, |total| total.amount.unit);
-    let Some(quantity) = resolve_quantity(staged, cx, leg.amount, unit, source_side.other(), diags) else {
-        return false;
-    };
-    let header_amount = total.map_or_else(|| Amount::zero(unit), |total| total.amount);
-    let zero = Amount::zero(header_amount.unit);
-    let (out, arrive) = if source_is_from { (zero, quantity.amount) } else { (quantity.amount, zero) };
-    let flow_at = staged.flows().len();
-    let basis_root = tail.basis_root;
-    let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
-    let codes = Codes { header: header_codes, local: leg_codes };
-    let Some(flow) = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags) else {
-        return false;
-    };
-    staged.book.flows.push(flow);
-    split.legs.push(flow_at);
-    split.quantities.push(quantity.group);
-    push_flow_expressions(
-        &mut built.flow_roots,
-        flow_at,
-        (!source_is_from).then_some(quantity.root).flatten(),
-        source_is_from.then_some(quantity.root).flatten(),
-        basis_root,
-    );
-    true
+    let base = staged.book.base;
+    let total = source_qty.and_then(|qty| resolve_quantity(staged, cx, qty, base, source.side, diags));
+    if source_qty.is_some() && total.is_none() {
+        built.successful = false;
+    }
+    let split = Split { txn, source, total };
+    let mut made = SplitLegs { legs: Vec::new(), quantities: Vec::new() };
+    for leg in &cx.file[written.body.legs] {
+        let Some(leg) = split.lower_leg(staged, leg, diags) else {
+            built.successful = false;
+            continue;
+        };
+        made.legs.push(leg.at);
+        made.quantities.push(leg.quantity);
+        push_flow_expressions(&mut built.flow_roots, leg.at, leg.out, leg.arrive, leg.basis);
+    }
+    let items = split.items(staged, &made, built, diags);
+    if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && made.legs.is_empty() {
+        built.successful = false;
+    }
+    built.groups.push(JournalGroup {
+        header: None,
+        source: journal_end(source.end),
+        side: source.side,
+        total: total.map(|total| total.group),
+        legs: made.legs.into_boxed_slice(),
+        leg_quantities: made.quantities.into_boxed_slice(),
+        items,
+    });
+}
+
+/// One leg of a split once its flow is made: where the flow is, what the leg said it moved, and the expressions
+/// that compute it.
+struct MadeLeg {
+    at: u32,
+    quantity: JournalQuantity,
+    out: Option<NodeId>,
+    arrive: Option<NodeId>,
+    basis: Option<NodeId>,
+}
+
+impl<'s> Split<'_, 's> {
+    /// One leg: a flow between the source and the end it names. None after the problem is said.
+    fn lower_leg(
+        &self,
+        staged: &mut Staged<'_, 's>,
+        leg: &ast::Leg<'s>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Option<MadeLeg> {
+        let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
+        let other = resolve_end(staged, cx, leg.end, diags)?;
+        let source_is_from = side == FlowSide::Out;
+        let (from, to) = if source_is_from { (source, other) } else { (other, source) };
+        let (leg_codes, leg_tail) = cx.lower_tail(staged, leg.tail, diags);
+        let tail = self.txn.tail.clone().merge(leg_tail);
+        let unit = self.total.map_or(staged.book.base, |total| total.amount.unit);
+        let quantity = resolve_quantity(staged, cx, leg.amount, unit, side.other(), diags)?;
+        let zero = Amount::zero(unit);
+        let (out, arrive) = if source_is_from { (zero, quantity.amount) } else { (quantity.amount, zero) };
+        let at = staged.flows().len();
+        let basis = tail.basis_root;
+        let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
+        let codes = Codes { header: self.txn.codes, local: leg_codes };
+        let flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags)?;
+        staged.book.flows.push(flow);
+        let (out, arrive) = if source_is_from { (None, quantity.root) } else { (quantity.root, None) };
+        Some(MadeLeg { at, quantity: quantity.group, out, arrive, basis })
+    }
+
+    /// The items under the header: expenses of the legs, or what the source's own flow is, which each leg's end
+    /// stands in for.
+    fn items(
+        &self,
+        staged: &mut Staged<'_, 's>,
+        made: &SplitLegs,
+        built: &mut Built,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Box<[JournalItem]> {
+        let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
+        let leg_end = made.legs.first().map(|&offset| {
+            let leg = staged.flow(offset);
+            let place = if side == FlowSide::Out { leg.to } else { leg.from };
+            ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) }
+        });
+        let ends = Ends { from: source, to: leg_end.unwrap_or(source) };
+        let parent = Parent { ends, side, mode: Mode::Actual, header_codes: self.txn.codes, tail: None };
+        lower_items(staged, cx, self.txn.flow.body.items, parent, &mut built.flow_roots, diags)
+    }
 }
 
 fn lower_opening<'a, 's>(
     world: &mut World<'s>,
-    site: &Site<'a, 's>,
-    item: &ast::Item<'s>,
-    opening: &ast::Opening<'s>,
+    record: Written<'a, 's, ast::Opening<'s>>,
     code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let file = &site.source.file;
+    let (file, site) = (record.file(), record.site);
     let Some(opening_place) = world.book.entities[world.book.roots.opening].place else {
         diags.push(
             Diagnostic::error("opening-place", "the opening source has no place")
-                .label(item.loc, "cannot record opening"),
+                .label(record.item.loc, "cannot record opening"),
         );
         return;
     };
-    lower_opening_balances(world, site, item, opening, opening_place, code_index, diags);
-    for claim in &file[opening.claims] {
+    lower_opening_balances(world, record, opening_place, code_index, diags);
+    for claim in &file[record.node.claims] {
         let loc = super::subject_loc(file, claim.subject);
         let at = Stated { site, statement: claim, loc, within: Within::Opening, code_index };
         lower_statement(world, at, None, diags);
@@ -501,102 +494,109 @@ fn lower_opening<'a, 's>(
 /// The opening's balances as one transaction of flows out of the opening entity: kept whole, or not at all.
 fn lower_opening_balances<'a, 's>(
     world: &mut World<'s>,
-    site: &Site<'a, 's>,
-    item: &ast::Item<'s>,
-    opening: &ast::Opening<'s>,
+    record: Written<'a, 's, ast::Opening<'s>>,
     opening_place: Id<Place>,
     code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let file = &site.source.file;
+    let (file, item, opening) = (record.file(), record.item, record.node);
     let mut staged = Staged::open(world);
-    let txn_id = Id::new(staged.book.txns.len() as u32);
+    let txn = Id::new(staged.book.txns.len() as u32);
     let diagnostic_start = diags.len();
     let mut roots = Vec::new();
     for leg in &file[opening.lines] {
         push_tail_roots(file, leg.tail, &mut roots);
     }
     let program_name = staged.book.names.intern("journal");
-    let compiled = super::compile_roots(&mut staged, file, site.home, Ty::Flow, program_name, &[], &roots, diags);
+    let compiled = super::compile_roots(&mut staged, file, record.home(), Ty::Flow, program_name, &[], &roots, diags);
     let Some((program, root_ids)) = compiled else {
         push_rejected_txn(&mut staged, item, opening.date);
         return;
     };
-    let cx =
-        FlowCx { file, home: site.home, day: opening.date, txn: txn_id, loc: item.loc, roots: &root_ids, code_index };
+    let cx = FlowCx { file, home: record.home(), day: opening.date, txn, loc: item.loc, roots: &root_ids, code_index };
     let mut flow_roots = Vec::new();
     for leg in &file[opening.lines] {
-        let whole_asset = if matches!(leg.amount, Quantity::Whole) { staged.book.asset(leg.end.name.0) } else { None };
-        let end = if let Some(asset) = whole_asset {
-            Some(ResolvedEnd { place: staged.book.assets[asset].place, entity: None, select: Run::new(Id::new(0), 0) })
-        } else {
-            resolve_end(&mut staged, &cx, leg.end, diags)
-        };
-        let Some(end) = end else {
-            if matches!(leg.amount, Quantity::Whole) {
-                diags.push(
-                    Diagnostic::error("opening-whole", "a whole opening holding must name an asset")
-                        .label(leg.loc, "write a unit amount for an account holding"),
-                );
-            }
+        let Some((flow, basis_root)) = lower_opening_leg(&mut staged, &cx, opening_place, leg, diags) else {
             continue;
         };
-        let fallback = whole_asset.map_or(staged.book.base, |asset| staged.book.assets[asset].unit);
-        let Some(quantity) = resolve_quantity(&mut staged, &cx, leg.amount, fallback, FlowSide::Out, diags) else {
-            continue;
-        };
-        if !matches!(leg.amount, Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
-            diags.push(
-                Diagnostic::error("opening-amount", "an opening line needs a literal amount")
-                    .label(leg.loc, "computed and inferred quantities cannot set an opening balance"),
-            );
-            continue;
-        }
-        let tail = cx.lower_tail(&mut staged, leg.tail, diags).1;
-        if end.select.len() != 0 {
-            diags.push(
-                Diagnostic::error("opening-selector", "an opening line sets a whole place")
-                    .label(leg.loc, "selectors do not apply to an opening balance"),
-            );
-            continue;
-        }
-        let opening_end = ResolvedEnd { place: opening_place, entity: None, select: Run::new(Id::new(0), 0) };
-        let named_end = ResolvedEnd { place: end.place, entity: None, select: Run::new(Id::new(0), 0) };
-        let (from, to) = if staged.book.places[end.place].class.display_sign() > 0 {
-            (opening_end, named_end)
-        } else {
-            (named_end, opening_end)
-        };
-        let amount = quantity.amount;
-        let basis_root = tail.basis_root;
-        let codes = Codes { header: Run::new(staged.codes().start(), 0), local: empty_codes(&staged) };
-        let shape =
-            Shape { ends: Ends { from, to }, out: amount, arrive: amount, infer: Infer::Known, mode: Mode::Opening };
-        if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, tail, leg.loc, diags) {
-            flow.owner =
-                whole_asset.map_or(staged.book.places[end.place].owner, |asset| staged.book.assets[asset].owner);
-            let flow_at = staged.flows().len();
-            staged.book.flows.push(flow);
-            push_flow_expressions(&mut flow_roots, flow_at, None, None, basis_root);
-        }
+        let flow_at = staged.flows().len();
+        staged.book.flows.push(flow);
+        push_flow_expressions(&mut flow_roots, flow_at, None, None, basis_root);
     }
     if diags.len() != diagnostic_start {
         push_rejected_txn(&mut staged, item, opening.date);
         return;
     }
-    let program_id = if !program.nodes.is_empty() || !flow_roots.is_empty() {
-        Some(staged.book.journal_programs.push(JournalProgram {
-            program,
-            flow_roots: flow_roots.into_boxed_slice(),
-            groups: Box::default(),
-        }))
-    } else {
-        None
-    };
+    let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
+        let flow_roots = flow_roots.into_boxed_slice();
+        staged.book.journal_programs.push(JournalProgram { program, flow_roots, groups: Box::default() })
+    });
     let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
-    let txn = Txn { program: program_id, doc, ..journal_txn(&staged, opening.date, item.loc) };
-    staged.book.txns.push(txn);
+    let record = Txn { program: program_id, doc, ..journal_txn(&staged, opening.date, item.loc) };
+    staged.book.txns.push(record);
     staged.commit();
+}
+
+/// One line of an opening: a flow between the opening entity and the place or asset it names, and the node its
+/// basis is computed by, if it is. None after the problem is said.
+fn lower_opening_leg<'s>(
+    staged: &mut Staged<'_, 's>,
+    cx: &FlowCx<'_, 's>,
+    opening_place: Id<Place>,
+    leg: &ast::Leg<'s>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Flow, Option<NodeId>)> {
+    let whole = matches!(leg.amount, Quantity::Whole);
+    let whole_asset = if whole { staged.book.asset(leg.end.name.0) } else { None };
+    let no_select = Run::new(Id::new(0), 0);
+    let end = match whole_asset {
+        Some(asset) => Some(ResolvedEnd { place: staged.book.assets[asset].place, entity: None, select: no_select }),
+        None => resolve_end(staged, cx, leg.end, diags),
+    };
+    let Some(end) = end else {
+        if whole {
+            diags.push(
+                Diagnostic::error("opening-whole", "a whole opening holding must name an asset")
+                    .label(leg.loc, "write a unit amount for an account holding"),
+            );
+        }
+        return None;
+    };
+    let fallback = whole_asset.map_or(staged.book.base, |asset| staged.book.assets[asset].unit);
+    let quantity = resolve_quantity(staged, cx, leg.amount, fallback, FlowSide::Out, diags)?;
+    if !matches!(leg.amount, Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
+        diags.push(
+            Diagnostic::error("opening-amount", "an opening line needs a literal amount")
+                .label(leg.loc, "computed and inferred quantities cannot set an opening balance"),
+        );
+        return None;
+    }
+    let tail = cx.lower_tail(staged, leg.tail, diags).1;
+    if end.select.len() != 0 {
+        diags.push(
+            Diagnostic::error("opening-selector", "an opening line sets a whole place")
+                .label(leg.loc, "selectors do not apply to an opening balance"),
+        );
+        return None;
+    }
+    let opening_end = ResolvedEnd { place: opening_place, entity: None, select: no_select };
+    let named_end = ResolvedEnd { place: end.place, entity: None, select: no_select };
+    let (from, to) = match staged.book.places[end.place].class.display_sign() > 0 {
+        true => (opening_end, named_end),
+        false => (named_end, opening_end),
+    };
+    let basis_root = tail.basis_root;
+    let codes = Codes { header: Run::new(staged.codes().start(), 0), local: empty_codes(staged) };
+    let shape = Shape {
+        ends: Ends { from, to },
+        out: quantity.amount,
+        arrive: quantity.amount,
+        infer: Infer::Known,
+        mode: Mode::Opening,
+    };
+    let mut flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags)?;
+    flow.owner = whole_asset.map_or(staged.book.places[end.place].owner, |asset| staged.book.assets[asset].owner);
+    Some((flow, basis_root))
 }
 
 /// Reads one statement into the record its verb makes.
