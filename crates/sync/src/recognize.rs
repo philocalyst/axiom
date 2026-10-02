@@ -5,8 +5,8 @@
 use std::cmp::Reverse;
 use std::ops::Range;
 
-use axiom_core::Id;
 use axiom_core::par;
+use axiom_core::{Id, Sym};
 use axiom_model::sync::{Capture, Op, Pattern};
 use axiom_model::{Book, Entity, Place, Role};
 
@@ -69,6 +69,70 @@ struct Entry {
     /// declarations always execute their model-owned program by id.
     own: Option<Box<[u8]>>,
     whole: bool,
+}
+
+impl<'b, 's> Known<'b, 's> {
+    /// The party the book names `path`, which is an account if it is a place, and knows by `patterns`.
+    fn of(book: &'b Book<'s>, id: KnownId, path: Sym, patterns: &'b [Id<Pattern>]) -> Known<'b, 's> {
+        let name = book.names.name(path);
+        Known { id, name, account: matches!(id, KnownId::Place(_)), patterns, aliases: aliases(name) }
+    }
+}
+
+/// The entities other than the user, then the accounts: everyone a memo can name.
+fn known_parties<'b, 's>(book: &'b Book<'s>) -> Vec<Known<'b, 's>> {
+    let entities = book.entities.iter().filter(|(id, _)| *id != book.roots.me);
+    let entities = entities.map(|(id, entity)| Known::of(book, KnownId::Entity(id), entity.path, &entity.known_as));
+    let accounts = book.places.iter().filter(|(_, place)| matches!(place.role, Role::Account { .. }));
+    let accounts = accounts.map(|(id, place)| Known::of(book, KnownId::Place(id), place.path, &place.known_as));
+    entities.chain(accounts).collect()
+}
+
+/// Whether a pattern the book declares for the party is the alias itself, as a name.
+fn names_a_pattern(book: &Book<'_>, party: &Known, alias: &str) -> bool {
+    party.patterns.iter().any(
+        |&pattern| matches!(book.patterns[pattern].program.as_ref(), [Op::Name(name)] if book.name(*name) == alias),
+    )
+}
+
+/// Every way a memo can name a party, and where in a memo each may start.
+struct Index {
+    entries: Vec<Entry>,
+    starts: Trie,
+    /// The entries that may start anywhere.
+    floating: Vec<usize>,
+}
+
+impl Index {
+    fn new() -> Index {
+        Index { entries: Vec::new(), starts: Trie::new(), floating: Vec::new() }
+    }
+
+    /// A pattern the book declares for the party at `owner`.
+    fn declared(&mut self, book: &Book<'_>, patterns: &Patterns<'_, '_>, owner: usize, pattern: Id<Pattern>) {
+        let entry = self.entries.len();
+        let whole = matches!(book.patterns[pattern].program.as_ref(), [Op::Name(_)]);
+        self.entries.push(Entry { owner, pattern: Some(pattern), own: None, whole });
+        match patterns.starts(pattern) {
+            Some(literals) => literals.for_each(|literal| self.starts.insert(literal, entry)),
+            None => self.floating.push(entry),
+        }
+    }
+
+    /// A spelling of the name of the party at `owner`, with spaces for its hyphens and slashes.
+    fn alias(&mut self, owner: usize, alias: &str) {
+        let own: Box<[u8]> = alias
+            .bytes()
+            .map(|byte| match byte {
+                b'-' | b'/' => b' ',
+                other => other.to_ascii_lowercase(),
+            })
+            .collect();
+        let entry = self.entries.len();
+        let first = own.split(|byte| *byte == b' ').next().unwrap_or(&own);
+        self.starts.insert(first, entry);
+        self.entries.push(Entry { owner, pattern: None, own: Some(own), whole: true });
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -155,67 +219,18 @@ pub struct Recognizer<'b, 's> {
 impl<'b, 's> Recognizer<'b, 's> {
     pub fn new(book: &'b Book<'s>) -> Recognizer<'b, 's> {
         let patterns = Patterns::new(book);
-        let mut known: Vec<Known<'b, 's>> = Vec::new();
-        for (id, entity) in book.entities.iter() {
-            if id != book.roots.me {
-                let name = book.names.name(entity.path);
-                known.push(Known {
-                    id: KnownId::Entity(id),
-                    name,
-                    account: false,
-                    patterns: &entity.known_as,
-                    aliases: aliases(name),
-                });
-            }
-        }
-        for (id, place) in book.places.iter() {
-            if matches!(place.role, Role::Account { .. }) {
-                let name = book.names.name(place.path);
-                known.push(Known {
-                    id: KnownId::Place(id),
-                    name,
-                    account: true,
-                    patterns: &place.known_as,
-                    aliases: aliases(name),
-                });
-            }
-        }
-        let mut entries = Vec::new();
-        let mut starts = Trie::new();
-        let mut floating = Vec::new();
+        let known = known_parties(book);
+        let mut index = Index::new();
         for (owner, item) in known.iter().enumerate() {
             for &pattern in item.patterns {
-                let entry = entries.len();
-                let whole = matches!(book.patterns[pattern].program.as_ref(), [Op::Name(_)]);
-                entries.push(Entry { owner, pattern: Some(pattern), own: None, whole });
-                match patterns.starts(pattern) {
-                    Some(literals) => literals.for_each(|literal| starts.insert(literal, entry)),
-                    None => floating.push(entry),
-                }
+                index.declared(book, &patterns, owner, pattern);
             }
-            for alias in &item.aliases {
-                let has_model_name = item.patterns.iter().any(|&pattern| {
-                    matches!(book.patterns[pattern].program.as_ref(), [Op::Name(name)] if book.name(*name) == *alias)
-                });
-                if has_model_name {
-                    continue;
-                }
-                let own = alias
-                    .bytes()
-                    .map(|byte| match byte {
-                        b'-' | b'/' => b' ',
-                        other => other.to_ascii_lowercase(),
-                    })
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice();
-                let entry = entries.len();
-                let first = own.split(|byte| *byte == b' ').next().unwrap_or(&own);
-                starts.insert(first, entry);
-                entries.push(Entry { owner, pattern: None, own: Some(own), whole: true });
+            for alias in item.aliases.iter().filter(|alias| !names_a_pattern(book, item, alias)) {
+                index.alias(owner, alias);
             }
         }
         let codes = book.code_rules.iter().flat_map(|rule| rule.known_as.iter().copied()).collect();
-        Recognizer { known, entries, starts, floating, codes, patterns }
+        Recognizer { known, entries: index.entries, starts: index.starts, floating: index.floating, codes, patterns }
     }
 
     pub fn account(&self, name: &str) -> Option<&'s str> {
