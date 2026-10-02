@@ -19,6 +19,7 @@ use axiom_syntax::{Decl, DeclKind, ExprKind, File, Has, Name, Takes, Verb};
 pub use axiom_syntax::Mult;
 
 use crate::book::{Book, Commodity, Kind, Sort};
+use crate::builtin;
 use crate::collect::{Collected, Written};
 use crate::declare::World;
 use crate::errors::{Word, article, list, suggest};
@@ -153,6 +154,16 @@ pub(crate) fn receiver(sort: Sort) -> Ty {
 }
 
 impl Schema {
+    /// The number of the slot at `index` among those a kind declares: the language's own come first.
+    fn slot_id(index: usize) -> SlotId {
+        SlotId(builtin::COUNT + index as u32)
+    }
+
+    /// Where a slot a kind declares is among them.
+    fn index(slot: SlotId) -> usize {
+        (slot.0 - builtin::COUNT) as usize
+    }
+
     /// A schema of slots that take one value each, numbered in the order given and declared by no kind: the slots of
     /// a book that is built by hand, where nothing is written to declare them. Every sort of thing has them.
     pub fn of_values(values: impl IntoIterator<Item = (Sym, Ty)>) -> Schema {
@@ -161,7 +172,7 @@ impl Schema {
             let range = Range::Value(ty);
             let slot = Slot { name, range, mult: Mult::Optional, weight: None, loc: Loc::default() };
             let id = schema.slots.push(slot);
-            let number = SlotId(schema.first.len() as u32);
+            let number = Schema::slot_id(schema.first.len());
             assert!(schema.numbers.insert(name, number).is_none(), "a slot is declared once");
             schema.first.push((id, ty));
             schema.families.push(u8::MAX);
@@ -192,7 +203,7 @@ impl Schema {
 
     /// What the values of the numbered slot are.
     pub fn ty(&self, slot: SlotId) -> Ty {
-        self.first[slot.0 as usize].1
+        self.first[Schema::index(slot)].1
     }
 
     /// The kinds a range names.
@@ -209,14 +220,14 @@ impl Schema {
     /// slot.
     pub fn field(&self, receiver: Ty, name: Sym) -> Option<Ty> {
         let number = self.number(name)?;
-        (self.families[number.0 as usize] & family(receiver) != 0).then(|| self.ty(number))
+        (self.families[Schema::index(number)] & family(receiver) != 0).then(|| self.ty(number))
     }
 
     /// The names of the slots a law may read off a thing of sort `receiver`.
     pub fn fields(&self, receiver: Ty) -> impl Iterator<Item = Sym> + '_ {
         let bit = family(receiver);
         let all = self.numbers.iter();
-        all.filter(move |&(_, number)| self.families[number.0 as usize] & bit != 0).map(|(&name, _)| name)
+        all.filter(move |&(_, &number)| self.families[Schema::index(number)] & bit != 0).map(|(&name, _)| name)
     }
 
     /// What a range holds, as slices.
@@ -240,9 +251,9 @@ impl Schema {
         let number = *self.numbers.entry(draft.name).or_insert_with(|| {
             self.first.push((id, draft.ty));
             self.families.push(0);
-            SlotId(self.first.len() as u32 - 1)
+            Schema::slot_id(self.first.len() - 1)
         });
-        self.families[number.0 as usize] |= family(receiver);
+        self.families[Schema::index(number)] |= family(receiver);
     }
 }
 
@@ -487,7 +498,7 @@ fn admit(world: &World<'_>, kind: Id<Kind>, own: &[Draft], draft: Draft) -> Resu
     if let Some(number) = schema.number(draft.name)
         && schema.ty(number) != draft.ty
     {
-        let first = &schema.slots[schema.first[number.0 as usize].0];
+        let first = &schema.slots[schema.first[Schema::index(number)].0];
         let (now, then) = (draft.range.view().describe(book), schema.view(first.range).describe(book));
         return Err(problem::slot_type(name, &now, &then, draft.loc, first.loc));
     }

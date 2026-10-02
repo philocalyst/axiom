@@ -7,9 +7,10 @@
 use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
 use axiom_syntax::{Folder, parse};
 
+use crate::builtin::{self, Coded};
 use crate::{
-    Amount, Book, Conversion, ConversionError, Holder, PurposeRoot, RatePolicy, RateSource, Residence, Role, Sort,
-    Source, Value, build,
+    Amount, Basis, Book, Conversion, ConversionError, Holder, PurposeRoot, RatePolicy, RateSource, Residence, Role,
+    Sort, Source, Value, build,
 };
 
 const STD: &str = "\
@@ -205,14 +206,15 @@ account retirement : residential
     let durable = book.kind("durable").unwrap();
     let residential = book.kind("residential").unwrap();
     let account = book.place("retirement").unwrap();
-    assert!(book.kinds[durable].deferred);
-    assert!(book.kinds[durable].claim);
-    assert_eq!(book.kinds[durable].basis, Some(crate::Basis::Zero));
-    assert_eq!(book.kinds[residential].basis, Some(crate::Basis::Cost));
-    assert_eq!(book.kinds[residential].select, Some(crate::Policy::Hifo));
-    assert!(book.places[account].deferred && book.places[account].claim);
-    assert_eq!(book.places[account].basis, crate::Basis::Cost);
-    assert_eq!(book.places[account].select, Some(crate::Policy::Hifo));
+    let (durable, residential) = (Holder::Kind(durable), Holder::Kind(residential));
+    assert_eq!(book.fact(builtin::DEFERRED, durable), Some(true));
+    assert_eq!(book.fact(builtin::CLAIM, durable), Some(true));
+    assert_eq!(book.fact(builtin::BASIS, durable).and_then(Basis::decode), Some(Basis::Zero));
+    assert_eq!(book.fact(builtin::BASIS, residential).and_then(Basis::decode), Some(Basis::Cost));
+    assert_eq!(book.select(residential), Some(crate::Policy::Hifo));
+    assert!(book.is_deferred(account) && book.is_claim(account), "a place has what its kinds say");
+    assert_eq!(book.basis(account), Basis::Cost, "and the nearest kind that says it");
+    assert_eq!(book.select(account), Some(crate::Policy::Hifo));
 }
 
 #[test]

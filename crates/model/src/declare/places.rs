@@ -10,7 +10,7 @@ use super::commodities::Commodities;
 use super::holdings::{AccountDraft, Assets, TabDraft};
 use super::parties::Entities;
 use super::{Resolving, Tabs, is_path_child, path_key};
-use crate::book::{Asset, Basis, Class, Commodity, Entity, Place, Role, Sort};
+use crate::book::{Asset, Class, Commodity, Entity, Place, Role, Sort};
 use crate::collect::Collected;
 use crate::names::Names;
 
@@ -195,14 +195,6 @@ impl<'x, 's> Nodes<'x, 's> {
             role: origin.role,
             kind: origin.kind,
             owner: origin.owner,
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Basis::Cost,
-            claim: false,
-            liquidity: None,
-            opened: None,
-            closed: None,
             shares,
             known_as: Box::default(),
             doc: None,
@@ -296,14 +288,6 @@ fn issuer_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, unit: 
         role: Role::Issuer(unit),
         kind: inputs.resolving.kind_roots.entity,
         owner: entities.me,
-        holds: None,
-        select: None,
-        deferred: false,
-        basis: Basis::Cost,
-        claim: false,
-        liquidity: None,
-        opened: None,
-        closed: None,
         shares: Box::default(),
         known_as: Box::default(),
         doc: commodity.doc,
@@ -320,14 +304,6 @@ fn tab_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, tab: &Tab
         role: Role::Tab(tab.party),
         kind: if tab.class == Class::Debt { roots.debt } else { roots.asset },
         owner: tab.owner,
-        holds: None,
-        select: None,
-        deferred: false,
-        basis: Basis::Cost,
-        claim: true,
-        liquidity: None,
-        opened: None,
-        closed: None,
         shares: Box::default(),
         known_as: Box::default(),
         doc: None,

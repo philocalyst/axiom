@@ -1365,10 +1365,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub fn finish(mut self) -> Run {
         self.world.holdings.tidy();
         let (book, today) = (self.plan.book, self.options.today);
-        let overdue = self.world.holdings.iter().filter(|slot| book.places[slot.place].claim).flat_map(|slot| {
-            let claims = slot.holding.lots.iter().filter(|lot| lot.qty > Qty::ZERO);
-            claims.filter_map(move |lot| explain::overdue(book, slot.place, slot.unit, lot, today))
-        });
+        let overdue =
+            self.world.holdings.iter().filter(|slot| self.plan.traits.place(slot.place).claim).flat_map(|slot| {
+                let claims = slot.holding.lots.iter().filter(|lot| lot.qty > Qty::ZERO);
+                claims.filter_map(move |lot| explain::overdue(book, slot.place, slot.unit, lot, today))
+            });
         let mut unused: Vec<_> = self.record.waivers.iter().filter(|&(_, &used)| !used).map(|(&loc, _)| loc).collect();
         unused.sort_unstable();
         let reports: Vec<Diagnostic> = overdue.chain(unused.into_iter().map(explain::unused_waiver)).collect();
@@ -1865,7 +1866,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let book = self.plan.book;
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
         let qty = if book.places[flow.from].class.holds_parcels() {
-            let money = is_money(book, flow.from, flow.out.unit);
+            let money = is_money(self.plan, flow.from, flow.out.unit);
             let view = book.flow_view(flow);
             slot.map_or(Qty::ZERO, |slot| slot.admitted(money, view.select(), &book.codes))
         } else {

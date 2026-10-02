@@ -25,6 +25,7 @@ use crate::state::World;
 use crate::temporal::Query;
 use crate::timeline::{self, Schedule};
 use crate::totals::Watch;
+use crate::traits::Traits;
 use crate::{Options, OwnerShare, Run, infer};
 
 /// The names the fold and the views look for by spelling, resolved once: what
@@ -65,6 +66,8 @@ pub struct Plan<'b, 's> {
     pub(crate) known: Known,
     /// The sign each place's balance is shown in.
     pub(crate) sides: Sides,
+    /// What the fold asks of each place and commodity.
+    pub(crate) traits: Traits,
     /// By law id: what is true of the law whatever runs it.
     pub(crate) laws: Box<[LawFacts]>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
@@ -120,6 +123,7 @@ impl<'b, 's> Plan<'b, 's> {
             problems,
             known: Known::of(book),
             sides,
+            traits: Traits::of(book),
             repeats: repeats(book),
             readers: facts::readers(book, &laws),
             purpose_readers: facts::purpose_readers(book),

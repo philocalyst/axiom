@@ -14,6 +14,7 @@ use axiom_core::Id;
 use axiom_model::{Book, Class, Entity, Place, Subject};
 
 use crate::motion::{Motion, Moves};
+use crate::plan::Plan;
 
 /// The entities that own what `owner` owns: itself, what it belongs to in the
 /// entity tree, and the household it is a member of.
@@ -44,8 +45,8 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
 /// Whether `unit` in `place` is money: base currency that is not a claim.
 /// Money is told apart by its basis per unit; everything else by the purchase
 /// that made it.
-pub(crate) fn is_money(book: &Book, place: Id<Place>, unit: Id<axiom_model::Commodity>) -> bool {
-    unit == book.base && !book.places[place].claim
+pub(crate) fn is_money(plan: &Plan, place: Id<Place>, unit: Id<axiom_model::Commodity>) -> bool {
+    unit == plan.book.base && !plan.traits.place(place).claim
 }
 
 /// Whether the flow leaves value with one owner's asset places: a transfer

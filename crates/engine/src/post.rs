@@ -28,6 +28,7 @@ use crate::explain;
 use crate::ledger::Ledger;
 use crate::lots::{Origin, Request, Selection, Shares, Slice};
 use crate::motion::{Motion, Moves};
+use crate::plan::Plan;
 use crate::scope::{is_money, stays_with_owner};
 use crate::state::Missing;
 use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, show};
@@ -45,8 +46,9 @@ fn fresh_slice(m: &Motion, qty: Qty, is_base: bool, now: (axiom_core::Day, Runti
 /// exchange there still starts a new parcel). Value from a non-asset place has
 /// no earlier basis to keep. A market moving an asset's worth, and a change of
 /// basis, fetch nothing.
-fn restarts_basis(m: &Motion) -> bool {
-    let (from, to) = (m.source, m.target);
+fn restarts_basis(plan: &Plan, m: &Motion) -> bool {
+    let from = m.source;
+    let (from_deferred, to_deferred) = (plan.traits.place(m.from).deferred, plan.traits.place(m.to).deferred);
     // v3 bridge: a change of basis fetches nothing.
     if m.moves == Moves::Loss {
         return false;
@@ -54,10 +56,10 @@ fn restarts_basis(m: &Motion) -> bool {
     if from.class != Class::Asset {
         return true;
     }
-    if from.deferred && to.deferred {
+    if from_deferred && to_deferred {
         return false;
     }
-    m.is_exchange() || from.deferred || !stays_with_owner(m)
+    m.is_exchange() || from_deferred || !stays_with_owner(m)
 }
 
 impl Ledger<'_, '_, '_> {
@@ -193,10 +195,10 @@ impl Ledger<'_, '_, '_> {
         self.ask_ties(m);
         let request = Request {
             need: m.out.qty,
-            money: is_money(book, m.from, unit),
+            money: is_money(self.plan, m.from, unit),
             selectors: m.select(),
             // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
-            policy: source.select.or(book.commodities[unit].select),
+            policy: self.plan.traits.place(m.from).select.or(self.plan.traits.unit_select(unit)),
             codes: &book.codes,
             permits: &self.scratch.permits,
             spender: m.detail().spender,
@@ -255,9 +257,9 @@ impl Ledger<'_, '_, '_> {
     /// target, and realizes what leaves. Returns whether the parcels keep
     /// their identity on arrival.
     fn price(&mut self, m: &Motion) -> bool {
-        let restarts = restarts_basis(m);
+        let restarts = restarts_basis(self.plan, m);
         // Value from outside takes the target's arrival rule; a market's growth has no basis.
-        let unbased = m.target.basis == Basis::Zero || m.moves == Moves::Growth;
+        let unbased = self.plan.traits.place(m.to).basis == Basis::Zero || m.moves == Moves::Growth;
         // What was fetched matters to what a sale realizes, and to a basis nobody stated.
         let priced = restarts && (m.source.class == Class::Asset || (m.detail().basis.is_none() && !unbased));
         let proceeds = if priced { self.proceeds(m) } else { None };
@@ -273,7 +275,7 @@ impl Ledger<'_, '_, '_> {
                 // contribution, even when relief selected an existing lot
                 // and the transfer otherwise keeps parcel identity. A move
                 // between two tax-deferred accounts still carries its basis.
-                (None, _, _, _) if unbased && !m.source.deferred => Qty::ZERO,
+                (None, _, _, _) if unbased && !self.plan.traits.place(m.from).deferred => Qty::ZERO,
                 (None, false, ..) => slice.basis,
                 (None, true, true, Origin::Fresh) if unbased => Qty::ZERO,
                 (None, true, true, _) => slice.worth,
@@ -407,7 +409,7 @@ impl Ledger<'_, '_, '_> {
             .detail()
             .hold
             .map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
-        let (money, since) = (is_money(book, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
+        let (money, since) = (is_money(self.plan, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
         let acquisition = self.new_acquisition_part(m);
         let declared_asset = book
             .commodities
@@ -691,7 +693,7 @@ impl Ledger<'_, '_, '_> {
         let declaration = &self.plan.book.assets[asset];
         m.target.owner == declaration.owner
             && self.world.assets.asset(asset).is_some_and(|state| state.part_count() > 0 && state.disposed.is_none())
-            && is_money(self.plan.book, m.to, m.arrive.unit)
+            && is_money(self.plan, m.to, m.arrive.unit)
     }
 
     fn dispose_sold_asset(&mut self, m: &Motion) {
@@ -749,7 +751,7 @@ impl Ledger<'_, '_, '_> {
             need: quantity,
             money: false,
             selectors: &[],
-            policy: book.places[declaration.place].select.or(book.commodities[declaration.unit].select),
+            policy: self.plan.traits.place(declaration.place).select.or(self.plan.traits.unit_select(declaration.unit)),
             codes: &book.codes,
             permits: &[],
             spender: None,
@@ -898,7 +900,7 @@ impl Ledger<'_, '_, '_> {
         let left: Qty = self.scratch.relief.slices.iter().filter(|s| s.origin != Origin::Fresh).map(|s| s.basis).sum();
         let selection = Selection { selectors: &[], codes: &book.codes };
         let slot = self.world.holdings.entry(m.from, m.out.unit);
-        slot.rebase(left, &selection, is_money(book, m.from, m.out.unit), (m.day, m.txn));
+        slot.rebase(left, &selection, is_money(self.plan, m.from, m.out.unit), (m.day, m.txn));
     }
 
     /// Fires the `on spend` laws of every entity whose tied money just left

@@ -5,7 +5,11 @@
 //! laws and rules are added by the test. Flows must be added in day order (the
 //! book's contract), and `book()` assembles the tables the engine reads.
 
-use axiom_core::{Arena, Day, Days, Facts, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Severity, Sym, Tree};
+use axiom_core::tagless::{Datum, Field as Held};
+use axiom_core::{
+    Arena, Day, Days, Facts, FileId, Groups, Id, Interner, Key, Loc, Qty, Ratio, Run, Severity, SlotId, Sym, Tree,
+};
+use axiom_model::builtin::{self, Coded};
 use axiom_model::*;
 
 /// The days from `first` to `last`, as day numbers.
@@ -57,6 +61,8 @@ pub(crate) struct Fixture {
     pub always: Vec<(Id<Place>, Rule)>,
     pub on_spend: Vec<(Id<Entity>, Rule)>,
     pub timed: Vec<Rule>,
+    /// What the language says of things, from the beginning: the thing, the slot and what it holds.
+    own: Vec<(Holder, SlotId, Datum)>,
     /// What is said of places, in the order said: the place, the slot's name, the day it holds from, the value.
     said: Vec<(Id<Place>, Sym, Day, Value)>,
 }
@@ -99,14 +105,6 @@ impl Fixture {
             role: if class == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } },
             kind,
             owner: me,
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Basis::Cost,
-            claim: false,
-            liquidity: None,
-            opened: None,
-            closed: None,
             shares: Box::new([]),
             known_as: Box::new([]),
             doc: None,
@@ -134,8 +132,6 @@ impl Fixture {
         let items = spec.iter().map(|&(path, class, _)| place(names.intern(path), class)).collect();
         let parents: Vec<_> = spec.iter().map(|&(.., parent)| parent).collect();
         let (mut places, p) = Tree::build(items, &parents).expect("no cycles");
-        places[p[5]].deferred = true;
-        places[p[5]].basis = Basis::Zero;
         places[p[16]].kind = Id::new(1);
         entities[ids[3]].place = Some(p[16]);
         entities[ids[4]].place = Some(p[13]);
@@ -187,6 +183,10 @@ impl Fixture {
             always: Vec::new(),
             on_spend: Vec::new(),
             timed: Vec::new(),
+            own: vec![
+                (Holder::Place(p[5]), builtin::DEFERRED.slot(), Datum::of(true)),
+                (Holder::Place(p[5]), builtin::BASIS.slot(), Datum::of(Basis::Zero.code())),
+            ],
             said: Vec::new(),
         }
     }
@@ -436,6 +436,11 @@ impl Fixture {
         self.laws.push(law.build())
     }
 
+    /// What the language says of a thing, as a line under it would.
+    pub fn say<V: Held>(&mut self, thing: impl Into<Holder>, key: Key<V>, value: V) {
+        self.own.push((thing.into(), key.slot(), Datum::of(value)));
+    }
+
     /// `value` holds of the place's slot `name` from day `since`.
     pub fn property(&mut self, place: Id<Place>, name: Sym, since: i32, value: Value) {
         self.said.push((place, name, Day(since), value));
@@ -452,6 +457,9 @@ impl Fixture {
         let schema = Schema::of_values(slots);
         let holders = HolderIndex::new(kinds, self.places.len(), self.entities.len(), self.commodities.len(), 0);
         let mut facts = Facts::builder(holders.len());
+        for &(thing, slot, datum) in &self.own {
+            facts.paint_datum(holders.number(thing), slot, Days::ALWAYS, datum);
+        }
         for &(place, name, since, value) in &self.said {
             let (slot, datum) = (schema.number(name).expect("a numbered slot"), value.datum().expect("a datum"));
             facts.paint_datum(holders.number(place), slot, Days::new(since, Day::MAX).expect("a day"), datum);
@@ -471,11 +479,6 @@ impl Fixture {
             sort: Sort::Place(Class::Asset),
             system: None,
             restricted: false,
-            deferred: false,
-            basis: None,
-            claim: false,
-            select: None,
-            liquidity: None,
             purpose: None,
             pays: None,
             takes: Box::new([]),
@@ -576,17 +579,7 @@ impl Fixture {
 }
 
 fn commodity(symbol: Sym, scale: u8) -> Commodity {
-    Commodity {
-        symbol,
-        kind: Id::new(0),
-        scale,
-        title: None,
-        liquidity: None,
-        select: None,
-        growth: None,
-        doc: None,
-        loc: None,
-    }
+    Commodity { symbol, kind: Id::new(0), scale, title: None, growth: None, doc: None, loc: None }
 }
 
 /// Builds a law's node arena bottom-up, the way the model's compiler does:

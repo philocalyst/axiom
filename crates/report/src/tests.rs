@@ -10,9 +10,10 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Days, Facts, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
 use axiom_engine::{Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
 use axiom_model::Effect as Consequence;
+use axiom_model::builtin;
 use axiom_model::*;
 
 use crate::lens::Whose;
@@ -161,14 +162,6 @@ impl Cast {
             role: if class == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } },
             kind: thing,
             owner: if JORDAN_OWNS.contains(&path) { jordan } else { me },
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Basis::Cost,
-            claim: path == "assets/owed/clients",
-            liquidity: (path == "assets/retirement").then_some(Span::months(1)),
-            opened: None,
-            closed: None,
             shares: Box::default(),
             known_as: Box::default(),
             doc: None,
@@ -183,8 +176,6 @@ impl Cast {
                 kind: thing,
                 scale,
                 title: None,
-                liquidity: None,
-                select: None,
                 growth: None,
                 doc: None,
                 loc: None,
@@ -236,11 +227,6 @@ fn kind(name: Sym) -> Kind {
         sort: Sort::Entity,
         system: None,
         restricted: false,
-        deferred: false,
-        basis: None,
-        claim: false,
-        select: None,
-        liquidity: None,
         purpose: None,
         pays: None,
         takes: Box::default(),
@@ -588,6 +574,10 @@ pub(crate) fn household() -> Household {
         purposes: PurposeRoots { income, spending, capital, transfer },
     };
     let law_count = records.laws.len();
+    let holders = HolderIndex::new(cast.kinds.len(), cast.places.len(), cast.entities.len(), cast.commodities.len(), 0);
+    let mut said = Facts::builder(holders.len());
+    said.paint_always(holders.number(cast.id("assets/owed/clients")), builtin::CLAIM, true);
+    said.paint_always(holders.number(cast.id("assets/retirement")), builtin::LIQUIDITY, Span::months(1));
     let book = Book {
         names: cast.names,
         text_values: Arena::new(),
@@ -599,8 +589,8 @@ pub(crate) fn household() -> Household {
         entities: cast.entities,
         kinds: cast.kinds,
         schema: Default::default(),
-        holders: Default::default(),
-        facts: Default::default(),
+        holders,
+        facts: said.freeze(),
         purposes,
         systems: cast.systems,
         commodities: cast.commodities,

@@ -8,6 +8,7 @@
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
 //! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
 //! | `slots`      | what the things of a kind have: ranges, counts and weights  |
+//! | `builtin`    | the language's own slots, as typed keys of the facts        |
 //! | `holders`    | the things a book says things about, numbered for the facts |
 //! | `said`       | what a book says of a thing: a slot's value on a day        |
 //! | `fill`       | what a line gives a slot: range, count and weights, checked |
@@ -24,6 +25,7 @@ pub mod journal;
 pub mod law;
 pub mod sync;
 
+pub mod builtin;
 mod collect;
 mod declare;
 mod errors;
@@ -98,6 +100,8 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     lower::contracts(&mut world, &collected, &mut diags);
     laws::register_native(&mut world, &mut diags);
     lower::record(&mut world, &collected, &mut diags);
+    // `end` statements say more of places, once the rest is lowered.
+    world.freeze_facts();
     // One cause is reported once, however many declarations shared the line.
     let mut seen = Set::default();
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));

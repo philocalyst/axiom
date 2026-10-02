@@ -5,9 +5,12 @@
 //! says nothing of a slot on a day has the nearest kind above it that does. The kind chain is the model's tree, which
 //! the store does not know, so the walk is here and the store is asked once per step of it.
 
-use axiom_core::{Day, Id, Sym};
+use axiom_core::tagless::Field;
+use axiom_core::{Day, Id, Key, Many, Span, Sym};
+use axiom_syntax::Policy;
 
-use crate::book::{Book, Kind};
+use crate::book::{Basis, Book, Commodity, Kind, Place, Role};
+use crate::builtin::{self, Coded};
 use crate::holders::Holder;
 use crate::law::Value;
 
@@ -46,6 +49,56 @@ impl Book<'_> {
     /// Whether `thing` itself says anything of its slot `name`, on some day.
     pub fn says(&self, thing: impl Into<Holder>, name: Sym) -> bool {
         self.schema.number(name).is_some_and(|slot| self.facts.says(slot, self.holders.number(thing)))
+    }
+
+    /// What `thing` says of one of the language's own slots, else the nearest kind above it that does. The language
+    /// says its slots by declarations alone, which hold from the beginning of time.
+    pub fn fact<V: Field>(&self, key: Key<V>, thing: impl Into<Holder>) -> Option<V> {
+        let thing = thing.into();
+        let kinds = self.kinds.lineage(thing.kind(self)).map(|kind| self.holders.number(Holder::Kind(kind)));
+        let own = (!matches!(thing, Holder::Kind(_))).then(|| self.holders.number(thing));
+        self.facts.at_first(key, own.into_iter().chain(kinds), Day::MIN)
+    }
+
+    /// How `thing`, a place or a commodity, has its parcels relieved, where it says.
+    pub fn select(&self, thing: impl Into<Holder>) -> Option<Policy> {
+        self.fact(builtin::SELECT, thing).and_then(Policy::decode)
+    }
+
+    /// How long `thing`, a place or a commodity, takes to turn into money, where it says.
+    pub fn liquidity(&self, thing: impl Into<Holder>) -> Option<Span> {
+        self.fact(builtin::LIQUIDITY, thing)
+    }
+
+    /// The commodities a place may hold, or `None` for any.
+    pub fn holds(&self, place: Id<Place>) -> Option<impl ExactSizeIterator<Item = Id<Commodity>> + Clone + '_> {
+        let set: Many<Id<Commodity>> = self.fact(builtin::HOLDS, place)?;
+        let members = self.facts.members(set);
+        (members.len() > 0).then_some(members)
+    }
+
+    /// The one commodity a place may hold, if it names exactly one.
+    pub fn holds_only(&self, place: Id<Place>) -> Option<Id<Commodity>> {
+        let mut holds = self.holds(place)?;
+        let only = holds.next()?;
+        holds.next().is_none().then_some(only)
+    }
+
+    /// Whether the gains of a place are not realized inside it.
+    pub fn is_deferred(&self, place: Id<Place>) -> bool {
+        self.fact(builtin::DEFERRED, place).unwrap_or(false)
+    }
+
+    /// What basis value arriving in a place takes: what its kinds say, else nothing if it is deferred, else its cost.
+    pub fn basis(&self, place: Id<Place>) -> Basis {
+        let said = self.fact(builtin::BASIS, place).and_then(Basis::decode);
+        said.unwrap_or(if self.is_deferred(place) { Basis::Zero } else { Basis::Cost })
+    }
+
+    /// Whether a place holds what others owe, so that its parcels stay apart by the transaction that made them: what
+    /// its kinds say, and every tab.
+    pub fn is_claim(&self, place: Id<Place>) -> bool {
+        self.fact(builtin::CLAIM, place).unwrap_or(false) || matches!(self.places[place].role, Role::Tab(_))
     }
 
     fn said_of(&self, holder: u32, name: Sym, day: Day) -> Option<Value> {

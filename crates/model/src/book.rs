@@ -235,21 +235,6 @@ pub struct Place {
     pub role: Role,
     pub kind: Id<Kind>,
     pub owner: Id<Entity>,
-    /// The commodities this place may hold; `None` for any.
-    pub holds: Option<Box<[Id<Commodity>]>>,
-    /// Resolved: the place's own policy, else its kind chain's.
-    pub select: Option<Policy>,
-    /// Resolved from the kind chain: gains are not realized inside.
-    pub deferred: bool,
-    /// Resolved from the kind chain: what basis arriving value takes.
-    pub basis: Basis,
-    /// Resolved from the kind chain: this place holds what others owe, and its
-    /// parcels stay apart by the transaction that made them.
-    pub claim: bool,
-    /// Resolved: own, else the kind chain's.
-    pub liquidity: Option<Span>,
-    pub opened: Option<Day>,
-    pub closed: Option<Day>,
     /// `owner me 50%, jordan 50%`: who owns it, in what shares. Empty for one
     /// owner, which is `owner`.
     pub shares: Box<[Share]>,
@@ -356,11 +341,6 @@ pub struct Kind {
     pub system: Option<Id<System>>,
     // Resolved down the kind chain.
     pub restricted: bool,
-    pub deferred: bool,
-    pub basis: Option<Basis>,
-    pub claim: bool,
-    pub select: Option<Policy>,
-    pub liquidity: Option<Span>,
     /// On a party kind: what flows with its parties are for (`grocer`:
     /// groceries).
     pub purpose: Option<At<Id<Purpose>>>,
@@ -416,10 +396,6 @@ pub struct Commodity {
     /// Decimal places: declared, or the most seen in any written amount.
     pub scale: u8,
     pub title: Option<Sym>,
-    pub liquidity: Option<Span>,
-    /// Resolved from the kind chain (`select fifo` on `currency`): how parcels
-    /// of it are relieved where neither the flow nor the place says.
-    pub select: Option<Policy>,
     /// `grows 5% yearly`: the valuation model forecasts use.
     pub growth: Option<Ratio>,
     pub doc: Option<Sym>,

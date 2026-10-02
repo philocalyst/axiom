@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, Id, Qty, Ratio};
 use axiom_engine::{Checkpoint, Holding, Ledger, Options, Plan};
-use axiom_model::{Book, Class, Commodity, Flow, Place, RuntimeDetail, RuntimeFlow, Value};
+use axiom_model::{Book, Class, Commodity, Flow, Place, RuntimeDetail, RuntimeFlow};
 
 use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};

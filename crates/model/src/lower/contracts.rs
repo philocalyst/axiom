@@ -1453,7 +1453,7 @@ fn deposit_holding<'s>(
         );
         return Err(());
     }
-    if kept.holds.as_ref().is_some_and(|units| !units.contains(&amount.unit)) {
+    if world.book.holds(place).is_some_and(|mut units| !units.any(|unit| unit == amount.unit)) {
         diags.push(
             Diagnostic::error("contract-deposit-unit", "the deposit holding does not accept this unit")
                 .label(file.exprs[file[prop.args][0]].loc, "choose a unit the holding can keep"),

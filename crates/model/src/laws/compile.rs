@@ -858,9 +858,7 @@ impl<'s> Compiler<'_, '_, 's> {
     /// conversion with `value(amount, UNIT)` before comparing unlike units.
     fn flow_amount_ty(&self) -> Ty {
         let unit = match self.owner {
-            Some(Owner::Place(place)) => {
-                self.world.book.places[place].holds.as_deref().and_then(|holds| (holds.len() == 1).then_some(holds[0]))
-            }
+            Some(Owner::Place(place)) => self.world.book.holds_only(place),
             Some(Owner::Asset(asset)) => Some(self.world.book.assets[asset].unit),
             _ => None,
         };

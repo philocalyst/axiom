@@ -510,7 +510,7 @@ fn command_units<'s>(book: &Book<'s>, run: &EngineRun) -> Vec<&'s str> {
 
 fn monitor_gaps(book: &Book<'_>, run: &EngineRun) -> Vec<Diagnostic> {
     let has_contracts = !book.contracts.is_empty();
-    let has_claim_places = book.places.iter().any(|(_, place)| place.claim);
+    let has_claim_places = book.places.ids().any(|place| book.is_claim(place));
     if (has_contracts || has_claim_places) && !run.monitor_complete {
         vec![Diagnostic::warning(
             "sync-monitor-incomplete",

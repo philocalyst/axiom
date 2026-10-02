@@ -1408,8 +1408,8 @@ impl<'a, 's> Machine<'a, 's> {
         let book = self.book();
         let unit = book.entities[self.ctx.owner].currency;
         let mut total = Qty::ZERO;
-        for (place, declaration) in book.places.iter() {
-            if !declaration.claim {
+        for (place, _) in book.places.iter() {
+            if !self.env.plan.traits.place(place).claim {
                 continue;
             }
             for slot in self.env.world.holdings.of(place) {
@@ -1501,8 +1501,9 @@ impl<'a, 's> Machine<'a, 's> {
     /// What everything the subject holds has already accounted for, in the base
     /// currency: the total basis of its parcels.
     fn basis(&self, subject: Subject) -> Value {
-        let (book, sign) = (self.book(), sign(self.env.plan, subject));
-        let basis: Qty = self.held(subject).map(|slot| slot.basis(is_money(book, slot.place, slot.unit))).sum();
+        let sign = sign(self.env.plan, subject);
+        let basis: Qty =
+            self.held(subject).map(|slot| slot.basis(is_money(self.env.plan, slot.place, slot.unit))).sum();
         self.base(Qty(basis.0 * sign))
     }
 

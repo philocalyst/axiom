@@ -63,7 +63,7 @@ pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]
 /// that day: soonest due first, what is owed to you before what you owe.
 pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
     let book = lens.book();
-    let claimed = holdings.into_iter().filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
+    let claimed = holdings.into_iter().filter(|holding| book.is_claim(holding.place) && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
         holding.lots.iter().filter_map(move |lot| {
             let left = lens.place_qty(holding.place, lot.qty);

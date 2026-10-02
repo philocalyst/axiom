@@ -219,21 +219,20 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     /// what kind of thing it is. Only assets are spendable at all.
     pub fn liquidity(self, place: Id<Place>, unit: Id<Commodity>) -> Option<Liquidity> {
         let book = self.book();
-        let place = &book.places[place];
-        if place.class != Class::Asset {
+        if book.places[place].class != Class::Asset {
             return None;
         }
-        if place.claim {
+        if book.is_claim(place) {
             return Some(Liquidity::Claim);
         }
         let quick = |span: Option<Span>| span.is_none_or(|span| span == Span::default());
-        let unit_span = book.commodities[unit].liquidity;
-        if self.is_currency(unit) && !place.deferred && quick(place.liquidity) && quick(unit_span) {
+        let (place_span, unit_span) = (book.liquidity(place), book.liquidity(unit));
+        if self.is_currency(unit) && !book.is_deferred(place) && quick(place_span) && quick(unit_span) {
             return Some(Liquidity::Cash);
         }
         // Whichever is slower, the place or the commodity, sets the pace.
         let span = |span: Option<Span>| span.unwrap_or_default();
-        let (by_place, by_unit) = (span(place.liquidity), span(unit_span));
+        let (by_place, by_unit) = (span(place_span), span(unit_span));
         Some(Liquidity::Slow(if self.day.add(by_place) >= self.day.add(by_unit) { by_place } else { by_unit }))
     }
 

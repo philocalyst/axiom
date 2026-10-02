@@ -14,7 +14,8 @@
 //! turns settlement events into flow states, and `infer` solves `? USD`
 //! amounts from the assertions around them, one place per thread. The plan is
 //! immutable and shared: every ledger, fork and thread borrows the one, and
-//! `facts` holds what is true of each law whatever runs it. `timeline` then
+//! `facts` holds what is true of each law whatever runs it, and `traits` what the
+//! fold asks of each place, resolved from the book's facts. `timeline` then
 //! orders every fact into one total order of moments, and `ledger` consumes
 //! them.
 //!
@@ -59,6 +60,7 @@ mod state;
 mod temporal;
 mod timeline;
 mod totals;
+mod traits;
 
 #[cfg(test)]
 mod fixture;

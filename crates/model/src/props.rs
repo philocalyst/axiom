@@ -18,8 +18,9 @@ use axiom_syntax::{
 };
 
 use crate::book::{
-    Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Purpose, RatePolicy, Residence, Role, Share, Sort, Take,
+    Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Purpose, RatePolicy, Residence, Share, Sort, Take,
 };
+use crate::builtin::{self as slot, Coded};
 use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, World};
 use crate::errors::{Reported, Word, article, list, suggest};
@@ -97,9 +98,6 @@ impl Assign {
         !matches!(
             self,
             Assign::Restricted
-                | Assign::Deferred
-                | Assign::Claim
-                | Assign::Basis(_)
                 | Assign::Purpose(_)
                 | Assign::Pays(_)
                 | Assign::Takes(_)
@@ -151,20 +149,32 @@ const BUILTINS: [(&str, &[Target], Reader); 24] = [
     ("claim", &[Target::Kind], |_| Ok(Assign::Claim)),
 ];
 
-const POLICIES: [(&str, Policy); 4] =
-    [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
-
 // ─── Applying ───────────────────────────────────────────────────────────────
+
+/// Says what a line of the language says of `thing` into the facts, if the facts are where it is held. Whether they
+/// are.
+fn say(world: &mut World<'_>, thing: Holder, assign: &Assign) -> bool {
+    match assign {
+        Assign::Holds(holds) => {
+            let units: Vec<_> = holds.iter().flat_map(|units| units.iter().copied()).collect();
+            world.say_set(thing, slot::HOLDS, units);
+        }
+        Assign::Select(policy) => world.say(thing, slot::SELECT, policy.code()),
+        Assign::Opened(day) => world.say(thing, slot::OPENED, *day),
+        Assign::Closed(day) => world.say(thing, slot::CLOSED, *day),
+        Assign::Liquidity(span) => world.say(thing, slot::LIQUIDITY, *span),
+        Assign::Deferred => world.say(thing, slot::DEFERRED, true),
+        Assign::Basis(basis) => world.say(thing, slot::BASIS, basis.code()),
+        Assign::Claim => world.say(thing, slot::CLAIM, true),
+        _ => return false,
+    }
+    true
+}
 
 impl Kind {
     /// What flows down from `above`, before this kind's own lines say more.
     fn inherit(&mut self, above: &Kind) {
         self.restricted |= above.restricted;
-        self.deferred |= above.deferred;
-        self.claim |= above.claim;
-        self.basis = self.basis.or(above.basis);
-        self.select = self.select.or(above.select);
-        self.liquidity = self.liquidity.or(above.liquidity);
         self.purpose = self.purpose.or(above.purpose);
         self.pays = self.pays.or(above.pays);
         self.sales_tax = self.sales_tax.or(above.sales_tax);
@@ -175,11 +185,6 @@ impl Kind {
     fn set(&mut self, assign: &Assign) {
         match assign {
             Assign::Restricted => self.restricted = true,
-            Assign::Deferred => self.deferred = true,
-            Assign::Claim => self.claim = true,
-            Assign::Basis(basis) => self.basis = Some(*basis),
-            Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Purpose(purpose) => self.purpose = Some(*purpose),
             Assign::Pays(pays) => self.pays = Some(*pays),
             Assign::Takes(take) => self.takes = merge_takes(&self.takes, std::slice::from_ref(take)),
@@ -242,8 +247,6 @@ impl Commodity {
         match assign {
             Assign::Precision(scale) => self.scale = *scale,
             Assign::Title(title) => self.title = Some(*title),
-            Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Grows(rate) => self.growth = Some(*rate),
             _ => {}
         }
@@ -260,19 +263,6 @@ impl Entity {
             Assign::Currency(currency) => self.currency = *currency,
             Assign::Citizen(citizen) => self.citizen = citizen.clone(),
             Assign::Books(books) => self.books = *books,
-            _ => {}
-        }
-    }
-}
-
-impl Place {
-    fn set(&mut self, assign: &Assign) {
-        match assign {
-            Assign::Holds(holds) => self.holds = holds.clone(),
-            Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Opened(day) => self.opened = Some(*day),
-            Assign::Closed(day) => self.closed = Some(*day),
-            Assign::Liquidity(span) => self.liquidity = Some(*span),
             _ => {}
         }
     }
@@ -463,9 +453,9 @@ impl<'a, 's> Args<'_, 'a, 's> {
     }
 
     fn policy(&mut self) -> Result<Policy, Diagnostic> {
-        let words: Vec<&str> = POLICIES.iter().map(|policy| policy.0).collect();
+        let words: Vec<&str> = Policy::WORDS.iter().map(|policy| policy.0).collect();
         let word = self.word(&words)?;
-        Ok(POLICIES.iter().find(|policy| policy.0 == word).map_or(Policy::Fifo, |policy| policy.1))
+        Ok(Policy::WORDS.iter().find(|policy| policy.0 == word).map_or(Policy::Fifo, |policy| policy.1))
     }
 
     /// `holds USD, VTI`, or `holds any`.
@@ -795,8 +785,8 @@ fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>,
                 native_system_currencies(world, collected, diags);
             }
             Target::Entity => builtin_entities(world, &written.entities, &defaults, diags),
-            Target::Place => builtin_places(world, &written.places, &defaults, diags),
-            Target::Asset => builtin_assets(world, &written.assets, &defaults, diags),
+            Target::Place => builtin_places(world, &written.places, diags),
+            Target::Asset => builtin_assets(world, &written.assets, diags),
             Target::Kind => unreachable!(),
         }
     }
@@ -822,6 +812,9 @@ fn kind_defaults<'a, 's>(
             let at = Lines::from_native(written);
             let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], kind, diags);
             for assign in &assigns {
+                if say(world, Holder::Kind(kind), assign) {
+                    continue;
+                }
                 world.book.kinds[kind].set(assign);
                 if assign.is_default() {
                     defaults.by_kind[kind.index()].push(assign.clone());
@@ -861,7 +854,9 @@ fn builtin_commodities<'a, 's>(
         let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
         defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
         for assign in &own {
-            commodities[id].set(assign);
+            if !say(world, Holder::Commodity(id), assign) {
+                world.book.commodities[id].set(assign);
+            }
         }
     }
 }
@@ -913,59 +908,37 @@ fn builtin_entities<'a, 's>(
 fn builtin_places<'a, 's>(
     world: &mut World<'s>,
     written: &Map<Id<Place>, Written<'a, 's, Decl<'s>>>,
-    defaults: &Defaults,
     diags: &mut Vec<Diagnostic>,
 ) {
     let ids: Vec<_> = world.book.places.ids().collect();
-    let mut path = Vec::new();
     for id in ids {
         let kind = world.book.places[id].kind;
-        let own = own_builtins(world, written.get(&id).copied(), Target::Place, kind, diags);
-        let (kinds, places) = (&world.book.kinds, &mut world.book.places);
-        defaults.apply(kinds, kind, &mut path, |assign| places[id].set(assign));
-        for assign in &own {
-            places[id].set(assign);
+        for assign in own_builtins(world, written.get(&id).copied(), Target::Place, kind, diags) {
+            say(world, Holder::Place(id), &assign);
         }
-        inherit_place_traits(&mut places[id], &kinds[kind]);
     }
 }
 
 fn builtin_assets<'a, 's>(
     world: &mut World<'s>,
     written: &Map<Id<Asset>, Written<'a, 's, Decl<'s>>>,
-    defaults: &Defaults,
     diags: &mut Vec<Diagnostic>,
 ) {
     let ids: Vec<_> = world.book.assets.ids().collect();
-    let mut path = Vec::new();
     for id in ids {
         let kind = world.book.assets[id].kind;
-        let own = own_builtins(world, written.get(&id).copied(), Target::Asset, kind, diags);
-        let (kinds, assets, places) = (&world.book.kinds, &mut world.book.assets, &mut world.book.places);
-        let asset = &mut assets[id];
-        let place = &mut places[asset.place];
         // `part of` is the asset's; every other setting is its place's.
-        defaults.apply(kinds, kind, &mut path, |assign| match assign {
-            Assign::PartOf(_) => asset.set(assign),
-            _ => place.set(assign),
-        });
-        for assign in &own {
+        for assign in own_builtins(world, written.get(&id).copied(), Target::Asset, kind, diags) {
             match assign {
-                Assign::PartOf(_) => asset.set(assign),
-                _ => place.set(assign),
+                Assign::PartOf(_) => world.book.assets[id].set(&assign),
+                _ => {
+                    let place = world.book.assets[id].place;
+                    say(world, Holder::Place(place), &assign);
+                }
             }
         }
-        inherit_place_traits(place, &kinds[kind]);
     }
     diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
-}
-
-fn inherit_place_traits(place: &mut Place, kind: &Kind) {
-    place.deferred = kind.deferred;
-    place.basis = kind.basis.unwrap_or(if kind.deferred { Basis::Zero } else { Basis::Cost });
-    // Claim tabs keep separate parcels even though their synthetic root kinds
-    // do not declare the `claim` trait themselves.
-    place.claim = kind.claim || matches!(place.role, Role::Tab(_));
 }
 
 fn read_builtin_lines<'s>(
@@ -1313,61 +1286,6 @@ fn missing_role(world: &World<'_>, written: Written<'_, '_, Decl<'_>>, kind: Id<
 #[cfg(test)]
 mod native_property_tests {
     use super::*;
-
-    fn place(role: Role, name: Sym) -> Place {
-        Place {
-            path: name,
-            class: crate::book::Class::Asset,
-            role,
-            kind: Id::new(0),
-            owner: Id::new(0),
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Basis::Cost,
-            claim: false,
-            liquidity: None,
-            opened: None,
-            closed: None,
-            shares: Box::default(),
-            known_as: Box::default(),
-            doc: None,
-            loc: None,
-        }
-    }
-
-    #[test]
-    fn synthetic_claim_tabs_keep_their_claim_trait_without_a_kind_default() {
-        let mut names = axiom_core::Interner::default();
-        let empty = names.intern("");
-        let kind = Kind {
-            name: empty,
-            sort: Sort::Place(crate::book::Class::Asset),
-            system: None,
-            restricted: false,
-            deferred: false,
-            basis: None,
-            claim: false,
-            select: None,
-            liquidity: None,
-            purpose: None,
-            pays: None,
-            takes: Box::default(),
-            sales_tax: None,
-            shares: Box::default(),
-            slots: axiom_core::Run::default(),
-            laws: Box::default(),
-            doc: None,
-            loc: None,
-        };
-        let mut tab = place(Role::Tab(Id::new(0)), empty);
-        inherit_place_traits(&mut tab, &kind);
-        assert!(tab.claim);
-
-        let mut account = place(Role::Account { institution: None }, empty);
-        inherit_place_traits(&mut account, &kind);
-        assert!(!account.claim);
-    }
 
     #[test]
     fn asset_part_cycles_are_reported_and_cut_before_engine_walks() {

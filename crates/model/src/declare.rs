@@ -5,8 +5,10 @@
 //! against complete scoped indexes, then freezes the place tree once.
 
 use axiom_core::facts::Builder;
-use axiom_core::tagless::Datum;
-use axiom_core::{Arena, Days, Diagnostic, Facts, Groups, Id, Interner, Loc, Map, Ratio, Set, SlotId, Sym, Tree};
+use axiom_core::tagless::{Datum, Field};
+use axiom_core::{
+    Arena, Days, Diagnostic, Facts, Groups, Id, Interner, Key, Loc, Many, Map, Ratio, Set, SlotId, Sym, Tree,
+};
 use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
 use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Roots, Share, Sort, System};
@@ -44,6 +46,21 @@ impl World<'_> {
     /// `value` holds of `thing`'s slot over `days`: a statement of the facts, painted in the order made.
     pub(crate) fn paint(&mut self, thing: impl Into<Holder>, slot: SlotId, days: Days, value: Datum) {
         self.painter.paint_datum(self.book.holders.number(thing), slot, days, value);
+    }
+
+    /// What a line of the language says of `thing`, from the beginning of time: a declaration of one of its own slots.
+    pub(crate) fn say<V: Field>(&mut self, thing: impl Into<Holder>, key: Key<V>, value: V) {
+        self.painter.paint_always(self.book.holders.number(thing), key, value);
+    }
+
+    /// What a line of the language says of `thing`: the whole set a slot of several holds.
+    pub(crate) fn say_set<V: Field>(
+        &mut self,
+        thing: impl Into<Holder>,
+        key: Key<Many<V>>,
+        members: impl IntoIterator<Item = V>,
+    ) {
+        self.painter.paint_many(self.book.holders.number(thing), key, Days::ALWAYS, members);
     }
 
     /// The set of `members` holds of `thing`'s slot over `days`.
