@@ -226,7 +226,7 @@ fn contract_purpose<'a, 's>(
 }
 
 fn contract_loan<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     contract: WrittenContract<'_, 's>,
     party: Id<Entity>,
     owner: Id<Entity>,
@@ -244,7 +244,7 @@ fn contract_loan<'s>(
     let LoanFields { principal, on, rate, term, asset } = loan_fields(world, file, prop, diags)?;
     let resets = loan_resets(world, home, file, prop.lines, on, diags)?;
     let prepay = loan_prepay(file, prop.lines, diags)?;
-    let debt = world.tab(party, owner, Class::Debt, prop.loc).or_report(diags)?;
+    let debt = world.tab(party, owner, Class::Debt, prop.loc);
     Some(Some((Loan { principal, on, term, asset, debt, resets, prepay }, rate)))
 }
 

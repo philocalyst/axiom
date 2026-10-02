@@ -99,8 +99,11 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     sync_lower::declare(&mut world, &sites, &collected, &mut diags);
     laws::declare(&mut world, &sites, &mut diags);
     lower::contracts(&mut world, &collected, &mut diags);
-    laws::register_native(&mut world, &mut diags);
+    let order = laws::register_native(&mut world, &mut diags);
     lower::record(&mut world, &collected, &mut diags);
+    // What watches a place is worked out when the last claim tab has been made: a claim makes its tab while the
+    // journal is lowered.
+    rules::govern(&mut world.book, &order);
     // `end` statements say more of places, once the rest is lowered.
     world.freeze_facts();
     // One cause is reported once, however many declarations shared the line.

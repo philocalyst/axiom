@@ -11,7 +11,7 @@ use axiom_core::{
 };
 use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
-use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Roots, Share, Sort, System};
+use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Role, Roots, Share, Sort, System};
 use crate::builtin;
 use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
@@ -91,18 +91,40 @@ impl World<'_> {
         self.book.facts = self.painter.freeze();
     }
 
-    pub(crate) fn tab(
-        &self,
-        party: Id<Entity>,
-        owner: Id<Entity>,
-        class: Class,
-        loc: Loc,
-    ) -> Result<Id<Place>, Diagnostic> {
-        self.tabs.get(&(party, owner, class)).copied().ok_or_else(|| {
-            Diagnostic::error("unregistered-tab", "this claim tab was not found during the declaration survey")
-                .label(loc, "a claim relationship must be visible before the place tree is frozen")
-                .help("check that the party, owner and flow direction match the claim or contract declaration")
-        })
+    /// The place that keeps what `party` owes `owner` (an `Asset`-class tab) or what `owner` owes `party` (a `Debt`-class
+    /// tab), made the first time anything asks for it. A tab is a root that ends the tree, with no path of its own: the
+    /// party's name labels it, and nothing finds it by name. `loc` is the line that asked first.
+    pub(crate) fn tab(&mut self, party: Id<Entity>, owner: Id<Entity>, class: Class, loc: Loc) -> Id<Place> {
+        let key = (party, owner, class);
+        if let Some(&place) = self.tabs.get(&key) {
+            return place;
+        }
+        let kinds = self.book.roots.kinds;
+        let tab = Place {
+            path: self.book.entities[party].path,
+            class,
+            role: Role::Tab(party),
+            kind: if class == Class::Debt { kinds.debt } else { kinds.asset },
+            owner,
+            shares: Box::default(),
+            known_as: Box::default(),
+            doc: None,
+            loc: Some(loc),
+        };
+        let place = self.open_place(tab);
+        self.tabs.insert(key, place);
+        place
+    }
+
+    /// A place that comes to be once the place tree and the facts about it are frozen: the last root of the tree, the last
+    /// number of the holders, and a row of the facts that says nothing.
+    fn open_place(&mut self, place: Place) -> Id<Place> {
+        let id = self.book.places.push_root(place);
+        self.book.holders.add_place();
+        let holders = self.book.holders.len();
+        self.book.facts.grow(holders);
+        self.painter.grow(holders);
+        id
     }
 }
 

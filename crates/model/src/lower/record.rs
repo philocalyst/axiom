@@ -1341,13 +1341,7 @@ fn lower_owes<'a, 's>(
         // an owner: the subject owes the creditor, who holds the claim.
         (debtor, creditor, crate::book::Class::Asset, debtor)
     };
-    let tab = match world.tab(party, owner, class, loc) {
-        Ok(place) => place,
-        Err(problem) => {
-            diags.push(problem);
-            return;
-        }
-    };
+    let tab = world.tab(party, owner, class, loc);
     let Some(party_place) = world.book.entities[party_end].place else {
         diags.push(
             Diagnostic::error("claim-party-place", "the claim party has no flow endpoint")
