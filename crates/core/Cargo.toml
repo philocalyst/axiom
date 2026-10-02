@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+fearless_simd.workspace = true
+
 [[bench]]
 name = "groups"
 harness = false
