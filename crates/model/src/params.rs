@@ -51,7 +51,7 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
             let sym = world.book.names.intern(name);
             let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
             if let Some((_, first)) = earlier {
-                diags.push(duplicate("param", Word { text: name, loc: file.loc(name) }, Some(first.loc), None));
+                diags.push(duplicate("param", Word::of(file, name), Some(first.loc), None));
                 continue;
             }
 

@@ -3,12 +3,20 @@
 
 use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic, Loc};
+use axiom_syntax::File;
 
 /// A word as written, and where.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Word<'s> {
     pub text: &'s str,
     pub loc: Loc,
+}
+
+impl<'s> Word<'s> {
+    /// `text`, a slice of `file`'s source, with where it was written.
+    pub fn of(file: &File<'s>, text: &'s str) -> Word<'s> {
+        Word { text, loc: file.loc(text) }
+    }
 }
 
 /// `there is no place `chekcing``, with the closest known name as the fix.

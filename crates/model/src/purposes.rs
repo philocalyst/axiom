@@ -78,7 +78,7 @@ pub(crate) fn declare_sites<'a, 's>(
             if let Some(&first) = seen.get(&(site.home, text)) {
                 diags.push(duplicate(
                     "purpose",
-                    Word { text, loc: file.loc(text) },
+                    Word::of(file, text),
                     drafts.get(first).and_then(|purpose| purpose.loc),
                     None,
                 ));
@@ -137,7 +137,7 @@ pub(crate) fn declare_sites<'a, 's>(
                     crate::book::Miss::Unknown { suggestion } => unknown(
                         "unknown-purpose",
                         "purpose",
-                        Word { text: parent.0, loc: file.loc(parent.0) },
+                        Word::of(file, parent.0),
                         suggestion.map(|sym| names.name(sym)),
                     ),
                     crate::book::Miss::Ambiguous(ids) => {

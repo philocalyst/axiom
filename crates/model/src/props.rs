@@ -1195,7 +1195,7 @@ fn native_system_currencies<'a, 's>(
                 );
                 continue;
             }
-            let word = Word { text: unit.0, loc: file.loc(unit.0) };
+            let word = Word::of(file, unit.0);
             match world.commodity_of(word) {
                 Ok(currency) => world.book.systems[system].currency = Some(currency),
                 Err(problem) => diags.push(problem),
@@ -1235,7 +1235,7 @@ pub(crate) fn system_rates<'a, 's>(
             let policy = match policy {
                 Rates::Spot => Some(RatePolicy::Spot),
                 Rates::Param(name) => {
-                    let word = Word { text: name.0, loc: file.loc(name.0) };
+                    let word = Word::of(file, name.0);
                     match world.seek_param(site.home, word) {
                         Ok(Some(param)) => Some(RatePolicy::Param(param)),
                         Ok(None) => {

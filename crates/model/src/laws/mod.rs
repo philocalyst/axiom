@@ -46,7 +46,7 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
                 }
                 ItemKind::Decl(id) => {
                     let decl = &file[id];
-                    let word = Word { text: decl.name.0, loc: file.loc(decl.name.0) };
+                    let word = Word::of(file, decl.name.0);
                     let resolved = match decl.what {
                         DeclKind::Kind => world.kind(source.home, word).map(|kind| {
                             let subject = match world.book.kinds[kind].sort {
@@ -334,7 +334,7 @@ pub(crate) fn lower_alsos<'s>(
                 let amount = match item.amount {
                     ast::Amount::Literal(literal) => {
                         let unit = match literal.unit() {
-                            Some(unit) => match world.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) }) {
+                            Some(unit) => match world.commodity_of(Word::of(file, unit.0)) {
                                 Ok(unit) => unit,
                                 Err(problem) => {
                                     diags.push(problem);
@@ -395,29 +395,25 @@ pub(crate) fn lower_alsos<'s>(
                 }
                 let mut valid_ends = true;
                 let from = match flow.from.end {
-                    Some(end) if end.name.0 != "self" => {
-                        match world.end(home, Word { text: end.name.0, loc: file.loc(end.name.0) }) {
-                            Ok(end) => Some(end.place),
-                            Err(problem) => {
-                                diags.push(problem);
-                                valid_ends = false;
-                                None
-                            }
+                    Some(end) if end.name.0 != "self" => match world.end(home, Word::of(file, end.name.0)) {
+                        Ok(end) => Some(end.place),
+                        Err(problem) => {
+                            diags.push(problem);
+                            valid_ends = false;
+                            None
                         }
-                    }
+                    },
                     _ => None,
                 };
                 let to = match flow.to.end {
-                    Some(end) if end.name.0 != "self" => {
-                        match world.end(home, Word { text: end.name.0, loc: file.loc(end.name.0) }) {
-                            Ok(end) => Some(end.place),
-                            Err(problem) => {
-                                diags.push(problem);
-                                valid_ends = false;
-                                None
-                            }
+                    Some(end) if end.name.0 != "self" => match world.end(home, Word::of(file, end.name.0)) {
+                        Ok(end) => Some(end.place),
+                        Err(problem) => {
+                            diags.push(problem);
+                            valid_ends = false;
+                            None
                         }
-                    }
+                    },
                     _ => None,
                 };
                 if !valid_ends {
@@ -471,7 +467,7 @@ pub(crate) fn lower_alsos<'s>(
                 let amount = match amount {
                     ast::Amount::Literal(literal) => {
                         let unit = match literal.unit() {
-                            Some(unit) => match world.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) }) {
+                            Some(unit) => match world.commodity_of(Word::of(file, unit.0)) {
                                 Ok(unit) => unit,
                                 Err(problem) => {
                                     diags.push(problem);
@@ -572,15 +568,9 @@ fn lower_also_selectors<'s>(
             }),
             ast::Select::Code(code) => Ok(LotSelect::Code(world.book.names.intern(code.name()))),
             ast::Select::Policy(policy, _) => Ok(LotSelect::Policy(policy)),
-            ast::Select::Purpose(name) => {
-                world.purpose(home, Word { text: name.0, loc: file.loc(name.0) }).map(LotSelect::Purpose)
-            }
-            ast::Select::Unit(name) => {
-                world.commodity_of(Word { text: name.0, loc: file.loc(name.0) }).map(LotSelect::Unit)
-            }
-            ast::Select::End(name) => {
-                world.end(home, Word { text: name.0, loc: file.loc(name.0) }).map(|end| LotSelect::End(end.place))
-            }
+            ast::Select::Purpose(name) => world.purpose(home, Word::of(file, name.0)).map(LotSelect::Purpose),
+            ast::Select::Unit(name) => world.commodity_of(Word::of(file, name.0)).map(LotSelect::Unit),
+            ast::Select::End(name) => world.end(home, Word::of(file, name.0)).map(|end| LotSelect::End(end.place)),
         };
         match resolved {
             Ok(selector) => {

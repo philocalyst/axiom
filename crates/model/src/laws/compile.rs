@@ -356,7 +356,7 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn owed_to(&mut self, name: &'s str) -> Option<Id<Entity>> {
-        let entity = self.world.entity(self.home, Word { text: name, loc: self.file.loc(name) });
+        let entity = self.world.entity(self.home, Word::of(self.file, name));
         entity.map_err(|diagnostic| self.report(diagnostic)).ok()
     }
 
@@ -504,11 +504,9 @@ impl<'s> Compiler<'_, '_, 's> {
         match expr.kind {
             ExprKind::Year(year) => Ok((Op::Const(Value::Num(Ratio::int(i64::from(year)))), Ty::Num)),
             ExprKind::Name(name) => self.name(at, Word { text: name.0, loc: expr.loc }),
-            ExprKind::Field(receiver, field) => self.field(receiver, Word { text: field.0, loc: file.loc(field.0) }),
+            ExprKind::Field(receiver, field) => self.field(receiver, Word::of(file, field.0)),
             ExprKind::Index(base, keys) => self.lookup(base, &file[keys], expr.loc),
-            ExprKind::Call(function, args) => {
-                self.call(Word { text: function.0, loc: file.loc(function.0) }, &file[args], expr.loc)
-            }
+            ExprKind::Call(function, args) => self.call(Word::of(file, function.0), &file[args], expr.loc),
             ExprKind::Unary(op, operand) => self.unary(op, operand),
             ExprKind::Binary(op, left, right) => self.binary(op, left, right),
             ExprKind::Of(purpose, object) => self.of(purpose, object),
@@ -1209,7 +1207,7 @@ impl<'s> Compiler<'_, '_, 's> {
                         .label(expr.loc, "name a system")
                         .into());
                 };
-                systems.push(self.world.system(Word { text: name.0, loc: self.file.loc(name.0) })?);
+                systems.push(self.world.system(Word::of(self.file, name.0))?);
             }
             return Ok((Op::Resides(entity, systems.into()), Ty::Bool));
         }

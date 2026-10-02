@@ -7,6 +7,7 @@ use axiom_syntax as ast;
 
 use crate::book::{Book, CodeRule, CodeScope, Role};
 use crate::declare::World;
+use crate::errors::Word;
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
 use crate::sync::{
@@ -178,12 +179,7 @@ fn resolve_named(
             name.0,
             named.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
         );
-        return Err(crate::errors::unknown(
-            "unknown-pattern",
-            "pattern",
-            crate::errors::Word { text: name.0, loc: file.loc(name.0) },
-            suggestion,
-        ));
+        return Err(crate::errors::unknown("unknown-pattern", "pattern", Word::of(file, name.0), suggestion));
     };
     let nearest = named
         .iter()
@@ -325,7 +321,7 @@ fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Na
                                 site.home,
                                 diags,
                             );
-                            match world.entity(site.home, Word { text: decl.name.0, loc: file.loc(decl.name.0) }) {
+                            match world.entity(site.home, Word::of(file, decl.name.0)) {
                                 Ok(id) => {
                                     let path = world.book.entities[id].path;
                                     add_name_patterns(&mut world.book, &mut patterns, path, file.loc(decl.name.0));
@@ -353,7 +349,7 @@ fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Na
                                 site.home,
                                 diags,
                             );
-                            match world.place(Word { text: decl.name.0, loc: file.loc(decl.name.0) }) {
+                            match world.place(Word::of(file, decl.name.0)) {
                                 Ok(id) => {
                                     let path = world.book.places[id].path;
                                     add_name_patterns(&mut world.book, &mut patterns, path, file.loc(decl.name.0));
@@ -395,7 +391,7 @@ fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Na
                     let mut on = Vec::new();
                     for name in &file[rule.on] {
                         let text = name.0;
-                        let word = crate::errors::Word { text, loc: file.loc(text) };
+                        let word = Word::of(file, text);
                         if axiom_core::glob::is_pattern(text) {
                             on.push(CodeScope::Places(world.book.names.intern(text)));
                         } else {
@@ -854,7 +850,7 @@ fn lower_sources<'s>(
                     }
                 }
                 None => {
-                    let word = Word { text: sync.name.0, loc: file.loc(sync.name.0) };
+                    let word = Word::of(file, sync.name.0);
                     match world.seek_place(word) {
                         Ok(Some(account)) => match world.book.places[account].role {
                             Role::Account { .. } => {
@@ -914,12 +910,7 @@ fn resolve_format(
             name.0,
             formats.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
         );
-        return Err(crate::errors::unknown(
-            "unknown-format",
-            "format",
-            crate::errors::Word { text: name.0, loc: file.loc(name.0) },
-            suggestion,
-        ));
+        return Err(crate::errors::unknown("unknown-format", "format", Word::of(file, name.0), suggestion));
     };
     let candidates: Vec<_> = formats
         .iter()
@@ -931,12 +922,7 @@ fn resolve_format(
             name.0,
             formats.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
         );
-        return Err(crate::errors::unknown(
-            "unknown-format",
-            "visible format",
-            crate::errors::Word { text: name.0, loc: file.loc(name.0) },
-            suggestion,
-        ));
+        return Err(crate::errors::unknown("unknown-format", "visible format", Word::of(file, name.0), suggestion));
     };
     let mut best = candidates.iter().filter(|(other_rank, _, _)| *other_rank == rank);
     let (_, id, first_loc) = *best.next().expect("the minimum rank came from a candidate");

@@ -210,7 +210,7 @@ pub(crate) fn settings<'a, 's>(sites: &[Site<'a, 's>], diags: &mut Vec<Diagnosti
             };
             match file[id] {
                 Setting::Base(name) => {
-                    let word = Word { text: name.0, loc: file.loc(name.0) };
+                    let word = Word::of(file, name.0);
                     match settings.base {
                         Some(first) if first.text != word.text => diags.push(
                             Diagnostic::error("duplicate-base", "the base currency is set twice")
@@ -247,7 +247,7 @@ pub(crate) fn scopes(
                     if let Setting::Use(name) = file[id] {
                         match systems.find(name.0) {
                             Some(system) => used.push((site.home, system)),
-                            None => diags.push(systems.unknown(Word { text: name.0, loc: file.loc(name.0) })),
+                            None => diags.push(systems.unknown(Word::of(file, name.0))),
                         }
                     }
                 }

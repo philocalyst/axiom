@@ -94,12 +94,12 @@ pub(crate) fn declare_sites<'a, 's>(
             let name = decl.name.0;
             written.push((file, decl, site.home));
             if let Some(&first) = duplicate_of.get(&(site.home, name)) {
-                diags.push(duplicate("kind", Word { text: name, loc: file.loc(name) }, drafts[first].loc, None));
+                diags.push(duplicate("kind", Word::of(file, name), drafts[first].loc, None));
                 draft_of.push(first);
                 continue;
             }
             if let Some(first) = ROOTS.iter().position(|&(root, _)| root == name) {
-                diags.push(duplicate("kind", Word { text: name, loc: file.loc(name) }, None, None));
+                diags.push(duplicate("kind", Word::of(file, name), None, None));
                 duplicate_of.insert((site.home, name), first);
                 draft_of.push(first);
                 continue;
@@ -145,14 +145,9 @@ pub(crate) fn declare_sites<'a, 's>(
         match find(&draft_index, names, systems, parent.0, |visible| scopes.of(home).sees(visible)) {
             Ok(parent) => parents[child] = Some(parent.index()),
             Err(miss) => {
-                diags.push(unresolved(
-                    miss,
-                    Word { text: parent.0, loc: file.loc(parent.0) },
-                    &draft_index,
-                    names,
-                    systems,
-                    |id| drafts[id.index()].loc,
-                ));
+                diags.push(unresolved(miss, Word::of(file, parent.0), &draft_index, names, systems, |id| {
+                    drafts[id.index()].loc
+                }));
                 parents[child] = Some(ROOT_THING);
                 broken[child] = true;
             }

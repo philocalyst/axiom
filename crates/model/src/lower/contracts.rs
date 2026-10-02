@@ -49,7 +49,7 @@ pub(crate) fn contracts<'a, 's>(
             if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
                 diags.push(duplicate(
                     "contract",
-                    Word { text: node.name.0, loc: file.loc(node.name.0) },
+                    Word::of(file, node.name.0),
                     Some(world.book.contracts[first].loc),
                     None,
                 ));
@@ -120,8 +120,8 @@ fn lower_contract<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Contract> {
     let node = written.node;
-    let name_word = Word { text: node.name.0, loc: file.loc(node.name.0) };
-    let party_word = node.party.map_or(name_word, |party| Word { text: party.0, loc: file.loc(party.0) });
+    let name_word = Word::of(file, node.name.0);
+    let party_word = node.party.map_or(name_word, |party| Word::of(file, party.0));
     let party = match world.entity(written.site.home, party_word) {
         Ok(party) => party,
         Err(problem) => {
@@ -136,7 +136,7 @@ fn lower_contract<'a, 's>(
     };
     let anchor = days.first();
     let purpose = if let Some(purpose) = node.purpose {
-        let purpose_word = Word { text: purpose.name.0, loc: file.loc(purpose.name.0) };
+        let purpose_word = Word::of(file, purpose.name.0);
         match world.purpose(written.site.home, purpose_word) {
             Ok(id) => Some(At {
                 value: Purposed {
@@ -292,7 +292,7 @@ fn contract_loan<'s>(
     let principal = match file.exprs[principal_expr].kind {
         ExprKind::Amount(literal) => {
             let unit = match literal.unit() {
-                Some(unit) => match world.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) }) {
+                Some(unit) => match world.commodity_of(Word::of(file, unit.0)) {
                     Ok(unit) => unit,
                     Err(problem) => {
                         diags.push(problem);
@@ -507,7 +507,7 @@ fn loan_resets<'s>(
     if margin.is_negative() {
         return invalid_reset(diags, file.exprs[margin_expr].loc, "the reset margin cannot be negative");
     }
-    let word = Word { text: index_name.0, loc: file.loc(index_name.0) };
+    let word = Word::of(file, index_name.0);
     let index = match world.seek_param(home, word) {
         Ok(Some(index)) => index,
         Ok(None) => {
@@ -974,7 +974,7 @@ fn lower_tail<'s>(
                 world.book.codes.push(sym);
             }
             ClauseKind::Purpose(purpose_ast) => {
-                let word = Word { text: purpose_ast.name.0, loc: file.loc(purpose_ast.name.0) };
+                let word = Word::of(file, purpose_ast.name.0);
                 match world.purpose(home, word) {
                     Ok(id) => {
                         purpose = Some(At {
@@ -1022,7 +1022,7 @@ fn resolve_commodity<'s>(
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Commodity>> {
-    world.commodity_of(Word { text: name.0, loc: file.loc(name.0) }).map_err(|problem| diags.push(problem)).ok()
+    world.commodity_of(Word::of(file, name.0)).map_err(|problem| diags.push(problem)).ok()
 }
 
 fn resolve_endpoint<'s>(
@@ -1033,7 +1033,7 @@ fn resolve_endpoint<'s>(
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Place>> {
-    match world.end(home, Word { text: name.0, loc: file.loc(name.0) }) {
+    match world.end(home, Word::of(file, name.0)) {
         Ok(end) => Some(end.place),
         Err(problem) => {
             diags.push(problem);
@@ -1119,7 +1119,7 @@ fn resolve_object<'s>(
     {
         return Some(crate::journal::Object::Asset(asset));
     }
-    match world.entity(home, Word { text: name.0, loc: file.loc(name.0) }) {
+    match world.entity(home, Word::of(file, name.0)) {
         Ok(entity) => Some(crate::journal::Object::Entity(entity)),
         Err(problem) => {
             diags.push(problem);
@@ -1304,7 +1304,7 @@ fn escalation_property<'s>(
                     _ => None,
                 };
                 if let Some(name) = index {
-                    let word = Word { text: name.0, loc: file.loc(name.0) };
+                    let word = Word::of(file, name.0);
                     match world.seek_param(home, word) {
                         Ok(Some(param)) => return Some(Escalation::Indexed(param)),
                         Ok(None) => diags.push(world.missing_param(home, word)),
@@ -1367,7 +1367,7 @@ fn contract_area<'s>(
             );
             return Err(());
         };
-        let unit = match world.commodity_of(Word { text: unit_name.0, loc: file.loc(unit_name.0) }) {
+        let unit = match world.commodity_of(Word::of(file, unit_name.0)) {
             Ok(unit) => unit,
             Err(problem) => {
                 diags.push(problem);
@@ -1544,7 +1544,7 @@ fn shares<'s>(
                 ExprKind::Fraction(top, bottom) => (Ratio::new(i128::from(top), i128::from(bottom)), None),
                 ExprKind::Amount(literal) => {
                     let numerator = literal.unit().and_then(|name| {
-                        let unit = match world.commodity_of(Word { text: name.0, loc: file.loc(name.0) }) {
+                        let unit = match world.commodity_of(Word::of(file, name.0)) {
                             Ok(unit) => unit,
                             Err(problem) => {
                                 diags.push(problem);
@@ -1645,7 +1645,7 @@ fn shares<'s>(
                 break;
             }
             total = next_total;
-            match world.entity(home, Word { text: owner_name.0, loc: file.loc(owner_name.0) }) {
+            match world.entity(home, Word::of(file, owner_name.0)) {
                 Ok(entity) => shares.push(Share { rate, entity, measure, loc: prop.loc }),
                 Err(problem) => diags.push(problem),
             }

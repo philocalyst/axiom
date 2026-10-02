@@ -82,7 +82,7 @@ impl<'s> World<'s> {
             }
             ExprKind::Amount(amount) => match amount.unit() {
                 Some(unit) => {
-                    let unit = self.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) })?;
+                    let unit = self.commodity_of(Word::of(file, unit.0))?;
                     (Value::Amount(self.amount(amount.num(), unit, expr.loc)?), Ty::Amount(Dim::Of(unit)))
                 }
                 None => (Value::Empty, Ty::Empty),

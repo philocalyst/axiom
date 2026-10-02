@@ -42,7 +42,7 @@ pub(crate) fn tail<'s>(
                 world.book.codes.push(world.book.names.intern(code.name()));
             }
             ClauseKind::Purpose(written) => {
-                let word = Word { text: written.name.0, loc: file.loc(written.name.0) };
+                let word = Word::of(file, written.name.0);
                 match world.purpose(home, word) {
                     Ok(id) => {
                         let of =
@@ -62,12 +62,10 @@ pub(crate) fn tail<'s>(
                 waive =
                     Some(Waive { loc: written.at, reason: written.reason.map(|text| world.book.quoted_text(text.0)) });
             }
-            ClauseKind::For(ast::For::Whom(name)) => {
-                match world.entity(home, Word { text: name.0, loc: file.loc(name.0) }) {
-                    Ok(entity) => detail.hold = Some(entity),
-                    Err(problem) => diags.push(problem),
-                }
-            }
+            ClauseKind::For(ast::For::Whom(name)) => match world.entity(home, Word::of(file, name.0)) {
+                Ok(entity) => detail.hold = Some(entity),
+                Err(problem) => diags.push(problem),
+            },
             ClauseKind::Since(day) => detail.since = Some(day),
             ClauseKind::Due(ast::Due::On(day)) => detail.due = Some(day),
             ClauseKind::Due(ast::Due::After(_)) => diags.push(
@@ -76,10 +74,7 @@ pub(crate) fn tail<'s>(
             ),
             ClauseKind::Basis(ast::Amount::Literal(literal)) => {
                 let Some(unit) = literal.unit().and_then(|unit| {
-                    world
-                        .commodity_of(Word { text: unit.0, loc: file.loc(unit.0) })
-                        .map_err(|problem| diags.push(problem))
-                        .ok()
+                    world.commodity_of(Word::of(file, unit.0)).map_err(|problem| diags.push(problem)).ok()
                 }) else {
                     diags.push(
                         Diagnostic::error("basis-unit", "basis needs an explicit base-currency unit")

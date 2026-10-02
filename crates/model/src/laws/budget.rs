@@ -49,7 +49,7 @@ pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], 
                             );
                             continue;
                         }
-                        let word = Word { text: decl.name.0, loc: file.loc(decl.name.0) };
+                        let word = Word::of(file, decl.name.0);
                         let purpose = match world.purpose(source.home, word) {
                             Ok(purpose) => purpose,
                             Err(problem) => {
@@ -79,7 +79,7 @@ pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], 
                 }
                 ItemKind::Budget(reference) => {
                     let budget = &file[reference];
-                    let word = Word { text: budget.purpose.0, loc: file.loc(budget.purpose.0) };
+                    let word = Word::of(file, budget.purpose.0);
                     let purpose = match world.purpose(source.home, word) {
                         Ok(purpose) => purpose,
                         Err(problem) => {
@@ -118,7 +118,7 @@ pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], 
                         );
                         continue;
                     };
-                    let word = Word { text: name.0, loc: file.loc(name.0) };
+                    let word = Word::of(file, name.0);
                     let purpose = match world.purpose(source.home, word) {
                         Ok(purpose) => purpose,
                         Err(problem) => {
@@ -317,10 +317,9 @@ fn lower_budget_limit<'s>(
     match entry.allowance.limit {
         ast::Limit::Amount(ast::Amount::Literal(literal)) => {
             let unit = match literal.unit() {
-                Some(unit) => world
-                    .commodity_of(Word { text: unit.0, loc: entry.file.loc(unit.0) })
-                    .map_err(|problem| diags.push(problem))
-                    .ok()?,
+                Some(unit) => {
+                    world.commodity_of(Word::of(entry.file, unit.0)).map_err(|problem| diags.push(problem)).ok()?
+                }
                 None => world.book.base,
             };
             world
@@ -344,7 +343,7 @@ fn lower_budget_limit<'s>(
             Some(BudgetLimit::Computed(NodeId(local_root.0 + law_offset)))
         }
         ast::Limit::Share { percent, of } => {
-            let word = Word { text: of.0, loc: entry.file.loc(of.0) };
+            let word = Word::of(entry.file, of.0);
             let of = world.purpose(entry.home, word).map_err(|problem| diags.push(problem)).ok()?;
             let rate = Ratio::percent(percent.mantissa as i128, percent.scale)?;
             Some(BudgetLimit::Ready(Limit::Share { rate, of }))
@@ -362,8 +361,8 @@ fn funding(
 ) -> Option<Option<(Id<crate::book::Place>, Id<crate::book::Place>)>> {
     funded
         .map(|funding| {
-            let from = world.place(Word { text: funding.from.0, loc: file.loc(funding.from.0) });
-            let to = world.place(Word { text: funding.into.0, loc: file.loc(funding.into.0) });
+            let from = world.place(Word::of(file, funding.from.0));
+            let to = world.place(Word::of(file, funding.into.0));
             match (from, to) {
                 (Ok(from), Ok(to)) => Some((from, to)),
                 (from, to) => {
