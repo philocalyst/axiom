@@ -33,7 +33,7 @@ entity halcyon, northwind, kestrel, devconf : client
 contract halcyon-retainer : engagement
   provider noor-consulting
   client halcyon
-  4_500.00 USD monthly on 1 invoiced due 15d      // ✗ fl-c01 [A3] a retainer is an invoice, not a receipt: `Due` blames the client, which only a typed engagement can say
+  4_500.00 USD monthly on 1 invoiced due 15d      // ✗ fl-c01 [A3] a retainer is an invoice from the day it is issued: v4 makes a claim only when a due day is missed (§7), so until then `claims` and `available` do not see it. FINDINGS proposal 1's `invoiced` is not in LANGUAGE.md
   includes 30 HR
   overage 150.00 USD/HR                           // billed on the next invoice: hours worked beyond the 30, by the `worked` lines
 contract northwind : engagement
@@ -294,7 +294,7 @@ opening 2025-12-31
 //   fl-b04  ✎     [open]   a cost billed back at cost is income and spending at once; the purpose of the line is income
 //   fl-b06  ✎     [A6]     the January installment belongs to the year before: `for the tax year`
 //   fl-b07  ✎     [open]   budgets "of income" lost their root when §6.3 dropped `#income`; the funded reserve needs a word for "everything that arrived"
-//   fl-c01  ✗     [A3]     a retainer is an invoice (a claim on the client), not a receipt: the obligation to pay blames the client, which a typed engagement says
+//   fl-c01  ✗     [A3]     a retainer is a claim on the client from the day it is invoiced, not only once a due day is missed (v4 §7); an `engagement` relator issues it
 //   fl-c05  ✗     [open]   two bases again: expensing a laptop for tax (§179) against five years for the books
 //   fl-s20  ⇄     [sync]   a time tracker's days as `worked` lines; the invoice then bills the sum by its code
 //   fl-u02  ?     [A1]     a sole proprietor is both employer and participant of her own plan: one entity in two slots of one relator

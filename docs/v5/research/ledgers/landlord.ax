@@ -86,10 +86,12 @@ kind lease : contract
   input water USD
   also + water * unit.area / unit.whole.area #utilities        // the tenant's share of the building's bill, by area
   also + 5% of rent #late-fees  when date > due + 5d
+  verb rents ... from                                          // `DATE TENANT rents UNIT from DAY`
+
+kind rental-home : property                                    // (us/rental) the vacancy law governs the unit, so it lives here and not on the lease
   law vacancy
     always
-    warn any lease where unit is self  "unit has no lease"      // ✗ ll-c02 [A12] needs an existential over the inverse of `unit`
-  verb rents ... from                                          // `DATE TENANT rents UNIT from DAY`
+    warn any lease where unit is self  "unit has no lease"      // ✗ ll-c02 [A12] needs an existential over the inverse of the lease's `unit` slot
 
 // ── the loan, and the rest ──────────────────────────────────────────────────────────────────────────
 

@@ -95,8 +95,8 @@ entity chase : bank
 entity fidelity : broker
   alex/401k                         // sponsor: alex's employer on the day it opens (acme), by the default of kind 401k  ? hh-u11 [A2] a default is a guess about the past
   jordan/bluefin/401k               // a second one will exist: the path names the sponsor so the two are told apart
-  alex/hsa
-    coverage family                 // ? hh-u07 [A1] a closed enum here; it should be what alex's `hdhp` covers, and nothing says the HSA needs that coverage
+  alex/hsa                          // `coverage` is a default: the tier of the `hdhp` alex joins, here `family`. Without an HDHP behind it the HSA is an error, below
+                                    // ? hh-u07 [A1] the default reads only the owner's own plans; the HSA is also contributable at family tier when the HDHP is the spouse's, and nothing says whose
   family/529
     beneficiary riley               // `family` fills `owner` (a household), `riley` the only unfilled slot a person can fill
 entity benefit-admin : plan-administrator
@@ -104,7 +104,7 @@ entity benefit-admin : plan-administrator
     sponsor acme                    // by default: alex's employer
     dependents riley
 entity rocket : lender
-  family/mortgage : loan 406_692.02 USD on 2025-12-31 at 5.875% over 27y6m for house
+  family/mortgage : mortgage 406_692.02 USD on 2025-12-31 at 5.875% over 27y6m for house
     monthly on 1 from checking
     also -> escrow 705.00 USD #escrow        // `escrow` is a position the kind `mortgage` implies: family's, with rocket
 entity honda-finance : lender
@@ -439,8 +439,8 @@ opening 2025-12-31
 //   error[wrong-kind]: `beneficiary acme`: acme is an employer, and a 529's `beneficiary` is a person
 //   = help: did you mean `beneficiary riley`?
 //
-//   error[missing-role]: alex/hsa has no `coverage`: the kind `hsa` needs one of `self-only | family`
-//   = help: coverage family
+//   error[missing-role]: alex/hsa has no `coverage`: its default (`owner.hdhp.tier`) found no HDHP that alex joins; the kind `hsa` needs one of `self-only | family`
+//   = help: `joins hdhp` in alex's employment, or `coverage family` if the plan is not in this book
 //
 //   error[too-many]: family/529 has two `beneficiary`: riley, jordan (a 529 has one)
 //   = help: open a second 529, or `beneficiary riley` only
@@ -457,5 +457,5 @@ opening 2025-12-31
 //   hh-s08  ⇄     [sync]   paystubs: print `15 alex-pay` when the stub is the contract's, its legs when it is not
 //   hh-s09  ⇄     [sync]   the servicer's annual escrow analysis as a `now` statement on the escrow term
 //   hh-s10  ⇄     [sync]   the 529 and HSA custodians' statements, with the plan's own claim numbers as codes
-//   hh-u07  ?     [A1]     HSA coverage as a closed enum vs what the HDHP actually covers; HSA eligibility needs that coverage and nobody else's
+//   hh-u07  ?     [A1]     HSA coverage defaults from the owner's own HDHP; family coverage through the spouse's plan is the same fact from another employment
 //   hh-u11  ?     [A2]     a default for `sponsor` is a guess about the past: an account that predates the book must say who sponsored it

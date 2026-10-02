@@ -330,7 +330,7 @@ opening 2025-12-31
 //   physical presence test: 128 of the 330 full days needed in some 12 consecutive months. With no further day in the US the 330th is 2027-01-18, and the qualifying
 //   period would then run from 2026-02-15. Today the test is not met, so nothing is excluded in the 06-30 view; the return will claim it later for income earned since 02-15.
 //   the bona fide residence test needs a whole tax year abroad: 2027 at the earliest
-//   ✗ ex-c01 [open] a test not yet met, and its earliest day: "any 12 consecutive months" is a search over window starts, and the answer depends on a plan of presence the book does
+//   ✗ ex-c01 [A12] a test not yet met, and its earliest day: "any 12 consecutive months" is a search over window starts of the presence DaySet, and the answer depends on a plan of presence the book does
 //       not have (`lena will be in pt until ...`). v4's `days(COND, window)` counts one given window; K2 could carry a forecast of the timeline, nothing yet carries the search
 //   ⇄ ex-s08 presence from bookings and location history would make the 128 an observation instead of a sum of typed statements
 //
@@ -354,7 +354,7 @@ opening 2025-12-31
 //   ex-b02  ✎     [A6]     the January installment belongs to the year before: `for the tax year`
 //   ex-b03  ✎     [A10]    a conversion between two of my own positions, or inside one, with the fee in the source currency
 //   ex-b05  ✎     [open]   the FBAR's maximum: per account, in its own units, at the Treasury's year-end rate; `peak` gives the owner's currency at the day's price
-//   ex-c01  ✗     [open]   a test over "any 12 consecutive months" that is not yet met, and the earliest day it can be: a window search and a forecast of presence
+//   ex-c01  ✗     [A12]    a test over "any 12 consecutive months" that is not yet met, and the earliest day it can be: a window search over the presence DaySet (THEORY T9) and a planned presence
 //   ex-c04  ✗     [A6]     a receipt has two calendars: the day money came (the cash-basis return) and the days the work was done (where: FEIE); `for` has one reader
 //   ex-c05  ✗     [open]   a due day that is a function of where the person lives on that day (the 2-month extension abroad)
 //   ex-c07  ✗     [A12]    Portuguese tax residence is derived from presence, with a start day, not declared

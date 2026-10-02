@@ -44,7 +44,7 @@ contract lease-2025 : lease with northline
   master   priya                                                         // by default the first tenant: written because it matters
   3_000.00 USD monthly on 1 from master #rent                            // checked: it must equal the sum of the weights
   deposit  3_000.00 USD paid 2025-08-20 equally                          // a claim of northline's, owed to "the tenants": a role, see 05-01
-  due 5d else 25.00 USD #late-fee                                         // ✎ sh-b02 [A3] the house rule is a term of the lease kind, not of the month
+  due 5d else 25.00 USD #late-fee                                         // ✎ sh-b01 [A3] v4 writes this house rule once per roommate (`contract marcus-room with priya … due 5d else 25.00 USD #late-fee`); the lease relator derives the claims and states it once
   from 2025-09-01 until 2026-08-31
 
 /// What the kind `lease` adds for a shared flat (a sketch, next to the one in landlord.ax):
@@ -64,7 +64,7 @@ opening 2025-12-31
 01 lease-2025                                                     // ▸ priya -> northline 3,000.00 USD #rent · marcus owes priya 950.00 USD · jules owes priya 900.00 USD, both due 01-05
 
 02 marcus -> priya 950.00 USD via venmo                           // ▸ settles rent-2601-m
-                                                                  // ✎ sh-b01 [A8] no code on a Venmo payment: the payment settles the oldest open claim between the two. ⇄ sh-s01 Venmo's memo ("rent jan") and handle are what sync reads
+                                                                  // ▸ v4 §7 settles the one claim whose open amount is exactly this flow's, oldest first otherwise: no code needed. ⇄ sh-s01 Venmo's memo ("rent jan") and handle are what sync reads
 
 04 jules -> priya 900.00 USD via venmo                            // ▸ settles rent-2601-j
 
@@ -105,7 +105,7 @@ opening 2025-12-31
 02 jules -> priya 900.00 USD via venmo
 
 06 lease-2025                                                     // ▸ marcus's rent is a day past 03-05: the house rule's 25.00 USD #late-fee joins the claim: marcus owes priya 25.00 USD
-                                                                  // ✎ sh-b02 [A3] a house rule is a norm of the lease kind (`due 5d else 25.00 USD #late-fee`): written in the lease, blaming the debtor, not typed per month. v4's `else` fires once and has no per-member form (the schedule's `Every` is K5)
+                                                                  // ✎ sh-b01 [A3] v4 would write the house rule once per roommate, as three contracts (`contract marcus-room with priya … due 5d else 25.00 USD #late-fee`). The lease relator derives the three claims and states the rule once, blaming whoever is late
 
 09 marcus -> priya 975.00 USD via venmo                           // ▸ settles rent-2603-m and late-2603-m
 
@@ -117,7 +117,7 @@ opening 2025-12-31
 15 jules -> comcast 79.99 USD #internet for flat for 2026-03
 
 20 priya -> ikea 346.00 USD #purchase of couch for flat by rent   // ▸ by rent, the weights of the lease's tenants: marcus owes priya 109.57 USD · jules owes priya 103.80 USD; priya's own 132.63 USD
-                                                                  // ✎ sh-b03 [A4] `by rent` takes the weights from an attribute of the relator (the lease's `tenants`), `for flat` alone means equal: one word picks the weight set, v4 has none
+                                                                  // ✎ sh-b02 [A4] v4's `share SHARE for ENTITY` is per contract and fixed; a one-off flow has no weight form. `by rent` takes the weights from the lease's `tenants`, `for flat` alone means equal
 
 22 priya -> centerpoint 87.60 USD #utilities for flat for 2026-02-12..03-11
 
@@ -185,9 +185,8 @@ opening 2025-12-31
 //
 // ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
 //   id      mark  closed by  what
-//   sh-b01  ✎     [A8]     a Venmo payment carries no claim code: it settles the oldest open claim between the two
-//   sh-b02  ✎     [A3]     a house rule is a term of the lease kind (`due 5d else 25.00 USD #late-fee`), blaming the member who is late
-//   sh-b03  ✎     [A4]     `for flat by rent` takes weights from the lease's `tenants`; `for flat` alone means equal, and a period means by days present
+//   sh-b01  ✎     [A3]     v4 writes the house rule once per roommate (three contracts); the lease relator states it once and blames whoever is late
+//   sh-b02  ✎     [A4]     a one-off flow divided by a weight set: `for flat by rent` reads the lease's `tenants`; `for flat` alone means equal, a period means by days present
 //   sh-c01  ✗     [A8]     set-off: claims in both directions between two members net, and one payment settles the difference (`net`). v4 settles a claim by its code only
 //   sh-c02  ✗     [A12]    the deposit is owed to a role, "the tenants of the lease"; when the occupant changes, so does the creditor, and nobody types it
 //   sh-c03  ✗     [A8]     a claim assigned for consideration (tomas pays jules 1,000.00 USD for his third), the debtor not asked
