@@ -675,12 +675,9 @@ impl<'a, 's> Machine<'a, 's> {
             },
             Op::Resides(entity, systems) => match self.at(*entity) {
                 Value::Fault(fault) => Value::Fault(fault),
-                Value::Entity(entity) => Value::Bool(
-                    self.book().entities[entity]
-                        .lives
-                        .iter()
-                        .any(|residence| residence.days.contains(self.ctx.day) && systems.contains(&residence.system)),
-                ),
+                Value::Entity(entity) => {
+                    Value::Bool(self.book().residing(entity, self.ctx.day).any(|system| systems.contains(&system)))
+                }
                 _ => Value::Fault(Fault::InvalidProgram),
             },
             Op::If(cond, then, otherwise) => match self.at(*cond) {
@@ -1406,7 +1403,7 @@ impl<'a, 's> Machine<'a, 's> {
 
     fn open(&self, code: Sym) -> Value {
         let book = self.book();
-        let unit = book.entities[self.ctx.owner].currency;
+        let unit = self.env.plan.traits.entity(self.ctx.owner).currency;
         let mut total = Qty::ZERO;
         for (place, _) in book.places.iter() {
             if !self.env.plan.traits.place(place).claim {

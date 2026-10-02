@@ -5,7 +5,7 @@ use axiom_syntax::{Decl, DeclKind};
 
 use super::commodities::Commodities;
 use super::{Resolving, Said, add_path_spellings, owner_names_in, strict_path_suffixes};
-use crate::book::{At, Books, Entity, Sort};
+use crate::book::{At, Entity, Sort};
 use crate::collect::{Collected, Written};
 use crate::errors::Word;
 use crate::lower::Mention;
@@ -197,7 +197,6 @@ pub(super) fn declare<'a, 's>(
     collected: &Collected<'a, 's>,
     parties: Parties<'a, 's>,
     resolving: &Resolving<'_>,
-    base: Id<crate::book::Commodity>,
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Entities<'s> {
@@ -222,15 +221,9 @@ pub(super) fn declare<'a, 's>(
             kind,
             purpose,
             place: None,
-            restricted: false,
-            lives: Box::default(),
-            member: None,
             owner: None,
             client_of: None,
             owned_by: Box::default(),
-            currency: base,
-            citizen: Box::default(),
-            books: Books::default(),
             known_as: Box::default(),
             doc,
             loc,

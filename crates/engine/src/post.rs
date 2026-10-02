@@ -408,7 +408,7 @@ impl Ledger<'_, '_, '_> {
         let hold = m
             .detail()
             .hold
-            .map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
+            .map(|entity| Some(entity).filter(|&e| e != owner && self.plan.traits.entity(owner).member != Some(e)));
         let (money, since) = (is_money(self.plan, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
         let acquisition = self.new_acquisition_part(m);
         let declared_asset = book
@@ -927,8 +927,7 @@ impl Ledger<'_, '_, '_> {
     /// The restricted entity that money crossing to another owner is tied to:
     /// the payee if it is restricted, else the source place's owner.
     fn restricted_source(&self, m: &Motion) -> Option<Id<Entity>> {
-        let book = self.plan.book;
-        let restricted = |entity: &Id<Entity>| book.entities[*entity].restricted;
+        let restricted = |entity: &Id<Entity>| self.plan.traits.entity(*entity).restricted;
         m.payee.filter(restricted).or(Some(m.source.owner).filter(restricted))
     }
 

@@ -17,10 +17,10 @@
 //! words is held as the place of its word in the set, a [`Coded`] value, and read back into its enum here, so that
 //! nothing else knows the numbering.
 
-use axiom_core::{Day, Id, Key, Many, SlotId, Span};
+use axiom_core::{Day, Id, Key, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Commodity};
+use crate::book::{Basis, Books, Commodity, Entity, Place, System};
 
 /// Declares the keys, numbered in the order written.
 macro_rules! own_slots {
@@ -52,6 +52,24 @@ own_slots! {
     BASIS: u32;
     /// A place holds what others owe: its parcels stay apart.
     CLAIM: bool;
+    /// An entity's money stays tied to it: spending it is the entity's to govern.
+    RESTRICTED: bool;
+    /// The household an entity belongs to.
+    MEMBER: Id<Entity>;
+    /// The currency an entity counts in.
+    CURRENCY: Id<Commodity>;
+    /// The systems that tax an entity wherever it lives.
+    CITIZEN: Many<Id<System>>;
+    /// When a claim is income or spending: [`Books`], coded.
+    BOOKS: u32;
+    /// The systems an entity lives under, on each day.
+    LIVES: Many<Id<System>>;
+    /// An entity's place as a flow's end, where it is not the one its name gives.
+    VIA: Id<Place>;
+    /// What a commodity is called in full.
+    TITLE: Sym;
+    /// How a commodity grows, a year at a time.
+    GROWS: Ratio;
 }
 
 /// A property that is one of a few words, held as the place of its word.
@@ -78,6 +96,10 @@ impl Coded for Basis {
     const SET: &'static [Basis] = &[Basis::Cost, Basis::Zero];
 }
 
+impl Coded for Books {
+    const SET: &'static [Books] = &[Books::Cash, Books::Accrual];
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,8 +107,8 @@ mod tests {
     #[test]
     fn the_keys_are_numbered_in_the_order_written_from_zero() {
         assert_eq!(HOLDS.slot(), SlotId(0));
-        assert_eq!(CLAIM.slot(), SlotId(COUNT - 1));
-        assert_eq!(COUNT, 8);
+        assert_eq!(GROWS.slot(), SlotId(COUNT - 1));
+        assert_eq!(COUNT, 17);
     }
 
     #[test]

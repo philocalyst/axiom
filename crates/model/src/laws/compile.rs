@@ -800,15 +800,15 @@ impl<'s> Compiler<'_, '_, 's> {
     /// currencies, so those contexts remain genuinely dynamic.
     fn owner_amount_ty(&self) -> Ty {
         let currency = match self.owner {
-            Some(Owner::Place(place)) => Some(self.world.book.entities[self.world.book.places[place].owner].currency),
-            Some(Owner::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+            Some(Owner::Place(place)) => Some(self.world.book.currency(self.world.book.places[place].owner)),
+            Some(Owner::Entity(entity)) => Some(self.world.book.currency(entity)),
             Some(Owner::Asset(asset)) => {
                 let owner = self.world.book.assets[asset].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
             Some(Owner::Contract(contract)) => {
                 let owner = self.world.book.contracts[contract].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
             // A system's currency is only the default for its residents;
             // individual entities may set another one.
@@ -824,26 +824,26 @@ impl<'s> Compiler<'_, '_, 's> {
         let currency = match self.nodes[node].op {
             Op::Const(Value::Place(place)) => {
                 let owner = self.world.book.places[place].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
-            Op::Const(Value::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+            Op::Const(Value::Entity(entity)) => Some(self.world.book.currency(entity)),
             Op::Const(Value::Asset(asset)) => {
                 let owner = self.world.book.assets[asset].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
             Op::Var(Var::Subject) => match self.owner {
                 Some(Owner::Place(place)) => {
                     let owner = self.world.book.places[place].owner;
-                    Some(self.world.book.entities[owner].currency)
+                    Some(self.world.book.currency(owner))
                 }
-                Some(Owner::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+                Some(Owner::Entity(entity)) => Some(self.world.book.currency(entity)),
                 Some(Owner::Asset(asset)) => {
                     let owner = self.world.book.assets[asset].owner;
-                    Some(self.world.book.entities[owner].currency)
+                    Some(self.world.book.currency(owner))
                 }
                 Some(Owner::Contract(contract)) => {
                     let owner = self.world.book.contracts[contract].owner;
-                    Some(self.world.book.entities[owner].currency)
+                    Some(self.world.book.currency(owner))
                 }
                 Some(Owner::System(_)) => None,
                 _ => None,

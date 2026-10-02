@@ -19,7 +19,7 @@ use crate::plan::Plan;
 /// The entities that own what `owner` owns: itself, what it belongs to in the
 /// entity tree, and the household it is a member of.
 fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Entity>> + Clone + 'a {
-    let household = book.entities[owner].member.filter(move |&house| !book.entities.covers(house, owner));
+    let household = book.member(owner).filter(move |&house| !book.entities.covers(house, owner));
     book.entities.lineage(owner).chain(household)
 }
 

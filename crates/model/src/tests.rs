@@ -4,13 +4,13 @@
 //! lowerers and by the engine. These tests focus on the model boundary: typed
 //! names, stable trees, ownership and once-stored property defaults.
 
-use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
+use axiom_core::{Day, Diagnostic, FileId, Id, Ratio};
 use axiom_syntax::{Folder, parse};
 
 use crate::builtin::{self, Coded};
 use crate::{
-    Amount, Basis, Book, Conversion, ConversionError, Holder, PurposeRoot, RatePolicy, RateSource, Residence, Role,
-    Sort, Source, Value, build,
+    Amount, Basis, Book, Conversion, ConversionError, Holder, PurposeRoot, RatePolicy, RateSource, Role, Sort, Source,
+    Value, build,
 };
 
 const STD: &str = "\
@@ -538,16 +538,27 @@ entity jo : person
     let (book, diagnostics) = build(&sources);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let residences = &book.entities[book.entity("jo").unwrap()].lives;
-    assert_eq!(residences.len(), 2);
-    assert_eq!(book.name(book.systems[residences[0].system].path), "us/ca");
-    assert_eq!(book.name(book.systems[residences[1].system].path), "us/ny");
-    assert_eq!(book.systems[residences[0].system].currency, book.commodity("CAD"));
-    assert_eq!(book.systems[residences[1].system].currency, book.commodity("USD"));
-    assert_eq!(residences[0].days.first(), Day::from_ymd(2025, 1, 1).unwrap());
-    assert_eq!(residences[0].days.last(), Day::from_ymd(2025, 12, 31).unwrap());
-    assert_eq!(residences[1].days.first(), Day::from_ymd(2025, 7, 1).unwrap());
-    assert_eq!(residences[1].days.last(), Day::MAX);
+    let jo = book.entity("jo").unwrap();
+    let on = |year, month, date| {
+        let day = Day::from_ymd(year, month, date).unwrap();
+        let mut systems: Vec<&str> =
+            book.residing(jo, day).map(|system| book.name(book.systems[system].path)).collect();
+        systems.sort_unstable();
+        systems
+    };
+    assert_eq!(on(2024, 12, 31), Vec::<&str>::new(), "nowhere before the first residence");
+    assert_eq!(on(2025, 6, 30), ["us/ca"]);
+    assert_eq!(on(2025, 7, 1), ["us/ca", "us/ny"], "overlapping residences are kept");
+    assert_eq!(on(2026, 1, 1), ["us/ny"], "and one that has no end does not");
+    let (ca, ny) = (
+        book.systems.iter().find(|(_, node)| book.name(node.path) == "us/ca").unwrap().0,
+        book.systems.iter().find(|(_, node)| book.name(node.path) == "us/ny").unwrap().0,
+    );
+    assert_eq!(book.systems[ca].currency, book.commodity("CAD"));
+    assert_eq!(book.systems[ny].currency, book.commodity("USD"));
+    assert_eq!(book.currency(jo), book.commodity("CAD").unwrap(), "the currency of the first system it lives under");
+    let first = book.residences(jo).next().unwrap();
+    assert_eq!((first.0.first(), first.1), (Day::from_ymd(2025, 1, 1).unwrap(), ca));
 }
 
 fn build_rate_book<'s>(project: &'s str) -> (Book<'s>, Vec<Diagnostic>) {
@@ -682,70 +693,46 @@ entity me : person
     ));
 }
 
+/// The project of an entity that lives under the systems named, in that order.
+fn living_under(paths: &[&str]) -> String {
+    let lines: String = paths.iter().map(|path| format!("  lives {path}\n")).collect();
+    format!(
+        "use std\nuse us\nuse de\nbase USD\ncommodity USD : currency\n  precision 2\ncommodity EUR : currency\n  precision 2\nentity me : person\n{lines}"
+    )
+}
+
 #[test]
 fn descendant_residence_policy_supersedes_ancestor_independent_of_order() {
-    let project = "\
-use std
-use us
-use de
-base USD
-commodity USD : currency
-  precision 2
-commodity EUR : currency
-  precision 2
-entity me : person
-";
-    let (mut book, diagnostics) = build_rate_book(project);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let owner = book.roots.me;
-    let system = |book: &Book<'_>, path| {
-        book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap()
-    };
-    let (us, de) = (system(&book, "us"), system(&book, "de"));
-    let child = system(&book, "us/ca");
-    let param = book.params.iter().next().unwrap().0;
-    book.systems[child].rates = Some(RatePolicy::Param(param));
-    let residences = [
-        Residence { days: Days::ALWAYS, system: de },
-        Residence { days: Days::ALWAYS, system: us },
-        Residence { days: Days::ALWAYS, system: child },
-    ];
-    let day = Day::from_ymd(2026, 6, 30).unwrap();
-    let amount = Amount::new(axiom_core::Qty(1_000), book.commodity("EUR").unwrap());
-    for lives in [residences, [residences[2], residences[0], residences[1]]] {
-        book.entities[owner].lives = lives.into();
+    for order in [["de", "us", "us/ca"], ["us/ca", "de", "us"], ["us", "us/ca", "de"]] {
+        let project = living_under(&order);
+        let (mut book, diagnostics) = build_rate_book(&project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let owner = book.roots.me;
+        let child = book.systems.iter().find_map(|(id, node)| (book.name(node.path) == "us/ca").then_some(id)).unwrap();
+        let param = book.params.iter().next().unwrap().0;
+        book.systems[child].rates = Some(RatePolicy::Param(param));
+        let day = Day::from_ymd(2026, 6, 30).unwrap();
+        let amount = Amount::new(axiom_core::Qty(1_000), book.commodity("EUR").unwrap());
         let converted = book.convert_for(amount, book.base, owner, day, None).unwrap();
-        assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()));
+        assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()), "{order:?}");
     }
 }
 
 #[test]
 fn conflicting_overlapping_residence_rate_policies_are_reported_deterministically() {
-    let project = "\
-use std
-use us
-use de
-base USD
-commodity USD : currency
-  precision 2
-commodity EUR : currency
-  precision 2
-entity me : person
-";
-    let (mut book, diagnostics) = build_rate_book(project);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let owner = book.roots.me;
-    let system =
-        |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
-    let (us, de) = (system("us"), system("de"));
-    book.entities[owner].lives =
-        vec![Residence { days: Days::ALWAYS, system: us }, Residence { days: Days::ALWAYS, system: de }].into();
-    let amount = Amount::new(axiom_core::Qty(100), book.commodity("EUR").unwrap());
-    let day = Day::from_ymd(2026, 6, 30).unwrap();
-    let expected = Err(ConversionError::PolicyConflict { first: us.min(de), second: us.max(de) });
-    assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected);
-    book.entities[owner].lives.reverse();
-    assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected);
+    for order in [["us", "de"], ["de", "us"]] {
+        let project = living_under(&order);
+        let (book, diagnostics) = build_rate_book(&project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let owner = book.roots.me;
+        let system =
+            |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
+        let (us, de) = (system("us"), system("de"));
+        let amount = Amount::new(axiom_core::Qty(100), book.commodity("EUR").unwrap());
+        let day = Day::from_ymd(2026, 6, 30).unwrap();
+        let expected = Err(ConversionError::PolicyConflict { first: us.min(de), second: us.max(de) });
+        assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected, "{order:?}");
+    }
 }
 
 #[test]

@@ -6,10 +6,10 @@
 //! the store does not know, so the walk is here and the store is asked once per step of it.
 
 use axiom_core::tagless::Field;
-use axiom_core::{Day, Id, Key, Many, Span, Sym};
+use axiom_core::{Day, Days, Id, Key, Many, Ratio, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Book, Commodity, Kind, Place, Role};
+use crate::book::{Basis, Book, Commodity, Entity, Kind, Place, Role, System};
 use crate::builtin::{self, Coded};
 use crate::holders::Holder;
 use crate::law::Value;
@@ -82,6 +82,41 @@ impl Book<'_> {
         let mut holds = self.holds(place)?;
         let only = holds.next()?;
         holds.next().is_none().then_some(only)
+    }
+
+    /// The household an entity belongs to.
+    pub fn member(&self, entity: Id<Entity>) -> Option<Id<Entity>> {
+        self.fact(builtin::MEMBER, entity)
+    }
+
+    /// Whether an entity's money stays tied to it.
+    pub fn is_restricted(&self, entity: Id<Entity>) -> bool {
+        self.fact(builtin::RESTRICTED, entity).unwrap_or(false)
+    }
+
+    /// The systems an entity lives under on a day.
+    pub fn residing(&self, entity: Id<Entity>, day: Day) -> impl Iterator<Item = Id<System>> + '_ {
+        let set: Option<Many<Id<System>>> = self.facts.at(builtin::LIVES, self.holders.number(entity), day);
+        set.into_iter().flat_map(|set| self.facts.members(set))
+    }
+
+    /// Every system an entity lives under, and the days it does: the stretches of its residences.
+    pub fn residences(&self, entity: Id<Entity>) -> impl Iterator<Item = (Days, Id<System>)> + '_ {
+        let steps = self.facts.steps(builtin::LIVES, self.holders.number(entity));
+        steps.flat_map(|(days, set)| self.facts.members(set).map(move |system| (days, system)))
+    }
+
+    /// The currency an entity counts in: its own, else its kinds', else that of the first system it lives under, else
+    /// the book's.
+    pub fn currency(&self, entity: Id<Entity>) -> Id<Commodity> {
+        let own = self.fact(builtin::CURRENCY, entity);
+        let residence = || self.residences(entity).find_map(|(_, system)| self.systems[system].currency);
+        own.or_else(residence).unwrap_or(self.base)
+    }
+
+    /// How a commodity grows, a year at a time, where it says.
+    pub fn growth(&self, unit: Id<Commodity>) -> Option<Ratio> {
+        self.fact(builtin::GROWS, unit)
     }
 
     /// Whether the gains of a place are not realized inside it.

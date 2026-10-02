@@ -378,14 +378,6 @@ fn subject_owners<'o>(book: &Book, ownership: &'o Owners, subject: Subject) -> &
 /// The days a dated value starts or ends, which must be sampled even when the journal has no fact that day.
 fn change_dates(book: &Book) -> Box<[Day]> {
     let mut dates: Vec<Day> = book.facts.step_days().collect();
-    for (_, entity) in book.entities.iter() {
-        for residence in entity.lives.iter() {
-            dates.push(residence.days.first());
-            if residence.days.last() != Day::MAX {
-                dates.push(residence.days.last().add_days(1));
-            }
-        }
-    }
     for (_, param) in book.params.iter() {
         dates.extend(param.rows.iter().filter_map(|row| row.since));
     }

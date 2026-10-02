@@ -63,6 +63,17 @@ impl World<'_> {
         self.painter.paint_many(self.book.holders.number(thing), key, Days::ALWAYS, members);
     }
 
+    /// What a line of the language says of `thing` over `days`: the set a slot of several holds then.
+    pub(crate) fn say_set_over<V: Field>(
+        &mut self,
+        thing: impl Into<Holder>,
+        key: Key<Many<V>>,
+        days: Days,
+        members: impl IntoIterator<Item = V>,
+    ) {
+        self.painter.paint_many(self.book.holders.number(thing), key, days, members);
+    }
+
     /// The set of `members` holds of `thing`'s slot over `days`.
     pub(crate) fn paint_set(&mut self, thing: impl Into<Holder>, slot: SlotId, days: Days, members: Vec<Datum>) {
         self.painter.paint_set_datum(self.book.holders.number(thing), slot, days, members);
@@ -382,7 +393,7 @@ pub(crate) fn declare<'a, 's>(
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
     let parties = parties::find(said, &resolving, &commodities, &mut names, diags);
-    let mut entities = parties::declare(collected, parties, &resolving, commodities.base, &mut names, diags);
+    let mut entities = parties::declare(collected, parties, &resolving, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
     let account_owners = holdings::owners_by_path(&accounts);

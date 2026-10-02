@@ -21,7 +21,6 @@ impl Kind {
             name,
             sort,
             system: None,
-            restricted: false,
             purpose: None,
             pays: None,
             takes: Box::default(),

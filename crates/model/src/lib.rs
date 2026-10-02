@@ -93,6 +93,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     slots::declare(&mut world, &collected, &mut diags);
     props::declare(&mut world, &collected, &mut diags);
     world.freeze_facts();
+    props::place_entities(&mut world);
     params::declare(&mut world, &collected, &mut diags);
     props::system_rates(&mut world, &collected, &mut diags);
     sync_lower::declare(&mut world, &sites, &collected, &mut diags);

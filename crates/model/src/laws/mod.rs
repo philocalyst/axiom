@@ -288,7 +288,7 @@ fn declare_alsos<'s>(
 
 fn fallback_currency(world: &World<'_>, owner: Owner) -> Id<crate::book::Commodity> {
     match owner {
-        Owner::Entity(entity) => world.book.entities[entity].currency,
+        Owner::Entity(entity) => world.book.currency(entity),
         _ => world.book.base,
     }
 }

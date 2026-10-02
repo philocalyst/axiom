@@ -275,13 +275,6 @@ pub struct Entity {
     pub purpose: Option<At<Id<Purpose>>>,
     /// Its place as a flow's end: an owner's `Holding`, a party's `Outside`.
     pub place: Option<Id<Place>>,
-    /// Resolved from the kind chain: money from this entity stays tied to it.
-    pub restricted: bool,
-    /// Jurisdictions, sorted by first day. They may overlap.
-    pub lives: Box<[Residence]>,
-    /// `member household`: the household this person belongs to, which is
-    /// governed in their place by the systems it lives in.
-    pub member: Option<Id<Entity>>,
     /// `owner me` on a business: it is one of the owners, owned by that one.
     pub owner: Option<Id<Entity>>,
     /// `of studio` on a client: what it pays is that owner's.
@@ -289,13 +282,6 @@ pub struct Entity {
     /// `owner me 60%, theo 40%` on a business: its tallies reach them in these
     /// shares. Empty for a sole owner (`owner`).
     pub owned_by: Box<[Share]>,
-    /// Its own `currency`, else its residence's system's, else the book's base:
-    /// resolved at build time.
-    pub currency: Id<Commodity>,
-    /// `citizen SYSTEM`: taxed by these wherever it lives.
-    pub citizen: Box<[Id<System>]>,
-    /// When a claim is income or spending.
-    pub books: Books,
     /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
     pub known_as: Box<[Id<Pattern>]>,
     pub doc: Option<Sym>,
@@ -310,14 +296,6 @@ pub enum Books {
     Cash,
     /// When it is due.
     Accrual,
-}
-
-/// `lives us/ca from 2025-01-01 until 2025-06-30`: inclusive, and open-ended
-/// on either side when unwritten.
-#[derive(Clone, Copy, Debug)]
-pub struct Residence {
-    pub days: Days,
-    pub system: Id<System>,
 }
 
 /// What basis value arriving from outside the owner's asset places takes.
@@ -340,7 +318,6 @@ pub struct Kind {
     /// The system that declared it; `None` for built-ins and project kinds.
     pub system: Option<Id<System>>,
     // Resolved down the kind chain.
-    pub restricted: bool,
     /// On a party kind: what flows with its parties are for (`grocer`:
     /// groceries).
     pub purpose: Option<At<Id<Purpose>>>,
@@ -395,9 +372,6 @@ pub struct Commodity {
     pub kind: Id<Kind>,
     /// Decimal places: declared, or the most seen in any written amount.
     pub scale: u8,
-    pub title: Option<Sym>,
-    /// `grows 5% yearly`: the valuation model forecasts use.
-    pub growth: Option<Ratio>,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -1639,40 +1613,29 @@ impl<'s> Book<'s> {
         Ok(Conversion::Rates { amount, path, rate })
     }
 
+    /// The rate policy of the systems an owner lives under on a day: the policy of a system that no other one's sits
+    /// beneath, or an error if two of them say different things.
     fn owner_rate_policy(&self, owner: Id<Entity>, day: Day) -> Result<Option<RatePolicy>, ConversionError> {
-        let residences = &self.entities[owner].lives;
+        let nearest: Vec<_> = self.residing(owner, day).filter_map(|system| self.nearest_rate_policy(system)).collect();
+        let sits_beneath = |system, other| other != system && self.systems.covers(system, other);
+        let maximal: Vec<_> = nearest
+            .iter()
+            .copied()
+            .filter(|&(system, _)| !nearest.iter().any(|&(other, _)| sits_beneath(system, other)))
+            .collect();
         let mut conflict = None::<(Id<System>, Id<System>)>;
-        for (index, residence) in residences.iter().enumerate().filter(|(_, r)| r.days.contains(day)) {
-            let Some((candidate, policy)) = self.nearest_rate_policy(residence.system) else {
-                continue;
-            };
-            if !self.active_policy_is_maximal(residences, day, candidate) {
-                continue;
-            }
-            for other in residences[index + 1..].iter().filter(|r| r.days.contains(day)) {
-                let Some((other, other_policy)) = self.nearest_rate_policy(other.system) else {
-                    continue;
-                };
-                if other == candidate
-                    || policy == other_policy
-                    || !self.active_policy_is_maximal(residences, day, other)
-                {
-                    continue;
+        for (index, &(first, policy)) in maximal.iter().enumerate() {
+            for &(second, other) in &maximal[index + 1..] {
+                if first != second && policy != other {
+                    let pair = (first.min(second), first.max(second));
+                    conflict = Some(conflict.map_or(pair, |current| current.min(pair)));
                 }
-                let pair = if candidate < other { (candidate, other) } else { (other, candidate) };
-                conflict = Some(conflict.map_or(pair, |current| current.min(pair)));
             }
         }
         if let Some((first, second)) = conflict {
             return Err(ConversionError::PolicyConflict { first, second });
         }
-        Ok(residences
-            .iter()
-            .filter(|residence| residence.days.contains(day))
-            .filter_map(|residence| self.nearest_rate_policy(residence.system))
-            .filter(|(candidate, _)| self.active_policy_is_maximal(residences, day, *candidate))
-            .min_by_key(|(candidate, _)| *candidate)
-            .map(|(_, policy)| policy))
+        Ok(maximal.iter().min_by_key(|(system, _)| *system).map(|&(_, policy)| policy))
     }
 
     fn nearest_rate_policy(&self, mut system: Id<System>) -> Option<(Id<System>, RatePolicy)> {
@@ -1683,14 +1646,6 @@ impl<'s> Book<'s> {
             }
             system = self.systems.parent(system)?;
         }
-    }
-
-    fn active_policy_is_maximal(&self, residences: &[Residence], day: Day, candidate: Id<System>) -> bool {
-        !residences
-            .iter()
-            .filter(|residence| residence.days.contains(day))
-            .filter_map(|residence| self.nearest_rate_policy(residence.system))
-            .any(|(other, _)| other != candidate && self.systems.covers(candidate, other))
     }
 
     fn conversion_path(

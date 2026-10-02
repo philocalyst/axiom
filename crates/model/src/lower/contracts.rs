@@ -164,7 +164,7 @@ fn lower_contract<'a, 's>(
         owner: Owner::Contract(written.id),
         on: AlsoOn::Contract(written.id),
         inputs: &contract_inputs,
-        currency: world.book.entities[owner].currency,
+        currency: world.book.currency(owner),
     };
     let also = lower_alsos(world, &also_cx, node.alsos, diags);
     let loan = contract_loan(world, written, party, owner, diags)?;
@@ -1376,7 +1376,7 @@ fn deposit_amount<'s>(
         );
         return Err(());
     };
-    let currency = Some(world.book.entities[owner].currency);
+    let currency = Some(world.book.currency(owner));
     match world.literal_amount(file, literal, currency).or_report(diags) {
         Some(amount) if amount.qty.0 > 0 => Ok(amount),
         Some(_) => {

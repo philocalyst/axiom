@@ -35,7 +35,7 @@ impl Whose {
 
     /// One entity's, and its members' if it is a household.
     pub fn of(book: &Book, entity: Id<Entity>) -> Whose {
-        let members = book.entities.iter().filter(|(_, other)| other.member == Some(entity)).map(|(id, _)| id);
+        let members = book.entities.ids().filter(|&other| book.member(other) == Some(entity));
         let mut owners: Vec<_> = iter::once(entity).chain(members).collect();
         owners.sort_unstable();
         Whose { owners: Some(owners), label: Some(entity) }

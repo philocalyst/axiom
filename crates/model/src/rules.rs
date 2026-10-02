@@ -30,8 +30,8 @@ type Governing = Vec<(Id<System>, Days)>;
 
 fn governing(book: &Book, entity: Id<Entity>) -> Governing {
     let mut spans: Governing = Vec::new();
-    for residence in book.entities[entity].lives.iter() {
-        spans.extend(book.systems.lineage(residence.system).map(|system| (system, residence.days)));
+    for (days, system) in book.residences(entity) {
+        spans.extend(book.systems.lineage(system).map(|system| (system, days)));
     }
     spans.sort();
     let mut merged: Governing = Vec::with_capacity(spans.len());
@@ -209,7 +209,7 @@ fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place
     }
     // The owner is governed where it lives, and so is the household it belongs
     // to: a household is governed as one, so its members' places answer to it.
-    let household = book.entities[owner].member;
+    let household = book.member(owner);
     out.extend(residents.rules(book, owner, None));
     if let Some(household) = household {
         out.extend(residents.rules(book, household, Some(owner)));
@@ -221,7 +221,7 @@ fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place
 /// A restricted entity's `on spend` laws: its kind chain's, then its own.
 fn spending(book: &Book, written: &WrittenIn) -> Vec<(Id<Entity>, Rule)> {
     let mut rules = Vec::new();
-    for (id, entity) in book.entities.iter().filter(|(_, entity)| entity.restricted) {
+    for (id, entity) in book.entities.iter().filter(|&(id, _)| book.is_restricted(id)) {
         let kind_laws = book.kinds.lineage(entity.kind).flat_map(|kind| book.kinds[kind].laws.iter().copied());
         let laws = kind_laws.chain(written.entities[id].iter().copied());
         let spends = laws.filter(|&law| book.laws[law].trigger == Trigger::Spend);
@@ -336,9 +336,9 @@ fn owners(book: &Book) -> Vec<Id<Entity>> {
         .places
         .values()
         .filter(|place| matches!(place.role, Role::Holding(_)))
-        .map(|place| book.entities[place.owner].member.unwrap_or(place.owner))
-        .chain(book.assets.values().map(|asset| book.entities[asset.owner].member.unwrap_or(asset.owner)))
-        .chain(book.contracts.values().map(|contract| book.entities[contract.owner].member.unwrap_or(contract.owner)))
+        .map(|place| book.member(place.owner).unwrap_or(place.owner))
+        .chain(book.assets.values().map(|asset| book.member(asset.owner).unwrap_or(asset.owner)))
+        .chain(book.contracts.values().map(|contract| book.member(contract.owner).unwrap_or(contract.owner)))
         .collect();
     owners.sort_unstable();
     owners.dedup();

@@ -71,31 +71,25 @@ impl Fixture {
     pub fn new() -> Fixture {
         let mut names = Interner::default();
         let kind = Id::new(0);
-        let entity = |path: Sym, restricted| Entity {
+        let entity = |path: Sym| Entity {
             path,
             kind,
             purpose: None,
             place: None,
-            restricted,
-            lives: Box::new([]),
-            member: None,
             owner: None,
             client_of: None,
             owned_by: Box::new([]),
-            currency: Id::new(0),
-            citizen: Box::new([]),
-            books: Books::Cash,
             known_as: Box::new([]),
             doc: None,
             loc: None,
         };
         let people = vec![
-            entity(names.intern("me"), false),
-            entity(names.intern("nsf-grant"), true),
-            entity(names.intern("household"), false),
-            entity(names.intern("market"), false),
-            entity(names.intern("unknown"), false),
-            entity(names.intern("opening"), false),
+            entity(names.intern("me")),
+            entity(names.intern("nsf-grant")),
+            entity(names.intern("household")),
+            entity(names.intern("market")),
+            entity(names.intern("unknown")),
+            entity(names.intern("opening")),
         ];
         let (mut entities, ids) = Tree::build(people, &[None; 6]).expect("no cycles");
         let me = ids[0];
@@ -184,6 +178,7 @@ impl Fixture {
             on_spend: Vec::new(),
             timed: Vec::new(),
             own: vec![
+                (Holder::Entity(ids[1]), builtin::RESTRICTED.slot(), Datum::of(true)),
                 (Holder::Place(p[5]), builtin::DEFERRED.slot(), Datum::of(true)),
                 (Holder::Place(p[5]), builtin::BASIS.slot(), Datum::of(Basis::Zero.code())),
             ],
@@ -395,7 +390,7 @@ impl Fixture {
     /// Makes `me` a member of the household.
     pub fn join_household(&mut self) {
         let (household, me) = (self.household, self.me);
-        self.entities[me].member = Some(household);
+        self.say(me, builtin::MEMBER, household);
     }
 
     /// The flow made a claim, due on `due`, against `payee`.
@@ -478,7 +473,6 @@ impl Fixture {
             name: kind_name,
             sort: Sort::Place(Class::Asset),
             system: None,
-            restricted: false,
             purpose: None,
             pays: None,
             takes: Box::new([]),
@@ -579,7 +573,7 @@ impl Fixture {
 }
 
 fn commodity(symbol: Sym, scale: u8) -> Commodity {
-    Commodity { symbol, kind: Id::new(0), scale, title: None, growth: None, doc: None, loc: None }
+    Commodity { symbol, kind: Id::new(0), scale, doc: None, loc: None }
 }
 
 /// Builds a law's node arena bottom-up, the way the model's compiler does:

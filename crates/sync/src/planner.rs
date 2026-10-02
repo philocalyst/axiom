@@ -457,7 +457,7 @@ impl<'a, 'b, 's> Planner<'a, 'b, 's> {
         if !matches!(place.role, Role::Account { .. }) {
             return problem("sync-feed-account", format!("`{name}` does not target an account"));
         }
-        let commodity = &book.commodities[book.entities[place.owner].currency];
+        let commodity = &book.commodities[book.currency(place.owner)];
         let unit = Unit { name: book.name(commodity.symbol), scale: commodity.scale };
         self.world.plan_feed_at(&Feed { account: book.name(place.path), unit, format }, text, file)
     }

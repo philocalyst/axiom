@@ -133,15 +133,9 @@ impl Cast {
             kind: thing,
             purpose: None,
             place: None,
-            restricted: false,
-            lives: Box::default(),
-            member: matches!(name, "me" | "jordan").then(|| Id::new(2)),
             owner: None,
             client_of: None,
             owned_by: Box::default(),
-            currency: Id::new(0),
-            citizen: Box::default(),
-            books: Books::Cash,
             known_as: Box::default(),
             doc: None,
             loc: None,
@@ -171,15 +165,7 @@ impl Cast {
 
         let mut commodities = Arena::new();
         let mut commodity = |symbol: &'static str, scale| {
-            commodities.push(Commodity {
-                symbol: names.intern(symbol),
-                kind: thing,
-                scale,
-                title: None,
-                growth: None,
-                doc: None,
-                loc: None,
-            })
+            commodities.push(Commodity { symbol: names.intern(symbol), kind: thing, scale, doc: None, loc: None })
         };
         let (usd, vti) = (commodity("USD", 2), commodity("VTI", 3));
 
@@ -226,7 +212,6 @@ fn kind(name: Sym) -> Kind {
         name,
         sort: Sort::Entity,
         system: None,
-        restricted: false,
         purpose: None,
         pays: None,
         takes: Box::default(),
@@ -577,6 +562,13 @@ pub(crate) fn household() -> Household {
     let holders = HolderIndex::new(cast.kinds.len(), cast.places.len(), cast.entities.len(), cast.commodities.len(), 0);
     let mut said = Facts::builder(holders.len());
     said.paint_always(holders.number(cast.id("assets/owed/clients")), builtin::CLAIM, true);
+    for household_member in [0, 1] {
+        said.paint_always(
+            holders.number(Holder::Entity(Id::new(household_member))),
+            builtin::MEMBER,
+            Id::<Entity>::new(2),
+        );
+    }
     said.paint_always(holders.number(cast.id("assets/retirement")), builtin::LIQUIDITY, Span::months(1));
     let book = Book {
         names: cast.names,
