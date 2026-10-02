@@ -1,0 +1,300 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Noor Haddad, a freelance UX researcher in Houston, 2026-01-01 .. 2026-06-30. Hours become invoices, miles are
+// measures, part of the apartment is her office, estimated tax is paid four times a year (three of them here), and one
+// client is on a retainer. Cash basis, a sole proprietorship, no payroll.
+//
+// Written against PROPOSAL §6 and ASSOCIATIONS.md.   ✗ cannot say  ✎ says it badly  ? unclear  ⇄ sync  ▸ derived
+// Ids: fl-c01 is freelancer, c = cannot say, 01; [A3] is the change in REPORT.md that closes it. Every balance is a
+// replay of the lines below; the 2026 mileage rate and the safe-harbor figures are illustrative.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use us
+use us/tx
+use us/401k
+use us/se                 // self-employment tax, the QBI deduction, the safe harbor for estimates (a sketch)
+
+entity noor : person
+  born    1990-09-04
+  filing  single
+  lives   us/tx
+
+/// The business: nothing but her, as a taxpayer sees it. What it earns and spends reaches her return on Schedule C.
+entity noor-consulting : sole-proprietorship
+  owner noor
+
+param mileage-rate
+  2026 0.725 USD/MI       // verify against the IRS notice
+
+// ── who she works for: an engagement is a relator, and a retainer is one that is invoiced ────────────────
+
+entity halcyon, northwind, kestrel, devconf : client
+
+contract halcyon-retainer : engagement
+  provider noor-consulting
+  client halcyon
+  4_500.00 USD monthly on 1 invoiced due 15d      // ✗ fl-c01 [A3] a retainer is an invoice from the day it is issued: v4 makes a claim only when a due day is missed (§7), so until then `claims` and `available` do not see it. FINDINGS proposal 1's `invoiced` is not in LANGUAGE.md
+  includes 30 HR
+  overage 150.00 USD/HR                           // billed on the next invoice: hours worked beyond the 30, by the `worked` lines
+contract northwind : engagement
+  provider noor-consulting
+  client northwind
+  140.00 USD/HR monthly on last invoiced due 30d  // the month's hours, by code
+  // kestrel's fixed fee, 9,000.00 in three milestones, and the conference workshop are one-off claims, written below
+
+// ── the apartment: a lease whose `uses` is a weighted many-slot ───────────────────────────────────────
+
+contract apartment-rent : lease
+  tenant noor
+  landlord oak-court
+  1_950.00 USD monthly on 1 from checking #rent
+  uses noor 880 SQFT, noor-consulting 120 SQFT    // [A4] one slot with weights replaces `area` and `share 120 SQFT for studio`; 12% of the rent and of the utilities is the business's
+contract coworking
+  250.00 USD monthly on 3 from checking
+contract health-insurance with blue-shield
+  540.00 USD monthly on 5 from checking #premium
+contract software
+  129.00 USD monthly on 8 from checking
+  share 100% for noor-consulting
+contract phone with mint
+  45.00 USD monthly on 10 from checking
+  share 60% for noor-consulting
+
+// ── positions ─────────────────────────────────────────────────────────────────────────────────────────
+
+entity chase : bank
+  noor/checking : deposit
+  noor/savings  : deposit
+entity fidelity : broker
+  noor/solo-401k                                  // ? fl-u02 [A1] her own plan: sponsor and participant are the same entity, in two slots of one relator
+    sponsor noor-consulting
+    monthly on 28 from checking deferral 1_500.00 USD
+
+/// 30% of what arrives moves to savings and is held for the year's taxes. A budget `of income`: v5 §6.3 drops the
+/// `#income` root the v4 form (`30% of #income`) used.
+budget tax-reserve 30% of income monthly funded from checking into savings    // ✎ fl-b07 [open] §6.3 removed the root a budget limit was a share of; "everything that arrived" has no name
+
+entity oak-court : landlord
+entity blue-shield : health-insurer
+entity mint : phone-company
+entity delta, hotel-lumen, apple, ledger-cpa, hiscox : merchant
+
+opening 2025-12-31
+  checking          12_840.55 USD
+  savings            9_600.00 USD
+  noor/solo-401k    41_200.00 USD
+  northwind owes noor 5_040.00 USD due 01-30 ^inv-nw-2512
+
+
+2026-01
+
+01 apartment-rent                                                  // ▸ 1,950.00 USD #rent of apartment, from checking; 12% (120 of 1,000 sqft) is the office's
+01 halcyon-retainer                                                // ▸ halcyon owes noor 4,500.00 USD due 01-16 (net 15): income when it is paid, her books are cash
+
+03 coworking                                                       // ▸ 250.00 USD
+
+05 health-insurance                                                // ▸ 540.00 USD #premium: above the line, for the self-employed
+
+08 software                                                        // ▸ 129.00 USD
+
+10 phone                                                           // ▸ 45.00 USD, 60% of it the business's
+
+14 checking <- halcyon 4_500.00 USD ^inv-hr-2601
+
+15 checking -> irs 5_400.00 USD #estimated-tax for 2025            // ✎ fl-b06 [A6] the January installment belongs to the year before
+
+20 noor worked 6.5 HR for northwind #research                      // ⇄ fl-s20 time tracker: one line per day, `worked`; the invoice bills the sum by its code
+
+28 solo-401k                                                       // ▸ 1,500.00 USD elective deferral from checking into noor/solo-401k (no payroll: she is her own employer and employee)
+
+29 checking <- northwind 5_040.00 USD ^inv-nw-2512                 // ▸ settles the opening invoice
+
+31 car used 88 MI #business-travel                                 // ▸ 63.80 USD at 0.725 USD/MI (param `mileage-rate`, 2026; verify)
+31 northwind owes noor due 30d ^inv-nw-2601
+     ^inv-nw-2601[HR] @ 140.00 USD/HR #research                    // 38.5 HR worked in the month, from the `worked` lines
+   // ▸ funded budget: 30% of the 9,540.00 that arrived in January = 2,862.00 USD moves checking -> savings, held for the tax reserve
+
+31 checking = 9_704.55 USD
+31 savings = 12_462.00 USD                                         // ▸ the reserve for taxes is the tied part of it
+
+2026-02
+
+01 apartment-rent
+01 halcyon-retainer
+
+03 coworking                                                       // ▸ 250.00 USD
+
+05 health-insurance                                                // ▸ 540.00 USD #premium: above the line, for the self-employed
+05 kestrel owes noor 3_000.00 USD due 14d #research ^inv-ke-1      // milestone 1 of 3: kickoff
+
+08 software                                                        // ▸ 129.00 USD
+
+10 phone                                                           // ▸ 45.00 USD, 60% of it the business's
+
+13 checking <- halcyon 4_500.00 USD ^inv-hr-2602
+
+14 checking -> apple 2_299.00 USD #purchase of laptop              // ▸ `us` expenses it in 2026 (§179), unless she elects otherwise · ✗ fl-c05 [open] two bases again, as in the small business
+
+18 checking <- kestrel 3_000.00 USD ^inv-ke-1
+
+20 checking -> ledger-cpa 400.00 USD #accounting "2025 return"
+
+28 car used 142 MI #business-travel                                // ▸ 102.95 USD
+28 solo-401k
+28 northwind owes noor due 30d ^inv-nw-2602
+     ^inv-nw-2602[HR] @ 140.00 USD/HR #research                    // 41.0 HR worked in the month, from the `worked` lines
+   // ▸ funded budget: 30% of the 7,500.00 that arrived in February = 2,250.00 USD moves checking -> savings, held for the tax reserve
+
+28 checking = 7_841.55 USD
+28 savings = 14_712.00 USD                                         // ▸ the reserve for taxes is the tied part of it
+
+2026-03
+
+01 apartment-rent
+01 halcyon-retainer                                                // ▸ 5,475.00 USD owed, due 03-16: 4,500.00 retainer + 6.5 HR over the 30 included at 150.00 USD/HR = 975.00
+01 checking -> hiscox 780.00 USD #insurance for 2026-03-01..2027-02-28 "professional liability"
+
+02 checking <- northwind 5_390.00 USD ^inv-nw-2601
+
+03 coworking                                                       // ▸ 250.00 USD
+
+05 health-insurance                                                // ▸ 540.00 USD #premium: above the line, for the self-employed
+
+08 software                                                        // ▸ 129.00 USD
+
+10 phone                                                           // ▸ 45.00 USD, 60% of it the business's
+
+12 checking -> delta 612.40 USD #business-travel "flights, devconf"   // paid for the workshop: the 1,240.00 above is billed back
+12 checking -> hotel-lumen 627.60 USD #business-travel "two nights"
+
+13 devconf owes noor 7_740.00 USD due 30d ^inv-dc-1
+     6_500.00 USD #workshop "two-day workshop"
+     1_240.00 USD #reimbursed-costs "flights and hotel at cost"    // ✎ fl-b04 [open] a cost billed back at cost is income and spending at once; the purpose is income
+
+16 checking <- halcyon 5_475.00 USD ^inv-hr-2603
+
+28 solo-401k
+
+30 checking <- northwind 5_740.00 USD ^inv-nw-2602
+
+31 car used 236 MI #business-travel                                // ▸ 171.10 USD
+31 northwind owes noor due 30d ^inv-nw-2603
+     ^inv-nw-2603[HR] @ 140.00 USD/HR #research                    // 29.5 HR worked in the month, from the `worked` lines
+   // ▸ funded budget: 30% of the 16,605.00 that arrived in March = 4,981.50 USD moves checking -> savings, held for the tax reserve
+
+31 checking = 13_031.05 USD
+31 savings = 19_693.50 USD                                         // ▸ the reserve for taxes is the tied part of it
+
+2026-04
+
+01 apartment-rent
+01 halcyon-retainer
+
+02 kestrel owes noor 3_000.00 USD due 14d #research ^inv-ke-2      // milestone 2 of 3: research complete
+
+03 coworking                                                       // ▸ 250.00 USD
+
+05 health-insurance                                                // ▸ 540.00 USD #premium: above the line, for the self-employed
+
+08 software                                                        // ▸ 129.00 USD
+
+10 phone                                                           // ▸ 45.00 USD, 60% of it the business's
+
+12 checking <- devconf 7_740.00 USD ^inv-dc-1
+
+14 checking <- halcyon 4_500.00 USD ^inv-hr-2604
+
+15 checking <- kestrel 3_000.00 USD ^inv-ke-2
+15 checking -> irs 6_800.00 USD #estimated-tax for 2026            // ▸ Q1: 110% of last year's tax, a quarter of it, is the safe harbor
+                                                               // ▸ self-employment tax so far: 15.3% of 92.35% of net profit 36,942.80 = 5,219.61 · half of it is an adjustment · QBI deduction 20%
+
+28 solo-401k
+
+30 car used 96 MI #business-travel                                 // ▸ 69.60 USD
+30 northwind owes noor due 30d ^inv-nw-2604
+     ^inv-nw-2604[HR] @ 140.00 USD/HR #research                    // 44.0 HR worked in the month, from the `worked` lines
+30 checking <- northwind 4_130.00 USD ^inv-nw-2603
+   // ▸ funded budget: 30% of the 19,370.00 that arrived in April = 5,811.00 USD moves checking -> savings, held for the tax reserve
+
+30 checking = 15_376.05 USD
+30 savings = 25_504.50 USD                                         // ▸ the reserve for taxes is the tied part of it
+
+2026-05
+
+01 apartment-rent
+01 halcyon-retainer                                                // ▸ 4,950.00 USD owed, due 05-16: 4,500.00 retainer + 3.0 HR over the 30 included at 150.00 USD/HR = 450.00
+
+03 coworking                                                       // ▸ 250.00 USD
+
+05 health-insurance                                                // ▸ 540.00 USD #premium: above the line, for the self-employed
+
+08 software                                                        // ▸ 129.00 USD
+
+10 phone                                                           // ▸ 45.00 USD, 60% of it the business's
+
+12 checking <- halcyon 4_950.00 USD ^inv-hr-2605
+
+28 solo-401k
+
+30 checking <- northwind 6_160.00 USD ^inv-nw-2604
+
+31 car used 64 MI #business-travel                                 // ▸ 46.40 USD
+31 northwind owes noor due 30d ^inv-nw-2605
+     ^inv-nw-2605[HR] @ 140.00 USD/HR #research                    // 36.0 HR worked in the month, from the `worked` lines
+   // ▸ funded budget: 30% of the 11,110.00 that arrived in May = 3,333.00 USD moves checking -> savings, held for the tax reserve
+
+31 checking = 18_739.05 USD
+31 savings = 28_837.50 USD                                         // ▸ the reserve for taxes is the tied part of it
+
+2026-06
+
+01 apartment-rent
+01 halcyon-retainer
+
+03 coworking                                                       // ▸ 250.00 USD
+
+04 kestrel owes noor 3_000.00 USD due 14d #research ^inv-ke-3      // milestone 3 of 3: delivery
+
+05 health-insurance                                                // ▸ 540.00 USD #premium: above the line, for the self-employed
+
+08 software                                                        // ▸ 129.00 USD
+
+10 phone                                                           // ▸ 45.00 USD, 60% of it the business's
+
+15 checking <- halcyon 4_500.00 USD ^inv-hr-2606
+15 checking -> irs 6_800.00 USD #estimated-tax for 2026            // Q2
+
+17 checking <- kestrel 3_000.00 USD ^inv-ke-3
+
+28 solo-401k
+
+30 car used 118 MI #business-travel                                // ▸ 85.55 USD
+30 northwind owes noor due 30d ^inv-nw-2606
+     ^inv-nw-2606[HR] @ 140.00 USD/HR #research                    // 31.5 HR worked in the month, from the `worked` lines
+30 checking <- northwind 5_040.00 USD ^inv-nw-2605
+   // ▸ funded budget: 30% of the 12,540.00 that arrived in June = 3,762.00 USD moves checking -> savings, held for the tax reserve
+
+30 checking = 16_303.05 USD
+30 savings = 32_599.50 USD                                         // ▸ the reserve for taxes is the tied part of it
+
+// ═════ what Axiom derives on 2026-06-30 ════════════════════════════════════════════════════════════════
+// ▸ axiom tax 2026 --for noor (to date; cash)                                  Schedule C, by purpose
+//   receipts 76,665.00  (retainer 28_425.00 · northwind 31_500.00 · kestrel 9_000.00 · devconf 7_740.00)
+//   expenses 9,098.40  (rent share 1_404.00 · coworking 1_500.00 · software 774.00 · phone 162.00 · laptop 2_299.00 · accounting 400.00
+//                    liability insurance 780.00 · business travel 1_240.00 · mileage 539.40 for 744 mi)
+//   net profit 67,566.60 · self-employment tax 9,546.86 (15.3% of 92.35%) · adjustments: half of it 4,773.43, the premium 3_240.00, the solo 401(k) 9_000.00 -> AGI 50,553.17
+//   QBI deduction 10,110.63 (20%) · standard deduction 16_100.00 · taxable 24,342.54 · income tax 2,673.10
+//   solo 401(k) deferrals 9_000.00 of 24_500.00 · estimated tax paid for 2026 13_600.00 (6_800.00 on 04-15 and 06-15)
+// ▸ axiom check
+//   note[safe-harbor]: 2026's estimates so far are 13_600.00; 110% of 2025's tax is 27_200.00: on pace for the safe harbor
+//   note[home-office]: 12% of rent and utilities is the business's; the simplified method would give 600.00: the actual method wins
+//   note[reserve]: the tax reserve holds 22_999.50; income tax 2,673.10 and self-employment tax 9,546.86 on this half-year's profit are 12,219.96: the reserve covers it, with 2026's second half still to come
+
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   fl-b04  ✎     [open]   a cost billed back at cost is income and spending at once; the purpose of the line is income
+//   fl-b06  ✎     [A6]     the January installment belongs to the year before: `for the tax year`
+//   fl-b07  ✎     [open]   budgets "of income" lost their root when §6.3 dropped `#income`; the funded reserve needs a word for "everything that arrived"
+//   fl-c01  ✗     [A3]     a retainer is a claim on the client from the day it is invoiced, not only once a due day is missed (v4 §7); an `engagement` relator issues it
+//   fl-c05  ✗     [open]   two bases again: expensing a laptop for tax (§179) against five years for the books
+//   fl-s20  ⇄     [sync]   a time tracker's days as `worked` lines; the invoice then bills the sum by its code
+//   fl-u02  ?     [A1]     a sole proprietor is both employer and participant of her own plan: one entity in two slots of one relator

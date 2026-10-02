@@ -1,12 +1,38 @@
-error[layout]: this transaction is dated 2026-01-08, which `journal/2025.ax` does not hold
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[accounts.ax:2:9]
+  │
+2 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[accounts.ax:3:9]
+  │
+3 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
   ╭─[journal/2025.ax:2:1]
   │
 2 │ 2026-01-08 checking -> food 84.20 USD
-  │ ─────┬────
-  │      ╰── outside 2025
+  │ ──────────────────┬──────────────────
+  │                   ╰── no complete flow can be formed here
   │
-  = note: `journal/2025.ax` holds 2025, because of where it is
-  = help: move it to `journal/2026.ax`, or set `layout free` to ignore folder names
+  = help: write both ends in the header, or write one end and indent the other legs
 
-✗ 1 error
+error[unknown-entity]: there is no entity `food`
+  ╭─[journal/2025.ax:2:24]
+  │
+2 │ 2026-01-08 checking -> food 84.20 USD
+  │                        ──┬─
+  │                          ╰── not a known entity
+
+✗ 4 errors
 [exit status 1]

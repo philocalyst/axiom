@@ -1,15 +1,52 @@
-error[repeated-event]: `#check-1041` already has an event
-   ╭─[52-void-twice.ax:15:1]
+error[chart-account]: `expenses/home` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[52-void-twice.ax:6:9]
+  │
+6 │ account expenses/home
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[52-void-twice.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/home`
+   ╭─[52-void-twice.ax:10:7]
+   │
+ 9 │ entity plumber : org
+10 │   via expenses/home
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/home`
+
+error[unknown-purpose]: there is no purpose `check-1041`
+   ╭─[52-void-twice.ax:13:43]
    │
 13 │ 2026-02-01 checking -> plumber (350 USD) #check-1041
-   │ ──────────────────────────┬─────────────────────────
-   │                           ╰── the flow
-14 │ 2026-02-10 #check-1041 void
-15 │ 2026-02-12 #check-1041 void
-   │ ─────────────┬─────────────
-   │              ╰── a flow takes one event; this second one is ignored for the flow below
-   │
-   = help: if a settled payment later bounces, write a new flow that reverses it
+   │                                           ─────┬────
+   │                                                ╰── not a known purpose
 
-✗ 1 error
+error[hash-code]: a code is written `^code`, and `#name` is a purpose
+   ╭─[52-void-twice.ax:14:12]
+   │
+14 │ 2026-02-10 #check-1041 void
+   │            ─────┬─────
+   │                 ╰── a purpose goes in a flow's tail, and this is where a code is meant
+   │
+   = note: also at 52-void-twice.ax:15
+   = help: write `^check-1041`
+14 - 2026-02-10 #check-1041 void
+14 + 2026-02-10 ^check-1041 void
+
+✗ 6 errors
 [exit status 1]

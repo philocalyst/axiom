@@ -1,0 +1,369 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Lena Marsh, a US citizen and freelance data engineer, 2026-01-01 .. 2026-06-30. She bills a Dutch client in EUR and a
+// British one in GBP, is paid into a Wise account, and moves from Austin to Lisbon on 02-15, with a trip to London in
+// March and a week in Austin in May. She is a cash-basis sole proprietor. The book stresses what a person abroad needs:
+// currencies held as parcels (FIFO, with a basis in USD), the day-count tests (FEIE, Portugal's 183 days), and the
+// FBAR's peak balances.
+//
+// Written against PROPOSAL §6 and ASSOCIATIONS.md.   ✗ cannot say  ✎ says it badly  ? unclear  ⇄ sync  ▸ derived
+// Ids: ex-c04 is expat, c = cannot say, 04; [A6] is the change in REPORT.md that closes it. Rates are the book's own
+// illustration (a straight line between month starts, rounded to 4 places): not market data. Every receipt, conversion
+// and balance below is a replay of the lines, with FIFO parcels per currency. The FEIE limit (132,900 USD for 2026)
+// and the thresholds are from memory of the IRS notices: verify.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use us
+use us/se                 // self-employment tax (a sketch, as in freelancer.ax)
+use us/feie               // a sketch: Form 2555, the exclusion and its two tests. Not in crates/systems; see the closing block
+use pt                    // ? ex-u02 [open] there is no `pt` system (see the move on 02-15)
+
+sync prices               // ⇄ ex-s06 the ECB's daily EUR and GBP rates into prices/{year}.ax; the Treasury's year-end rates arrive in January
+  into prices/{year}.ax
+sync wise                 // ⇄ ex-s07 Wise's statement CSV carries the rate and the fee of every conversion, so a conversion is read, not typed
+  read "imports/wise-*.csv"
+sync bcp                  // ⇄ ex-s07 Millennium bcp exports "dd-mm-yyyy" dates and decimal commas
+  read "imports/bcp-*.csv"
+
+entity lena : person
+  born    1989-03-12
+  filing  single
+  citizen us              // taxed by the US wherever she lives
+  lives   us/tx           // moves on 02-15. ? ex-u04 [open] which rate turns a foreign receipt into USD (the day's, or the IRS yearly average that `us` brings) is a choice of the *return*, made once and used for all: nothing holds it. This book uses the day's (`rates spot`)
+
+/// Her business, as a taxpayer sees it: nothing but her. What it earns reaches her return on Schedule C.
+entity lena-studio : sole-proprietorship
+  owner lena
+
+// ── who she works for: engagements are relators (ASSOCIATIONS.md §5); both clients are abroad ──────────
+
+entity vondel : client    // Amsterdam. 6,500.00 EUR a month, for the month before, paid by SEPA on about the 18th
+entity tern-co : client   // London. 3,200.00 GBP a month, for the month before, on about the 20th
+contract vondel-retainer : engagement
+  provider lena-studio
+  client vondel
+  6_500.00 EUR monthly on last invoiced due 18d
+contract tern-retainer : engagement
+  provider lena-studio
+  client tern-co
+  3_200.00 GBP monthly on last invoiced due 20d
+
+// ── homes: two leases, one ended and one begun ──────────────────────────────────────────────────────────
+
+entity oak-court : landlord
+entity sr-ferreira : landlord       // a person, but the kind is a role: here he is the landlord
+contract apartment-rent : lease
+  tenant lena
+  landlord oak-court
+  1_850.00 USD monthly on 1 from chase/checking #rent until 2026-02-14       // notice given 01-14
+  deposit 1_850.00 USD
+contract pt-rent : lease
+  tenant lena
+  landlord sr-ferreira
+  1_450.00 EUR monthly on 1 from bcp/checking #rent from 2026-03-01
+  deposit 2_900.00 EUR
+contract health-us with blue-shield
+  540.00 USD monthly on 5 from chase/checking #premium until 2026-02-14
+contract expat-health with cigna
+  310.00 USD monthly on 15 from chase/checking #premium from 2026-02-15
+
+// ── positions: by institution, the paths are the shortest that are unique ───────────────────────────────
+
+entity chase : bank
+  lena/checking : deposit
+  lena/savings  : deposit
+entity wise : money-transfer
+  lena/main : deposit holds EUR, GBP          // ? ex-u05 [open] one account with two currency balances: for the FBAR it is one account (Wise Europe SA is Belgian)
+entity bcp : bank
+  lena/checking : deposit holds EUR           // a second `checking`: the paths are now lena/chase/checking and lena/bcp/checking, and `chase/checking` and `bcp/checking` suffice
+
+entity blue-shield, cigna : health-insurer
+entity irs : tax-authority
+entity heb, pingo-doce : grocer
+entity tap-air : airline
+entity airbnb, hotel-soho : lodging
+entity edp : utility
+entity meo : phone-company
+
+// ═════ 2025-12-31 ═════════════════════════════════════════════════════════════════════════════════════
+
+opening 2025-12-31
+  chase/checking        21_350.40 USD
+  chase/savings          8_000.00 USD
+  wise                   5_200.00 EUR   basis 6_059.04 USD since 2025-12-19
+  wise                   1_800.00 GBP   basis 2_410.20 USD since 2025-12-22
+  oak-court owes lena 1_850.00 USD ^deposit                      // the Austin deposit
+  vondel owes lena 6_500.00 EUR due 01-18 ^inv-vd-2512           // December's invoices, issued on 12-31
+  tern-co owes lena 3_200.00 GBP due 01-20 ^inv-tc-2512
+  // ▸ foreign accounts at 12-31: 5,200.00 EUR + 1,800.00 GBP = 8,475.40 USD at the 01-01 prices: under the FBAR's 10,000 USD threshold
+
+
+2026-01
+
+01 apartment-rent                                               // ▸ 1,850.00 USD #rent of the Austin apartment, from chase/checking
+
+05 health-us                                                    // ▸ 540.00 USD #premium
+
+09 chase/checking -> heb 312.55 USD #groceries
+
+15 chase/checking -> irs 3_200.00 USD #estimated-tax for 2025   // ✎ ex-b02 [A6] the January installment belongs to the year before (fl-b06, sb-b27)
+20 wise <- vondel 6_500.00 EUR ^inv-vd-2512                     // ▸ settles the 12-31 invoice, for 2025-12. Income 7,592.65 USD at 1.1681 USD/EUR, the day's price: she is cash basis, so the receipt day is the day. The new EUR parcel carries it as basis
+                                                                // ✗ ex-c04 [A6] the invoice it settles is for December: that is when and where the work was done, the date FEIE reads. Her return reads the day the money came (01-20). v4 has one
+                                                                //         `for`, and recognizes by it, so a cash-basis tally would put this in 2025. Two readers need two calendars: the tax tally by day received, foreign-earned by day earned.
+
+21 wise <- tern-co 3_200.00 GBP ^inv-tc-2512                    // ▸ income 4,312.00 USD at 1.3475 USD/GBP
+
+22 wise -> 5_000.00 EUR @ 1.1684 USD into chase/checking ^fx-0122
+     - 20.50 EUR #fees via wise
+                                                                // ✎ ex-b03 [A10] a conversion between two of my own positions with the fee in the source currency (sb-b22): `@` names one subject position, the other end is `into`
+                                                                // ▸ FIFO relieves 5,020.50 EUR from the 2025-12-19 parcel; 5,842.00 USD arrive; gain 16.00 USD on the 5,826.00 USD of basis that left; the fee's 23.89 USD of basis is cost
+                                                                // ? ex-u03 [open] §988(e) exempts a personal-transaction currency gain of 200 USD or less. She holds business receipts and spends them on rent: which kind of transaction is it? (sb-u23)
+
+31 vondel-retainer                                              // ▸ vondel owes lena 6,500.00 EUR due 02-18 ^inv-vd-2601, for 2026-01; a claim, not income: she is cash basis
+31 tern-retainer                                                // ▸ tern-co owes lena 3,200.00 GBP due 02-20 ^inv-tc-2601
+
+31 chase/checking = 21_289.85 USD
+31 wise = 6_679.50 EUR
+31 wise = 5_000.00 GBP
+
+2026-02
+
+01 apartment-rent                                               // ▸ 925.00 USD: 14 of 28 days, the lease ends 02-14. The deposit is the landlord's claim until the unit is checked
+
+05 health-us                                                    // ▸ 540.00 USD #premium: the last; the contract ends 02-14
+
+10 chase/checking -> tap-air 842.00 USD #travel "AUS-LIS, one way"
+
+15 lena now lives pt                                            // ? ex-u02 [open] no `pt` system exists: nothing knows Portuguese income tax, IRS Jovem, the 183-day rule or the NIF. `lives` takes the name and no law reads it
+                                                                //         and the US-Portugal totalization agreement (which country's social security a self-employed citizen pays, by certificate of coverage) is a law of two systems at once
+15 lena now in pt                                               // ? ex-u01 [A12] where she lives and where she is are two timelines. `lives` moves once, here; presence moves with every trip (03-23, 05-09). The 330-day test
+                                                                //         reads presence, the 183-day rule too. ▸ presence defaults to residence: nobody writes `in` unless the two differ. 02-15 is her first full day abroad
+15 wise -> airbnb 1_120.00 EUR #lodging "Alfama, 14 nights"     // ▸ 1,308.38 USD at 1.1682; basis 1,307.75 USD; gain 0.63 USD on the euros spent (§988, ordinary)
+15 expat-health                                                 // ▸ 310.00 USD #premium, from today, in place of health-us
+
+19 wise <- vondel 6_500.00 EUR ^inv-vd-2601                     // ▸ income 7,590.70 USD at 1.1678. Earned in January, in Texas: US-source, not foreign earned income
+20 wise <- tern-co 3_200.00 GBP ^inv-tc-2601                    // ▸ income 4,294.08 USD at 1.3419
+20 wise -> 2_400.00 GBP @ 1.1487 EUR into wise ^fx-0220
+     - 12.00 GBP #fees via wise
+                                                                // ✎ ex-b03 [A10] the same position at both ends: an exchange inside one account, at a cross rate (EUR per GBP) that the day's two prices already imply
+                                                                // ▸ FIFO: 2,412.00 GBP leave from the 2025-12-22 parcel (1.3390 basis); 2,756.88 EUR arrive worth 3,218.93 USD at 1.1676; basis that left 3,218.78 USD; gain 0.15 USD; the fee's 16.09 USD is cost
+
+27 wise -> bcp/checking 6_000.00 EUR                            // ▸ a transfer: parcels move with their basis and day; nothing is realized. SEPA, no fee
+                                                                // ▸ basis moved 7,008.47 USD: 5,559.50 EUR from 2026-01-20, 440.50 EUR from 2026-02-19
+27 bcp/checking -> sr-ferreira 2_900.00 EUR due 2027-02-28 ^pt-deposit "caucao, two months"  // ▸ a claim in euros: sr-ferreira owes lena 2,900.00 EUR, carrying the 3,387.49 USD of basis that left. Nothing realized now
+                                                                // ✎ it is the lease's `deposit 2,900.00 EUR` term: this line is its payment, which a typed `lease` implies (ll-b03)
+
+28 vondel-retainer                                              // ▸ vondel owes lena 6,500.00 EUR due 03-18 ^inv-vd-2602, for 2026-02; a claim, not income: she is cash basis
+28 tern-retainer                                                // ▸ tern-co owes lena 3,200.00 GBP due 03-20 ^inv-tc-2602
+
+28 chase/checking = 18_672.85 USD
+28 wise = 8_816.38 EUR
+28 wise = 5_788.00 GBP
+28 bcp/checking = 3_100.00 EUR
+
+2026-03
+
+01 pt-rent                                                      // ▸ 1,450.00 EUR #rent from bcp/checking: 1,691.42 USD at 1.1665; basis 1,693.74 USD; loss 2.32 USD on the euros
+
+03 chase/checking <- oak-court 1_850.00 USD ^deposit            // ▸ settles the opening claim
+
+05 bcp/checking -> pingo-doce 168.30 EUR #groceries             // ▸ 196.49 USD · loss 0.10 USD
+
+08 bcp/checking -> edp 62.10 EUR #utilities
+
+12 bcp/checking -> meo 39.99 EUR #phone
+
+15 expat-health                                                 // ▸ 310.00 USD #premium
+
+18 wise <- vondel 6_500.00 EUR ^inv-vd-2602                     // ▸ income 7,608.90 USD at 1.1706. February: 14 days worked in Texas, 14 in Lisbon: half is foreign earned income
+                                                                // ✗ ex-c04 [A6] the source is a set of days, not an interval: `total(#consulting, where lena.in is foreign)` over a flow recognized per day. v4 `total` takes DATE..DATE only
+
+19 wise <- tern-co 3_200.00 GBP ^inv-tc-2602                    // ▸ income 4,300.16 USD at 1.3438
+20 wise -> bcp/checking 3_000.00 EUR                            // ▸ a transfer; basis moves
+
+21 wise -> 3_000.00 GBP @ 1.1473 EUR into wise ^fx-0321
+     - 15.00 GBP #fees via wise
+                                                                // ▸ 3,441.90 EUR arrive worth 4,031.50 USD; loss 8.62 USD
+
+23 lena now in gb                                               // ? ex-u01 [A12] a trip: still abroad for the 330-day test, no longer in Portugal for the 183-day rule. A third value of the same timeline, which `lives` cannot hold
+                                                                // ⇄ ex-s08 presence from flight bookings and the phone's location history, as `now in` statements: nobody types a travel log
+23 bcp/checking -> tap-air 168.40 EUR #business-travel "LIS-LGW return"
+
+24 wise -> hotel-soho 395.00 GBP #business-travel "three nights, tern workshop"  // ▸ 531.43 USD at 1.3454; basis 530.05 USD; gain 1.38 USD on the pounds spent. A deductible cost of lena-studio
+
+27 lena now in pt
+
+28 wise -> 4_000.00 EUR @ 1.1730 USD into chase/checking ^fx-0328
+     - 16.40 EUR #fees via wise
+                                                                // ▸ 4,692.00 USD arrive; gain 20.99 USD; FIFO from the oldest parcels first (01-20, 02-19)
+
+31 vondel-retainer                                              // ▸ vondel owes lena 6,500.00 EUR due 04-18 ^inv-vd-2603, for 2026-03; a claim, not income: she is cash basis
+31 tern-retainer                                                // ▸ tern-co owes lena 3,200.00 GBP due 04-20 ^inv-tc-2603
+
+31 chase/checking = 24_904.85 USD
+31 wise = 11_741.88 EUR
+31 wise = 5_578.00 GBP
+31 bcp/checking = 4_211.21 EUR
+
+2026-04
+
+01 pt-rent                                                      // ▸ 1,450.00 EUR #rent: 1,702.30 USD at 1.1740
+
+02 chase/checking -> tap-air 1_031.00 USD #travel "LIS-AUS return, 05-09 / 05-16"  // ⇄ ex-s08 the booking is the first record of the trip: its dates are the presence statements
+
+04 bcp/checking -> pingo-doce 211.75 EUR #groceries
+
+08 bcp/checking -> edp 58.40 EUR #utilities
+
+12 bcp/checking -> meo 39.99 EUR #phone
+
+15 expat-health                                                 // ▸ 310.00 USD #premium
+15 chase/checking -> irs 4_100.00 USD #estimated-tax for 2026   // ▸ the first installment of 2026, due today. Her 2025 return is due today too; a citizen living abroad on the day has an automatic extension to 06-15 to file, not to pay
+                                                                // ✗ ex-c05 [open] the filing extension for a citizen abroad (and 4868 to October) is a rule of `us` whose due day depends on where she lives on 04-15 (and 4868 moves it to October): a due day that is a function of residence
+
+17 wise <- vondel 6_500.00 EUR ^inv-vd-2603                     // ▸ income 7,651.80 USD at 1.1772. March: all 31 days abroad
+20 wise <- tern-co 3_200.00 GBP ^inv-tc-2603                    // ▸ income 4,331.84 USD at 1.3537
+20 wise -> bcp/checking 2_500.00 EUR
+
+21 wise -> 3_000.00 GBP @ 1.1488 EUR into wise ^fx-0421
+     - 15.00 GBP #fees via wise
+                                                                // ▸ 3,446.40 EUR arrive; gain 32.95 USD
+
+22 wise -> 4_000.00 EUR @ 1.1782 USD into chase/checking ^fx-0422
+     - 16.40 EUR #fees via wise
+                                                                // ▸ 4,712.80 USD arrive; gain 30.40 USD
+
+30 vondel-retainer                                              // ▸ vondel owes lena 6,500.00 EUR due 05-18 ^inv-vd-2604, for 2026-04; a claim, not income: she is cash basis
+30 tern-retainer                                                // ▸ tern-co owes lena 3,200.00 GBP due 05-20 ^inv-tc-2604
+
+30 chase/checking = 25_207.65 USD
+30 wise = 15_171.88 EUR
+30 wise = 5_763.00 GBP
+30 bcp/checking = 4_951.07 EUR
+
+2026-05
+
+01 pt-rent
+
+03 bcp/checking -> pingo-doce 188.20 EUR #groceries
+
+08 bcp/checking -> edp 61.05 EUR #utilities
+
+09 lena now in us/tx                                            // ? ex-u01 [A12] a week in Austin: `lives pt` does not change. In the US for 8 days (05-09..05-16): the 330-day test loses them, and any work done these days is US-source
+
+12 bcp/checking -> meo 39.99 EUR #phone
+
+15 expat-health                                                 // ▸ 310.00 USD #premium
+
+17 lena now in pt                                               // ▸ days in the US 05-09..05-16: 8. Days abroad since 02-15: 128 through 06-30 (136 days less 8)
+
+19 wise <- vondel 6_500.00 EUR ^inv-vd-2604                     // ▸ income 7,658.95 USD at 1.1783. April: 30 of 30 days abroad
+20 wise <- tern-co 3_200.00 GBP ^inv-tc-2604                    // ▸ income 4,332.48 USD at 1.3539
+
+21 wise -> 3_000.00 GBP @ 1.1486 EUR into wise ^fx-0521
+     - 15.00 GBP #fees via wise
+                                                                // ▸ 3,445.80 EUR arrive; gain 23.65 USD
+
+22 wise -> bcp/checking 2_500.00 EUR
+
+27 wise -> 4_000.00 EUR @ 1.1775 USD into chase/checking ^fx-0527
+     - 16.40 EUR #fees via wise
+                                                                // ▸ 4,710.00 USD arrive; gain 17.21 USD
+
+31 vondel-retainer                                              // ▸ vondel owes lena 6,500.00 EUR due 06-18 ^inv-vd-2605, for 2026-05; a claim, not income: she is cash basis
+31 tern-retainer                                                // ▸ tern-co owes lena 3,200.00 GBP due 06-20 ^inv-tc-2605
+
+31 chase/checking = 28_576.65 USD
+31 wise = 18_601.28 EUR
+31 wise = 5_948.00 GBP
+31 bcp/checking = 5_711.83 EUR
+
+2026-06
+
+01 pt-rent
+
+04 bcp/checking -> pingo-doce 204.60 EUR #groceries
+
+08 bcp/checking -> edp 59.30 EUR #utilities
+
+12 bcp/checking -> meo 39.99 EUR #phone
+
+15 expat-health                                                 // ▸ 310.00 USD #premium
+15 chase/checking -> irs 3_900.00 USD #estimated-tax for 2026   // ▸ Q2
+
+18 wise <- vondel 6_500.00 EUR ^inv-vd-2605                     // ▸ income 7,665.45 USD at 1.1793. May: 23 of 31 days abroad (the 8 in Austin are US-source)
+
+19 wise <- tern-co 3_200.00 GBP ^inv-tc-2605                    // ▸ income 4,332.16 USD at 1.3538
+
+22 wise -> 3_000.00 GBP @ 1.1472 EUR into wise ^fx-0622
+     - 15.00 GBP #fees via wise
+                                                                // ▸ 3,441.60 EUR arrive worth 4,060.40 USD; loss 0.75 USD
+
+23 wise -> bcp/checking 3_000.00 EUR
+
+30 vondel-retainer                                              // ▸ vondel owes lena 6,500.00 EUR due 07-18 ^inv-vd-2606, for 2026-06; a claim, not income: she is cash basis
+30 tern-retainer                                                // ▸ tern-co owes lena 3,200.00 GBP due 07-20 ^inv-tc-2606
+
+30 chase/checking = 24_366.65 USD
+30 wise = 25_542.88 EUR
+30 wise = 6_133.00 GBP
+30 bcp/checking = 6_957.94 EUR
+
+
+// ═════ closing 2026-06-30 ════════════════════════════════════════════════════════════════════════════════
+//
+// ▸ balances (each a replay of the lines above; `lots` lists the parcels that remain):
+//     chase/checking 24,366.65 USD · chase/savings 8,000.00 USD
+//     wise 25,542.88 EUR (basis 30,104.69 USD) and 6,133.00 GBP (basis 8,303.15 USD)
+//     bcp/checking 6,957.94 EUR (basis 8,162.99 USD) · claim on sr-ferreira 2,900.00 EUR (basis 3,387.49 USD)
+//   at the 06-30 prices (1.1809 USD/EUR, 1.3549 USD/GBP) the foreign holdings and the claim are worth 50,114.43 USD against a basis of 49,958.32: 156.11 USD unrealized
+//
+// ▸ income received, cash basis: 71,671.17 USD = 45,768.45 USD from vondel + 25,902.72 USD from tern-co, six receipts each; estimated tax paid: 3,200.00 for 2025, 8,000.00 for 2026
+//   earned abroad by day (the receipt's `for` month, the days of it with `in` foreign): 38,831.05 USD (vondel 24,802.47 USD · tern-co 14,028.58 USD); earned in the US: 32,840.12 USD
+//   Feb 14/28 · Mar 31/31 · Apr 30/30 · May 23/31 of the month's receipt; Dec, Jan: 0
+// ▸ currency gains realized in the half, ordinary (§988): 180.87 USD: 84.60 USD on euros sold for dollars · 47.38 USD on pounds sold for euros · 47.51 USD on euros spent · 1.38 USD on pounds spent
+//
+// ▸ presence, 02-15..06-30: 136 days; abroad 128 (Portugal 124, the United Kingdom 4); in the US 8 (05-09..05-16). Before 02-15: the US, 45 days
+//
+// ▸ FEIE (Form 2555), what `us/feie` can say today:
+//   foreign earned income to date 38,831.05 USD; the limit for 2026, 132,900.00 USD (verify) prorated by the 321 days of 02-15..12-31: 116,879.18 USD
+//   physical presence test: 128 of the 330 full days needed in some 12 consecutive months. With no further day in the US the 330th is 2027-01-18, and the qualifying
+//   period would then run from 2026-02-15. Today the test is not met, so nothing is excluded in the 06-30 view; the return will claim it later for income earned since 02-15.
+//   the bona fide residence test needs a whole tax year abroad: 2027 at the earliest
+//   ✗ ex-c01 [A12] a test not yet met, and its earliest day: "any 12 consecutive months" is a search over window starts of the presence DaySet, and the answer depends on a plan of presence the book does
+//       not have (`lena will be in pt until ...`). v4's `days(COND, window)` counts one given window; K2 could carry a forecast of the timeline, nothing yet carries the search
+//   ⇄ ex-s08 presence from bookings and location history would make the 128 an observation instead of a sum of typed statements
+//
+// ▸ Portugal: 124 days in the country by 06-30; the 183rd would be 2026-08-28 if she stays (tax residence there: more than 183 days in any 12 months, or a dwelling kept on 12-31: from memory, verify)
+//   ✗ ex-c07 [A12] tax residence is a phase derived from presence, with a start day, not a declared fact: `lives pt` was typed on 02-15 and `us/pt` would have to derive it, backdated
+//
+// ▸ FBAR (FinCEN 114) for 2026, so far: the foreign accounts are wise/main and bcp/checking (chase is domestic)
+//   maximum of each, in its own units: wise 28,542.88 EUR on 06-22 and 9,148.00 GBP on 06-19 (the two peaks fall on different days) · bcp 6,957.94 EUR on 06-23
+//   at each day's prices: wise 41,989.01 USD (06-19) · bcp 8,209.67 USD (06-23). The aggregate at one moment peaked at 46,657.01 USD on 06-19, and crossed the 10,000 USD threshold on 01-20 (16,091.91 USD),
+//   so the form is due: 04-15-2027, automatically extended to 10-15. The sum of the per-account maxima, 50,198.68 USD, is more than any moment's total
+//   ✎ ex-b05 [open] `peak(wise, 2026)` is in the owner's currency at the day's price; the form wants each account's maximum in its own units converted once with the Treasury's
+//       year-end rate (a param that arrives in January), and for a two-currency account the maximum is not the sum of two maxima. A view: `peak` by unit, then `value(... at param treasury-eoy)`
+//   ? ex-u05 [open] Wise's multi-currency account is one FBAR account or several (the balances have separate numbers): the book cannot say, the preparer decides
+//   ⇄ ex-s06 the Treasury rates of exchange (published each year-end), the ECB's daily rates for the book
+//   (Form 8938 for a single filer abroad: 200,000 USD at year end or 300,000 at any time, from memory, verify; she is far below it)
+//
+// ▸ documents out: Form 2555, the 2026 return, FinCEN 114, and Portugal's: ✗ ex-c09 [open] none can be written (sb-c26: Axiom reports lines, it writes no form)
+
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   id      mark  closed by  what
+//   ex-b02  ✎     [A6]     the January installment belongs to the year before: `for the tax year`
+//   ex-b03  ✎     [A10]    a conversion between two of my own positions, or inside one, with the fee in the source currency
+//   ex-b05  ✎     [open]   the FBAR's maximum: per account, in its own units, at the Treasury's year-end rate; `peak` gives the owner's currency at the day's price
+//   ex-c01  ✗     [A12]    a test over "any 12 consecutive months" that is not yet met, and the earliest day it can be: a window search over the presence DaySet (THEORY T9) and a planned presence
+//   ex-c04  ✗     [A6]     a receipt has two calendars: the day money came (the cash-basis return) and the days the work was done (where: FEIE); `for` has one reader
+//   ex-c05  ✗     [open]   a due day that is a function of where the person lives on that day (the 2-month extension abroad)
+//   ex-c07  ✗     [A12]    Portuguese tax residence is derived from presence, with a start day, not declared
+//   ex-c09  ✗     [open]   Form 2555, FinCEN 114, the return: documents out (sb-c26)
+//   ex-s06  ⇄     [sync]   ECB daily rates; the Treasury's year-end rates of exchange
+//   ex-s07  ⇄     [sync]   Wise's CSV (rate and fee per conversion) and bcp's export (dates and decimal commas)
+//   ex-s08  ⇄     [sync]   presence as `now in` statements from bookings and location history
+//   ex-u01  ?     [A12]    where she lives and where she is are two timelines; `in` defaults to `lives`
+//   ex-u02  ?     [open]   no `pt` system; the US-Portugal totalization agreement (which social security applies) is a law of two systems
+//   ex-u03  ?     [open]   §988(e): a personal-transaction exemption of 200 USD of gain; she holds business receipts and spends them on life (sb-u23)
+//   ex-u04  ?     [open]   the rate that turns a foreign receipt into USD (spot, or the IRS yearly average) is chosen once per return, and nothing holds the choice
+//   ex-u05  ?     [open]   one Wise account with two currency balances: one FBAR account or two

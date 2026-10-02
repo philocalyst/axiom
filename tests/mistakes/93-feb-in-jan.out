@@ -1,12 +1,41 @@
-error[layout]: this transaction is dated 2026-02-10, which `journal/2026/01.ax` does not hold
-  ╭─[journal/2026/01.ax:3:1]
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[accounts.ax:2:9]
   │
-3 │ 2026-02-10 checking -> food 61.00 USD
-  │ ─────┬────
-  │      ╰── outside January 2026
+2 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
   │
-  = note: `journal/2026/01.ax` holds January 2026, because of where it is
-  = help: move it to `journal/2026/02.ax`, or set `layout free` to ignore folder names
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[accounts.ax:3:9]
+  │
+3 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+  ╭─[journal/2026/01.ax:2:1]
+  │
+2 │ 2026-01-08 checking -> food 84.20 USD
+  │ ──────────────────┬──────────────────
+  │                   ╰── no complete flow can be formed here
+  │
+  = note: also at journal/2026/01.ax:3, journal/2026/02.ax:1
+  = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+  ╭─[journal/2026/01.ax:2:24]
+  │
+2 │ 2026-01-08 checking -> food 84.20 USD
+  │                        ──┬─
+  │                          ╰── not a known entity
+  │
+  = note: also at journal/2026/01.ax:3, journal/2026/02.ax:1
+
+✗ 8 errors
 [exit status 1]

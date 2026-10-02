@@ -1,3 +1,23 @@
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[85-no-base-currency.ax:6:9]
+  │
+6 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[85-no-base-currency.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
 error[no-price]: no price for EUR in USD on 2025-12-31
    ╭─[85-no-base-currency.ax:10:1]
    │
@@ -7,17 +27,21 @@ error[no-price]: no price for EUR in USD on 2025-12-31
    │
    = help: add a price line such as `2025-12-31 EUR <price> USD`
 
-error[no-base]: the journal uses `USD` and `EUR`, and no `base` says which one values the others
-   ╭─[85-no-base-currency.ax:10:47]
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[85-no-base-currency.ax:11:1]
    │
- 9 │ 2025-12-31 equity/opening -> checking 1_000 USD
-   │                                             ─┬─
-   │                                              ╰── USD is first written here
-10 │ 2025-12-31 equity/opening -> euro-account 500 EUR
-   │                                               ─┬─
-   │                                                ╰── EUR is a second currency
+11 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
    │
-   = help: declare the base currency, for example `base USD`
+   = help: write both ends in the header, or write one end and indent the other legs
 
-✗ 2 errors
+error[unknown-entity]: there is no entity `food`
+   ╭─[85-no-base-currency.ax:11:24]
+   │
+11 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+✗ 5 errors
 [exit status 1]

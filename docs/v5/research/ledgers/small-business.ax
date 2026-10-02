@@ -1,0 +1,855 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Lantern Row Games LLC: two owners (60/40), taxed as an S-corp, sells board games and puzzles online and does
+// some consulting. Austin, Texas. Payroll: the officer (an owner) and three employees. Sales tax collected in Texas and Washington. 2025-11-01 .. 2026-03-31.
+//
+// Written against docs/v5/PROPOSAL.md §6 (`->` gives, `<-` takes, `@` exchanges, legs lead with arrows, positions
+// under agents, a debt is a promise, direction decides income or spending, the counterparty is optional) and the
+// typed associations of ASSOCIATIONS.md. Not runnable: no toolchain reads it.
+//
+//   ✗ cannot say     ✎ says it badly     ? unclear     ⇄ what sync would need     ▸ derived, never typed
+//
+// Each mark carries an id (sb-c13: small business, c = cannot say, 13) and the change in REPORT.md that closes it:
+// [A1]..[A12] are this lane's twelve; [K5] says PROPOSAL §5 already closes it; [open] says nothing here does.
+// The index at the end of the file lists every id once.
+//
+// About the numbers. This is the last five months of a book that began in 2023: journal/2025/01..10.ax are not shown.
+// Every figure was produced by a script that replayed each event through an internal double-entry check (a tool for
+// the author, never part of the language). Cash, FIFO cost, payroll, FICA, FUTA and SUTA bases, sales tax, Stripe
+// fees, interest on the line and the EUR conversion are exact; net assets moved by exactly income less distributions.
+// Payroll uses the 2026 brackets of crates/systems/src/us.ax as an approximation of IRS Pub 15-T; rates marked verify
+// are illustrative. Exchange rates are illustrative.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use us
+use us/tx                  // sales tax, no income tax, SUTA through the Texas Workforce Commission (twc)
+use us/wa                  // sales tax by destination; B&O tax is left out of this book
+use us/payroll             // kind employment: withholding, FICA both halves, FUTA, SUTA, the plan match  [A3]
+use us/s-corp              // kind s-corp: what the business counts, its owners count in their shares   [A4]
+
+// ── people ───────────────────────────────────────────────────────────────────────────────────────────
+
+/// Dana Okafor, 60%, the officer. She is `me` in this book.
+entity dana : person
+  born    1984-08-17
+  filing  single
+  lives   us/tx
+
+/// Theo Lindqvist, 40%. A buyer and event person, part time; he is paid by distribution and his own note.
+entity theo : person
+  born    1982-03-02
+  filing  single
+  lives   us/tx
+
+entity marisol, kenji, jonah : person         // employees. Not owners: nobody's money here is theirs
+  filing  single
+  lives   us/tx
+
+// ── the company ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Lantern Row Games LLC. The positions are written under their owner: the nesting fills `owner`, the path
+/// (`chase/operating`) fills `with`. Both are slots of the position's kind, and the kind says what may fill them. [A2]
+entity lantern-row : s-corp
+  owners  dana 60%, theo 40%                  // a weighted many-slot: shares by day, so selling 10% on 09-01 splits the K-1 at that day  [A4]
+  books   accrual
+  lives   us/tx
+  lives   us/wa from 2025-04-01               // ✎ sb-b01 [A12] `lives` is a domicile for a person; for a company this is nexus, which its own tallies cross
+
+  chase/operating   : deposit
+  stripe/balance    : processor-balance       // what Stripe owes the company until it pays out
+    pays out weekly on tuesday all into operating
+  wise/eur          : deposit holds EUR
+  wise/usd          : deposit
+  amex/card         : credit-card
+    in full monthly on 25 from operating      // a card is a promise too: the forecast sees the bill
+  bluebonnet/line   : credit-line 40_000 USD  // ✗ sb-c04 [A7] a revolving line: draws and repayments at will, interest on the daily balance,
+    rate prime + 2.5%                         //   a floating rate. v5's `loan` is the annuity; ACTUS has UMP and IPAC for this
+    pays interest monthly on 5 for last month from operating
+  theo/note         : loan 15_000.00 USD on 2024-03-01 at 6%     // a debt is a position with a promise (§6.2): theo is `with`, by the path
+    interest monthly on 28 from operating     // ✗ sb-c05 [A8] interest only, the principal in one payment (ACTUS PAM): v5's `loan` is the annuity
+  warehouse         : stock-room              // custody by the company itself, as cash in hand is
+  label-printer     : equipment               // bought 2025-10-12 for 6_800 USD; see the opening
+
+  401k-plan                                   // a thing of kind 401k-plan, named by its kind: sponsor = lantern-row by the nesting
+    custodian guideline                       // the recordkeeper: a slot of kind 401k-plan, filled by role word
+    match 100% to 3%, 50% to 5%               // ✎ sb-b07 [A1] a tiered match is a typed value of the plan, not an expression written in every `also`
+
+// ── who the company deals with ──────────────────────────────────────────────────────────────────
+
+entity chase, bluebonnet : bank
+entity amex : card-issuer
+entity stripe : processor
+entity wise : money-transfer
+entity guideline : recordkeeper
+entity irs, tx-comptroller, wa-dor, twc : tax-authority
+entity pecan-st : landlord                    // the warehouse
+entity brightwood-dist, boxcraft : vendor     // games and puzzles; the club's boxes
+entity oakcraft : vendor                      // ? sb-u08 [A12] it is a vendor now and a client in February: kinds here are roles, and a thing has one kind
+entity ups-freight, pirate-ship, uline : vendor
+entity austin-energy : utility
+entity spectrum : isp
+entity hartford : insurer
+entity meta-ads, mailchimp : advertiser
+entity home-depot, staples, costco, eventbrite : merchant
+entity austin-food-bank #charity
+entity priya-nair : contractor                // the bookkeeper: 1099-NEC
+  w9 true
+entity lumi-studio : contractor               // box artwork, once
+  w9 true
+entity barton-dental, east-side-brewing, southside-library : client
+entity cafe-cluiche : client                  // Dublin; pays in EUR
+entity customers : market                     // every shopper, as one party: v5 lets a flow omit its counterparty, but a document header reads better with one
+
+// ── what is sold ─────────────────────────────────────────────────────────────────────────────────────
+
+/// Goods bought to be sold again. A sale is revenue and a cost, never a capital gain. [A9]
+kind merchandise : stock-in-trade
+  select fifo                                 // average cost would be `prorata`: relief in exact shares of every parcel
+  sells  sales                                // ✎ sb-b03 [A9] the purpose of selling a commodity is a property of its kind; v4's `pays` is for issuers
+commodity ORCHARD    : merchandise            // a strategy game
+commodity LANTERN    : merchandise            // a card game
+commodity ALPINE_1K  : merchandise            // a 1,000-piece puzzle
+commodity DICE_OAK   : merchandise            // hand-turned dice
+commodity TILEWRIGHT : merchandise            // the heavy strategy game
+commodity CLUB_BOX   : merchandise            // one box of the Game Night Club
+
+// ── employment, a plan, a lease, a note: contracts are typed and fill slots ──────────────────────────
+
+/// Pay is for the 1st..15th on the 20th and for the 16th..last on the 5th. Withholding, both FICA halves, FUTA, SUTA
+/// and the match come from `employment` and the plan; a paystub is one line. [A3]
+contract dana-pay : employment
+  employee dana                               // dana is also an owner: two relators between the same two agents, no conflict
+  employer lantern-row                        // the plan is inferred: lantern-row sponsors exactly one 401k-plan
+  2_750.00 USD semi-monthly in arrears paid 5, 20     // ✗ sb-c06 [A6] a pay period (16..last) and its pay date (the 5th) are two calendars, and the date moves off weekends
+  deferral 10%
+contract marisol-pay : employment
+  employee marisol
+  employer lantern-row
+  2_300.00 USD semi-monthly in arrears paid 5, 20
+  deferral 6%
+contract kenji-pay : employment
+  employee kenji
+  employer lantern-row
+  1_100.00 USD semi-monthly in arrears paid 5, 20
+contract jonah-pay : employment
+  employee jonah
+  employer lantern-row
+  20.50 USD/HR semi-monthly in arrears paid 5, 20     // ✎ sb-b29 [A3] a promise priced by a rate on a measure (the `worked` hours of the period), not an amount per period
+  overtime 1.5 x
+  deferral 3%
+
+contract warehouse-lease : lease
+  tenant lantern-row
+  landlord pecan-st
+  4_200.00 USD monthly on 1 from operating #rent
+  deposit 4_200.00 USD                        // paid to the landlord at the start: a claim on it, back at the end
+
+contract draws
+  8_000.00 USD monthly on 25 from operating -> owners by share #distribution   // ✗ sb-c09 [A4] `owners` as an end of a leg, split by the weights; no party is invented for a category
+
+// ── what the kinds above rely on (a sketch of us/payroll, us/s-corp and std) ─────────────────────────
+
+kind employment : contract
+  has employee  person
+  has employer  org
+  has plan      401k-plan optional = employer.401k-plan       // a default is evaluated the day the contract starts, then it is an ordinary step of the timeline
+  has deferral  percent = 0%
+  purpose wages
+  also withholding(gross - deferral * gross, employee.filing) -> irs #federal-tax
+  also 6.2% of gross -> irs #payroll-tax
+  also 1.45% of gross -> irs #payroll-tax
+  also deferral * gross -> plan.custodian #deferral
+  also 6.2% of gross -> irs #payroll-tax            when employer is owner      // the employer's half: only the employer's book pays it
+  also 1.45% of gross -> irs #payroll-tax           when employer is owner
+  also plan.match(deferral, gross) -> plan.custodian #match  when employer is owner       // the tiers above, as a function
+  also 0.6% * min(gross, max(7_000 USD - total(#wages of employee, year), empty)) -> irs #futa  when employer is owner   // ✗ sb-c02 [A5] total() cannot see the wages paid before the book began
+  also 2.7% * min(gross, max(9_000 USD - total(#wages of employee, year), empty)) -> twc #suta  when employer is owner
+
+kind s-corp : business
+  has owners  person | household  some by share
+  passes-through                                    // every tally the company counts is also counted for each owner, share by day  [A4]
+
+kind stock-in-trade : commodity
+  law cost-of-goods
+    on gain
+    derive -> basis #cost-of-goods                  // a leg out of the position the parcels left, to no party: their basis leaves the owners as spending; the proceeds keep the sale's own purpose
+
+
+// ═════ 2025-11-01 ═══════════════════════════════════════════════════════════════════════════════════
+
+opening 2025-11-01
+  operating           84_512.19 USD
+  stripe/balance       1_236.90 USD
+  card                 4_410.22 USD                           owed
+  line                18_000.00 USD                           owed          // October's interest, 147.25, is derived from the line's terms
+  warehouse     620 ORCHARD    basis 11_098.00 USD since 2025-09-10
+  warehouse     480 ORCHARD    basis  8_832.00 USD since 2025-10-14
+  warehouse     900 LANTERN    basis  6_255.00 USD since 2025-09-10
+  warehouse   1_000 LANTERN    basis  7_100.00 USD since 2025-10-14
+  warehouse     500 ALPINE_1K  basis  4_675.00 USD since 2025-09-10
+  warehouse     520 ALPINE_1K  basis  4_992.00 USD since 2025-10-14
+  warehouse     380 DICE_OAK   basis  2_299.00 USD since 2025-09-24
+  warehouse     420 DICE_OAK   basis  2_604.00 USD since 2025-10-14
+  warehouse     330 TILEWRIGHT basis  9_966.00 USD since 2025-09-10
+  warehouse     370 TILEWRIGHT basis 11_470.00 USD since 2025-10-14
+  warehouse     200 CLUB_BOX   basis  2_300.00 USD since 2025-10-14
+  label-printer               basis  6_800.00 USD since 2025-10-15       // ▸ book: 5 years straight line, 113.33 a month, mid-month in October
+  east-side-brewing owes lantern-row 2_400.00 USD due 11-10 ^inv-1112
+  lantern-row owes brightwood-dist 32_394.00 USD due 11-13 ^pi-1097
+  lantern-row owes boxcraft 2_300.00 USD due 11-13 ^bc-0412
+  lantern-row owes tx-comptroller 1_046.83 USD due 11-20 #sales-tax-collected ^st-tx-2025-10
+  lantern-row owes wa-dor 1_058.12 USD due 11-25 #sales-tax-collected ^st-wa-2025-10
+  lantern-row owes irs 3_507.66 USD due 11-17 ^941-2025-10          // the two October pay days: withheld tax and both halves of FICA
+
+// ✗ sb-c02 [A5] a book that starts mid-year needs its year to date. An `opening` is a state no law reads, so nothing here says
+// that every employee is past the 2025 FUTA and SUTA wage bases, that dana's 2025 deferrals are 5_500.00 of the 23_500.00 limit, or
+// what the company's 2025 income is to date. What is wanted is `opening 2025-11-01 tally wages[2025] of dana 55_000.00 USD` (and
+// the same for every tally a law reads).
+
+2025-11
+
+01 warehouse-lease                                                 // ▸ 4,200.00 USD #rent from operating; the 4,200.00 deposit stays with pecan-st
+01 operating -> hartford 4_860.00 USD #insurance for 2025-11-01..2026-10-31 ^bop-2025   // annual policy, paid in advance
+                                                               // ▸ recognized 405.00 USD a month; 4,455.00 USD of it is still prepaid on 11-30
+                                                               // ? sb-u18 [A8] no view lists a prepaid remainder: `for PERIOD` is a recognition map, not a position
+
+03 barton-dental owes lantern-row due 15d else + 1.5% #late-fees every 30d ^inv-1118   // ✎ sb-b21 [K5] a late fee that repeats; v4's `else` fires once
+     ^inv-1118[HR] @ 90.00 USD/HR #consulting                      // dana worked 35 HR in October, ⇄ sb-s35 time sheet
+                                                               // ▸ 3,150.00 USD owed, due 11-18 · recognized now: books accrual
+03 stripe/balance <- 2_880.00 USD #subscriptions ^club-2025-11a    // 12 annual Game Night Club subscriptions
+     - 87.12 USD #fees via stripe
+     lantern-row owes market 144 CLUB_BOX monthly over 12m from 12-15 received 2_880.00 USD   // ✗ sb-c17 [A8] a promise of goods bought with cash up front; v5 has no `received`, no in-kind amortization
+                                                               // ▸ no revenue yet: 2,880.00 USD is held as a claim of 144 CLUB_BOX; 20.00 USD is recognized per box delivered
+
+04 stripe/balance                                                  // ▸ weekly payout 4_029.78 USD -> operating (1,236.90 carried + the club sale)
+
+05 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00
+                                                               // ▸ #wages of dana 2,750.00 · -> irs (withheld) 206.17 · employee FICA 170.50 + 39.88 · -> guideline 275.00 (deferral 10%)
+                                                               // ▸ employer: FICA 170.50 + 39.88 · match 110.00 (100% of 3% + 50% of the next 2%) · FUTA 0.00 and SUTA 0.00: 2025 wage bases already reached [A5]
+                                                               // ▸ pays Oct 16..31 — accrued on 10-31 (books accrual), so no expense today
+05 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00
+05 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22
+05 jonah-pay                                                       // ▸ gross 1,804.00 · net 1,492.72 · owes irs 395.17 · -> guideline 108.24
+05 lantern-row owes austin-energy 418.22 USD due 20d #utilities ^ae-1105   // ⇄ sb-s32 utility PDF
+05 line                                                            // ▸ interest for October 147.25 USD #interest, from operating (31 days at 9.50%)
+
+06 card -> meta-ads 2_450.00 USD #marketing
+
+07 lantern-row owes uline 1_860.40 USD due 30d #packaging ^ul-71422
+
+10 warehouse <- brightwood-dist due 30d ^pi-1140                   // ✎ sb-b14 [A10] `<-` with `due`: the price is owed; §6.1 defines the junction for money lines · ⇄ sb-s34 the distributor's invoice
+         600 ORCHARD     @ 18.40 USD
+       1_200 LANTERN     @ 7.10 USD
+         400 TILEWRIGHT  @ 31.00 USD
+         600 ALPINE_1K   @ 9.60 USD
+                                                               // ▸ owes brightwood-dist 37_720.00 USD due 12-10 · 4 parcels at cost, acquired 11-10
+10 warehouse <- oakcraft due 15d ^oc-1003
+     500 DICE_OAK @ 6.20 USD
+                                                               // ▸ owes oakcraft 3_100.00 USD due 11-25
+
+12 lantern-row owes ups-freight 1_412.60 USD due 15d #landed-cost of ^pi-1140 ^uf-8841   // ✗ sb-c13 [A9] freight-in joins the parcels of the purchase it belongs to
+                                                               // ▸ joins pi-1140's four parcels pro rata to cost (3.745%): ORCHARD +413.44 · LANTERN +319.07 · TILEWRIGHT +464.38 · ALPINE_1K +215.71
+                                                               // ▸ basis per unit becomes ORCHARD 19.0891 · LANTERN 7.3659 · TILEWRIGHT 32.1610 · ALPINE_1K 9.9595
+12 card -> spectrum 129.99 USD #internet
+12 operating -> brightwood-dist 32_394.00 USD ^pi-1097             // the opening payable, due 11-13
+12 operating -> boxcraft 2_300.00 USD ^bc-0412                     // the opening payable
+
+13 card -> 255.00 USD #software "mailchimp, workspace, wp-engine"  // three subscriptions, one card line; contracts would say less
+
+14 operating <- east-side-brewing 2_400.00 USD ^inv-1112           // ▸ settles the opening invoice
+
+15 jonah worked 88.0 HR for 11-01..11-15                           // ⇄ sb-s31 time clock
+15 jonah worked 4.0 HR #overtime for 11-01..11-15                  // overtime is a rate of the contract: 1.5×
+                                                               // ▸ accrued payroll for 11-01..11-15: 8,954.70 USD (wages 8,077.00 · employer FICA 617.89 · match 259.81)   ✗ sb-c20 [A6] the pay occurrence must cover its pay period
+15 warehouse -> customers into stripe/balance ^so-2025-11a         // ⇄ sb-s30 order export 11-01..11-15, 353 orders
+         156 ORCHARD     @ 39.99 USD
+         297 LANTERN     @ 16.99 USD
+         154 ALPINE_1K   @ 24.99 USD
+         120 DICE_OAK    @ 18.00 USD
+         103 TILEWRIGHT  @ 64.99 USD
+     + 1_729.70 USD #shipping                                      // 353 orders
+     + 551.62 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 558.95 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 883.89 USD #fees via stripe                                 // 2.9% + 0.30 per order
+                                                               // ▸ 25_943.28 USD arrives at stripe/balance; 1_110.57 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 10_133.05 USD: ORCHARD 2,792.40, LANTERN 2,064.15, ALPINE_1K 1,439.90, DICE_OAK 726.00, TILEWRIGHT 3,110.60
+                                                               // ✎ sb-b10 [A10] goods leave `warehouse`, money arrives in `stripe/balance`: `@` has one subject position
+                                                               // ✎ sb-b12 [open] a half-month document is one flow on one day; with order-level sync the balance would not jump
+                                                               // ✗ sb-c11 [open] the tax rate is by ship-to address: only the document knows it; the book cannot derive it
+                                                               // ✗ sb-c10 [A9] selling merchandise is revenue and cost, not a gain: the cost leg below comes from `kind stock-in-trade`
+                                                               // ▸ ORCHARD 156 from the 09-10 parcel (620 at 17.90) · TILEWRIGHT 103 from the 09-10 parcel (330 at 30.20): FIFO
+
+17 east-side-brewing owes lantern-row 2_800.00 USD due 30d ^inv-1121
+     2_800.00 USD #consulting "inventory planning, 28 HR"
+17 operating -> irs 3_507.66 USD ^941-2025-10                      // ✎ sb-b28 [A6] due 11-15 is a Saturday: paid the next business day
+                                                               // ▸ settles the four claims of 10-05 and 10-20 (exact amount): withheld tax and both halves of FICA
+
+18 stripe/balance                                                  // ▸ payout 25_943.28 USD -> operating
+
+// 11-19 ▸ ^inv-1118 is past due since 11-18: the late fee, 47.25 USD (1.5%), joins the claim; another 1.5% would join on 12-18
+
+20 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00
+20 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00
+20 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22
+20 jonah-pay                                                       // ▸ gross 1,927.00 · net 1,588.31 · owes irs 428.29 · -> guideline 115.62
+20 operating -> priya-nair 650.00 USD #accounting                  // contractor: the 1099-NEC base grows by 650.00
+20 operating -> tx-comptroller 1_046.83 USD ^st-tx-2025-10         // monthly return, due 11-20
+                                                               // ▸ settles the claim for October; - 5.23 USD #vendor-discount (0.5% for filing on time) is derived by `us/tx`, so the bank shows 1,041.60
+
+24 operating -> oakcraft 3_100.00 USD ^oc-1003
+24 stripe/balance -> customers 70.35 USD against ^so-2025-11a "order 5871"   // refund of one TILEWRIGHT in a TX order
+24 warehouse <- customers 1 TILEWRIGHT against ^so-2025-11a        // ✗ sb-c15 [A9] back to stock at the cost it left with (30.20), not at today's
+                                                               // ▸ revenue -64.99 · tax owed to tx-comptroller -5.36 · cost of goods -30.20, parcel back at the head of its FIFO queue
+
+25 operating -> wa-dor 1_058.12 USD ^st-wa-2025-10
+25 operating -> austin-energy 418.22 USD ^ae-1105                  // ▸ settles it
+25 card                                                            // ▸ October statement 7,245.21 USD, paid in full from operating
+25 draws                                                           // ▸ 8,000.00 USD from operating #distribution: dana 4,800.00 · theo 3,200.00 (60/40, by `owners`)
+
+27 card -> home-depot 612.40 USD #supplies "shelving"
+
+28 stripe/balance <- 7_440.00 USD #subscriptions ^club-2025-11b    // 31 more subscriptions: Cyber Monday
+     - 225.06 USD #fees via stripe
+     lantern-row owes market 372 CLUB_BOX monthly over 12m from 12-15 received 7_440.00 USD
+28 theo/note                                                       // ▸ interest 75.00 USD #interest to theo (6% of 15,000.00, a month)
+
+30 jonah worked 96.0 HR for 11-16..11-30
+30 jonah worked 14.0 HR #overtime for 11-16..11-30
+30 lantern-row owes pirate-ship 6_184.20 USD due 15d #postage ^ps-1130   // ⇄ sb-s32 postage statement
+30 warehouse -> customers into stripe/balance ^so-2025-11b         // ⇄ sb-s30 order export 11-16..11-30, 898 orders
+         397 ORCHARD     @ 39.99 USD
+         754 LANTERN     @ 16.99 USD
+         391 ALPINE_1K   @ 24.99 USD
+         305 DICE_OAK    @ 18.00 USD
+         263 TILEWRIGHT  @ 64.99 USD
+     - 5_493.60 USD #discounts                                     // "BF25 9% off"
+     + 4_400.20 USD #shipping                                      // 898 orders
+     + 1_285.85 USD #sales-tax-collected for tx-comptroller        // 8.25% of the TX orders
+     + 1_302.94 USD #sales-tax-collected for wa-dor                // 10.35% of the WA orders
+     - 2_082.92 USD #fees via stripe                               // 2.9% + 0.30 per order
+                                                               // ▸ 60_452.42 USD arrives at stripe/balance; 2_588.79 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 25_858.95 USD: ORCHARD 7,106.30, LANTERN 5,262.95, ALPINE_1K 3,667.10, DICE_OAK 1,852.00, TILEWRIGHT 7,970.60
+                                                               // ▸ BF25 promo: 9% off; the discount is its own item, not a lower price
+
+30 operating = 33_655.66 USD
+30 stripe/balance = 67_597.01 USD                                  // ▸ earned, not yet paid out: Stripe owes it
+30 card = 612.40 USD                                               // owed, as the statement shows it
+30 line = 18_000.00 USD                                            // owed
+
+2025-12
+
+01 warehouse-lease                                                 // ▸ 4,200.00 USD
+01 southside-library owes lantern-row 1_980.00 USD due 30d ^inv-1124
+     1_980.00 USD #consulting "reading-room game library, 22 HR"
+
+02 warehouse <- brightwood-dist due 30d ^pi-1171
+         450 ORCHARD     @ 18.65 USD
+       1_000 LANTERN     @ 7.25 USD
+         300 TILEWRIGHT  @ 31.40 USD
+         450 ALPINE_1K   @ 9.70 USD
+                                                               // ▸ owes brightwood-dist 29_427.50 USD due 01-01
+02 warehouse <- boxcraft due 30d ^bc-0455
+     300 CLUB_BOX @ 11.50 USD
+                                                               // ▸ owes boxcraft 3_450.00 USD due 01-01
+02 stripe/balance                                                  // ▸ payout 67_597.01 USD -> operating
+
+03 warehouse <- oakcraft due 15d ^oc-1021
+     150 DICE_OAK @ 6.20 USD
+
+04 lantern-row owes ups-freight 1_128.45 USD due 15d #landed-cost of ^pi-1171 ^uf-9015
+                                                               // ▸ joins pi-1171's four parcels pro rata to cost (3.834%)
+04 lantern-row owes uline 2_410.75 USD due 30d #packaging ^ul-73011
+04 card -> meta-ads 2_100.00 USD #marketing
+
+05 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00
+05 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00
+05 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22
+05 jonah-pay                                                       // ▸ gross 2,398.50 · net 1,954.70 · owes irs 555.33 · -> guideline 143.92
+05 lantern-row owes austin-energy 436.90 USD due 20d #utilities ^ae-1205
+05 operating -> uline 1_860.40 USD ^ul-71422
+05 line                                                            // ▸ interest for November 142.50 USD (30 days at 9.50%)
+
+09 operating -> brightwood-dist 37_720.00 USD ^pi-1140             // on its due day
+09 stripe/balance -> customers 77.12 USD against ^so-2025-12a "dispute 6140"   // chargeback: a WA order; the bank takes it back
+     + 15.00 USD #fees via stripe                                  // the dispute fee is real whatever the outcome
+                                                               // ▸ revenue -69.89 (64.99 + 4.90 shipping) · tax owed to wa-dor -7.23 · the goods are gone: cost of goods stays
+                                                               // ? sb-u16 [open] is the WA tax on a lost dispute recoverable? A rule of the state, so a param of `us/wa` — or nobody says
+
+10 stripe/balance <- 3_360.00 USD #subscriptions ^club-2025-12a    // 14 subscriptions
+     - 101.64 USD #fees via stripe
+     lantern-row owes market 168 CLUB_BOX monthly over 12m from 01-15 received 3_360.00 USD
+
+12 cafe-cluiche owes lantern-row 2_400.00 EUR due 30d ^inv-1126    // Dublin, a client: game-library curation
+     40 HR @ 60.00 EUR/HR #consulting
+                                                               // ▸ 2,813.04 USD of income at 1.1721 today; the claim keeps that as its basis
+12 card -> spectrum 129.99 USD #internet
+12 operating -> ups-freight 1_412.60 USD ^uf-8841
+12 stripe/balance -> customers 19.49 USD against ^so-2025-12a "order 6302"
+12 warehouse <- customers 1 DICE_OAK against ^so-2025-12a
+
+13 card -> 255.00 USD #software "mailchimp, workspace, wp-engine"
+
+15 jonah worked 96.0 HR for 12-01..12-15
+15 jonah worked 12.0 HR #overtime for 12-01..12-15
+15 warehouse -> customers into stripe/balance ^so-2025-12a         // ⇄ sb-s30 order export 12-01..12-15, 1089 orders
+         481 ORCHARD     @ 39.99 USD
+         915 LANTERN     @ 16.99 USD
+         474 ALPINE_1K   @ 24.99 USD
+         370 DICE_OAK    @ 18.00 USD
+         319 TILEWRIGHT  @ 64.99 USD
+     - 3_700.91 USD #discounts                                     // "CM25 5% off"
+     + 5_336.10 USD #shipping                                      // 1089 orders
+     + 1_622.76 USD #sales-tax-collected for tx-comptroller        // 8.25% of the TX orders
+     + 1_644.32 USD #sales-tax-collected for wa-dor                // 10.35% of the WA orders
+     - 2_615.39 USD #fees via stripe                               // 2.9% + 0.30 per order
+                                                               // ▸ 76_304.99 USD arrives at stripe/balance; 3_267.08 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 32_064.35 USD: ORCHARD 8,816.90, LANTERN 6,514.05, ALPINE_1K 4,550.40, DICE_OAK 2,294.00, TILEWRIGHT 9,889.00
+                                                               // ▸ CM25 extension: 5% off
+15 club                                                            // ▸ 43 CLUB_BOX out of warehouse to 43 members · recognizes 860.00 USD #subscriptions · #cost-of-goods 494.50
+                                                               // ▸ the November claims (144 and 372 boxes) are relieved by 12 and 31: 132 + 341 = 473 boxes (9,460.00 USD) still owed
+15 operating -> irs 3_540.78 USD ^941-2025-11
+15 operating <- east-side-brewing 2_800.00 USD ^inv-1121
+15 operating -> pirate-ship 6_184.20 USD ^ps-1130
+
+16 operating <- barton-dental 3_197.25 USD ^inv-1118               // ▸ settles it: 3,150.00 + the 47.25 late fee; 28 days after its due day
+16 stripe/balance                                                  // ▸ payout 79_451.74 USD -> operating
+
+17 operating -> oakcraft 930.00 USD ^oc-1021
+
+18 card -> meta-ads 2_100.00 USD #marketing
+18 card -> austin-food-bank 600.00 USD #charity                    // a separately stated item on the K-1
+
+19 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00  ✎ sb-b28 [A6] 12-20 is a Saturday: paid on the 19th
+19 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00
+19 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22
+19 jonah-pay                                                       // ▸ gross 2,337.00 · net 1,906.92 · owes irs 538.75 · -> guideline 140.22
+19 operating -> priya-nair 650.00 USD #accounting
+
+22 stripe/balance <- 1_920.00 USD #subscriptions ^club-2025-12b    // 8 gift subscriptions
+     - 58.08 USD #fees via stripe
+     lantern-row owes market 96 CLUB_BOX monthly over 12m from 01-15 received 1_920.00 USD
+22 operating -> lumi-studio 2_100.00 USD #design "box artwork"     // contractor: 1099-NEC base 2,100.00 for 2025
+22 operating -> tx-comptroller 1_832.11 USD ^st-tx-2025-11         // due 12-20 is a Saturday
+                                                               // ▸ - 9.16 USD #vendor-discount derived · bank 1,822.95
+
+23 stripe/balance                                                  // ▸ payout 1_861.92 USD
+
+26 operating -> wa-dor 1_861.89 USD ^st-wa-2025-11                 // due 12-25 is a holiday
+26 operating -> austin-energy 436.90 USD ^ae-1205
+26 card                                                            // ▸ November statement 5,797.39 USD, paid in full
+26 draws                                                           // ▸ 8,000.00 USD #distribution: dana 4,800.00 · theo 3,200.00
+
+29 card -> staples 287.13 USD #supplies
+29 theo/note                                                       // ▸ interest 75.00 USD #interest to theo
+
+30 operating -> brightwood-dist 29_427.50 USD ^pi-1171
+
+31 jonah worked 88.0 HR for 12-16..12-31
+31 jonah worked 8.0 HR #overtime for 12-16..12-31
+31 lantern-row owes pirate-ship 9_730.55 USD due 15d #postage ^ps-1231
+31 warehouse -> customers into stripe/balance ^so-2025-12b         // ⇄ sb-s30 order export 12-16..12-31, 677 orders
+         299 ORCHARD     @ 39.99 USD
+         569 LANTERN     @ 16.99 USD
+         295 ALPINE_1K   @ 24.99 USD
+         230 DICE_OAK    @ 18.00 USD
+         198 TILEWRIGHT  @ 64.99 USD
+     - 2_760.26 USD #discounts                                     // "WINTER6"
+     + 3_317.30 USD #shipping                                      // 677 orders
+     + 998.74 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 1_012.01 USD #sales-tax-collected for wa-dor                // 10.35% of the WA orders
+     - 1_611.69 USD #fees via stripe                               // 2.9% + 0.30 per order
+                                                               // ▸ 46_960.49 USD arrives at stripe/balance; 2_010.75 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 20_566.33 USD: ORCHARD 5,662.15, LANTERN 4,191.19, ALPINE_1K 2,937.70, DICE_OAK 1,426.00, TILEWRIGHT 6,349.29
+                                                               // ▸ WINTER6: 6% off
+31 operating -> boxcraft 3_450.00 USD ^bc-0455
+31 warehouse = 814 ORCHARD, 1_551 LANTERN, 755 ALPINE_1K, 424 DICE_OAK, 518 TILEWRIGHT, 457 CLUB_BOX #shrinkage   // ✎ sb-b19 [A9] a count with a purpose: the gap is a loss of stock, not unexplained and not the market's
+                                                               // ▸ the book held 817 · 1,565 · 756 · 426: gap of 3, 14, 1 and 2 units = 182.75 USD at FIFO cost, #shrinkage (spending)
+   // ▸ 2025 on 12-31 (accrual): accrued payroll 9,361.40 USD owed for 12-16..12-31 (wages 8,200.00 · employer FICA 627.30 · match 263.50 · FUTA 49.20 · SUTA 221.40)   [sb-c20]
+   // ▸ unearned: 14,740.00 USD = 737 CLUB_BOX still owed to 65 members (473 from November, 264 from December) · prepaid insurance 4,050.00 USD · receivables 4,793.04 USD
+
+31 operating = 63_878.07 USD
+31 stripe/balance = 46_960.49 USD                                  // ▸ earned, not yet paid out: Stripe owes it
+31 card = 287.13 USD                                               // owed, as the statement shows it
+31 line = 18_000.00 USD                                            // owed
+
+2026-01
+
+02 warehouse-lease                                                 // ▸ 4,200.00 USD; due 01-01, a holiday
+02 operating <- southside-library 1_980.00 USD ^inv-1124
+
+05 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00 · owes twc 74.25, irs 16.50 (futa)
+                                                               // ▸ pays 12-16..12-31 but is a 2026 payment: the wage bases start again — FUTA 0.6% to 7,000 and SUTA 2.7% to 9,000 per employee [A5]
+                                                               // ✗ sb-c02 [A5] nothing in the book says 2025's year-to-date wages: `opening` is a state that no law reads, so a mid-year book has no wage bases, no 401(k) deferrals to date, no K-1 to date
+05 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00 · owes twc 62.10, irs 13.80 (futa)
+05 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22 · owes twc 29.70, irs 6.60 (futa)
+05 jonah-pay                                                       // ▸ gross 2,050.00 · net 1,683.89 · owes irs 461.43 · -> guideline 123.00 · owes twc 55.35, irs 12.30 (futa)
+05 barton-dental owes lantern-row 1_350.00 USD due 15d else + 1.5% #late-fees every 30d ^inv-1130
+     1_350.00 USD #consulting "pricing review, 15 HR"
+05 lantern-row owes austin-energy 402.15 USD due 20d #utilities ^ae-0105
+05 operating -> uline 2_410.75 USD ^ul-73011
+05 line                                                            // ▸ interest for December 144.62 USD (10 days at 9.50%, 21 at 9.25% after the 12-10 cut)
+
+06 stripe/balance                                                  // ▸ payout 46_960.49 USD
+
+08 card -> meta-ads 1_280.00 USD #marketing
+
+09 wise/eur <- cafe-cluiche 2_400.00 EUR ^inv-1126                 // SEPA, into the euro balance
+                                                               // ▸ settles it · the euros keep 2,813.04 USD as basis (1.1721 on the invoice day), not today's 1.1688
+
+10 operating -> owners 14_000.00 USD #distribution "tax distribution for Q4"   // ✗ sb-c09 [A4] `owners` as the other end, by share: dana 8,400.00 · theo 5,600.00
+                                                               // ▸ the estimates themselves are the owners' own books (01-15 below)
+
+12 lantern-row owes uline 905.30 USD due 30d #packaging ^ul-74188
+12 card -> spectrum 129.99 USD #internet
+12 operating -> line 10_000.00 USD                                 // ▸ principal repaid: 8,000.00 USD still drawn, interest on it from today
+
+13 card -> 255.00 USD #software "mailchimp, workspace, wp-engine"
+13 operating -> ups-freight 1_128.45 USD ^uf-9015
+
+14 stripe/balance -> customers 141.75 USD against ^so-2025-12b "orders 6891, 6893"   // post-holiday returns, TX
+14 warehouse <- customers against ^so-2025-12b                     // one of the three LANTERN came back damaged: it is not stock
+     2 ORCHARD
+     2 LANTERN
+                                                               // ▸ revenue -130.95 · tax owed to tx-comptroller -10.80 (a refund of December's sale reduces the return of the month it is paid) · cost back 52.91
+
+15 jonah worked 80.0 HR for 01-01..01-15
+15 warehouse -> customers into stripe/balance ^so-2026-01a         // ⇄ sb-s30 order export 01-01..01-15, 368 orders
+         163 ORCHARD     @ 39.99 USD
+         309 LANTERN     @ 16.99 USD
+         160 ALPINE_1K   @ 24.99 USD
+         125 DICE_OAK    @ 18.00 USD
+         108 TILEWRIGHT  @ 64.99 USD
+     - 2_503.56 USD #discounts                                     // "NEWYEAR10"
+     + 1_803.20 USD #shipping                                      // 368 orders
+     + 521.99 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 528.93 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 846.60 USD #fees via stripe                                 // 2.9% + 0.30 per order
+                                                               // ▸ 24_539.56 USD arrives at stripe/balance; 1_050.92 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 11_229.48 USD: ORCHARD 3,111.52, LANTERN 2,276.06, ALPINE_1K 1,593.52, DICE_OAK 775.00, TILEWRIGHT 3,473.38
+                                                               // ▸ NEWYEAR10: 10% off
+15 club                                                            // ▸ 65 CLUB_BOX · recognizes 1,300.00 USD #subscriptions · #cost-of-goods 747.50 (11.50 each, FIFO)
+15 operating -> irs 3_811.40 USD ^941-2025-12
+15 operating -> pirate-ship 9_730.55 USD ^ps-1231
+// ── the owners' own books, for completeness (`--for dana`, `--for theo`) ──
+15 dana/checking -> irs 7_900.00 USD #estimated-tax for 2025       // ✎ sb-b27 [A6] the January installment belongs to the year before: `for the tax year`
+15 theo/checking -> irs 5_100.00 USD #estimated-tax for 2025
+
+20 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00 · owes twc 74.25, irs 16.50 (futa)
+20 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00 · owes twc 62.10, irs 13.80 (futa)
+20 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22 · owes twc 29.70, irs 6.60 (futa)
+20 jonah-pay                                                       // ▸ gross 1,640.00 · net 1,365.28 · owes irs 350.98 · -> guideline 98.40 · owes twc 44.28, irs 9.84 (futa)
+20 stripe/balance <- 2_160.00 USD #subscriptions ^club-2026-01     // 9 subscriptions
+     - 65.34 USD #fees via stripe
+     lantern-row owes market 108 CLUB_BOX monthly over 12m from 02-15 received 2_160.00 USD
+20 operating -> priya-nair 650.00 USD #accounting
+20 operating -> tx-comptroller 2_620.01 USD ^st-tx-2025-12
+                                                               // ▸ December's two documents less 1.49 + the refund of 12-12 · - 13.10 USD #vendor-discount derived · bank 2,606.91
+20 draws now 3_000.00 USD monthly "winter"                         // ▸ from 01-26: dana 1,800.00 · theo 1,200.00
+20 stripe/balance                                                  // ▸ payout 26_492.47 USD
+
+22 wise/eur -> 2_385.60 EUR @ 1.1750 USD into operating ^fx-0122
+     - 14.40 EUR #fees via wise
+                                                               // ✎ sb-b22 [A10] a conversion between two of my own positions, with the fee in the source currency
+                                                               // ▸ 2,803.08 USD arrive · gain 6.92 USD (2,803.08 against the 2,796.16 of basis that left) · the fee costs 16.88 USD of basis
+                                                               // ? sb-u23 [open] `us`' currency-gain law exempts a personal gain of 200 USD or less (§988(e)); a business has no such exemption: its gain is ordinary at any size
+
+26 operating -> austin-energy 402.15 USD ^ae-0105
+26 operating -> wa-dor 2_649.10 USD ^st-wa-2025-12                 // due 01-25 is a Sunday
+26 card                                                            // ▸ December statement 1,952.12 USD, paid in full
+26 draws                                                           // ▸ 3,000.00 USD #distribution: dana 1,800.00 · theo 1,200.00
+
+28 card -> staples 148.00 USD #supplies "label scale"
+28 theo/note                                                       // ▸ interest 75.00 USD #interest to theo
+
+30 operating <- barton-dental 1_350.00 USD ^inv-1130
+
+31 jonah worked 80.0 HR for 01-16..01-31
+31 lantern-row owes pirate-ship 3_310.40 USD due 15d #postage ^ps-0131
+31 warehouse -> customers into stripe/balance ^so-2026-01b         // ⇄ sb-s30 order export 01-16..01-31, 338 orders
+         150 ORCHARD     @ 39.99 USD
+         284 LANTERN     @ 16.99 USD
+         147 ALPINE_1K   @ 24.99 USD
+         115 DICE_OAK    @ 18.00 USD
+          99 TILEWRIGHT  @ 64.99 USD
+     + 1_656.20 USD #shipping                                      // 338 orders
+     + 528.90 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 535.93 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 847.34 USD #fees via stripe                                 // 2.9% + 0.30 per order
+                                                               // ▸ 24_874.89 USD arrives at stripe/balance; 1_064.83 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 10_322.96 USD: ORCHARD 2,863.36, LANTERN 2,098.40, ALPINE_1K 1,464.27, DICE_OAK 713.00, TILEWRIGHT 3,183.93
+// W-2 and W-3 (2025), 1099-NEC (priya-nair 7,800.00 · lumi-studio 2,100.00) and Form 940 are due today.
+// ✗ sb-c26 [open] they are documents the book should print, with the lines it already derived: Axiom reports lines (`axiom tax`), not forms
+// the 941 for Q4 (3,811.40 + 3,540.78 + 3,507.66 deposited) is the same: a return is `filed`, but nothing writes it
+
+31 operating = 72_504.85 USD
+31 stripe/balance = 24_874.89 USD                                  // ▸ earned, not yet paid out: Stripe owes it
+31 card = 148.00 USD                                               // owed, as the statement shows it
+31 line = 8_000.00 USD                                             // owed
+
+2026-02
+
+02 warehouse-lease                                                 // ▸ 4,200.00 USD; 02-01 is a Sunday
+02 east-side-brewing owes lantern-row 3_600.00 USD due 30d ^inv-1133
+     3_600.00 USD #consulting "seasonal inventory plan, 40 HR"
+
+03 stripe/balance                                                  // ▸ payout 24_874.89 USD
+
+05 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00 · owes twc 74.25, irs 9.00 (futa)
+05 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00 · owes twc 62.10, irs 13.80 (futa)
+05 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22 · owes twc 29.70, irs 6.60 (futa)
+05 jonah-pay                                                       // ▸ gross 1,640.00 · net 1,365.28 · owes irs 350.98 · -> guideline 98.40 · owes twc 44.28, irs 9.84 (futa)
+05 lantern-row owes austin-energy 395.77 USD due 20d #utilities ^ae-0205
+05 line                                                            // ▸ interest for January 91.99 USD (11 days on 18,000.00 · 20 days on 8,000.00, at 9.25%)
+
+06 card -> meta-ads 1_150.00 USD #marketing
+
+09 warehouse <- brightwood-dist due 30d ^pi-1209
+         300 ORCHARD     @ 18.65 USD
+         900 LANTERN     @ 7.25 USD
+         220 TILEWRIGHT  @ 31.40 USD
+         420 ALPINE_1K   @ 9.70 USD
+                                                               // ▸ owes brightwood-dist 23_102.00 USD due 03-11
+09 warehouse <- oakcraft due 15d ^oc-1060
+     420 DICE_OAK @ 6.30 USD
+09 warehouse <- boxcraft due 30d ^bc-0501
+     150 CLUB_BOX @ 11.80 USD                                      // the price rose 0.30
+
+11 lantern-row owes ups-freight 683.10 USD due 15d #landed-cost of ^pi-1209 ^uf-9330
+11 operating -> uline 905.30 USD ^ul-74188
+
+12 lantern-row owes uline 810.45 USD due 30d #packaging ^ul-75530
+12 card -> spectrum 129.99 USD #internet
+12 operating -> line 8_000.00 USD                                  // ▸ the line is repaid in full: 0.00 USD drawn
+
+13 card -> 255.00 USD #software "mailchimp, workspace, wp-engine"
+
+15 jonah worked 80.0 HR for 02-01..02-15
+15 warehouse -> customers into stripe/balance ^so-2026-02a         // ⇄ sb-s30 order export 02-01..02-15, 353 orders
+         156 ORCHARD     @ 39.99 USD
+         297 LANTERN     @ 16.99 USD
+         154 ALPINE_1K   @ 24.99 USD
+         120 DICE_OAK    @ 18.00 USD
+         103 TILEWRIGHT  @ 64.99 USD
+     + 1_729.70 USD #shipping                                      // 353 orders
+     + 551.62 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 558.95 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 883.89 USD #fees via stripe                                 // 2.9% + 0.30 per order
+                                                               // ▸ 25_943.28 USD arrives at stripe/balance; 1_110.57 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 10_890.58 USD: ORCHARD 3,006.33, LANTERN 2,235.82, ALPINE_1K 1,551.08, DICE_OAK 744.00, TILEWRIGHT 3,353.35
+15 club                                                            // ▸ 74 CLUB_BOX · recognizes 1,480.00 USD #subscriptions · #cost-of-goods 851.00
+
+16 oakcraft owes lantern-row 450.00 USD due 15d ^inv-1135
+     450.00 USD #consulting "box-insert design review"
+                                                               // ? sb-u08 [A12] oakcraft is a vendor (what we pay it is cost of goods) and now a client: money *from* it is a refund by the party-kind rule, so this line needs its own #consulting
+16 operating -> pirate-ship 3_310.40 USD ^ps-0131
+
+17 operating -> irs 3_529.73 USD ^941-2026-01                      // 02-15 is a Sunday and 02-16 Presidents' Day
+17 stripe/balance                                                  // ▸ payout 25_943.28 USD
+
+18 stripe/balance <- 1_440.00 USD #subscriptions ^club-2026-02     // 6 subscriptions
+     - 43.56 USD #fees via stripe
+     lantern-row owes market 72 CLUB_BOX monthly over 12m from 03-15 received 1_440.00 USD
+
+20 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00 · owes twc 20.25, irs 0.00 (futa)
+20 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00 · owes twc 56.70, irs 0.60 (futa)
+20 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22 · owes twc 29.70, irs 6.60 (futa)
+20 jonah-pay                                                       // ▸ gross 1,640.00 · net 1,365.28 · owes irs 350.98 · -> guideline 98.40 · owes twc 44.28, irs 9.84 (futa)
+20 operating -> priya-nair 650.00 USD #accounting
+20 operating -> tx-comptroller 1_040.09 USD ^st-tx-2026-01
+                                                               // ▸ - 5.20 USD #vendor-discount derived · bank 1_034.89 USD
+20 stripe/balance -> customers 27.58 USD against ^so-2026-01b "order 7011"   // WA
+20 warehouse <- customers 1 ALPINE_1K against ^so-2026-01b
+
+23 operating -> oakcraft 1_890.00 USD ^oc-1060
+
+24 stripe/balance                                                  // ▸ payout 1_368.86 USD
+
+25 operating -> austin-energy 395.77 USD ^ae-0205
+25 operating -> wa-dor 1_064.86 USD ^st-wa-2026-01
+25 card                                                            // ▸ January statement 1,682.99 USD, paid in full
+25 draws                                                           // ▸ 3,000.00 USD #distribution: dana 1,800.00 · theo 1,200.00
+
+27 card -> costco 321.75 USD #supplies "office"
+27 theo/note                                                       // ▸ interest 75.00 USD #interest to theo
+
+28 jonah worked 80.0 HR for 02-16..02-28
+28 jonah worked 2.0 HR #overtime for 02-16..02-28
+28 lantern-row owes pirate-ship 3_058.10 USD due 15d #postage ^ps-0228
+28 warehouse -> customers into stripe/balance ^so-2026-02b         // ⇄ sb-s30 order export 02-16..02-28, 346 orders
+         153 ORCHARD     @ 39.99 USD
+         290 LANTERN     @ 16.99 USD
+         150 ALPINE_1K   @ 24.99 USD
+         118 DICE_OAK    @ 18.00 USD
+         101 TILEWRIGHT  @ 64.99 USD
+     + 1_695.40 USD #shipping                                      // 346 orders
+     + 540.06 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 547.23 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 865.48 USD #fees via stripe                                 // 2.9% + 0.30 per order
+                                                               // ▸ 25_399.27 USD arrives at stripe/balance; 1_087.29 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 10_686.42 USD: ORCHARD 2,962.87, LANTERN 2,183.12, ALPINE_1K 1,510.42, DICE_OAK 737.00, TILEWRIGHT 3,293.01
+
+28 operating = 80_249.95 USD
+28 stripe/balance = 25_399.27 USD                                  // ▸ earned, not yet paid out: Stripe owes it
+28 card = 321.75 USD                                               // owed, as the statement shows it
+28 line = 0.00 USD                                                 // owed
+
+2026-03
+
+02 warehouse-lease                                                 // ▸ 4,200.00 USD
+02 southside-library owes lantern-row 2_250.00 USD due 30d ^inv-1136
+     2_250.00 USD #consulting "summer reading-room refresh, 25 HR"
+02 operating <- oakcraft 450.00 USD ^inv-1135
+
+03 operating <- east-side-brewing 3_600.00 USD ^inv-1133
+03 stripe/balance                                                  // ▸ payout 25_399.27 USD
+
+05 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00
+05 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00
+05 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22 · owes twc 29.70, irs 6.60 (futa)
+05 jonah-pay                                                       // ▸ gross 1,701.50 · net 1,413.08 · owes irs 367.54 · -> guideline 102.08 · owes twc 45.94, irs 0.18 (futa)
+05 lantern-row owes austin-energy 388.40 USD due 20d #utilities ^ae-0305
+05 card -> meta-ads 1_400.00 USD #marketing
+05 line                                                            // ▸ interest for February 22.61 USD (11 days on 8,000.00)
+
+10 lantern-row owes uline 1_042.60 USD due 30d #packaging ^ul-76702
+10 operating -> brightwood-dist 23_102.00 USD ^pi-1209
+10 operating -> boxcraft 1_770.00 USD ^bc-0501
+
+12 card -> spectrum 129.99 USD #internet
+
+13 card -> 255.00 USD #software "mailchimp, workspace, wp-engine"
+13 operating -> ups-freight 683.10 USD ^uf-9330
+
+14 operating -> uline 810.45 USD ^ul-75530
+
+15 jonah worked 84.0 HR for 03-01..03-15
+15 warehouse -> customers into stripe/balance ^so-2026-03a         // ⇄ sb-s30 order export 03-01..03-15, 390 orders
+         172 ORCHARD     @ 39.99 USD
+         328 LANTERN     @ 16.99 USD
+         170 ALPINE_1K   @ 24.99 USD
+         132 DICE_OAK    @ 18.00 USD
+         114 TILEWRIGHT  @ 64.99 USD
+     - 794.52 USD #discounts                                       // "SPRING3"
+     + 1_911.00 USD #shipping                                      // 390 orders
+     + 592.03 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 599.90 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 951.98 USD #fees via stripe                                 // 2.9% + 0.30 per order
+                                                               // ▸ 27_840.59 USD arrives at stripe/balance; 1_191.93 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 12_056.64 USD: ORCHARD 3,330.81, LANTERN 2,469.19, ALPINE_1K 1,710.10, DICE_OAK 831.60, TILEWRIGHT 3,714.94
+                                                               // ▸ SPRING3: 3% off
+15 club                                                            // ▸ 80 CLUB_BOX · recognizes 1,600.00 USD #subscriptions · #cost-of-goods 920.00 (the 11.80 parcel starts)
+
+16 operating -> irs 3_419.28 USD ^941-2026-02                      // 03-15 is a Sunday
+16 operating -> pirate-ship 3_058.10 USD ^ps-0228
+// 03-16: the 2025 return of the LLC (Form 1120-S) and its K-1s are due (03-15 is a Sunday). The K-1 is in the closing block below.
+
+17 stripe/balance                                                  // ▸ payout 27_840.59 USD
+
+20 dana-pay                                                        // ▸ gross 2,750.00 · net 2,058.45 · owes irs 626.93 · -> guideline 385.00
+20 marisol-pay                                                     // ▸ gross 2,300.00 · net 1,817.44 · owes irs 520.51 · -> guideline 230.00
+20 kenji-pay                                                       // ▸ gross 1,100.00 · net 972.93 · owes irs 211.22 · owes twc 29.70, irs 6.60 (futa)
+20 jonah-pay                                                       // ▸ gross 1,722.00 · net 1,429.00 · owes irs 373.07 · -> guideline 103.32 · owes twc 8.87, irs 0.00 (futa)
+20 operating -> priya-nair 650.00 USD #accounting
+20 operating -> tx-comptroller 1_091.68 USD ^st-tx-2026-02
+                                                               // ▸ - 5.46 USD #vendor-discount derived · bank 1_086.22 USD
+
+25 operating -> austin-energy 388.40 USD ^ae-0305
+25 operating -> wa-dor 1_103.59 USD ^st-wa-2026-02
+25 card                                                            // ▸ February statement 2,106.74 USD, paid in full
+25 draws                                                           // ▸ 3,000.00 USD #distribution: dana 1,800.00 · theo 1,200.00
+
+27 card -> eventbrite 1_150.00 USD #travel "conference ticket, theo"   // paid on the company card for theo: his business trip, not a distribution
+27 theo/note                                                       // ▸ interest 75.00 USD #interest to theo
+
+31 jonah worked 84.0 HR for 03-16..03-31
+31 lantern-row owes pirate-ship 3_640.85 USD due 15d #postage ^ps-0331
+31 warehouse -> customers into stripe/balance ^so-2026-03b         // ⇄ sb-s30 order export 03-16..03-31, 412 orders
+         182 ORCHARD     @ 39.99 USD
+         346 LANTERN     @ 16.99 USD
+         179 ALPINE_1K   @ 24.99 USD
+         140 DICE_OAK    @ 18.00 USD
+         121 TILEWRIGHT  @ 64.99 USD
+     + 2_018.80 USD #shipping                                      // 412 orders
+     + 644.20 USD #sales-tax-collected for tx-comptroller          // 8.25% of the TX orders
+     + 652.76 USD #sales-tax-collected for wa-dor                  // 10.35% of the WA orders
+     - 1_032.15 USD #fees via stripe                               // 2.9% + 0.30 per order
+                                                               // ▸ 30_297.33 USD arrives at stripe/balance; 1_296.96 USD of it is tied for the two states
+                                                               // ▸ #cost-of-goods 12_665.19 USD: ORCHARD 3,498.27, LANTERN 2,585.54, ALPINE_1K 1,787.64, DICE_OAK 882.00, TILEWRIGHT 3,911.74
+31 stripe/balance                                                  // ▸ payout 30_297.33 USD
+31 warehouse = 138 ORCHARD, 590 LANTERN, 214 ALPINE_1K, 90 DICE_OAK, 91 TILEWRIGHT, 388 CLUB_BOX #shrinkage
+                                                               // ▸ gap of 2, 9, 2, 4 and 1 units = 183.08 USD at FIFO cost, #shrinkage
+
+31 operating = 108_386.53 USD
+31 stripe/balance = 0.00 USD                                       // ▸ earned, not yet paid out: Stripe owes it
+31 card = 1_150.00 USD                                             // owed, as the statement shows it
+31 line = 0.00 USD                                                 // owed
+
+// ═════ what Axiom derives on 2026-03-31 (nothing below is typed) ═════
+
+// ▸ axiom balance --at 2026-03-31          the books are accrual: unearned, prepaid and accrued items are derived, not posted
+//   holdings      operating 108_386.53 · stripe/balance 0.00 · warehouse at cost 17_206.88 · label-printer (book) 6_176.66
+//   claims for us receivable 2_250.00 (inv-1136) · prepaid 2_835.00 (insurance, 7 of 12 months) · deposit with pecan-st 4_200.00
+//   claims on us  payables 4_683.45 (uline 1_042.60 · pirate-ship 3_640.85) · amex 1_150.00 · theo-note 15_000.00
+//                 sales tax: tx-comptroller 1_236.23 (due 04-20) · wa-dor 1_252.66 (due 04-25)
+//                 payroll: irs 3_457.93 (941, due 04-15) · twc 907.20 and irs 165.60 (SUTA, FUTA; due 04-30) · accrued wages 8_759.97 (03-16..03-31, paid 04-05)
+//                 unearned: 698 CLUB_BOX owed to 80 members = 13_960.00 USD recognized only as the boxes go out
+
+// ▸ axiom balance --equity --at 2026-03-31   ✗ sb-c24 [A4] equity is a view: net assets split by the purpose roots of what built them
+//   net assets                         90_482.03
+//     contributed (#contribution)      20_000.00   dana 12_000.00 · theo 8_000.00
+//     brought forward on 11-01         64_000.73   income less distributions of every earlier month
+//     income since 11-01               45_481.30   Nov 16_432.68 · Dec 25_577.46 · Jan -2_238.56 · Feb 3_013.33 · Mar 2_696.39
+//     distributions since 11-01       -39_000.00   #distribution: 60/40 each time
+//   by owner (the `owners` weights, by day)   dana 54_289.22 · theo 36_192.81
+//   no equity account, no retained-earnings account: the figure is the fold's own difference, so it cannot disagree with the balance sheet
+
+// ▸ the 2025 K-1, Nov and Dec only (the full year adds journal/2025/01..10)           ✗ sb-c24 [A4]
+//   ordinary business income 42_610.14 (net income 42_010.14 + 600.00 charity, which is separately stated)
+//     dana 60%  25_566.08   theo 40%  17_044.06   (by day: the shares did not change)
+//   separately stated: charitable contributions 600.00 -> dana 360.00 · theo 240.00;  §179 deduction on the label printer 6_800.00 (a tax-only basis: ✗ sb-c25 [open])
+//   distributions 16_000.00 (+ the 01-10 tax distribution, which is 2026's): dana 9_600.00 · theo 6_400.00  -> reduce stock basis, never below zero
+//   2026 to date (Q1): ordinary business income 3_471.16 -> dana 2_082.70 · theo 1_388.46
+
+// ▸ axiom claims --at 2026-03-31 · axiom check
+//   note[owner-pay]: dana's W-2 wages are 66_000.00 a year; `us/s-corp` asks for reasonable compensation for an officer who works full time (its param is illustrative here: 62_000.00)
+//   note[pro-rata]: distributions in 2026 so far are 14_000.00 + 3 × 3_000.00, each 60/40: single class of stock holds                    ✗ sb-c09 [A4] a law over per-owner tallies
+//   note[1099]: priya-nair 7_800.00 and lumi-studio 2_100.00 were paid in 2025, both over 600.00: W-9s are on file
+
+
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   id      mark  closed by  what
+//   sb-b01  ✎     [A12]    `lives us/wa` stands for nexus: a company is governed where it sells, from the day its own 12-month sales cross a threshold, not where it lives
+//   sb-b03  ✎     [A9]     what selling a commodity is for is a property of the commodity's kind (`sells`), which v4 only has for issuers (`pays`)
+//   sb-b07  ✎     [A1]     a tiered employer match is a typed value of the plan, not an expression repeated in every `also`
+//   sb-b10  ✎     [A10]    an exchange between two of my own positions (goods in the warehouse, money into the processor): `@` has one subject position
+//   sb-b12  ✎     [open]   a document that covers a half-month is one flow on one day: balances in between are wrong; order-level sync would not have this
+//   sb-b14  ✎     [A10]    `<-` with `due`: a purchase whose price is owed; v5 §6.1 defines the junction for money lines only
+//   sb-b19  ✎     [A9]     an inventory count whose gap is a loss of stock: `=` has `!` (unexplained) and `via` (a party, the market), not a purpose
+//   sb-b21  ✎     [K5]     a late fee that repeats every 30 days: `due ... else ITEM` fires once in v4; the term algebra has `Every` inside `otherwise`
+//   sb-b22  ✎     [A10]    a conversion between two of my own positions with the fee in the source currency
+//   sb-b27  ✎     [A6]     the January installment belongs to the year before: an installment `for the tax year`
+//   sb-b28  ✎     [A6]     a due day that falls on a weekend or holiday rolls to the next business day (taxes) or back to the day before (pay)
+//   sb-b29  ✎     [A3]     a promise priced by a rate on a measure (hours worked in the pay period) rather than an amount per period
+//   sb-c02  ✗     [A5]     year-to-date tallies at the start of a book: FUTA/SUTA/Social Security wage bases, 401(k) deferrals, K-1 income to date
+//   sb-c04  ✗     [A7]     a revolving credit line: draws and repayments at will, interest on the daily balance, a floating rate (ACTUS UMP, IPAC)
+//   sb-c05  ✗     [A8]     an interest-only note with the principal due at the end (ACTUS PAM): v5's `loan` is the annuity
+//   sb-c06  ✗     [A6]     a pay period and its pay date are two calendars (16th..last paid on the 5th), and the date moves off weekends and holidays
+//   sb-c09  ✗     [A4]     owners as one end of a leg split by share; a norm over per-owner tallies (distributions must be pro rata)
+//   sb-c10  ✗     [A9]     selling merchandise realizes revenue and a cost, never a capital gain: the cost leg comes from the commodity's kind
+//   sb-c11  ✗     [open]   a sales-tax rate is by the order's ship-to place; only the order-level document knows it, so the book types the totals it was given
+//   sb-c13  ✗     [A9]     landed cost: a later freight bill joins the parcels of the purchase it belongs to, pro rata to cost
+//   sb-c15  ✗     [A9]     a return goes back to stock at the cost it left with; a damaged one is not stock
+//   sb-c17  ✗     [A8]     annual subscriptions sold for cash: a promise of goods bought up front; revenue as each box goes out (no `received`, no in-kind amortization)
+//   sb-c20  ✗     [A6]     accrued wages at month end: the pay occurrence must cover its pay period so the expense lands in the period earned
+//   sb-c24  ✗     [A4]     K-1: the company's tallies reach each owner by share and day; equity and stock basis as views, not accounts
+//   sb-c25  ✗     [open]   two bases at once: books accrual, tax cash; §179 expensing for tax, five-year straight line for the books
+//   sb-c26  ✗     [open]   W-2, W-3, 940, 941, 1099-NEC and K-1 as documents out: Axiom reports lines, `filed` records a return but nothing writes one
+//   sb-s30  ⇄     [sync]   the store's order export, one document per half-month with units by SKU, taxes by state, fees and discounts; it outranks the Stripe lines
+//   sb-s31  ⇄     [sync]   the time clock's hours per pay period, regular and overtime, as `worked` statements
+//   sb-s32  ⇄     [sync]   utility, freight and postage statements as `owes` statements with their codes
+//   sb-s34  ⇄     [sync]   the distributor's invoice as a priced exchange with its due day
+//   sb-s35  ⇄     [sync]   the time sheet that the consulting invoice bills
+//   sb-u08  ?     [A12]    a vendor that is also a client: party kinds are roles, but a thing has one kind, so the purpose rule by kind gives the wrong answer for money from it
+//   sb-u16  ?     [open]   is the sales tax on a lost chargeback recoverable? A rule of the state: a param of `us/wa`, or nothing
+//   sb-u18  ?     [A8]     prepaid insurance and unearned revenue have no home in `balance`: `for PERIOD` is a recognition map, not a position
+//   sb-u23  ?     [open]   §988(e) exempts a personal currency gain of 200 USD or less; a business has no such exemption: content of `us/s-corp`

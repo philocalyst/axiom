@@ -1,16 +1,12 @@
-error[not-held]: `assets/wallet` only holds `BTC`, and this flow moves USD
-   ╭─[39-holds-violation.ax:14:24]
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[39-holds-violation.ax:11:9]
    │
- 9 │ account assets/wallet
-10 │   holds BTC
-   │   ────┬────
-   │       ╰── only `BTC` may be held here
-   ⋮
-14 │ 2026-02-10 checking -> wallet 500 USD
-   │                        ───┬──
-   │                           ╰── USD arrives or leaves here
+11 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
    │
-   = help: change what the account holds, or use another account
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
 
 ✗ 1 error
 [exit status 1]

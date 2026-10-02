@@ -1,14 +1,59 @@
-error[unknown-commodity]: there is no commodity `UDS`
-   ╭─[23-typo-commodity.ax:15:40]
+error[chart-account]: `expenses/food/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[23-typo-commodity.ax:6:9]
+  │
+6 │ account expenses/food/groceries
+  │         ───────────┬───────────
+  │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/food/dining` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[23-typo-commodity.ax:7:9]
+  │
+7 │ account expenses/food/dining
+  │         ──────────┬─────────
+  │                   ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[23-typo-commodity.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/food/groceries`
+   ╭─[23-typo-commodity.ax:11:7]
+   │
+10 │ entity trader-joes : org
+11 │   via expenses/food/groceries
+   │       ───────────┬───────────
+   │                  ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/food/groceries`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[23-typo-commodity.ax:15:1]
    │
 15 │ 2026-01-08 checking -> groceries 84.20 UDS
-   │                                        ─┬─
-   │                                         ╰── not a known commodity
+   │ ─────────────────────┬────────────────────
+   │                      ╰── no complete flow can be formed here
    │
-   = note: commodities are declared with `commodity UDS`; USD, EUR, GBP… come with `use std`
-   = help: did you mean `USD`?
-15 - 2026-01-08 checking -> groceries 84.20 UDS
-15 + 2026-01-08 checking -> groceries 84.20 USD
+   = help: write both ends in the header, or write one end and indent the other legs
 
-✗ 1 error
+error[unknown-entity]: there is no entity `groceries`
+   ╭─[23-typo-commodity.ax:15:24]
+   │
+15 │ 2026-01-08 checking -> groceries 84.20 UDS
+   │                        ────┬────
+   │                            ╰── not a known entity
+
+✗ 6 errors
 [exit status 1]

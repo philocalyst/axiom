@@ -1,12 +1,38 @@
-error[type-mismatch]: cannot compare an amount with a number
-   ╭─[62-type-amount-lt-number.ax:10:30]
-   │
-10 │     warn total(in, month) <= 650 "food is over budget"
-   │          ────────┬───────    ─┬─
-   │                  │            ╰── this is a number
-   │                  ╰── this is an amount
-   │
-   = note: `<` and its kin compare two amounts, numbers, dates or spans
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[62-type-amount-lt-number.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[62-type-amount-lt-number.ax:7:9]
+  │
+7 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[62-type-amount-lt-number.ax:13:1]
+   │
+13 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[62-type-amount-lt-number.ax:13:24]
+   │
+13 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+✗ 4 errors
 [exit status 1]

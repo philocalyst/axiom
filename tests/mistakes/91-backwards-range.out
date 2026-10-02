@@ -1,3 +1,23 @@
+error[chart-account]: `expenses/insurance` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[91-backwards-range.ax:6:9]
+  │
+6 │ account expenses/insurance
+  │         ─────────┬────────
+  │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[91-backwards-range.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
 error[empty-range]: this range ends on 2026-01-01, 364 days before it starts on 2026-12-31
    ╭─[91-backwards-range.ax:10:1]
    │
@@ -9,5 +29,5 @@ error[empty-range]: this range ends on 2026-01-01, 364 days before it starts on 
 10 - 2026-12-31..2026-01-01 checking -> insurance 600 USD
 10 + 2026-01-01..2026-12-31 checking -> insurance 600 USD
 
-✗ 1 error
+✗ 3 errors
 [exit status 1]

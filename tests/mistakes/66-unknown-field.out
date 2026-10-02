@@ -1,3 +1,13 @@
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[66-unknown-field.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
 error[unknown-field]: an entity has no `aeg`
    ╭─[66-unknown-field.ax:17:19]
    │
@@ -6,10 +16,10 @@ error[unknown-field]: an entity has no `aeg`
    │               │    ╰── no such field
    │               ╰── this is an entity
    │
-   = note: it has `owner`, `kind`, `age`, `born`, `children`, `filing`, `purpose` or `until`
+   = note: it has `owner`, `kind`, `age`, `born`, `children`, `filing`, `grant-purpose` or `until`
    = help: did you mean `age`?
 17 -     require owner.aeg >= 18y "owner is a minor"
 17 +     require owner.age >= 18y "owner is a minor"
 
-✗ 1 error
+✗ 2 errors
 [exit status 1]

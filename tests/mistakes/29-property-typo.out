@@ -3,14 +3,35 @@ error[unknown-property]: `employr` is not a property of an account of kind `401k
    │
 11 │ account assets/retirement : 401k
 12 │   employr acme
-   │   ───┬───
-   │      ╰── no such property
+   │   ──────┬─────
+   │         ╰── no such property
    │
-   = note: its properties are `owner`, `holds`, `select`, `opened`, `closed`, `budget`, `liquidity`,
-           `employer`, `pays`, `taxed-by-kind` or `deductible`
+   = note: its properties are `closed`, `deductible`, `employer`, `holds`, `liquidity`, `opened`,
+           `select` or `taxed-by-kind`
    = help: did you mean `employer`?
 12 -   employr acme
-12 +   employer acme
+12 +   employer
 
-✗ 1 error
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[29-property-typo.ax:13:9]
+   │
+13 │ account income/salary : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[29-property-typo.ax:16:7]
+   │
+15 │ entity acme : employer
+16 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+✗ 3 errors
 [exit status 1]

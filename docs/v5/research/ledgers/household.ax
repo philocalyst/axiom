@@ -1,0 +1,461 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// The Reyes family, 2026-01-01 .. 2026-06-30: two earners and a child. Two employers with plans, then a job change on
+// 06-01; both 401(k)s with matches, an HSA, a dependent-care FSA, a 529, a mortgage with escrow, a credit card.
+//
+// This is examples/05-family after v5, so that its `accounts.ax` can be read side by side with this file. The point of
+// the file is the ASSOCIATIONS: who owns what, who sponsors it, who it is for, what it implies. See ASSOCIATIONS.md §7
+// for every declaration of the v4 file next to its replacement.
+//
+//   ✗ cannot say     ✎ says it badly     ? unclear     ⇄ what sync would need     ▸ derived, never typed
+// Ids: hh-c03 is household, c = cannot say, 03; [A3] is the change in REPORT.md that closes it.
+// Numbers: pay and loan terms are those of examples/05-family/contracts.ax; the mortgage and car-loan schedules are
+// computed (ACTUS annuity, 30/360); every month-end balance is a replay of the lines below. Jordan's new pay and the
+// supplemental rates are approximations.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use std
+use us/ca
+use us/payroll
+use us/401k
+use us/529
+use us/hsa
+use us/fsa                 // a sketch: dependent-care FSA (FINDINGS 02a1)
+
+// ── people ───────────────────────────────────────────────────────────────────────────────────────────
+
+/// The household files one joint return. `members` is a slot of `household` (person, some); `dependents` another (person,
+/// many). The v4 lines `member family` on every person and `children 1` on the household are gone: each person's side is
+/// the same slot read backwards, and `children` is derived from `dependents` and `born` on the day it is read.
+entity family : household
+  members     alex, jordan
+  dependents  riley                 // ✗ hh-c01 [A12] `children` is a count that does not age in v4; a dependent under 17 on the last day of the year is a phase of `born`
+  filing      joint
+  lives       us/ca
+
+entity alex : person                // `me`
+  born 1988-02-10
+entity jordan : person
+  born 1987-06-21
+entity riley : person
+  born 2019-08-22
+
+// ── employers, and the plans they offer ─────────────────────────────────────────────────────────────
+// A plan is a thing nested under its sponsor: the nesting fills `sponsor`, the kind-name stands for the name.
+
+entity acme : employer
+  401k-plan
+    custodian fidelity
+    match 40% to 10%                // 40% of what is deferred, deferrals counted up to 10% of pay
+  hdhp : health-plan
+    insurer blue-shield
+    premium 212.50 USD per paycheck, pre-tax
+    tier family                     // covers the employee and `dependents` of the household
+  dcfsa : dependent-care-plan
+    administrator benefit-admin
+    limit 5_000 USD yearly
+entity bluefin : employer
+  401k-plan
+    custodian fidelity
+    match 50% to 6%
+    vests 20% per year of service   // ✗ hh-c03 [A3] a schedule: the plan's, read when the membership ends
+entity pinnacle : employer
+  401k-plan
+    custodian fidelity
+    match 100% to 4%
+    waits 60d                       // eligibility: deferrals and the match start 60 days after the employment
+
+// ── what each person does for whom: relators, not properties ───────────────────────────────────────
+
+/// A paycheck is one line. Withholding, FICA, SDI, the deferral, the match, the HSA, the FSA and the premium come from
+/// the employment and from what it joins; they are never written.
+contract alex-pay : employment with acme
+  employee alex
+  5_750.00 USD semi-monthly on 15, last into family/checking
+  joins 401k-plan   deferral 10%    // a membership: plan, participant, election. The match is the plan's; the account is alex/401k
+  joins hdhp                        // coverage: the premium, and what makes the HSA contributable
+  joins dcfsa       5_000.00 USD yearly
+  -> alex/hsa 250.00 USD            // a payroll contribution
+contract jordan-bluefin : employment with bluefin
+  employee jordan
+  3_803.08 USD every 2w on friday into family/checking from 2026-01-02
+  joins 401k-plan   deferral 6%
+// 2026-06-01: `jordan works at pinnacle` starts the next one (see the journal)
+
+// ── where the money sits: positions under their institution, named by the people they relate ─────────
+// `alex/401k` is alex's 401(k) with fidelity: `alex` fills `owner`, `fidelity` (the nesting) fills `with`, and the kind is
+// the last word. No name carries a relation; `jordan-401k` and `riley-529` are not needed.
+
+entity chase : bank
+  family/checking   : deposit
+  family/savings    : deposit
+    interest 3.95% on the daily balance, paid monthly       // ✗ hh-c05 [A7] a term of the position; v4 types each month's interest as a line
+  family/card       : credit-card
+    in full monthly on 25 from checking
+entity fidelity : broker
+  alex/401k                         // sponsor: alex's employer on the day it opens (acme), by the default of kind 401k  ? hh-u11 [A2] a default is a guess about the past
+  jordan/bluefin/401k               // a second one will exist: the path names the sponsor so the two are told apart
+  alex/hsa                          // `coverage` is a default: the tier of the `hdhp` alex joins, here `family`. Without an HDHP behind it the HSA is an error, below
+                                    // ? hh-u07 [A1] the default reads only the owner's own plans; the HSA is also contributable at family tier when the HDHP is the spouse's, and nothing says whose
+  family/529
+    beneficiary riley               // `family` fills `owner` (a household), `riley` the only unfilled slot a person can fill
+entity benefit-admin : plan-administrator
+  alex/dcfsa
+    sponsor acme                    // by default: alex's employer
+    dependents riley
+entity rocket : lender
+  family/mortgage : mortgage 406_692.02 USD on 2025-12-31 at 5.875% over 27y6m for house
+    monthly on 1 from checking
+    also -> escrow 705.00 USD #escrow        // `escrow` is a position the kind `mortgage` implies: family's, with rocket
+entity honda-finance : lender
+  family/car-loan : loan 16_976.91 USD on 2025-12-31 at 4.9% over 30m for crv
+    monthly on 5 from checking
+
+asset house : home
+  owner family
+asset crv : vehicle
+  owner family
+
+// ── who else ───────────────────────────────────────────────────────────────────────────────────────────
+
+entity blue-shield : health-insurer
+entity county : government
+entity homeguard, statefarm : insurer
+entity costco, trader-joes : grocer
+entity target, amazon : store
+entity shell : fuel
+entity pge, comcast, verizon : utility
+entity netflix : streaming
+entity little-sprouts : childcare-provider
+entity st-annes-school : school
+entity smile-dental : medical-provider
+entity irs, ftb, ssa, edd : tax-authority
+
+// ═════ 2025-12-31 ═════════════════════════════════════════════════════════════════════════════════════
+
+opening 2025-12-31
+  family/checking        18_630.77 USD
+  family/savings         24_310.00 USD
+  family/card             2_116.40 USD   owed
+  alex/401k              61_204.17 USD
+  jordan/bluefin/401k    74_310.55 USD
+  alex/hsa                3_481.22 USD
+  family/529             29_884.00 USD   basis 25_850.00 USD
+  rocket/escrow           3_410.00 USD
+
+
+2026-01
+
+01 rocket/mortgage                                             // ▸ 3,192.48 USD from checking: interest 1,991.10 #interest of house · principal 496.38 · escrow 705.00 into rocket/escrow
+
+02 jordan-bluefin                                              // ▸ gross 3,803.08 · net 2,782.33 · -> jordan/bluefin/401k 228.18 + match 114.09 (50% of 6%)
+
+03 card -> costco 158.77 USD                                   // ▸ #groceries: costco is a grocer; the kind says so
+
+05 honda-finance/car-loan                                      // ▸ 602.42 USD: interest 69.32 · principal 533.10
+05 family/checking -> family/529 500.00 USD #contribution      // money the household keeps, moved between its own positions
+05 card -> little-sprouts 1_650.00 USD #childcare ^dc-2601
+
+08 card -> trader-joes 84.20 USD
+
+09 card -> 94.21 USD #dining                                   // no party: `restaurant` was an invented one in v4
+
+10 family/529 -> st-annes-school 4_800.00 USD #education       // ▸ a qualified withdrawal: it pays what a 529 is for, so no earnings are taxed and no penalty is owed · ⇄ hh-s10 the plan's statement
+
+12 checking -> pge 148.00 USD
+
+15 alex-pay                                                    // ▸ gross 5,750.00 · net 3,077.66 · -> alex/401k 575.00 + match 230.00 · -> alex/hsa 250.00 · -> dcfsa 208.33 · premium 212.50 · irs 692.00 · ftb 285.00 · ssa 388.56 · edd 60.95
+                                                           // ⇄ hh-s08 ▸ legs from the contract, the plan and the coverage it joins: the book never writes them. acme's match: 40% of the deferral, deferrals counted to 10% of pay
+
+16 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+17 card -> target 62.40 USD
+
+18 checking -> comcast 89.99 USD
+
+20 checking -> verizon 112.00 USD
+
+22 card -> netflix 17.99 USD
+
+25 card                                                        // ▸ December's statement 4,183.97 USD, paid in full from checking
+
+27 card -> shell 51.18 USD
+
+28 checking -> savings 3_000.00 USD
+
+30 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+31 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+   // ▸ 82.85 USD #interest from chase on savings, on the daily balance at 3.95% (a term of the position, not a typed line)
+
+31 checking = 21_304.22 USD
+31 card = 51.18 USD                                            // owed
+31 rocket/escrow = 4_115.00 USD
+
+2026-02
+
+01 rocket/mortgage                                             // ▸ 3,192.48 USD: interest 1,988.67 · principal 498.81 · escrow 705.00 · balance 405,696.83
+
+02 card -> costco 171.30 USD
+
+03 alex/dcfsa -> family/checking 416.66 USD against ^dc-2601   // ▸ reimburses it up to what the plan holds: 416.66 of 1,650.00
+
+05 honda-finance/car-loan                                      // ▸ 602.42 USD: interest 67.15 · principal 535.27
+05 family/checking -> family/529 500.00 USD #contribution
+05 card -> little-sprouts 1_650.00 USD #childcare ^dc-2602
+
+07 card -> trader-joes 92.05 USD
+
+12 checking -> pge 152.60 USD
+12 alex/hsa -> smile-dental 620.00 USD #medical                // ▸ qualified: paid from the HSA straight to a medical party; coverage `family` sets the year's limit at 8,750.00
+
+13 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+14 card -> 128.60 USD #dining
+
+15 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+
+18 checking -> comcast 89.99 USD
+18 card -> amazon 73.12 USD
+
+20 checking -> verizon 112.00 USD
+
+22 card -> netflix 17.99 USD
+
+25 card                                                        // ▸ January's statement 2,184.24 USD, paid in full from checking
+
+26 card -> shell 48.77 USD
+
+27 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+28 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+28 checking -> savings 3_000.00 USD
+   // ▸ 83.08 USD #interest from chase on savings, on the daily balance at 3.95% (a term of the position, not a typed line)
+
+28 checking = 23_607.13 USD
+28 card = 48.77 USD                                            // owed
+28 rocket/escrow = 4_820.00 USD
+
+2026-03
+
+01 rocket/mortgage                                             // ▸ 3,192.48 USD: interest 1,986.22 · principal 501.26 · escrow 705.00 · balance 405,195.57
+01 checking -> statefarm 1_310.00 USD #insurance of crv for 2026-03-01..2026-08-31   // six months, recognized as 218.33 a month
+01 card -> costco 203.44 USD
+
+03 alex/dcfsa -> family/checking 416.66 USD against ^dc-2602
+
+05 honda-finance/car-loan                                      // ▸ 602.42 USD: interest 64.96 · principal 537.46
+05 family/checking -> family/529 500.00 USD #contribution
+05 card -> little-sprouts 1_650.00 USD #childcare ^dc-2603
+
+08 card -> trader-joes 77.90 USD
+
+11 card -> 86.30 USD #dining
+
+12 checking -> pge 139.15 USD
+
+13 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+14 alex-bonus                                                  // ▸ gross 12,000.00 · net 5,870.40 · 22% and 10.23% supplemental · -> alex/401k 1,200.00 + match 480.00
+
+15 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+
+18 checking -> comcast 89.99 USD
+
+19 card -> target 119.99 USD
+
+20 checking -> verizon 112.00 USD
+
+22 card -> netflix 17.99 USD
+
+25 card                                                        // ▸ February's statement 2,204.39 USD, paid in full from checking
+
+27 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+28 checking -> savings 3_000.00 USD
+28 card -> shell 53.06 USD
+
+31 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+   // ▸ 102.98 USD #interest from chase on savings, on the daily balance at 3.95% (a term of the position, not a typed line)
+
+31 checking = 30_463.74 USD
+31 card = 53.06 USD                                            // owed
+31 rocket/escrow = 5_525.00 USD
+
+2026-04
+
+01 rocket/mortgage                                             // ▸ 3,192.48 USD: interest 1,983.77 · principal 503.71 · escrow 705.00 · balance 404,691.86
+
+03 alex/dcfsa -> family/checking 416.66 USD against ^dc-2603
+
+04 card -> costco 166.12 USD
+
+05 honda-finance/car-loan                                      // ▸ 602.42 USD: interest 62.77 · principal 539.65
+05 family/checking -> family/529 500.00 USD #contribution
+05 card -> little-sprouts 1_650.00 USD #childcare ^dc-2604
+
+09 card -> trader-joes 88.41 USD
+
+10 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+10 rocket/escrow -> county 3_300.00 USD #property-tax of house   // paid from escrow, not from checking · ⇄ hh-s09 the servicer's escrow analysis would restate the 705.00
+
+12 checking -> pge 121.80 USD
+12 card -> 142.75 USD #dining
+
+15 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+
+18 checking -> comcast 89.99 USD
+18 card -> amazon 46.33 USD
+
+20 checking -> verizon 112.00 USD
+
+22 card -> netflix 17.99 USD
+
+24 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+25 card                                                        // ▸ March's statement 2,164.66 USD, paid in full from checking
+
+27 card -> shell 55.20 USD
+
+28 checking -> savings 3_000.00 USD
+
+30 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+   // ▸ 109.12 USD #interest from chase on savings, on the daily balance at 3.95% (a term of the position, not a typed line)
+
+30 checking = 32_817.03 USD
+30 card = 55.20 USD                                            // owed
+30 rocket/escrow = 2_930.00 USD
+
+2026-05
+
+01 rocket/mortgage                                             // ▸ 3,192.48 USD: interest 1,981.30 · principal 506.18 · escrow 705.00 · balance 404,185.68
+
+02 card -> costco 181.09 USD
+
+03 alex/dcfsa -> family/checking 416.66 USD against ^dc-2604
+
+05 honda-finance/car-loan                                      // ▸ 602.42 USD: interest 60.56 · principal 541.86
+05 family/checking -> family/529 500.00 USD #contribution
+05 card -> little-sprouts 1_650.00 USD #childcare ^dc-2605
+
+08 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+
+09 card -> trader-joes 95.66 USD
+
+12 checking -> pge 110.42 USD
+
+15 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+
+16 card -> 101.48 USD #dining
+
+18 checking -> comcast 89.99 USD
+
+20 checking -> verizon 112.00 USD
+20 card -> target 84.57 USD
+
+22 jordan-bluefin                                              // ▸ net 2,782.33 · match 114.09
+22 card -> netflix 17.99 USD
+
+25 card                                                        // ▸ April's statement 2,185.99 USD, paid in full from checking
+
+28 checking -> savings 3_000.00 USD
+28 card -> shell 57.31 USD
+
+29 jordan stops working at bluefin                             // ends jordan-bluefin: the plan membership ends with it; the account stays, now with a former employer
+                                                           // ▸ bluefin's match vests 20% a year: two years of service is 40%. The unvested 60% of the employer's money in jordan/bluefin/401k goes back to the plan
+                                                           // ✗ hh-c03 [A3] vesting is a schedule of the plan, triggered by the end of the employment: no kind says it
+29 jordan <- bluefin 1_900.00 USD #wages "PTO payout"          // ✎ hh-b06 [A3] a final pay is a rule of the employment's end: typed here, with supplemental rates
+     -> irs 418.00 USD                                         // 22% supplemental
+     -> ftb 194.37 USD                                         // 10.23%
+     -> ssa 145.35 USD                                         // 7.65%
+     -> edd 22.80 USD
+     -> family/checking ...                                    // ▸ 1,119.48
+
+31 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+   // ▸ 123.11 USD #interest from chase on savings, on the daily balance at 3.95% (a term of the position, not a typed line)
+
+31 checking = 36_279.85 USD
+31 card = 57.31 USD                                            // owed
+31 rocket/escrow = 3_635.00 USD
+
+2026-06
+
+01 jordan works at pinnacle                                    // a statement that starts an `employment` (a verb of the kind): employee jordan, employer pinnacle
+     4_666.67 USD semi-monthly on 15, last into family/checking
+     joins 401k-plan deferral 6%                               // pinnacle's plan waits 60 days: eligible from 08-01
+                                                           // ✗ hh-c04 [A3] eligibility is a term of the plan, read by the membership: until 08-01 there is no deferral, no match and no jordan/pinnacle/401k to hold them
+01 rocket/mortgage                                             // ▸ 3,192.48 USD: interest 1,978.83 · principal 508.65 · escrow 705.00 · balance 403,677.03
+
+03 alex/dcfsa -> family/checking 416.66 USD against ^dc-2605
+03 card -> costco 174.50 USD
+
+05 honda-finance/car-loan                                      // ▸ 602.42 USD: interest 58.35 · principal 544.07
+05 family/checking -> family/529 500.00 USD #contribution
+05 card -> little-sprouts 1_650.00 USD #childcare ^dc-2606
+
+10 card -> trader-joes 90.12 USD
+
+12 checking -> pge 118.37 USD
+
+13 card -> 136.20 USD #dining
+
+14 card -> 3_846.20 USD #travel "Lisbon, five days"            // no party: a flight, a hotel and a rental car are one purpose
+
+15 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+15 jordan-pinnacle                                             // ▸ gross 4,666.67 · net 3,720.79 · irs 378.33 · ftb 154.55 · ssa 357.00 · edd 56.00 · no deferral yet
+
+18 checking -> comcast 89.99 USD
+
+19 card -> amazon 68.45 USD
+
+20 checking -> verizon 112.00 USD
+20 rocket/escrow -> homeguard 1_870.00 USD #insurance of house
+
+22 card -> netflix 17.99 USD
+
+25 card                                                        // ▸ May's statement 6,040.77 USD, paid in full from checking
+
+26 card -> shell 50.64 USD
+
+28 checking -> savings 3_000.00 USD
+
+30 alex-pay                                                    // ▸ net 3,077.66 · match 230.00
+30 jordan-pinnacle                                             // ▸ net 3,720.79
+   // ▸ 128.60 USD #interest from chase on savings, on the daily balance at 3.95% (a term of the position, not a typed line)
+
+30 checking = 36_637.38 USD
+30 card = 50.64 USD                                            // owed
+30 rocket/escrow = 2_470.00 USD
+   // ▸ elective deferrals 2026: jordan 2,509.98 (11 bluefin pay days) of 24,500.00 · alex 8,100.00 (24 pay days 575.00 + the bonus 1,200.00): per person, across every plan they hold
+
+
+// ═════ what the checker says when an association is wrong (each is an error; the fix is an edit) ═════════
+//
+//   error[ambiguous-role]: `riley` can fill two roles of this 529: `owner` and `beneficiary`
+//      family/529                                   (the household `family` fills `owner`, so `riley` can only be `beneficiary`: accepted)
+//      riley/529                                    (nothing else fills a slot: `riley` could own it or be its beneficiary)
+//   = help: write the role: `beneficiary riley`
+//
+//   error[wrong-kind]: `beneficiary acme`: acme is an employer, and a 529's `beneficiary` is a person
+//   = help: did you mean `beneficiary riley`?
+//
+//   error[missing-role]: alex/hsa has no `coverage`: its default (`owner.hdhp.tier`) found no HDHP that alex joins; the kind `hsa` needs one of `self-only | family`
+//   = help: `joins hdhp` in alex's employment, or `coverage family` if the plan is not in this book
+//
+//   error[too-many]: family/529 has two `beneficiary`: riley, jordan (a 529 has one)
+//   = help: open a second 529, or `beneficiary riley` only
+//
+//   warning[former-employer]: jordan/bluefin/401k has no employment behind it since 05-29: no match, no new deferrals
+//   note: this is what a former-employer account is; it is not an error
+//
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   hh-b06  ✎     [A3]     a final pay (accrued PTO, supplemental withholding) is a rule of the employment's end
+//   hh-c01  ✗     [A12]    `children` and `member` as properties: dependents are a slot of the household and being under 17 is a phase of `born`, read on the day
+//   hh-c03  ✗     [A3]     vesting: a schedule of the plan, triggered when the employment ends (forfeiture of the unvested match)
+//   hh-c04  ✗     [A3]     plan eligibility: a waiting period that is a term of the plan, read by the membership
+//   hh-c05  ✗     [A7]     interest on a balance (savings, a card, a line) as a term of the position, not a typed line each month
+//   hh-s08  ⇄     [sync]   paystubs: print `15 alex-pay` when the stub is the contract's, its legs when it is not
+//   hh-s09  ⇄     [sync]   the servicer's annual escrow analysis as a `now` statement on the escrow term
+//   hh-s10  ⇄     [sync]   the 529 and HSA custodians' statements, with the plan's own claim numbers as codes
+//   hh-u07  ?     [A1]     HSA coverage defaults from the owner's own HDHP; family coverage through the spouse's plan is the same fact from another employment
+//   hh-u11  ?     [A2]     a default for `sponsor` is a guess about the past: an account that predates the book must say who sponsored it

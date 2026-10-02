@@ -1,13 +1,45 @@
-error[unknown-place]: there is no place `chekcing`
-   ╭─[47-unknown-place-in-assertion.ax:11:12]
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[47-unknown-place-in-assertion.ax:6:9]
+  │
+6 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[47-unknown-place-in-assertion.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[47-unknown-place-in-assertion.ax:10:1]
+   │
+10 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[47-unknown-place-in-assertion.ax:10:24]
+   │
+10 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+error[statement-lowering]: a value needs an account, asset, code or commodity subject
+   ╭─[47-unknown-place-in-assertion.ax:11:1]
    │
 11 │ 2026-01-31 chekcing = 915.80 USD
-   │            ────┬───
-   │                ╰── not a known place
-   │
-   = help: did you mean `checking`?
-11 - 2026-01-31 chekcing = 915.80 USD
-11 + 2026-01-31 checking = 915.80 USD
+   │ ────────────────┬───────────────
+   │                 ╰── this record is not included in the Book yet
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

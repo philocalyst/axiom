@@ -1,3 +1,13 @@
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[54-ambiguous-lot-sale.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
 error[ambiguous-lots]: ambiguous lot: assets/brokerage holds 2 lots that differ and no policy applies
    ╭─[54-ambiguous-lot-sale.ax:15:1]
    │
@@ -16,5 +26,5 @@ error[ambiguous-lots]: ambiguous lot: assets/brokerage holds 2 lots that differ 
    = help: name the lot, `assets/brokerage[2026-01-22]`, or a policy, `assets/brokerage[fifo]` (or
            lifo, hifo, prorata), or give the account `select fifo`
 
-✗ 1 error
+✗ 2 errors
 [exit status 1]

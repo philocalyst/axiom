@@ -1,38 +1,54 @@
-error[assertion]: assets/checking holds -50.00 USD, not 50.00 USD
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[84-assert-sign-overdrawn.ax:7:9]
+  │
+7 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[84-assert-sign-overdrawn.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[84-assert-sign-overdrawn.ax:11:1]
+   │
+11 │ 2026-01-08 checking -> food 150 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[84-assert-sign-overdrawn.ax:11:24]
+   │
+11 │ 2026-01-08 checking -> food 150 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+error[assertion]: assets/checking holds 100.00 USD, not 50.00 USD
    ╭─[84-assert-sign-overdrawn.ax:12:1]
    │
 10 │ 2025-12-31 equity/opening -> checking 100 USD
    │ ──────────────────────┬──────────────────────
    │                       ╰── +100.00 USD from equity/opening
 11 │ 2026-01-08 checking -> food 150 USD
-   │ ─────────────────┬─────────────────
-   │                  ╰── -150.00 USD to expenses/food
 12 │ 2026-01-31 checking = 50 USD
    │ ──────────────┬─────────────
-   │               ╰── 100.00 USD more than the ledger holds
+   │               ╰── 50.00 USD less than the ledger holds
    │
-   = note: the ledger holds -50.00 USD, the opposite of 50.00 USD: the sign may be wrong
-   = help: if the balance is -50.00 USD, write it with its sign: `= -50.00 USD`
+   = note: 50.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 12 + 2026-01-31 checking = 50 USD !
 
-warning[overdraft]: balance below zero: -50.00 USD against a minimum of 0.00 USD, short by 50.00 USD
-   ╭─[84-assert-sign-overdrawn.ax:11:1]
-   │
-11 │ 2026-01-08 checking -> food 150 USD
-   │ ─────────────────┬─────────────────
-   │                  ╰── this flow: 150.00 USD from assets/checking to expenses/food
-   │
-   ├─[std.ax:28:10] (built in)
-   │
-28 │     warn balance >= empty "balance below zero"
-   │          ───┬───
-   │             ╰── -50.00 USD
-   │
-   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
-           usually for a fee.
-   = help: move money in before the payment clears, or look for a pending payment or a missing
-           deposit that explains it.
-
-✗ 1 error · 1 warning
+✗ 5 errors
 [exit status 1]

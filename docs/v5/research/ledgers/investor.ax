@@ -1,0 +1,162 @@
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Ravi Menon, 2026-01-01 .. 2026-06-30: a brokerage with lots, a wash sale, dividends with foreign tax withheld, a split,
+// crypto with staking and gas, and two covered calls (one expires, one is assigned).
+//
+// Written against PROPOSAL §6 and ASSOCIATIONS.md.   ✗ cannot say  ✎ says it badly  ? unclear  ⇄ sync  ▸ derived
+// Ids: iv-c01 is investor, c = cannot say, 01; [A11] is the change in REPORT.md that closes it. Prices are
+// illustrative. Share arithmetic is exact: lots, basis and holding periods are what `lots.rs` already does; this file
+// marks only what it cannot say. "WHAT OPTIONS NEED" is at the end.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+base USD
+use us
+use us/securities         // the wash-sale law: `carry` a disallowed loss into a replacement lot within 30 days
+
+entity ravi : person
+  born    1981-11-09
+  filing  single
+  lives   us/il
+
+// ── what he holds ───────────────────────────────────────────────────────────────────────────────────
+
+commodity VTI   : fund
+commodity VXUS  : fund
+commodity QQQM  : fund
+commodity LMNT  : stock               // a split is expected this year
+commodity ETH   : crypto
+commodity USDC  : crypto              // ✎ iv-b05 [open] a stablecoin is a `crypto` that behaves as cash: every swap into it is a disposal of cents (FINDINGS 04b2)
+
+/// An option series is a commodity with typed terms (ACTUS OPTNS: OPTP, OPS1, OPXED, OPXT, DS, and the multiplier).
+/// A holder owns contracts; a writer owes them: see `owes market` below.
+commodity LMNT_C75_0417 : option      // ✎ iv-b04 [A11] `kind option` and its terms are not in std
+  underlying LMNT
+  call
+  strike      75.00 USD
+  expires     2026-04-17
+  multiplier  100
+  exercise    american
+  settle      physical
+commodity LMNT_C72_0619 : option
+  underlying LMNT
+  call
+  strike      72.00 USD
+  expires     2026-06-19
+  multiplier  100
+  exercise    american
+  settle      physical
+
+entity fidelity : broker
+  ravi/brokerage : brokerage
+    select hifo                       // the default; a sale may name a lot: `brokerage[2024-03-18]`
+    buy VTI for 1_000.00 USD monthly on 14 from checking          // a standing order
+  ravi/roth-ira : roth-ira
+entity kraken : exchange
+  ravi/eth : exchange-balance         // custody with the exchange: kraken owes him the coins
+  ravi/eth-staked : staked-balance
+entity ledger : self-custody
+  ravi/wallet : wallet                // custody by himself: nobody owes him
+entity chase : bank
+  ravi/checking : deposit
+
+// ═════ 2025-12-31 ═══════════════════════════════════════════════════════════════════════════════════
+
+opening 2025-12-31
+  brokerage            8_420.15 USD
+  brokerage      10 VTI    basis  2_521.00 USD since 2024-03-18
+  brokerage       6 VTI    basis  1_700.40 USD since 2025-01-14
+  brokerage       8 VTI    basis  2_441.60 USD since 2025-09-22
+  brokerage     140 VXUS   basis  8_582.00 USD since 2024-07-02
+  brokerage      30 QQQM   basis  6_555.00 USD since 2025-11-03
+  brokerage      25 LMNT   basis  6_110.00 USD since 2025-05-20      // pre-split shares
+  kraken/eth    1.8 ETH    basis  4_572.00 USD since 2025-06-11
+  checking                14_300.00 USD
+  carry loss 72.83 USD to VXUS within 30d of 2025-12-22              // ✗ iv-c11 [A5] a wash sale across the year: 12 VXUS sold at a loss on 12-22, the replacement comes in January. The sale is not in this book
+// ✗ iv-c11 [A5] `opening` is a state no law reads: a loss disallowed by a sale before the book began has nowhere to live. The line above is what is wanted.
+
+2026-01
+
+08 brokerage <- 10 VXUS @ 72.40 USD                                    // ▸ wash sale: 10 of the 12 shares sold on 12-22 are replaced: 72.83 of that loss joins this lot's basis (724.00 -> 796.83)
+14 brokerage                                                           // ▸ standing order: 3.141 VTI at 318.40 = 1,000.09 USD (its own lot)
+20 kraken/eth <- 0.5 ETH @ 3_150.00 USD from checking                  // ✎ iv-b12 [A10] the money for a purchase comes from another position: `from`, as `into` names where proceeds go. ▸ basis 1,575.00 + 4.10 fee
+     + 4.10 USD #fees via kraken
+
+2026-02
+
+02 kraken/eth -> kraken/eth-staked 2.0 ETH                             // ? iv-u06 [open] staking is a move between two positions of the same exchange, not a disposal: but the tax treatment of staking and of liquid staking tokens is unsettled
+05 brokerage -> 30 QQQM @ 201.30 USD                                   // ▸ sale: proceeds 6_039.00 stay at brokerage · loss 516.00 on the 2025-11-03 lot (short term)
+14 brokerage                                                           // ▸ standing order: 3.228 VTI at 309.75
+17 brokerage <- 12 QQQM @ 205.10 USD                                   // ▸ wash sale: replacement bought 12 days after the loss: 12 of 30 shares = 206.40 of the loss is disallowed and joins this lot
+                                                                       //   (basis 2,461.20 -> 2,667.60, 222.30 a share, holding period tacked); the other 309.60 is allowed
+24 LMNT split 4 for 1
+28 kraken/eth-staked                                                   // ▸ 0.00533 ETH of reward, income of 15.40 USD at the day's price (2,890.00) · ⇄ iv-s10 the exchange's staking report, with a price of the day                                                  // ▸ 25 shares -> 100; basis stays 6,110.00 (61.10 a share), still held since 2025-05-20
+
+2026-03
+
+02 brokerage owes market 1 LMNT_C75_0417 received 235.00 USD ^call-1   // ✗ iv-c01 [A11] writing an option: he sells what he does not hold; `->` would look for a contract to relieve
+     - 0.65 USD #fees via fidelity
+     covers brokerage[2025-05-20] 100 LMNT                             // ✗ iv-c03 [A1] a covered call is covered by a lot: the lot it delivers on assignment, and the lot whose holding period it can suspend
+10 brokerage -> 6 VTI @ 331.20 USD                                     // ▸ sale by HIFO: 3.141 of the 01-14 lot (318.40) + 2.859 of the 02-14 lot (309.75): proceeds 1,987.20 · basis 1,885.66 · gain 101.54, short term
+14 brokerage                                                           // ▸ standing order: 3.019 VTI at 331.20
+14 wallet <- 0.1506 ETH @ 3_320.00 USDC/ETH                            // a swap on a DEX inside one position: 500.00 USDC out, 0.1506 ETH in
+     - 0.0041 ETH #fees "gas"                                          // ▸ an item in another commodity than the header's is an exchange of its own: 0.0041 ETH sold for gas at 3,320.00 = 13.61 USD, a gain or loss on those coins
+25 brokerage <- VXUS 142.30 USD #dividend                               // ▸ gross
+     - 9.96 USD #foreign-tax-withheld                                  // ▸ 7% withheld by the fund's country: a credit (`us` counts it; under 300.00 it needs no form)
+27 brokerage <- VTI 22.60 USD #dividend
+28 kraken/eth-staked                                                   // ▸ 0.00533 ETH · 17.70 USD at 3,320.00
+
+2026-04
+
+14 brokerage                                                           // ▸ standing order: 3.050 VTI at 327.90
+17 ^call-1 expires                                                     // ✗ iv-c02 [A11] expiry is an event nobody does. ▸ the claim ends with no delivery: the 234.35 USD of premium is realized today, short term, whatever the shares' holding period
+22 kraken/eth -> 0.4 ETH @ 3_610.00 USD                                // ▸ sale: 1,444.00 · basis 1,016.00 from the 2025-06-11 lot · gain 428.00, short term (held 315 days)
+28 kraken/eth-staked                                                   // ▸ 0.00533 ETH · 18.71 USD at 3,510.00
+
+2026-05
+
+04 brokerage owes market 1 LMNT_C72_0619 received 310.00 USD ^call-2
+     - 0.65 USD #fees via fidelity
+     covers brokerage[2025-05-20] 100 LMNT
+12 brokerage[2024-03-18] -> 10 VTI @ 334.60 USD                        // ▸ specific lot: 3,346.00 - 2,521.00 = 825.00 long term
+14 brokerage                                                           // ▸ standing order: 2.989 VTI at 334.60
+28 kraken/eth-staked                                                   // ▸ 0.00533 ETH · 20.68 USD at 3,880.00
+
+2026-06
+
+14 brokerage                                                           // ▸ standing order: 2.957 VTI at 338.15
+19 ^call-2 assigned                                                    // ⇄ iv-s09 the broker's notice: an event the counterparty chose. ✗ iv-c02 [A11]
+                                                                       // ▸ delivers the covered lot: 100 LMNT at 72.00 = 7,200.00 USD · amount realized 7,200.00 + 309.35 premium
+                                                                       // ▸ gain 1,399.35: 1,090.00 on the shares + 309.35 premium, long term (held since 2025-05-20)
+                                                                       // ? iv-u08 [open] the qualified-covered-call rule (a strike no lower than one below the prior close, 31..90 days out) can pause the holding period: §1092(c)(4), Treas. Reg. 1.1092(c)-1
+30 brokerage = 26.384 VTI
+                                                                       // ▸ lots: 6 (2025-01-14) · 8 (2025-09-22) · 0.369 (02-14) · 3.019 · 3.050 · 2.989 · 2.957
+28 kraken/eth-staked                                                   // ▸ 0.00533 ETH of reward, income of 19.93 USD at the day's price (3,740.00); basis the same
+
+// ═════ WHAT OPTIONS NEED ═════════════════════════════════════════════════════════════════════════════════
+//
+// A covered call shows five things the language cannot yet say, in this order of difficulty:
+//
+//  1. A writer's obligation is a claim in kind, with consideration paid up front: `owes market 1 CONTRACT received 235.00 USD`.
+//     It is the same substrate as the small business's prepaid subscriptions (sb-c17): a claim parcel whose basis is the cash
+//     received, realized when the claim ends. [A8]
+//  2. It is conditional: the counterparty chooses. K5 needs `Choose { by, until, take, leave }`, which PROPOSAL §5 left out of
+//     `Term`: `Choose { by: market, until: expiry, take: Pay(100 LMNT -> market for 7_200.00 USD), leave: Done }`. [A11]
+//  3. Three endings, none typed by the book: expiry (the claim ends, the premium is the gain), assignment (the claim is settled by
+//     delivering the covered lot, and the premium joins the amount realized), and a closing purchase (buy-to-close relieves the
+//     claim at the price paid). The first two are events the market causes; sync reads them from the broker. [A11]
+//  4. A series is a commodity with typed terms: ACTUS OPTNS carries OPTP (call, put or both), OPS1 and OPS2 (strikes), OPXT (exercise
+//     style), OPXED (the last day), DS (cash or physical delivery), and a multiplier. `kind option` in std, and its laws in `us`. [A11]
+//  5. "Covered" is an association between the written call and a lot: `covers brokerage[2025-05-20] 100 LMNT`. It decides which lot is
+//     delivered, which holding period a qualified covered call may pause, and whether the call is covered at all (a naked one needs margin). [A1]
+//
+// ═════ index of marks ═══════════════════════════════════════════════════════════════════════════════
+//   iv-b04  ✎     [A11]    option series are commodities with typed terms (ACTUS OPTNS) that std does not declare
+//   iv-b05  ✎     [open]   a stablecoin is a crypto that behaves as cash
+//   iv-b12  ✎     [A10]    an exchange whose money comes from another position of mine: `from`, beside `into`
+//   iv-c01  ✗     [A11]    writing an option: a claim in kind with consideration (shared with deferred revenue)
+//   iv-c02  ✗     [A11]    expiry and assignment are events the market causes; `Choose` is missing from K5's `Term`
+//   iv-c03  ✗     [A1]     a covered call is covered by a lot: an association between a written claim and a parcel
+//   iv-c11  ✗     [A5]     a wash sale across the year end needs the prior year's pending loss
+//   iv-s09  ⇄     [sync]   the broker's assignment notice, one lot-level record per event
+//   iv-s10  ⇄     [sync]   a staking report with the price of the day
+//   iv-u06  ?     [open]   staking and liquid staking tokens: a move, a disposal, or income on receipt: unsettled
+//   iv-u08  ?     [open]   §1092(c) qualified covered calls pause the holding period of the shares

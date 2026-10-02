@@ -1,16 +1,40 @@
-error[code-placement]: `#check-1041` may not mark this transaction
-   ╭─[40-code-forbidden.ax:18:38]
-   │
-14 │ code check-*
-   │ ──────┬─────
-   │       ╰── the rule for codes like it
-   ⋮
-18 │ 2026-02-01 visa -> plumber (350 USD) #check-1041
-   │                                      ─────┬─────
-   │                                           ╰── this code
-   │
-   = note: it may only mark transactions touching `bank`
-   = help: use the code where the rule allows it, or change the rule
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[40-code-forbidden.ax:8:9]
+  │
+8 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[40-code-forbidden.ax:9:9]
+  │
+9 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/food`
+   ╭─[40-code-forbidden.ax:12:7]
+   │
+11 │ entity plumber : org
+12 │   via expenses/food
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/food`
+
+error[unknown-purpose]: there is no purpose `check-1041`
+   ╭─[40-code-forbidden.ax:18:39]
+   │
+18 │ 2026-02-01 visa -> plumber (350 USD) #check-1041
+   │                                       ─────┬────
+   │                                            ╰── not a known purpose
+
+✗ 4 errors
 [exit status 1]

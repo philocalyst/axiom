@@ -1,50 +1,232 @@
+error[purpose-disagreement]: this flow's purpose sources disagree
+    ╭─[contracts.ax:21:3]
+    │
+ 21 │   irs 880 USD
+    │   ─────┬─────
+    │        ╰── these sources classify the same flow differently
+    │
+    ├─[std.ax:118:8] (built in)
+    │
+117 │ kind employer : org
+118 │   pays wages
+    │        ──┬──
+    │          ╰── party kind `employer` gives purpose `#wages`
+    │
+    ├─[us.ax:120:11] (built in)
+    │
+119 │ entity irs : tax-authority
+120 │   purpose federal-tax
+    │           ─────┬─────
+    │                ╰── party `irs` gives purpose `#federal-tax`
+
+error[assertion]: checking holds 2,831.70 USD, not 8,169.70 USD
+   ╭─[journal/2026/01.ax:32:1]
+   │
+ 6 │ 05 checking -> college 300 USD #contribution
+   │ ──────────────────────┬─────────────────────
+   │                       ╰── -300.00 USD to college
+   ⋮
+23 │ 20 checking -> savings 500 USD #transfer
+   │ ────────────────────┬───────────────────
+   │                     ╰── -500.00 USD to savings
+   ⋮
+26 │ 22 checking -> brokerage 7 VTI @ 285.70 USD
+   │ ─────────────────────┬─────────────────────
+   │                      ╰── -1,999.90 USD to brokerage
+   ⋮
+32 │ 31 checking = 8_169.70 USD
+   │ ─────────────┬────────────
+   │              ╰── 5,338.00 USD more than the ledger holds
+   │
+   = note: 5,338.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+32 + 31 checking = 8_169.70 USD !
+
+error[assertion]: retirement holds 41,300.00 USD, not 42,100.00 USD
+   ╭─[journal/2026/01.ax:34:1]
+   │
+34 │ 31 retirement = 42_100 USD
+   │ ─────────────┬────────────
+   │              ╰── 800.00 USD more than the ledger holds
+   │
+   = note: 800.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+34 + 31 retirement = 42_100 USD !
+
+error[purpose]: grant money spent outside its purpose
+    ╭─[journal/2026/02.ax:9:1]
+    │
+  9 │ 03 checking -> visa 461.50 USD
+    │ ───────────────┬──────────────
+    │                ╰── this flow: 461.50 USD of restricted money leaving checking
+    │
+    ├─[std.ax:156:13] (built in)
+    │
+156 │     require purpose is self.grant-purpose "grant money spent outside its purpose"
+    │             ───┬───    ─────────┬────────
+    │                │                ╰── no value (`grant-purpose` is not set)
+    │                ╰── empty
+    │
+    = note: also at journal/2026/02.ax:16, journal/2026/02.ax:34
+
+error[cannot-infer]: cannot infer the amount of this flow
+   ╭─[journal/2026/02.ax:22:1]
+   │
+22 │ 10 checking -> cash ? USD
+   │ ────────────┬────────────
+   │             ╰── this amount is unknown
+   │
+   = note: the next assertion on cash accepts a gap with `!`, so it cannot pin this amount down
+   = note: the assertions on checking imply -5,238.00 USD, which runs this flow backwards; check the
+           assertions or the direction
+
+error[contract-occurrence-date]: this day is outside every contract schedule's grace window
+   ╭─[journal/2026/02.ax:28:1]
+   │
+28 │ 13 paycheck
+   │ ─────┬─────
+   │      ╰── no active scheduled occurrence is close enough to this date
+   │
+   = note: also at journal/2026/03.ax:14
+
+error[assertion]: retirement holds 41,300.00 USD, not 42,900.00 USD
+   ╭─[journal/2026/02.ax:51:1]
+   │
+51 │ 28 retirement = 42_900 USD
+   │ ─────────────┬────────────
+   │              ╰── another 800.00 USD more than the ledger holds
+   │
+   = note: the 800.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 800.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+51 + 28 retirement = 42_900 USD !
+
+error[assertion]: checking holds -5,581.30 USD, not 10,332.70 USD
+   ╭─[journal/2026/03.ax:38:1]
+   │
+ 6 │ 03 checking -> visa 722.20 USD
+   │ ───────────────┬──────────────
+   │                ╰── -722.20 USD to visa
+   ⋮
+ 9 │ 05 checking -> college 300 USD #contribution
+   │ ──────────────────────┬─────────────────────
+   │                       ╰── -300.00 USD to college
+   ⋮
+22 │ 20 brokerage 8 VTI -> checking 2_432.80 USD
+   │ ─────────────────────┬─────────────────────
+   │                      ╰── +2,432.80 USD from brokerage
+23 │
+24 │ 20 checking -> savings 500 USD #transfer
+   │ ────────────────────┬───────────────────
+   │                     ╰── -500.00 USD to savings
+   ⋮
+28 │ 25 college -> checking 1_500 USD
+   │ ────────────────┬───────────────
+   │                 ╰── +1,500.00 USD from college
+   ⋮
+38 │ 31 checking = 10_332.70 USD
+   │ ─────────────┬─────────────
+   │              ╰── another 5,338.00 USD more than the ledger holds
+   │
+   = note: the 10,576.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 5,338.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+38 + 31 checking = 10_332.70 USD !
+
+error[assertion]: retirement holds 41,300.00 USD, not 43,700.00 USD
+   ╭─[journal/2026/03.ax:40:1]
+   │
+40 │ 31 retirement = 43_700 USD
+   │ ─────────────┬────────────
+   │              ╰── another 800.00 USD more than the ledger holds
+   │
+   = note: the 1,600.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 800.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+40 + 31 retirement = 43_700 USD !
+
+✗ 12 errors
+✗ rests on a book with 12 errors (`axiom check` lists them): what they touch may be wrong
+
 Forecast to 2027-04-15
 
 Liquid net worth
-  Month end       Committed       Net worth
+  Month end        Committed      Net worth
   ─────────────────────────────────────────
-  2026-03-31  26,592.63 USD   77,597.73 USD
-  2026-04-30  28,238.36 USD   80,343.46 USD
-  2026-05-31  30,002.49 USD   83,207.59 USD
-  2026-06-30  31,766.62 USD   86,071.72 USD
-  2026-07-31  31,212.35 USD   86,617.45 USD
-  2026-08-31  29,376.48 USD   84,681.58 USD
-  2026-09-30  31,140.61 USD   87,545.71 USD
-  2026-10-31  32,786.34 USD   90,291.44 USD
-  2026-11-30  34,550.47 USD   93,155.57 USD
-  2026-12-31  38,201.20 USD   98,306.30 USD
-  2027-01-31  39,335.33 USD  100,540.43 USD
-  2027-02-28  41,099.46 USD  103,404.56 USD
-  2027-03-31  42,863.59 USD  106,268.69 USD
-  2027-04-15  45,362.11 USD  109,201.49 USD
+  2026-03-31   10,678.63 USD  59,283.73 USD
+  2026-04-30    6,866.36 USD  55,771.46 USD
+  2026-05-31    3,172.49 USD  52,377.59 USD
+  2026-06-30     -521.38 USD  48,983.72 USD
+  2026-07-31   -6,533.65 USD  43,271.45 USD
+  2026-08-31  -13,827.52 USD  35,077.58 USD
+  2026-09-30  -17,521.39 USD  31,683.71 USD
+  2026-10-31  -21,333.66 USD  28,171.44 USD
+  2026-11-30  -25,027.53 USD  24,777.57 USD
+  2026-12-31  -28,839.80 USD  21,265.30 USD
+  2027-01-31  -33,163.67 USD  17,241.43 USD
+  2027-02-28  -36,857.54 USD  13,847.56 USD
+  2027-03-31  -40,551.41 USD  10,453.69 USD
+  2027-04-15  -44,092.69 USD   7,248.49 USD
   · Committed: money in hand, less what is owed on debts with no term and on obligations as they
     fall due, in USD, after plans, recurring flows found in history and what they can still give.
     Investments and property are net worth, not liquid. Variable spending is not in it.
   · Bands need 3 full months of spending history; there is not enough yet.
 
 What recurs
-  Expected                                                      Every          Amount  Next        Source
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/bank/checking → expenses/rent (landlord)               monthly  2,850.00 USD  2026-04-01  seen 3 times
-  liabilities/visa → expenses/food/groceries (trader-joes)      weekly     118.40 USD  2026-04-02  seen 10 times
-  assets/bank/checking → assets/college                         monthly    300.00 USD  2026-04-05  seen 3 times
-  income/salary → assets/bank/checking (acme), and 4 more legs  monthly  8,000.00 USD  2026-04-13  plan
-  assets/bank/checking → assets/bank/savings                    monthly    500.00 USD  2026-04-20  seen 3 times
-  income/interest → assets/bank/savings                         monthly     49.73 USD  2026-04-30  seen 3 times
-  assets/bank/checking → expenses/travel                        yearly   2,200.00 USD  2026-07-10  plan
-  assets/bank/checking → expenses/tuition (state-u)             yearly   3,600.00 USD  2026-08-15  plan
-  assets/college → expenses/tuition (state-u)                   yearly   1,200.00 USD  2026-08-20  plan
-  income/salary → assets/bank/checking (acme), and 4 more legs  yearly   4,000.00 USD  2026-12-15  plan
-  assets/bank/checking → expenses/insurance (insurer)           yearly     630.00 USD  2027-01-01  plan
+  Expected                          Every        Amount  Next        Source
+  ────────────────────────────────────────────────────────────────────────────────
+  visa → trader-joes (trader-joes)  weekly   118.40 USD  2026-04-02  seen 10 times
+  checking → college                monthly  300.00 USD  2026-04-05  seen 3 times
+  checking → savings                monthly  500.00 USD  2026-04-20  seen 3 times
+  chase → savings (chase)           monthly   49.73 USD  2026-04-30  seen 3 times
+
+Contract occurrences
+  Contract                                 Every          Amount  Next
+  ──────────────────────────────────────────────────────────────────────────
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-04-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-04-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-05-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-05-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-06-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-06-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-07-01
+  summer-trip · checking → travel-agent    yearly   2,200.00 USD  2026-07-10
+  utility-bill · checking → utility        monthly    120.00 USD  2026-07-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-08-01
+  fall-tuition · checking → state-u        yearly   3,600.00 USD  2026-08-15
+  utility-bill · checking → utility        monthly    120.00 USD  2026-08-16
+  529-tuition · college → state-u          yearly   1,200.00 USD  2026-08-20
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-09-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-09-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-10-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-10-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-11-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-11-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2026-12-01
+  utility-bill · checking → utility        monthly    120.00 USD  2026-12-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2027-01-01
+  next-renter-policy · checking → insurer  yearly     630.00 USD  2027-01-01
+  utility-bill · checking → utility        monthly    120.00 USD  2027-01-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2027-02-01
+  utility-bill · checking → utility        monthly    120.00 USD  2027-02-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2027-03-01
+  utility-bill · checking → utility        monthly    120.00 USD  2027-03-16
+  apartment-rent · checking → landlord     monthly  2,850.00 USD  2027-04-01
 
 Obligations coming due
-  Due         Obligation                To        Amount
-  ──────────────────────────────────────────────────────
-  2027-04-15  nonqualified-529-penalty  irs    34.94 USD
-  2027-04-15  federal-income-tax        irs  -230.77 USD
-  2027-04-15  ca-income-tax             ftb  -469.89 USD
+  Due         Obligation                To      Amount
+  ────────────────────────────────────────────────────
+  2027-04-15  nonqualified-529-penalty  irs  36.08 USD
 
 Problems ahead
-  Date  Problem
-  ─────────────
-  · No law violations or overdrafts are projected.
+  Date        Problem
+  ─────────────────────────────────────────────────────────
+  2026-04-01  checking is overdrawn, down to -60,401.30 USD
