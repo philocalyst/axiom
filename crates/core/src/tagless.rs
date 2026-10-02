@@ -99,11 +99,12 @@ impl Payload {
     }
 }
 
-mod sealed {
+pub(crate) mod sealed {
     pub trait Sealed {}
 }
 
-/// A type a [`Column`] can hold. Sealed: a new type is a new field of [`Payload`], and that is this module's to add.
+/// A type a [`Column`] can hold. Sealed outside this crate: a new field of [`Payload`] is this module's to add, and
+/// inside the crate a type may wear a field that is there, as `bool` wears a flag and `Many` wears a run.
 pub trait Field: Copy + sealed::Sealed {
     const TAG: Tag;
 

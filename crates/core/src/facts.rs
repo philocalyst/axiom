@@ -51,8 +51,10 @@ use crate::calendar::Days;
 use crate::day::Day;
 use crate::dayset::DaySet;
 use crate::groups::bucket;
+use crate::hash::Map;
+use crate::id::{Id, Run};
 use crate::par;
-use crate::tagless::{Column, Datum, Field, Tag};
+use crate::tagless::{Column, Datum, Field, Payload, Tag, sealed};
 use crate::timeline::paint_steps;
 
 /// A slot, numbered densely from zero by whoever declares the slots.
@@ -108,6 +110,105 @@ impl<V> fmt::Debug for Key<V> {
     }
 }
 
+/// A set of `V`s as the value of a step: a slot that holds many things at once, such as the systems a person lives
+/// in or the owners of a position.
+///
+/// It is a handle: where the members are in the store's second column. They are sorted and without repeats, and each
+/// set is stored once, so within a store two equal sets are the same handle, are equal as values and merge as steps
+/// do. Open it with [`Facts::members`] of the store it came from; a handle of another store is a wrong claim like a
+/// wrong key, and gives other members, or panics.
+pub struct Many<V> {
+    run: Run<V>,
+}
+
+const _: () = assert!(size_of::<Many<u32>>() == 8);
+
+impl<V> Many<V> {
+    fn at(start: u32, len: u32) -> Many<V> {
+        Many { run: Run::new(Id::new(start), len) }
+    }
+}
+
+impl<V> Clone for Many<V> {
+    fn clone(&self) -> Many<V> {
+        *self
+    }
+}
+
+impl<V> Copy for Many<V> {}
+
+impl<V> PartialEq for Many<V> {
+    fn eq(&self, other: &Many<V>) -> bool {
+        self.run == other.run
+    }
+}
+
+impl<V> Eq for Many<V> {}
+
+impl<V> fmt::Debug for Many<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Many<{}>{:?}", std::any::type_name::<V>(), self.run)
+    }
+}
+
+impl<V> sealed::Sealed for Many<V> {}
+
+/// A run in the payload, as it is for [`Run`]: one more way to say it, in the type of the key.
+impl<V> Field for Many<V> {
+    const TAG: Tag = Tag::Run;
+
+    fn put(self) -> Payload {
+        self.run.put()
+    }
+
+    fn pull(payload: Payload) -> Many<V> {
+        Many { run: Run::pull(payload) }
+    }
+}
+
+/// The members of a set, in order, borrowed from the store's second column: what [`Facts::members`] gives.
+pub struct Members<'a, V> {
+    column: &'a Column,
+    range: Range<u32>,
+    of: PhantomData<fn() -> V>,
+}
+
+const _: () = assert!(size_of::<Members<'_, u32>>() == 16);
+
+impl<V: Field> Members<'_, V> {
+    /// Whether `member` is in the set, by the equality of values that merging uses. A scan: a set is a handful.
+    pub fn contains(&self, member: V) -> bool {
+        let member = Datum::of(member);
+        self.range.clone().any(|at| self.column.datum(at) == member)
+    }
+}
+
+impl<V: Field> Iterator for Members<'_, V> {
+    type Item = V;
+
+    fn next(&mut self) -> Option<V> {
+        self.range.next().map(|at| self.column.get(at))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.range.size_hint()
+    }
+}
+
+impl<V: Field> DoubleEndedIterator for Members<'_, V> {
+    fn next_back(&mut self) -> Option<V> {
+        self.range.next_back().map(|at| self.column.get(at))
+    }
+}
+
+impl<V: Field> ExactSizeIterator for Members<'_, V> {}
+
+impl<V> Clone for Members<'_, V> {
+    fn clone(&self) -> Self {
+        Members { column: self.column, range: self.range.clone(), of: PhantomData }
+    }
+}
+
 /// One slot of one holder: which slot, and where its steps begin. They end where the next entry's begin, and the
 /// last entry of the store is followed by one that says only where the steps end.
 #[derive(Clone, Copy)]
@@ -128,12 +229,18 @@ pub struct Facts {
     days: Vec<Day>,
     /// Step to what holds from its day on: empty where nothing is said.
     values: Column,
+    /// The members of every set that a step holds, each set stored once: what a [`Many`] points into.
+    members: Column,
 }
 
 impl Facts {
     /// A builder for a store of `holders` rows, numbered from zero.
     pub fn builder(holders: usize) -> Builder {
-        Builder { holders: u32::try_from(holders).expect("fewer than 2^32 holders"), statements: Vec::new() }
+        Builder {
+            holders: u32::try_from(holders).expect("fewer than 2^32 holders"),
+            statements: Vec::new(),
+            sets: Sets::default(),
+        }
     }
 
     /// How many holders: rows, most of them with few entries or none.
@@ -167,6 +274,21 @@ impl Facts {
     ) -> DaySet {
         let satisfying = self.steps(key, holder).within(within).filter(|&(_, value)| holds(value));
         satisfying.filter_map(|(days, _)| days.intersect(within)).collect()
+    }
+
+    /// What holds of `key` on `day` for the first of `chain` that says anything then: a thing, then the kinds it
+    /// descends from, nearest first. A kind's facts are the defaults of its things, and the tree of kinds is the
+    /// model's, which hands its ancestors over as holder numbers; the store needs no tree.
+    pub fn at_first<V: Field>(&self, key: Key<V>, chain: impl IntoIterator<Item = u32>, day: Day) -> Option<V> {
+        chain.into_iter().find_map(|holder| self.at(key, holder, day))
+    }
+
+    /// The members of `set`, a value of this store.
+    pub fn members<V: Field>(&self, set: Many<V>) -> Members<'_, V> {
+        let start = set.run.start().index() as u32;
+        let range = start..start + set.run.len();
+        debug_assert!(range.end as usize <= self.members.len(), "a set of this store");
+        Members { column: &self.members, range, of: PhantomData }
     }
 
     /// Where the steps of `slot` are among the store's, if `holder` said anything of it.
@@ -345,6 +467,36 @@ fn paint(group: &[Statement], steps: &mut Vec<(Day, Datum)>) {
 pub struct Builder {
     holders: u32,
     statements: Vec<Statement>,
+    sets: Sets,
+}
+
+/// The sets that statements hold, each once: the second column of the store, and where each set is in it.
+#[derive(Default)]
+struct Sets {
+    members: Column,
+    /// A set's members, sorted, to where they begin in `members`.
+    interned: Map<Box<[Datum]>, u32>,
+}
+
+impl Sets {
+    /// The set of `members`, which are put in order and without repeats, and stored if it was not yet.
+    fn intern<V: Field>(&mut self, members: impl IntoIterator<Item = V>) -> Many<V> {
+        let mut sorted: Vec<Datum> = members.into_iter().map(Datum::of).collect();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let start = self.interned.get(sorted.as_slice()).copied().unwrap_or_else(|| self.store(&sorted));
+        Many::at(start, len32(sorted.len()))
+    }
+
+    /// Appends a set that is not yet stored, and says where it went.
+    fn store(&mut self, sorted: &[Datum]) -> u32 {
+        let start = len32(self.members.len());
+        for &member in sorted {
+            self.members.push_datum(member);
+        }
+        self.interned.insert(sorted.into(), start);
+        start
+    }
 }
 
 /// How many holders are frozen as one piece of work.
@@ -355,6 +507,19 @@ impl Builder {
     pub fn paint<V: Field>(&mut self, holder: u32, key: Key<V>, days: Days, value: V) {
         assert!(holder < self.holders, "holder {holder} of a store of {}", self.holders);
         self.statements.push(Statement { holder, slot: key.slot, days, value: Datum::of(value) });
+    }
+
+    /// The set of `members` holds of `holder`'s `key` over `days`. Order and repeats do not matter: a set is the same
+    /// set, and merges with the same set next to it.
+    pub fn paint_many<V: Field>(
+        &mut self,
+        holder: u32,
+        key: Key<Many<V>>,
+        days: Days,
+        members: impl IntoIterator<Item = V>,
+    ) {
+        let set = self.sets.intern(members);
+        self.paint(holder, key, days, set);
     }
 
     /// `value` holds of `holder`'s `key` from the beginning of time: a declaration.
@@ -379,6 +544,7 @@ impl Builder {
             (0..holders).step_by(per_chunk).map(|first| first..holders.min(first + per_chunk)).collect();
         let mut facts = Facts::with_room_for(holders, self.statements.len()).finish();
         par::map_each_ordered(&chunks, |chunk| by_holder.freeze(chunk.clone()), |part| facts.append(part));
+        facts.members = self.sets.members.clone();
         facts
     }
 }
@@ -429,6 +595,7 @@ impl Facts {
             entries: Vec::with_capacity(statements + 1),
             days: Vec::with_capacity(statements),
             values: Column::with_capacity(statements),
+            members: Column::new(),
         }
     }
 
@@ -759,6 +926,115 @@ mod tests {
         assert_eq!(size_of::<Key<Day>>(), size_of::<SlotId>());
         assert_eq!(size_of::<Steps<'_, Day>>(), 32);
         assert_eq!(size_of::<(Day, Datum)>(), 32);
+    }
+
+    const LIVES: Key<Many<u32>> = Key::new(SlotId(3));
+    const OWNERS: Key<Many<u32>> = Key::new(SlotId(4));
+
+    /// The members of the set that holds of the first holder's `LIVES` over each stretch of days it holds.
+    fn lived(facts: &Facts) -> Vec<(i32, i32, Vec<u32>)> {
+        let seen = facts.steps(LIVES, 0);
+        seen.map(|(days, set)| (days.first().0, days.last().0, facts.members(set).collect())).collect()
+    }
+
+    #[test]
+    fn a_set_is_a_value_whose_members_are_in_order_and_without_repeats() {
+        let mut builder = Facts::builder(1);
+        builder.paint_many(0, LIVES, Days::ALWAYS, [30, 10, 20, 10, 30]);
+        let facts = builder.freeze();
+        assert_eq!(lived(&facts), [(MIN, MAX, vec![10, 20, 30])]);
+        let set = facts.at(LIVES, 0, Day(0)).unwrap();
+        let members = facts.members(set);
+        assert_eq!(members.len(), 3);
+        assert_eq!(members.clone().rev().collect::<Vec<_>>(), [30, 20, 10]);
+        assert!(members.contains(20) && !members.contains(25));
+        assert_eq!(facts.at(LIVES, 0, Day(MAX)), Some(set));
+    }
+
+    #[test]
+    fn equal_sets_are_the_same_value_whatever_order_they_were_said_in_and_merge() {
+        let mut builder = Facts::builder(2);
+        builder.paint_many(0, LIVES, days(0, 9), [2, 1]);
+        builder.paint_many(0, LIVES, days(10, 19), [1, 2, 2]);
+        builder.paint_many(0, LIVES, days(20, 29), [1]);
+        builder.paint_many(1, OWNERS, Days::ALWAYS, [1, 2]);
+        let facts = builder.freeze();
+        assert_eq!(lived(&facts), [(0, 19, vec![1, 2]), (20, 29, vec![1])], "the first two touch, and agree");
+        let (here, there) = (facts.at(LIVES, 0, Day(5)), facts.at(OWNERS, 1, Day(5)));
+        assert_eq!(here, there, "one set of the store, kept once, whatever slot and holder says it");
+        assert_ne!(here, facts.at(LIVES, 0, Day(25)));
+        assert_eq!(facts.members(here.unwrap()).collect::<Vec<_>>(), [1, 2]);
+    }
+
+    #[test]
+    fn the_empty_set_is_a_value_and_nothing_said_is_not() {
+        let mut builder = Facts::builder(1);
+        builder.paint_many(0, LIVES, days(10, 19), []);
+        builder.paint_many(0, LIVES, days(30, 39), [4]);
+        let facts = builder.freeze();
+        assert_eq!(lived(&facts), [(10, 19, vec![]), (30, 39, vec![4])]);
+        let nobody = facts.at(LIVES, 0, Day(15)).expect("the empty set holds");
+        assert_eq!((facts.members(nobody).len(), facts.at(LIVES, 0, Day(25))), (0, None));
+        assert_eq!(facts.steps(LIVES, 0).len(), 2);
+    }
+
+    #[test]
+    fn the_days_a_person_lived_in_a_system_are_the_days_a_set_holds_it() {
+        let mut builder = Facts::builder(1);
+        builder.paint_many(0, LIVES, Days::ALWAYS, [1]);
+        builder.paint_many(0, LIVES, days(100, 199), [1, 2]);
+        builder.paint_many(0, LIVES, days(200, 299), [2]);
+        builder.paint_many(0, LIVES, from(300), [1, 3]);
+        let facts = builder.freeze();
+        let lived_in =
+            |system: u32, within: Days| facts.days_where(LIVES, 0, within, |set| facts.members(set).contains(system));
+        let intervals = |set: DaySet| set.intervals().iter().map(|d| (d.first().0, d.last().0)).collect::<Vec<_>>();
+        assert_eq!(intervals(lived_in(1, Days::ALWAYS)), [(MIN, 199), (300, MAX)]);
+        assert_eq!(intervals(lived_in(2, Days::ALWAYS)), [(100, 299)]);
+        assert_eq!(intervals(lived_in(2, days(250, 350))), [(250, 299)]);
+        assert_eq!(intervals(lived_in(3, days(0, 365))), [(300, 365)]);
+        assert!(lived_in(4, Days::ALWAYS).is_empty());
+    }
+
+    #[test]
+    fn sets_of_different_types_that_have_the_same_bytes_stay_different_sets() {
+        const DAYS: Key<Many<Day>> = Key::new(SlotId(5));
+        let mut builder = Facts::builder(1);
+        builder.paint_many(0, LIVES, Days::ALWAYS, [1, 2]);
+        builder.paint_many(0, DAYS, Days::ALWAYS, [Day(1), Day(2)]);
+        let facts = builder.freeze();
+        let (letters, dates) = (facts.at(LIVES, 0, Day(0)).unwrap(), facts.at(DAYS, 0, Day(0)).unwrap());
+        assert_eq!(facts.members(letters).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(facts.members(dates).collect::<Vec<_>>(), [Day(1), Day(2)]);
+    }
+
+    #[test]
+    fn a_set_slot_and_a_plain_slot_of_one_holder_do_not_disturb_each_other() {
+        let mut builder = Facts::builder(1);
+        builder.paint_always(0, LETTER, 7);
+        builder.paint_many(0, LIVES, Days::ALWAYS, [7]);
+        builder.paint(0, LETTER, days(5, 6), 8);
+        let facts = builder.freeze();
+        assert_eq!(seen(&facts), [(MIN, 4, 7), (5, 6, 8), (7, MAX, 7)]);
+        assert_eq!(lived(&facts), [(MIN, MAX, vec![7])]);
+    }
+
+    #[test]
+    fn a_chain_of_holders_falls_back_to_the_first_that_says_something_that_day() {
+        // A thing, the kind it is, and the kind that kind is: holders 0, 1, 2.
+        let mut builder = Facts::builder(3);
+        builder.paint(0, LETTER, from(10), 9);
+        builder.paint_always(1, LETTER, 5);
+        builder.paint_always(2, OTHER, 7);
+        builder.paint_always(2, LETTER, 1);
+        let facts = builder.freeze();
+        let letter = |day: i32| facts.at_first(LETTER, [0, 1, 2], Day(day));
+        assert_eq!((letter(0), letter(10)), (Some(5), Some(9)), "the thing says nothing until day 10");
+        assert_eq!(facts.at_first(OTHER, [0, 1, 2], Day(0)), Some(7), "the nearest kind to say it");
+        assert_eq!(facts.at_first(OTHER, [0, 1], Day(0)), None);
+        assert_eq!(facts.at_first(LETTER, [], Day(0)), None, "an empty chain says nothing");
+        assert_eq!(facts.at_first(LETTER, 1..3, Day(0)), Some(5), "any iterator of holders is a chain");
+        assert_eq!(facts.at_first(Key::<u32>::new(SlotId(99)), [0, 1, 2], Day(0)), None);
     }
 
     /// One statement of a generated book: `(holder, slot, days, letter)`.
