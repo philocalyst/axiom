@@ -182,15 +182,59 @@ pub(crate) struct Watch {
     /// Slots whose history a computed budget `total(in|out, …)` may read.
     /// Empty unless a budget formula has a non-purpose total expression.
     budget_total_slots: Box<[bool]>,
+    numbering: Numbering,
+}
+
+/// How the subjects of a book are numbered: its places, then its entities, assets and contracts.
+#[derive(Clone, Copy)]
+struct Numbering {
     places: usize,
     entities: usize,
     assets: usize,
+    contracts: usize,
+}
+
+impl Numbering {
+    fn of(book: &Book) -> Numbering {
+        let (places, entities) = (book.places.len(), book.entities.len());
+        Numbering { places, entities, assets: book.assets.len(), contracts: book.contracts.len() }
+    }
+
+    fn len(self) -> usize {
+        self.places + self.entities + self.assets + self.contracts
+    }
+
+    fn slot(self, subject: Subject) -> usize {
+        match subject {
+            Subject::Place(place) => place.index(),
+            Subject::Entity(entity) => self.places + entity.index(),
+            Subject::Asset(asset) => self.places + self.entities + asset.index(),
+            Subject::Contract(contract) => self.places + self.entities + self.assets + contract.index(),
+        }
+    }
+
+    /// The subject whose totals are kept at `slot`.
+    fn subject(self, slot: usize) -> Subject {
+        let Numbering { places, entities, assets, .. } = self;
+        match slot {
+            at if at < places => Subject::Place(Id::new(at as u32)),
+            at if at < places + entities => Subject::Entity(Id::new((at - places) as u32)),
+            at if at < places + entities + assets => Subject::Asset(Id::new((at - places - entities) as u32)),
+            at => Subject::Contract(Id::new((at - places - entities - assets) as u32)),
+        }
+    }
 }
 
 impl Watch {
     pub fn of(book: &Book, laws: &[LawFacts]) -> Watch {
-        let (places, entities, assets, contracts) =
-            (book.places.len(), book.entities.len(), book.assets.len(), book.contracts.len());
+        let numbering = Numbering::of(book);
+        let watched = watched_slots(book, laws, numbering);
+        let mut slots = vec![u32::MAX; watched.len()];
+        let mut subjects = Vec::new();
+        for (at, _) in watched.iter().enumerate().filter(|(_, yes)| **yes) {
+            slots[at] = subjects.len() as u32;
+            subjects.push(numbering.subject(at));
+        }
         let budget_reads_total = book.laws.values().any(|law| {
             law.budget.is_some()
                 && law
@@ -198,135 +242,25 @@ impl Watch {
                     .values()
                     .any(|node| matches!(node.op, axiom_model::Op::Call(axiom_model::Func::Total(..), _)))
         });
-        let mut watched = vec![false; places + entities + assets + contracts];
-        for rule in book.rules.all() {
-            match laws[rule.law.index()].totals {
-                TotalsRead::Nothing => {}
-                TotalsRead::Subject => {
-                    watched[slot(places, entities, assets, rule.subject)] = true;
-                }
-                // A kind-wide total reads every place of that kind.
-                TotalsRead::Kind => watched[..places].fill(true),
-            }
-        }
-        // Purpose rules are evaluated once for each flow owner at run time;
-        // their stored subject is only a placeholder. Reserve owner slots for
-        // each such read so a non-placeholder owner's total is never missing.
-        for rule in book.rules.purposes.values() {
-            match laws[rule.law.index()].totals {
-                TotalsRead::Nothing => {}
-                TotalsRead::Subject => watched[places..places + entities].fill(true),
-                TotalsRead::Kind => watched[..places].fill(true),
-            }
-        }
-        for rule in book.rules.about.values() {
-            match laws[rule.law.index()].totals {
-                TotalsRead::Nothing => {}
-                TotalsRead::Subject => {
-                    watched[slot(places, entities, assets, rule.subject)] = true;
-                }
-                TotalsRead::Kind => watched[..places].fill(true),
-            }
-        }
-        let mut slots = vec![u32::MAX; watched.len()];
-        let mut subjects = Vec::new();
-        for (at, &yes) in watched.iter().enumerate() {
-            if yes {
-                slots[at] = subjects.len() as u32;
-                subjects.push(subject_at(places, entities, assets, at));
-            }
-        }
         let budget_total_slots = subjects
             .iter()
             .map(|subject| budget_reads_total && matches!(subject, Subject::Place(_) | Subject::Entity(_)))
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        let mut within: Vec<_> = (0..places as u32)
-            .map(Id::new)
-            .flat_map(|place| containing(book, place).map(move |subject| (place, subject)))
-            .filter(|&(_, subject)| watched[slot(places, entities, assets, subject)])
-            .collect();
-        // An asset's totals follow its asset place and its parts. Keep the
-        // relation in the plan so posting a flow never scans the asset table.
-        for (asset, _) in book.assets.iter() {
-            let mut part = Some(asset);
-            while let Some(current) = part {
-                let subject = Subject::Asset(current);
-                if watched[slot(places, entities, assets, subject)] {
-                    within.extend(book.places.subtree(book.assets[asset].place).map(|place| (place, subject)));
-                }
-                part = book.assets[current].part_of.map(|part| part.value);
-            }
-        }
-        within.sort_unstable_by_key(|&(place, subject)| (place, subject_key(places, entities, assets, subject)));
-        within.dedup();
-        let through = Groups::build(places, within.iter().copied());
-        drop(within);
-        let mut purpose_reads = Set::default();
-        let mut budget_purposes = Set::default();
-        for (_, budget) in book.budgets.iter() {
-            budget_purposes.insert(budget.purpose);
-            for (_, terms) in budget.terms.within(Days::ALWAYS) {
-                if let axiom_model::Limit::Share { of, .. } = terms.limit {
-                    budget_purposes.insert(of);
-                }
-            }
-        }
-        purpose_reads.extend(budget_purposes.iter().copied());
-        for law in book.laws.values() {
-            for node in law.nodes.values() {
-                let axiom_model::Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) = &node.op else {
-                    continue;
-                };
-                let purpose = purpose.or_else(|| match law.owner {
-                    axiom_model::Owner::Purpose(purpose) => Some(purpose),
-                    _ => None,
-                });
-                if let Some(purpose) = purpose {
-                    purpose_reads.insert(purpose);
-                    if law.budget.is_some() {
-                        budget_purposes.insert(purpose);
-                    }
-                }
-            }
-        }
-        let purpose_through = if purpose_reads.is_empty() {
-            None
-        } else {
-            let within = book.purposes.ids().flat_map(|actual| {
-                book.purposes
-                    .lineage(actual)
-                    .filter(|ancestor| purpose_reads.contains(ancestor))
-                    .map(move |ancestor| (actual, ancestor))
-            });
-            Some(Groups::build(book.purposes.len(), within))
-        };
-        let budget_through = if budget_purposes.is_empty() {
-            None
-        } else {
-            let within = book.purposes.ids().flat_map(|actual| {
-                book.purposes
-                    .lineage(actual)
-                    .filter(|ancestor| budget_purposes.contains(ancestor))
-                    .map(move |ancestor| (actual, ancestor))
-            });
-            Some(Groups::build(book.purposes.len(), within))
-        };
+        let (purpose_reads, budget_purposes) = purposes_read(book);
         Watch {
-            through,
+            through: places_within(book, &watched, numbering),
             slots: slots.into(),
             subjects: subjects.into(),
-            purpose_through,
-            budget_through,
+            purpose_through: lineage_groups(book, &purpose_reads),
+            budget_through: lineage_groups(book, &budget_purposes),
             budget_total_slots,
-            places,
-            entities,
-            assets,
+            numbering,
         }
     }
 
     fn slot(&self, subject: Subject) -> Option<usize> {
-        let slot = *self.slots.get(slot(self.places, self.entities, self.assets, subject))?;
+        let slot = *self.slots.get(self.numbering.slot(subject))?;
         (slot != u32::MAX).then_some(slot as usize)
     }
 
@@ -354,6 +288,102 @@ impl Watch {
     pub fn sides(&self, from: Id<Place>, to: Id<Place>) -> (bool, bool) {
         (self.crossed(from, to).next().is_some(), self.crossed(to, from).next().is_some())
     }
+}
+
+/// Which subjects some law reads a flow total of, by slot.
+fn watched_slots(book: &Book, laws: &[LawFacts], numbering: Numbering) -> Vec<bool> {
+    let mut watched = vec![false; numbering.len()];
+    let (places, entities) = (numbering.places, numbering.entities);
+    for rule in book.rules.all().chain(book.rules.about.values()) {
+        match laws[rule.law.index()].totals {
+            TotalsRead::Nothing => {}
+            TotalsRead::Subject => watched[numbering.slot(rule.subject)] = true,
+            // A kind-wide total reads every place of that kind.
+            TotalsRead::Kind => watched[..places].fill(true),
+        }
+    }
+    // Purpose rules are evaluated once for each flow owner at run time;
+    // their stored subject is only a placeholder. Reserve owner slots for
+    // each such read so a non-placeholder owner's total is never missing.
+    for rule in book.rules.purposes.values() {
+        match laws[rule.law.index()].totals {
+            TotalsRead::Nothing => {}
+            TotalsRead::Subject => watched[places..places + entities].fill(true),
+            TotalsRead::Kind => watched[..places].fill(true),
+        }
+    }
+    watched
+}
+
+/// The watched subjects each place lies within, in the order of their slots.
+fn places_within(book: &Book, watched: &[bool], numbering: Numbering) -> Groups<Place, Subject> {
+    let mut within: Vec<_> = (0..numbering.places as u32)
+        .map(Id::new)
+        .flat_map(|place| containing(book, place).map(move |subject| (place, subject)))
+        .filter(|&(_, subject)| watched[numbering.slot(subject)])
+        .collect();
+    // An asset's totals follow its asset place and its parts. Keep the
+    // relation in the plan so posting a flow never scans the asset table.
+    for (asset, _) in book.assets.iter() {
+        let mut part = Some(asset);
+        while let Some(current) = part {
+            let subject = Subject::Asset(current);
+            if watched[numbering.slot(subject)] {
+                within.extend(book.places.subtree(book.assets[asset].place).map(|place| (place, subject)));
+            }
+            part = book.assets[current].part_of.map(|part| part.value);
+        }
+    }
+    within.sort_unstable_by_key(|&(place, subject)| (place, numbering.slot(subject)));
+    within.dedup();
+    Groups::build(numbering.places, within.iter().copied())
+}
+
+/// The purposes some law reads a total of, and of those the ones a budget needs the history of.
+fn purposes_read(book: &Book) -> (Set<Id<Purpose>>, Set<Id<Purpose>>) {
+    let mut budget_purposes = Set::default();
+    for (_, budget) in book.budgets.iter() {
+        budget_purposes.insert(budget.purpose);
+        for (_, terms) in budget.terms.within(Days::ALWAYS) {
+            if let axiom_model::Limit::Share { of, .. } = terms.limit {
+                budget_purposes.insert(of);
+            }
+        }
+    }
+    let mut purpose_reads: Set<Id<Purpose>> = Set::default();
+    purpose_reads.extend(budget_purposes.iter().copied());
+    for law in book.laws.values() {
+        for node in law.nodes.values() {
+            let axiom_model::Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) = &node.op else {
+                continue;
+            };
+            let purpose = purpose.or_else(|| match law.owner {
+                axiom_model::Owner::Purpose(purpose) => Some(purpose),
+                _ => None,
+            });
+            if let Some(purpose) = purpose {
+                purpose_reads.insert(purpose);
+                if law.budget.is_some() {
+                    budget_purposes.insert(purpose);
+                }
+            }
+        }
+    }
+    (purpose_reads, budget_purposes)
+}
+
+/// Each purpose with its ancestors that are in `wanted`, or nothing when none is wanted.
+fn lineage_groups(book: &Book, wanted: &Set<Id<Purpose>>) -> Option<Groups<Purpose, Id<Purpose>>> {
+    if wanted.is_empty() {
+        return None;
+    }
+    let within = book.purposes.ids().flat_map(|actual| {
+        book.purposes
+            .lineage(actual)
+            .filter(|ancestor| wanted.contains(ancestor))
+            .map(move |ancestor| (actual, ancestor))
+    });
+    Some(Groups::build(book.purposes.len(), within))
 }
 
 /// Running flow totals for the subjects a [`Watch`] names.
@@ -773,30 +803,6 @@ impl Totals {
     pub fn read(&self, watch: &Watch, subject: Subject, dir: Dir, window: Window, day: Day) -> Qty {
         watch.slot(subject).map_or(Qty::ZERO, |at| self.windows[at].read(dir, window, day))
     }
-}
-
-/// Where a subject's totals are kept: places first, then entities.
-fn slot(places: usize, entities: usize, assets: usize, subject: Subject) -> usize {
-    match subject {
-        Subject::Place(place) => place.index(),
-        Subject::Entity(entity) => places + entity.index(),
-        Subject::Asset(asset) => places + entities + asset.index(),
-        Subject::Contract(contract) => places + entities + assets + contract.index(),
-    }
-}
-
-/// The subject whose totals are kept at `slot`.
-fn subject_at(places: usize, entities: usize, assets: usize, slot: usize) -> Subject {
-    match slot {
-        at if at < places => Subject::Place(Id::new(at as u32)),
-        at if at < places + entities => Subject::Entity(Id::new((at - places) as u32)),
-        at if at < places + entities + assets => Subject::Asset(Id::new((at - places - entities) as u32)),
-        at => Subject::Contract(Id::new((at - places - entities - assets) as u32)),
-    }
-}
-
-fn subject_key(places: usize, entities: usize, assets: usize, subject: Subject) -> usize {
-    slot(places, entities, assets, subject)
 }
 
 /// What `count` effects have added up to, keyed by `(owner, year, name)`. A

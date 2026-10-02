@@ -1,8 +1,8 @@
 //! Many diagnostics, presented as few: in the order a reader fixes them, one
 //! report for each cause, and counted.
 
-use axiom_core::Map;
 use axiom_core::diag::{Diagnostic, Disposition, FileId, Loc, Severity};
+use axiom_core::{Groups, Id, Map};
 
 use crate::style::{Ink, Line};
 use crate::text::plural;
@@ -68,26 +68,28 @@ fn rank(diagnostic: &Diagnostic) -> u8 {
     }
 }
 
+/// One cause: the diagnostics that say the same thing, as a row of the groups [`arrange`] makes.
+pub enum Finding {}
+
 /// The diagnostics in reading order (by rank, then in source order as `place`
 /// says, those that point nowhere last), with the ones that say the same thing
 /// gathered behind the first of them: same severity, code and headline.
 pub fn arrange<'d>(
     diagnostics: &[&'d Diagnostic],
     place: impl Fn(&Diagnostic) -> Option<Loc>,
-) -> Vec<Vec<&'d Diagnostic>> {
+) -> Groups<Finding, &'d Diagnostic> {
     let nowhere = (FileId(u16::MAX), u32::MAX);
     let mut ordered = diagnostics.to_vec();
     ordered.sort_by_cached_key(|&diagnostic| {
         (rank(diagnostic), place(diagnostic).map_or(nowhere, |loc| (loc.file, loc.start)))
     });
-    let mut groups: Vec<Vec<&Diagnostic>> = Vec::new();
-    let mut seen: Map<(Severity, &str, &str), usize> = Map::default();
-    for diagnostic in ordered {
-        let at = *seen.entry((diagnostic.severity, &diagnostic.code, &diagnostic.message)).or_insert(groups.len());
-        if at == groups.len() {
-            groups.push(Vec::new());
-        }
-        groups[at].push(diagnostic);
-    }
-    groups
+    let mut causes: Map<(Severity, &str, &str), Id<Finding>> = Map::default();
+    let findings: Vec<_> = ordered
+        .into_iter()
+        .map(|diagnostic| {
+            let next = Id::new(causes.len() as u32);
+            (*causes.entry((diagnostic.severity, &diagnostic.code, &diagnostic.message)).or_insert(next), diagnostic)
+        })
+        .collect();
+    Groups::build(causes.len(), findings.iter().copied())
 }

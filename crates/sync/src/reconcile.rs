@@ -5,8 +5,6 @@
 //! nearest day is taken first, and a flow is taken at most once, so two
 //! identical coffees on one day are two.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
-
 use axiom_core::{Day, Map, Qty, Set};
 
 use crate::Record;
@@ -57,6 +55,7 @@ struct Slot {
     index: usize,
 }
 
+/// What a record could be a flow of: an amount in a unit.
 #[derive(Clone, Copy)]
 struct Candidate {
     unit: usize,
@@ -91,106 +90,136 @@ fn reconcile_by<'a, 't: 'a>(
     let (Some(first), Some(last)) = (days.clone().min(), days.max()) else {
         return matched;
     };
-    // A book is far longer than a statement: only the flows near it can match.
-    let near = first.add_days(-WINDOW)..=last.add_days(WINDOW);
-    // Units are compared as small numbers; the account's own, which a flow or a
-    // record may also name outright, is 0.
-    let mut unit_ids: Map<u64, Vec<(&'a str, usize)>> = Map::default();
-    let mut next_unit = 0usize;
-    let mut key = |name: Option<&'a str>| {
-        let Some(name) = name.filter(|name| !name.eq_ignore_ascii_case(default)) else {
-            return 0;
-        };
-        let mut hasher = DefaultHasher::new();
-        for byte in name.bytes() {
-            hasher.write_u8(byte.to_ascii_lowercase());
-        }
-        name.len().hash(&mut hasher);
-        let hash = hasher.finish();
-        let bucket = unit_ids.entry(hash).or_default();
-        if let Some((_, id)) = bucket.iter().find(|(known, _)| known.eq_ignore_ascii_case(name)) {
-            return 1 + *id;
-        }
-        let id = next_unit;
-        next_unit += 1;
-        bucket.push((name, id));
-        1 + id
-    };
-    let candidates: Vec<[Option<Candidate>; 2]> = (0..len)
-        .map(|at| {
-            let record = record_at(at);
-            let primary = Candidate { unit: key(record.facts().currency.as_deref()), qty: record.qty };
-            let original = record
-                .facts()
-                .original
-                .as_ref()
-                .map(|original| Candidate { unit: key(Some(original.unit.as_ref())), qty: original.qty });
-            [Some(primary), original.filter(|other| (other.unit, other.qty) != (primary.unit, primary.qty))]
-        })
-        .collect();
-    // Only a flow of an amount some record has can be one: most of a book is not.
-    let wanted: Set<(usize, Qty)> =
-        candidates.iter().flatten().flatten().map(|candidate| (candidate.unit, candidate.qty)).collect();
-    let mut slots: Vec<Slot> = existing
-        .iter()
-        .enumerate()
-        .filter(|(_, flow)| near.contains(&flow.day))
-        .map(|(index, flow)| Slot { unit: key(flow.unit), qty: flow.qty, day: flow.day, index })
-        .filter(|slot| wanted.contains(&(slot.unit, slot.qty)))
-        .collect();
-    slots.sort_unstable();
-    let batch_of = |slot: &Slot| existing[slot.index].batch;
-    // The slots of each batch: what is taken along with a flow.
-    let mut batches: Map<u32, Vec<usize>> = Map::default();
-    for (at, slot) in slots.iter().enumerate() {
-        if let Batch::Member(n) | Batch::Total(n) = batch_of(slot) {
-            batches.entry(n).or_default().push(at);
-        }
-    }
-    let mut taken = vec![false; slots.len()];
+    let mut units = UnitIds { default, known: Vec::new() };
+    let candidates = candidates(len, record_at, &mut units);
+    let mut flows = Flows::near(existing, first..=last, &candidates, &mut units);
     let mut order: Vec<usize> = (0..len).collect();
     order.sort_by_key(|&at| record_at(at).day);
     for radius in [0, WINDOW] {
         for &at in &order {
-            if matched[at].is_some() {
-                continue;
-            }
-            let record = record_at(at);
-            let key = |slot: &Slot| (slot.unit, slot.qty, slot.day);
-            let mut nearest = None;
-            for candidate in candidates[at].iter().flatten() {
-                let from = slots
-                    .partition_point(|slot| key(slot) < (candidate.unit, candidate.qty, record.day.add_days(-radius)));
-                nearest = slots[from..]
-                    .iter()
-                    .enumerate()
-                    .take_while(|(_, slot)| {
-                        (slot.unit, slot.qty) == (candidate.unit, candidate.qty)
-                            && slot.day <= record.day.add_days(radius)
-                    })
-                    .filter(|(offset, _)| !taken[from + offset])
-                    .min_by_key(|(_, slot)| (slot.day.0 - record.day.0).abs())
-                    .map(|(offset, slot)| (from + offset, slot.index));
-                if nearest.is_some() {
-                    break;
-                }
-            }
-            let Some((slot, index)) = nearest else {
-                continue;
-            };
-            taken[slot] = true;
-            matched[at] = Some(index);
-            // A total takes every member; a member leaves the total no longer whole.
-            let (Batch::Member(n) | Batch::Total(n)) = existing[index].batch else {
-                continue;
-            };
-            let total = matches!(existing[index].batch, Batch::Total(_));
-            for &other in &batches[&n] {
-                taken[other] |= total || matches!(batch_of(&slots[other]), Batch::Total(_));
+            if matched[at].is_none() {
+                matched[at] = flows.take_nearest(&candidates[at], record_at(at).day, radius);
             }
         }
     }
     matched
+}
+
+/// Units as small numbers, so that comparing them costs nothing: the account's
+/// own unit, which a flow or a record may also name outright, is 0, and the
+/// others count up from 1 in the order they are first seen, in any case.
+struct UnitIds<'a> {
+    default: &'a str,
+    known: Vec<&'a str>,
+}
+
+impl<'a> UnitIds<'a> {
+    fn id(&mut self, name: Option<&'a str>) -> usize {
+        let Some(name) = name.filter(|name| !name.eq_ignore_ascii_case(self.default)) else {
+            return 0;
+        };
+        let at = self.known.iter().position(|known| known.eq_ignore_ascii_case(name)).unwrap_or_else(|| {
+            self.known.push(name);
+            self.known.len() - 1
+        });
+        1 + at
+    }
+}
+
+/// What each record could be: its own amount, and the bank's original amount where that is another.
+fn candidates<'a, 't: 'a>(
+    len: usize,
+    record_at: impl Fn(usize) -> &'a Record<'t>,
+    units: &mut UnitIds<'a>,
+) -> Vec<[Option<Candidate>; 2]> {
+    (0..len)
+        .map(|at| {
+            let record = record_at(at);
+            let primary = Candidate { unit: units.id(record.facts().currency.as_deref()), qty: record.qty };
+            let original = record
+                .facts()
+                .original
+                .as_ref()
+                .map(|original| Candidate { unit: units.id(Some(original.unit.as_ref())), qty: original.qty });
+            [Some(primary), original.filter(|other| (other.unit, other.qty) != (primary.unit, primary.qty))]
+        })
+        .collect()
+}
+
+/// The flows of the book that a record could be, ordered by unit, amount and
+/// day so that finding one is a binary search, and which of them are taken.
+struct Flows<'a> {
+    existing: &'a [Existing<'a>],
+    slots: Vec<Slot>,
+    taken: Vec<bool>,
+    /// The slots of each batch: what is taken along with a flow.
+    batches: Map<u32, Vec<usize>>,
+}
+
+impl<'a> Flows<'a> {
+    /// A book is far longer than a statement, and most of it is of other
+    /// amounts: only the flows near the records, of an amount one of them has.
+    fn near(
+        existing: &'a [Existing<'a>],
+        days: std::ops::RangeInclusive<Day>,
+        candidates: &[[Option<Candidate>; 2]],
+        units: &mut UnitIds<'a>,
+    ) -> Flows<'a> {
+        let wanted: Set<(usize, Qty)> =
+            candidates.iter().flatten().flatten().map(|candidate| (candidate.unit, candidate.qty)).collect();
+        let (first, last) = (days.start().add_days(-WINDOW), days.end().add_days(WINDOW));
+        let mut slots: Vec<Slot> = existing
+            .iter()
+            .enumerate()
+            .filter(|(_, flow)| (first..=last).contains(&flow.day))
+            .map(|(index, flow)| Slot { unit: units.id(flow.unit), qty: flow.qty, day: flow.day, index })
+            .filter(|slot| wanted.contains(&(slot.unit, slot.qty)))
+            .collect();
+        slots.sort_unstable();
+        let mut batches: Map<u32, Vec<usize>> = Map::default();
+        for (at, slot) in slots.iter().enumerate() {
+            if let Batch::Member(n) | Batch::Total(n) = existing[slot.index].batch {
+                batches.entry(n).or_default().push(at);
+            }
+        }
+        Flows { existing, taken: vec![false; slots.len()], slots, batches }
+    }
+
+    /// Takes the flow nearest the day of a record, within `radius` days, that is one of its candidates and not yet taken.
+    fn take_nearest(&mut self, candidates: &[Option<Candidate>; 2], day: Day, radius: i32) -> Option<usize> {
+        let (slot, index) = candidates.iter().flatten().find_map(|candidate| self.nearest(candidate, day, radius))?;
+        self.take(slot, index);
+        Some(index)
+    }
+
+    /// The free flow of this amount nearest `day`, within `radius` days: its slot, and its index in the book.
+    fn nearest(&self, candidate: &Candidate, day: Day, radius: i32) -> Option<(usize, usize)> {
+        let key = |slot: &Slot| (slot.unit, slot.qty, slot.day);
+        let from =
+            self.slots.partition_point(|slot| key(slot) < (candidate.unit, candidate.qty, day.add_days(-radius)));
+        self.slots[from..]
+            .iter()
+            .enumerate()
+            .take_while(|(_, slot)| {
+                (slot.unit, slot.qty) == (candidate.unit, candidate.qty) && slot.day <= day.add_days(radius)
+            })
+            .filter(|(offset, _)| !self.taken[from + offset])
+            .min_by_key(|(_, slot)| (slot.day.0 - day.0).abs())
+            .map(|(offset, slot)| (from + offset, slot.index))
+    }
+
+    /// A total takes every member; a member leaves the total no longer whole.
+    fn take(&mut self, slot: usize, index: usize) {
+        self.taken[slot] = true;
+        let (Batch::Member(n) | Batch::Total(n)) = self.existing[index].batch else {
+            return;
+        };
+        let total = matches!(self.existing[index].batch, Batch::Total(_));
+        for &other in &self.batches[&n] {
+            let is_total = matches!(self.existing[self.slots[other].index].batch, Batch::Total(_));
+            self.taken[other] |= total || is_total;
+        }
+    }
 }
 
 #[cfg(test)]

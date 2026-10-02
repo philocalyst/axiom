@@ -29,7 +29,9 @@ use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{Fact, Moment, SourceFact, Timeline};
-use crate::{Applied, Cause, Holding, Options, Posted, Promise, Recorded, Run, RuntimeRange, State, explain};
+use crate::{
+    Applied, Cause, Holding, OmittedInputs, Options, Posted, Promise, PromisedFlows, Recorded, Run, State, explain,
+};
 
 /// Why one native contract occurrence could not be materialized.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,8 +49,8 @@ pub enum TemplateError {
 /// The shared-pool ranges appended by one materialization call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OccurrenceOutput {
-    pub flows: crate::RuntimeRange,
-    pub missing_inputs: crate::RuntimeRange,
+    pub flows: PromisedFlows,
+    pub missing_inputs: OmittedInputs,
 }
 
 impl OccurrenceOutput {
@@ -458,8 +460,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         missing_inputs.truncate(write);
 
         Ok(OccurrenceOutput {
-            flows: crate::RuntimeRange::new(flow_start, flows.len() - flow_start),
-            missing_inputs: crate::RuntimeRange::new(missing_start, missing_inputs.len() - missing_start),
+            flows: PromisedFlows::of(flow_start..flows.len()),
+            missing_inputs: OmittedInputs::of(missing_start..missing_inputs.len()),
         })
     }
 
@@ -1557,8 +1559,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             due,
             kept: Some((day, txn_id)),
             waived: false,
-            flows: RuntimeRange::new(flow_start, self.record.promised_flows.len() - flow_start),
-            missing_inputs: RuntimeRange::new(missing_start, self.record.promise_missing_inputs.len() - missing_start),
+            flows: PromisedFlows::of(flow_start..self.record.promised_flows.len()),
+            missing_inputs: OmittedInputs::of(missing_start..self.record.promise_missing_inputs.len()),
         });
         self.scratch.runtime_flows = flows;
         self.scratch.runtime_details = details;

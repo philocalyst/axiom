@@ -289,7 +289,7 @@ fn diagnostics_come_in_reading_order_one_report_per_cause_and_are_counted() {
         at(Diagnostic::error("d", "again"), 0, "five"),
     ];
     let refs: Vec<&Diagnostic> = all.iter().collect();
-    let (drawn, tally) = Renderer::new(&sources, Terminal::plain(100)).present(&refs, false);
+    let (drawn, tally) = Renderer::new(&sources, Terminal::plain(100)).present(&refs, Limit::Capped);
     let headers: Vec<&str> = drawn.lines().filter(|line| line.contains("]: ")).collect();
     assert_eq!(
         headers,
@@ -330,11 +330,11 @@ fn a_flood_is_counted_not_drawn_unless_asked_for() {
         .collect();
     let refs: Vec<&Diagnostic> = all.iter().collect();
     let renderer = Renderer::new(&sources, Terminal::plain(100));
-    let (drawn, tally) = renderer.present(&refs, false);
+    let (drawn, tally) = renderer.present(&refs, Limit::Capped);
     assert_eq!(drawn.matches("error[").count(), 50);
     assert!(drawn.contains("… 10 more diagnostics not shown (10 errors); `--all` shows every one"), "{drawn}");
     assert_eq!(tally.errors, 60);
-    assert_eq!(renderer.present(&refs, true).0.matches("error[").count(), 60);
+    assert_eq!(renderer.present(&refs, Limit::Every).0.matches("error[").count(), 60);
 }
 
 #[test]

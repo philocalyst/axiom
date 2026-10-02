@@ -1961,6 +1961,58 @@ fn a_folder_gives_a_year_and_a_month_by_its_path() {
 }
 
 #[test]
+fn a_path_segment_names_a_year_a_month_or_both() {
+    assert_eq!(Named::of("2026"), Some(Named::Year(2026)));
+    assert_eq!(Named::of("03"), Some(Named::Month(3)));
+    assert_eq!(Named::of("2026-03"), Some(Named::YearMonth(2026, 3)));
+    for not in ["", "26", "3", "13", "00", "2026-13", "2026-3", "26-03", "2026-03-01", "journal", "2026a"] {
+        assert_eq!(Named::of(not), None, "{not:?}");
+    }
+}
+
+#[test]
+fn a_written_date_is_completed_as_the_parser_reads_it() {
+    assert_eq!(MARCH.complete("2026-01-15"), Some(day(2026, 1, 15)), "a whole date needs no place");
+    assert_eq!(Folder::default().complete("2026-01-15"), Some(day(2026, 1, 15)));
+    assert_eq!(MARCH.complete("04-01"), Some(day(2026, 4, 1)));
+    assert_eq!(MARCH.complete("15"), Some(day(2026, 3, 15)));
+    assert_eq!(MARCH.complete("5"), Some(day(2026, 3, 5)));
+    assert_eq!(YEAR.complete("04-01"), Some(day(2026, 4, 1)));
+    // What the place does not give, what is no date, and what is not a date's shape.
+    for (place, written) in [(YEAR, "15"), (Folder::default(), "04-01"), (Folder::default(), "15")] {
+        assert_eq!(place.complete(written), None, "{written:?} in {place:?}");
+    }
+    for written in ["", "2026-02-30", "02-30", "32", "015", "1-15", "4-1", "2026-03", "15 USD", "2026", "x"] {
+        assert_eq!(MARCH.complete(written), None, "{written:?}");
+    }
+}
+
+#[test]
+fn a_day_is_shortened_to_what_the_place_gives_and_completes_back() {
+    let days = [day(2026, 3, 5), day(2026, 4, 1), day(2026, 12, 31), day(2027, 1, 1), day(2025, 3, 5)];
+    let shortest = |place: Folder| days.map(|day| place.shorten(day));
+    assert_eq!(shortest(MARCH), ["05", "04-01", "12-31", "2027-01-01", "2025-03-05"]);
+    assert_eq!(shortest(YEAR), ["03-05", "04-01", "12-31", "2027-01-01", "2025-03-05"]);
+    assert_eq!(shortest(Folder::default()), days.map(|day| day.to_string()));
+    for place in [MARCH, YEAR, Folder::default()] {
+        for day in days {
+            assert_eq!(place.complete(&place.shorten(day)), Some(day), "{place:?} {day}");
+        }
+    }
+}
+
+#[test]
+fn a_heading_line_is_a_year_or_a_month_and_nothing_else() {
+    let heading = |line: &str| Folder::heading(line.as_bytes());
+    assert_eq!(heading("2026\n"), Some(YEAR));
+    assert_eq!(heading("2026-03 // March"), Some(MARCH));
+    assert_eq!(heading("2026   "), Some(YEAR));
+    for not in ["", "2026x", "2026 x", "2026//x", "2026-13", "2026-3", "2026-03-01", "  2026", "03", "x 2026"] {
+        assert_eq!(heading(not), None, "{not:?}");
+    }
+}
+
+#[test]
 fn layout_free_is_gone_and_says_why() {
     let src = "layout free // folders stop giving dates\n";
     let error = only_error(src, "layout-is-gone");

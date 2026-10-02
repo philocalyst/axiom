@@ -4,33 +4,52 @@
 //! executes borrowed `model::sync::Pattern` values; it has no second pattern
 //! language or semantic representation.
 
-use axiom_core::Id;
+use axiom_core::{Arena, Groups, Id};
 use axiom_model::Book;
 use axiom_model::sync::{Capture, CharClass, Op, Pattern};
 use memchr::memmem;
 
 const MAX_DEPTH: usize = 64;
 
+/// A literal that starts a pattern: a run of bytes in [`Patterns`]' arena of them.
+type Literal = axiom_core::Run<u8>;
+
 /// A compiled program set borrows the book's canonical pattern arena. The
-/// start-literal lists are only a lookup index; the Op programs remain in the
-/// model arena and are never copied.
+/// start-literal index is only a lookup: every literal's bytes sit in one arena
+/// and a pattern's literals are a row of runs into it, so finding where a memo
+/// may match is a slice and a `memmem`. The Op programs remain in the model
+/// arena and are never copied.
 pub struct Patterns<'a, 's> {
     book: &'a Book<'s>,
-    starts: Vec<Option<Vec<Vec<u8>>>>,
+    /// What a match must begin with, one of these per pattern. A pattern that may begin anywhere has none.
+    starts: Groups<Pattern, Literal>,
+    literals: Arena<u8>,
 }
 
 impl<'a, 's> Patterns<'a, 's> {
     pub fn new(book: &'a Book<'s>) -> Patterns<'a, 's> {
-        let mut starts = vec![None; book.patterns.len()];
         let mut visiting = vec![false; book.patterns.len()];
+        let (mut literals, mut rows) = (Arena::new(), Vec::new());
         for (id, _) in book.patterns.iter() {
-            starts[id.index()] = starts_of(book, id, &mut visiting, 0);
+            for literal in starts_of(book, id, &mut visiting, 0).into_iter().flatten() {
+                rows.push((id, literals.extend(literal)));
+            }
         }
-        Patterns { book, starts }
+        Patterns { book, starts: Groups::build(book.patterns.len(), rows.iter().copied()), literals }
     }
 
-    pub fn starts(&self, id: Id<Pattern>) -> Option<&[Vec<u8>]> {
-        self.starts.get(id.index())?.as_deref()
+    /// The literals a match of `id` must begin with, one of them; `None` where it may begin anywhere.
+    pub fn starts(&self, id: Id<Pattern>) -> Option<impl ExactSizeIterator<Item = &[u8]> + '_> {
+        let row = &self.starts[id];
+        (!row.is_empty()).then(|| row.iter().map(|&literal| &self.literals[literal]))
+    }
+
+    /// What every match of `id` begins with, when that is one literal: what a search can jump to.
+    fn prefix(&self, id: Id<Pattern>) -> &[u8] {
+        match self.starts[id][..] {
+            [only] => &self.literals[only],
+            _ => &[],
+        }
     }
 
     fn pattern(&self, id: Id<Pattern>) -> Option<&Pattern> {
@@ -79,7 +98,7 @@ impl Run {
         self.literal = 0;
         self.captures.clear();
         let pattern = patterns.pattern(id)?;
-        let end = body(&pattern.program, hay, at, self, patterns, 0)?;
+        let end = Matcher { hay, patterns, run: self }.body(&pattern.program, at, 0)?;
         if !boundary(hay, end) {
             self.literal = 0;
             self.captures.clear();
@@ -90,10 +109,7 @@ impl Run {
 
     pub fn find(&mut self, id: Id<Pattern>, hay: &[u8], from: usize, patterns: &Patterns<'_, '_>) -> Option<Found> {
         let text = std::str::from_utf8(hay).ok()?;
-        let prefix = match patterns.starts(id) {
-            Some([only]) => only.as_slice(),
-            _ => &[],
-        };
+        let prefix = patterns.prefix(id);
         let mut at = from.min(hay.len());
         if !text.is_char_boundary(at) {
             at = text.char_indices().find_map(|(at, _)| (at > from).then_some(at))?;
@@ -118,7 +134,8 @@ fn boundary(hay: &[u8], at: usize) -> bool {
     at <= hay.len() && (at == 0 || at == hay.len() || hay.get(at).is_some_and(|byte| byte & 0b1100_0000 != 0b1000_0000))
 }
 
-/// The fixed-start literals for a pattern, or `None` if it may start anywhere.
+/// The fixed-start literals for a pattern, or `None` if it may start anywhere. They are gathered per pattern
+/// in a short-lived vector, because the alternatives of a choice are as many as it has ways.
 fn starts_of(book: &Book<'_>, id: Id<Pattern>, visiting: &mut [bool], depth: usize) -> Option<Vec<Vec<u8>>> {
     if depth > MAX_DEPTH {
         return None;
@@ -177,94 +194,104 @@ fn starts_in(program: &[Op], book: &Book<'_>, visiting: &mut [bool], depth: usiz
     }
 }
 
-/// A body either succeeds wholly or leaves the scratch state as it found it.
-fn body(ops: &[Op], hay: &[u8], pos: usize, run: &mut Run, patterns: &Patterns<'_, '_>, depth: usize) -> Option<usize> {
-    if depth > MAX_DEPTH {
-        return None;
-    }
-    let (literal, captured) = (run.literal, run.captures.len());
-    let ended = sequence(ops, hay, pos, run, patterns, depth);
-    if ended.is_none() {
-        run.literal = literal;
-        run.captures.truncate(captured);
-    }
-    ended
+/// One pattern being executed against one memo.
+struct Matcher<'m, 'a, 's> {
+    hay: &'m [u8],
+    patterns: &'m Patterns<'a, 's>,
+    run: &'m mut Run,
 }
 
-fn sequence(
-    ops: &[Op],
-    hay: &[u8],
-    mut pos: usize,
-    run: &mut Run,
-    patterns: &Patterns<'_, '_>,
-    depth: usize,
-) -> Option<usize> {
-    let mut at = 0;
-    while let Some(op) = ops.get(at) {
-        at += 1;
-        match op {
-            Op::Literal(sym) => {
-                let literal = patterns.book.text(*sym).as_bytes();
-                let end = pos.checked_add(literal.len())?;
-                if !hay.get(pos..end)?.eq_ignore_ascii_case(literal) {
-                    return None;
+impl Matcher<'_, '_, '_> {
+    /// A body either succeeds wholly or leaves the scratch state as it found it.
+    fn body(&mut self, ops: &[Op], pos: usize, depth: usize) -> Option<usize> {
+        if depth > MAX_DEPTH {
+            return None;
+        }
+        let (literal, captured) = (self.run.literal, self.run.captures.len());
+        let ended = self.sequence(ops, pos, depth);
+        if ended.is_none() {
+            self.run.literal = literal;
+            self.run.captures.truncate(captured);
+        }
+        ended
+    }
+
+    fn sequence(&mut self, ops: &[Op], mut pos: usize, depth: usize) -> Option<usize> {
+        let mut at = 0;
+        while let Some(op) = ops.get(at) {
+            at += 1;
+            pos = match op {
+                Op::Literal(sym) => self.literal(self.patterns.book.text(*sym).as_bytes(), pos)?,
+                Op::Name(sym) => self.name(self.patterns.book.name(*sym).as_bytes(), pos)?,
+                Op::Class(class) => step(*class, self.hay, pos)?,
+                Op::Choice { len } => return self.choice(usize::from(*len), ops.get(at..)?, pos, depth),
+                Op::Repeat { min, max, len } => {
+                    let inner = ops.get(at..at + usize::from(*len))?;
+                    at += usize::from(*len);
+                    self.repeat(inner, (*min, *max), pos, depth)?
                 }
-                run.literal += literal.len();
-                pos = end;
-            }
-            Op::Name(sym) => {
-                let name = patterns.book.name(*sym).as_bytes();
-                let end = match_name(name, hay, pos)?;
-                run.literal += end - pos;
-                pos = end;
-            }
-            Op::Class(class) => pos = step(*class, hay, pos)?,
-            Op::Choice { len } => {
-                // The ways are a chain to the end of this body.
-                let (mut way, mut rest) = (usize::from(*len), ops.get(at..)?);
-                loop {
-                    let (one, others) = rest.split_at_checked(way)?;
-                    if let Some(end) = body(one, hay, pos, run, patterns, depth + 1) {
-                        return Some(end);
-                    }
-                    match others {
-                        [Op::Choice { len }, next @ ..] => (way, rest) = (usize::from(*len), next),
-                        last => return body(last, hay, pos, run, patterns, depth + 1),
-                    }
+                Op::Capture { name, len } => {
+                    let inner = ops.get(at..at + usize::from(*len))?;
+                    at += usize::from(*len);
+                    let end = self.body(inner, pos, depth + 1)?;
+                    self.run.captures.push((*name, pos, end));
+                    end
                 }
+                Op::Call(callee) => self.body(&self.patterns.pattern(*callee)?.program, pos, depth + 1)?,
+            };
+        }
+        Some(pos)
+    }
+
+    fn literal(&mut self, literal: &[u8], pos: usize) -> Option<usize> {
+        let end = pos.checked_add(literal.len())?;
+        if !self.hay.get(pos..end)?.eq_ignore_ascii_case(literal) {
+            return None;
+        }
+        self.run.literal += literal.len();
+        Some(end)
+    }
+
+    fn name(&mut self, name: &[u8], pos: usize) -> Option<usize> {
+        let end = match_name(name, self.hay, pos)?;
+        self.run.literal += end - pos;
+        Some(end)
+    }
+
+    /// The ways of a choice are a chain to the end of the body: the first `len` ops, then a `Choice` that gives the
+    /// length of the next way, and so on, the last way running to the end. The first that matches wins.
+    fn choice(&mut self, len: usize, ways: &[Op], pos: usize, depth: usize) -> Option<usize> {
+        let (mut way, mut rest) = (len, ways);
+        loop {
+            let (one, others) = rest.split_at_checked(way)?;
+            if let Some(end) = self.body(one, pos, depth + 1) {
+                return Some(end);
             }
-            Op::Repeat { min, max, len } => {
-                let inner = ops.get(at..at + usize::from(*len))?;
-                at += usize::from(*len);
-                let (mut end, mut count) = (pos, 0u32);
-                while max.is_none_or(|max| count < u32::from(max)) {
-                    let Some(next) = body(inner, hay, end, run, patterns, depth + 1) else {
-                        break;
-                    };
-                    count += 1;
-                    if next == end {
-                        count = count.max(u32::from(*min));
-                        break;
-                    }
-                    end = next;
-                }
-                (count >= u32::from(*min)).then_some(())?;
-                pos = end;
-            }
-            Op::Capture { name, len } => {
-                let inner = ops.get(at..at + usize::from(*len))?;
-                at += usize::from(*len);
-                let end = body(inner, hay, pos, run, patterns, depth + 1)?;
-                run.captures.push((*name, pos, end));
-                pos = end;
-            }
-            Op::Call(callee) => {
-                let called = patterns.pattern(*callee)?;
-                pos = body(&called.program, hay, pos, run, patterns, depth + 1)?;
+            match others {
+                [Op::Choice { len }, next @ ..] => (way, rest) = (usize::from(*len), next),
+                last => return self.body(last, pos, depth + 1),
             }
         }
     }
-    Some(pos)
+
+    /// As many matches of `inner` as `bounds` (a minimum and a maximum, if any) allow: it stops at the first that
+    /// fails, or that moves nowhere, and the minimum is then met by what could not be told apart.
+    fn repeat(&mut self, inner: &[Op], bounds: (u8, Option<u8>), pos: usize, depth: usize) -> Option<usize> {
+        let (min, max) = bounds;
+        let (mut end, mut count) = (pos, 0u32);
+        while max.is_none_or(|max| count < u32::from(max)) {
+            let Some(next) = self.body(inner, end, depth + 1) else {
+                break;
+            };
+            count += 1;
+            if next == end {
+                count = count.max(u32::from(min));
+                break;
+            }
+            end = next;
+        }
+        (count >= u32::from(min)).then_some(end)
+    }
 }
 
 /// Match a built-in entity/account name without constructing its normalized

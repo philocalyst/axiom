@@ -15,8 +15,8 @@
 
 use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param,
-    Place, RuntimeTxn, StepKind, Subject, System, TemplateProgram, Trigger, Value, Waive, Window,
+    Amount, Assert, BinOp, Book, Budget, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op,
+    Param, Place, Purpose, RuntimeTxn, StepKind, Subject, System, TemplateProgram, Trigger, Value, Waive, Window,
 };
 
 use crate::calc::Calc;
@@ -168,121 +168,135 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
             _ => return Vec::new(),
         };
         let window = reads.window(book, ctx);
-        let mut found: Vec<Id<Flow>> = match reads {
-            Reads::Tally(name) => {
-                let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
-                let counted = of_name.filter(|e| window.contains(e.day)).filter_map(|e| match e.cause {
-                    Cause::Flow(id) if Some(id) != current => Some(id),
-                    _ => None,
-                });
-                counted.take(3).collect()
-            }
-            Reads::Total(dir, _) => {
-                let Subject::Place(place) = ctx.subject else { return Vec::new() };
-                let flows = &book.touching[place];
-                let before = match current {
-                    Some(current) => flows.partition_point(|&id| id < current),
-                    None => flows.partition_point(|&id| book.flows[id].day <= ctx.day),
-                };
-                let crosses = |flow: &Flow| {
-                    let (here, there) = if dir == Dir::In { (flow.to, flow.from) } else { (flow.from, flow.to) };
-                    book.places.covers(place, here) && !book.places.covers(place, there)
-                };
-                let moves = flows[..before].iter().rev().take(400).filter(|&&id| {
-                    let flow = &book.flows[id];
-                    crosses(flow) && flow.recognized.overlaps(window)
-                });
-                moves.copied().take(3).collect()
-            }
-            Reads::Purpose(_) | Reads::Budget(_) => {
-                let (scopes, read_days): (Vec<_>, Days) = match reads {
-                    Reads::Purpose(_) => (
-                        self.law
-                            .range(cond)
-                            .filter_map(|at| match self.law.nodes[node_id(at)].op {
-                                Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => {
-                                    purpose.or_else(|| match self.law.owner {
-                                        axiom_model::Owner::Purpose(purpose) => Some(purpose),
-                                        _ => None,
-                                    })
-                                }
-                                _ => None,
-                            })
-                            .collect(),
-                        window,
-                    ),
-                    Reads::Budget(id) => {
-                        let Some(budget) = book.budgets.get(id) else { return Vec::new() };
-                        let start = if budget.starts == Day::MIN {
-                            self.plan.period_start.unwrap_or(budget.starts)
-                        } else {
-                            budget.starts
-                        };
-                        let active_start = if budget.terms.at(ctx.day).carries {
-                            crate::budget::carry_start(budget, start, ctx.anchor()).unwrap_or(start)
-                        } else {
-                            crate::budget::segment_start(budget, start, ctx.anchor())
-                        };
-                        let read_days = Days::new(active_start, ctx.anchor()).unwrap_or(window);
-                        (vec![budget.purpose], read_days)
-                    }
-                    _ => unreachable!(),
-                };
-                let mut counted = Vec::with_capacity(3);
-                for (id, flow) in book.flows.iter() {
-                    let before = current.map_or(flow.day <= ctx.day, |current| id < current);
-                    if !before
-                        || !flow.recognized.overlaps(read_days)
-                        || !self.plan.events.state(id, flow).is_real_on(ctx.day)
-                    {
-                        continue;
-                    }
-                    let Some(actual) = flow.purpose.map(|purpose| purpose.purpose) else { continue };
-                    if !scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted)) {
-                        continue;
-                    }
-                    let owns = |place| {
-                        let details = &book.places[place];
-                        details.class != Class::Outside
-                            && self
-                                .plan
-                                .owners_of(place)
-                                .iter()
-                                .any(|share| share.owner == ctx.owner && !share.share.is_zero())
-                    };
-                    let direction =
-                        crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
-                    let Some(direction) = direction else { continue };
-                    let amounts = self.plan.amounts.get(&id);
-                    let (amount, place) = match direction {
-                        Dir::Out => {
-                            (Amount::new(amounts.map_or(flow.out.qty, |amounts| amounts.out), flow.out.unit), flow.from)
-                        }
-                        Dir::In => (
-                            Amount::new(amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive), flow.arrive.unit),
-                            flow.to,
-                        ),
-                    };
-                    let Ok(amount) = (Calc { book, day: flow.day }).convert(amount, book.base) else { continue };
-                    if !self
-                        .plan
-                        .allocate(place, amount.qty)
-                        .any(|(owner, qty)| owner.owner == ctx.owner && !qty.is_zero())
-                    {
-                        continue;
-                    }
-                    let key = (flow.day, id);
-                    let at = counted.binary_search_by_key(&key, |&(day, id)| (day, id)).unwrap_or_else(|at| at);
-                    counted.insert(at, key);
-                    if counted.len() > 3 {
-                        counted.remove(0);
-                    }
-                }
-                counted.into_iter().rev().map(|(_, id)| id).collect()
-            }
+        let mut found = match reads {
+            Reads::Tally(name) => self.tally_contributors(name, window, current),
+            Reads::Total(dir, _) => self.total_contributors(dir, window, current),
+            Reads::Purpose(_) => self.purpose_contributors(&self.purpose_scopes(cond), window, current),
+            Reads::Budget(id) => match self.budget_read(id, window) {
+                Some((purpose, read_days)) => self.purpose_contributors(&[purpose], read_days, current),
+                None => Vec::new(),
+            },
         };
         found.reverse();
         found
+    }
+
+    /// The latest flows that a tally of the owner's counted in the window, other than the current one.
+    fn tally_contributors(&self, name: Sym, window: Days, current: Option<Id<Flow>>) -> Vec<Id<Flow>> {
+        let ctx = self.ctx;
+        let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
+        let counted = of_name.filter(|e| window.contains(e.day)).filter_map(|e| match e.cause {
+            Cause::Flow(id) if Some(id) != current => Some(id),
+            _ => None,
+        });
+        counted.take(3).collect()
+    }
+
+    /// The latest flows before the current one that crossed the boundary of the place in the direction a total
+    /// reads, and were recognized in its window.
+    fn total_contributors(&self, dir: Dir, window: Days, current: Option<Id<Flow>>) -> Vec<Id<Flow>> {
+        let (book, ctx) = (self.book(), self.ctx);
+        let Subject::Place(place) = ctx.subject else { return Vec::new() };
+        let flows = &book.touching[place];
+        let before = match current {
+            Some(current) => flows.partition_point(|&id| id < current),
+            None => flows.partition_point(|&id| book.flows[id].day <= ctx.day),
+        };
+        let crosses = |flow: &Flow| {
+            let (here, there) = if dir == Dir::In { (flow.to, flow.from) } else { (flow.from, flow.to) };
+            book.places.covers(place, here) && !book.places.covers(place, there)
+        };
+        let moves = flows[..before].iter().rev().take(400).filter(|&&id| {
+            let flow = &book.flows[id];
+            crosses(flow) && flow.recognized.overlaps(window)
+        });
+        moves.copied().take(3).collect()
+    }
+
+    /// The purposes the purpose totals under `cond` read.
+    fn purpose_scopes(&self, cond: NodeId) -> Vec<Id<Purpose>> {
+        let scope = |at| match self.law.nodes[node_id(at)].op {
+            Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => purpose.or_else(|| match self.law.owner {
+                axiom_model::Owner::Purpose(purpose) => Some(purpose),
+                _ => None,
+            }),
+            _ => None,
+        };
+        self.law.range(cond).filter_map(scope).collect()
+    }
+
+    /// The purpose a budget counts, and the days it reads: from where its current window or carry begins up to
+    /// now. A budget the book does not have reads nothing.
+    fn budget_read(&self, id: Id<Budget>, window: Days) -> Option<(Id<Purpose>, Days)> {
+        let ctx = self.ctx;
+        let budget = self.book().budgets.get(id)?;
+        let start =
+            if budget.starts == Day::MIN { self.plan.period_start.unwrap_or(budget.starts) } else { budget.starts };
+        let active_start = if budget.terms.at(ctx.day).carries {
+            crate::budget::carry_start(budget, start, ctx.anchor()).unwrap_or(start)
+        } else {
+            crate::budget::segment_start(budget, start, ctx.anchor())
+        };
+        Some((budget.purpose, Days::new(active_start, ctx.anchor()).unwrap_or(window)))
+    }
+
+    /// The latest three flows before the current one that count towards purposes, in order of their days.
+    fn purpose_contributors(
+        &self,
+        scopes: &[Id<Purpose>],
+        read_days: Days,
+        current: Option<Id<Flow>>,
+    ) -> Vec<Id<Flow>> {
+        let mut counted: Vec<(Day, Id<Flow>)> = Vec::with_capacity(3);
+        for (id, flow) in self.book().flows.iter() {
+            if !self.counts_toward(id, flow, scopes, read_days, current) {
+                continue;
+            }
+            let key = (flow.day, id);
+            let at = counted.binary_search(&key).unwrap_or_else(|at| at);
+            counted.insert(at, key);
+            if counted.len() > 3 {
+                counted.remove(0);
+            }
+        }
+        counted.into_iter().rev().map(|(_, id)| id).collect()
+    }
+
+    /// Whether a flow before the current one, real on the day and recognized in the days read, is of one of the
+    /// purposes and moves money that the owner has a share of.
+    fn counts_toward(
+        &self,
+        id: Id<Flow>,
+        flow: &Flow,
+        scopes: &[Id<Purpose>],
+        read_days: Days,
+        current: Option<Id<Flow>>,
+    ) -> bool {
+        let (book, ctx) = (self.book(), self.ctx);
+        let before = current.map_or(flow.day <= ctx.day, |current| id < current);
+        if !before || !flow.recognized.overlaps(read_days) || !self.plan.events.state(id, flow).is_real_on(ctx.day) {
+            return false;
+        }
+        let Some(actual) = flow.purpose.map(|purpose| purpose.purpose) else { return false };
+        if !scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted)) {
+            return false;
+        }
+        let owns = |place| {
+            let details = &book.places[place];
+            details.class != Class::Outside
+                && self.plan.owners_of(place).iter().any(|share| share.owner == ctx.owner && !share.share.is_zero())
+        };
+        let direction = crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
+        let Some(direction) = direction else { return false };
+        let amounts = self.plan.amounts.get(&id);
+        let (amount, place) = match direction {
+            Dir::Out => (Amount::new(amounts.map_or(flow.out.qty, |amounts| amounts.out), flow.out.unit), flow.from),
+            Dir::In => {
+                (Amount::new(amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive), flow.arrive.unit), flow.to)
+            }
+        };
+        let Ok(amount) = (Calc { book, day: flow.day }).convert(amount, book.base) else { return false };
+        self.plan.allocate(place, amount.qty).any(|(owner, qty)| owner.owner == ctx.owner && !qty.is_zero())
     }
 
     /// The flow that fired the law, the flows that built what its condition

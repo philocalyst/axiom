@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+use axiom_core::{Groups, Id};
 use memchr::memchr;
 
 use crate::Span;
@@ -19,144 +20,120 @@ struct Tag<'t> {
     empty: bool,
     at: Span,
     value: &'t str,
-    /// Where the value is, without the spaces around it.
+    /// Where the value is, with the white space around it.
     span: Span,
     /// A CDATA text segment, not an element boundary.
     cdata: bool,
 }
 
+impl Tag<'_> {
+    /// Where the text of the tag is, without the white space around it.
+    fn written(&self) -> Span {
+        let (leading, trailing) =
+            (self.value.len() - self.value.trim_start().len(), self.value.len() - self.value.trim_end().len());
+        Span { start: self.span.start.saturating_add(leading), end: self.span.end.saturating_sub(trailing) }
+    }
+}
+
 /// The tags of a text, skipping declarations, comments and processing
 /// instructions. Attributes are not read.
-fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
-    let bytes = text.as_bytes();
-    let mut from = 0;
-    std::iter::from_fn(move || {
-        loop {
-            let open = match memchr(b'<', &bytes[from..]) {
-                Some(relative) => from + relative,
-                None if from < bytes.len() => {
-                    let start = from;
-                    from = bytes.len();
-                    return Some(Ok(Tag {
-                        name: "",
-                        closing: false,
-                        empty: false,
-                        at: Span { start, end: bytes.len() },
-                        value: &text[start..],
-                        span: Span { start, end: bytes.len() },
-                        cdata: false,
-                    }));
-                }
-                None => return None,
-            };
-            if open > from {
-                let start = from;
-                from = open;
-                return Some(Ok(Tag {
-                    name: "",
-                    closing: false,
-                    empty: false,
-                    at: Span { start, end: open },
-                    value: &text[start..open],
-                    span: Span { start, end: open },
-                    cdata: false,
-                }));
+fn tags(text: &str) -> Tags<'_> {
+    Tags { text, from: 0 }
+}
+
+struct Tags<'t> {
+    text: &'t str,
+    /// Where the next thing starts.
+    from: usize,
+}
+
+impl<'t> Iterator for Tags<'t> {
+    type Item = Result<Tag<'t>, Broken>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.from < self.text.len() {
+            if let Some(found) = self.read() {
+                return Some(found);
             }
-            if bytes[open..].starts_with(b"<!--") {
-                let Some(end) = text[open + 4..].find("-->") else {
-                    from = bytes.len();
-                    return Some(Err(Broken {
-                        row: 0,
-                        span: Span { start: open, end: bytes.len() },
-                        what: "a comment is never closed",
-                    }));
-                };
-                from = open + 4 + end + 3;
-                continue;
-            }
-            if bytes[open..].starts_with(b"<![CDATA[") {
-                let body = open + 9;
-                let Some(end) = text[body..].find("]]>") else {
-                    from = bytes.len();
-                    return Some(Err(Broken {
-                        row: 0,
-                        span: Span { start: open, end: bytes.len() },
-                        what: "a CDATA section is never closed",
-                    }));
-                };
-                let stop = body + end;
-                from = stop + 3;
-                return Some(Ok(Tag {
-                    name: "",
-                    closing: false,
-                    empty: false,
-                    at: Span { start: open, end: from },
-                    value: &text[body..stop],
-                    span: Span { start: body, end: stop },
-                    cdata: true,
-                }));
-            }
-            if bytes[open..].starts_with(b"<?") {
-                let Some(end) = text[open + 2..].find("?>") else {
-                    from = bytes.len();
-                    return Some(Err(Broken {
-                        row: 0,
-                        span: Span { start: open, end: bytes.len() },
-                        what: "a processing instruction is never closed",
-                    }));
-                };
-                from = open + 2 + end + 2;
-                continue;
-            }
-            if bytes[open..].get(..9).is_some_and(|head| head.eq_ignore_ascii_case(b"<!DOCTYPE")) {
-                let Some(close) = declaration_end(bytes, open + 9) else {
-                    from = bytes.len();
-                    return Some(Err(Broken {
-                        row: 0,
-                        span: Span { start: open, end: bytes.len() },
-                        what: "a document type declaration is never closed",
-                    }));
-                };
-                from = close + 1;
-                continue;
-            }
-            if bytes[open..].starts_with(b"<!") {
-                let Some(close) = tag_end(bytes, open + 2) else {
-                    from = bytes.len();
-                    return Some(Err(Broken {
-                        row: 0,
-                        span: Span { start: open, end: bytes.len() },
-                        what: "a markup declaration is malformed or never closed",
-                    }));
-                };
-                from = close + 1;
-                continue;
-            }
-            let Some(close_rel) = tag_end(bytes, open + 1) else {
-                from = bytes.len();
-                return Some(Err(Broken {
-                    row: 0,
-                    span: Span { start: open, end: bytes.len() },
-                    what: "a tag is never closed",
-                }));
-            };
-            let close = close_rel;
-            from = close + 1;
-            let raw = text[open + 1..close].trim();
-            let (closing, raw) = raw.strip_prefix('/').map_or((false, raw), |name| (true, name));
-            let (empty, raw) = raw.strip_suffix('/').map_or((false, raw), |name| (true, name));
-            let name = raw.split_whitespace().next().unwrap_or("");
-            return Some(Ok(Tag {
-                name,
-                closing,
-                empty,
-                at: Span { start: open, end: close + 1 },
-                value: "",
-                span: Span { start: close + 1, end: close + 1 },
-                cdata: false,
-            }));
         }
-    })
+        None
+    }
+}
+
+impl<'t> Tags<'t> {
+    /// What starts at `from`: text, or markup. Markup that carries nothing is stepped over and gives `None`.
+    fn read(&mut self) -> Option<Result<Tag<'t>, Broken>> {
+        let bytes = self.text.as_bytes();
+        let open = memchr(b'<', &bytes[self.from..]).map_or(bytes.len(), |relative| self.from + relative);
+        if open > self.from {
+            return Some(Ok(self.text_to(open)));
+        }
+        let markup = &bytes[open..];
+        if markup.starts_with(b"<![CDATA[") {
+            return Some(self.cdata(open));
+        }
+        let (end, unclosed) = if markup.starts_with(b"<!--") {
+            (self.after(open + 4, "-->"), "a comment is never closed")
+        } else if markup.starts_with(b"<?") {
+            (self.after(open + 2, "?>"), "a processing instruction is never closed")
+        } else if markup.get(..9).is_some_and(|head| head.eq_ignore_ascii_case(b"<!DOCTYPE")) {
+            (declaration_end(bytes, open + 9).map(|close| close + 1), "a document type declaration is never closed")
+        } else if markup.starts_with(b"<!") {
+            (tag_end(bytes, open + 2).map(|close| close + 1), "a markup declaration is malformed or never closed")
+        } else {
+            return Some(self.element(open));
+        };
+        match end {
+            Some(end) => {
+                self.from = end;
+                None
+            }
+            None => Some(Err(self.broken(open, unclosed))),
+        }
+    }
+
+    /// The end of the first `closer` from `from` on.
+    fn after(&self, from: usize, closer: &str) -> Option<usize> {
+        self.text[from..].find(closer).map(|at| from + at + closer.len())
+    }
+
+    /// The text up to `end`.
+    fn text_to(&mut self, end: usize) -> Tag<'t> {
+        let at = Span { start: self.from, end };
+        self.from = end;
+        Tag { name: "", closing: false, empty: false, at, value: &self.text[at.start..end], span: at, cdata: false }
+    }
+
+    /// The CDATA section that opens at `open`: its contents are text, whatever they look like.
+    fn cdata(&mut self, open: usize) -> Result<Tag<'t>, Broken> {
+        let body = open + "<![CDATA[".len();
+        let Some(stop) = self.after(body, "]]>").map(|end| end - "]]>".len()) else {
+            return Err(self.broken(open, "a CDATA section is never closed"));
+        };
+        self.from = stop + "]]>".len();
+        let (at, span) = (Span { start: open, end: self.from }, Span { start: body, end: stop });
+        Ok(Tag { name: "", closing: false, empty: false, at, value: &self.text[body..stop], span, cdata: true })
+    }
+
+    /// The element tag that opens at `open`.
+    fn element(&mut self, open: usize) -> Result<Tag<'t>, Broken> {
+        let Some(close) = tag_end(self.text.as_bytes(), open + 1) else {
+            return Err(self.broken(open, "a tag is never closed"));
+        };
+        self.from = close + 1;
+        let raw = self.text[open + 1..close].trim();
+        let (closing, raw) = raw.strip_prefix('/').map_or((false, raw), |name| (true, name));
+        let (empty, raw) = raw.strip_suffix('/').map_or((false, raw), |name| (true, name));
+        let name = raw.split_whitespace().next().unwrap_or("");
+        let (at, span) = (Span { start: open, end: close + 1 }, Span { start: close + 1, end: close + 1 });
+        Ok(Tag { name, closing, empty, at, value: "", span, cdata: false })
+    }
+
+    /// Markup at `open` that never ends: the rest of the text is lost with it.
+    fn broken(&mut self, open: usize, what: &'static str) -> Broken {
+        self.from = self.text.len();
+        Broken { row: 0, span: Span { start: open, end: self.text.len() }, what }
+    }
 }
 
 fn tag_end(bytes: &[u8], mut at: usize) -> Option<usize> {
@@ -251,67 +228,58 @@ fn ends_with(open: &[&str], wanted: &[&str]) -> bool {
         && open[open.len() - wanted.len()..].iter().zip(wanted).all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
-/// Append one text node to the first value found at an element path. XML text
-/// split by comments or CDATA stays one value; a boundary that carried spaces
-/// contributes one separator while an adjacent boundary contributes none.
-fn append_text<'t>(
-    cell: &mut Cell<'t>,
-    trailing_space: &mut bool,
-    raw: &'t str,
-    span: Span,
-    cdata: bool,
-) -> Result<(), &'static str> {
-    let decoded = if cdata { Cow::Borrowed(raw) } else { decode(raw)? };
-    let value = decoded.as_ref();
-    if value.trim().is_empty() {
-        *trailing_space = cell.span != ABSENT;
-        return Ok(());
-    }
-    let leading_bytes = raw.len() - raw.trim_start().len();
-    let trailing_bytes = raw.len() - raw.trim_end().len();
-    let part_span =
-        Span { start: span.start.saturating_add(leading_bytes), end: span.end.saturating_sub(trailing_bytes) };
-
-    if cell.span == ABSENT {
-        let value = decoded.as_ref();
-        let ends_with_space = value.len() != value.trim_end().len();
-        cell.text = match decoded {
-            Cow::Borrowed(text) => Cow::Borrowed(text.trim()),
-            Cow::Owned(mut text) => {
-                let start = text.len() - text.trim_start().len();
-                let end = text.trim_end().len();
-                text.truncate(end);
-                text.drain(..start);
-                Cow::Owned(text)
-            }
-        };
-        cell.span = part_span;
-        *trailing_space = ends_with_space;
-        return Ok(());
-    }
-
-    let value = decoded.as_ref();
-    let trimmed = value.trim();
-    let leading_space = value.len() != value.trim_start().len();
-    let ends_with_space = value.len() != value.trim_end().len();
-    if !trimmed.is_empty() {
-        let mut joined = match std::mem::replace(&mut cell.text, Cow::Borrowed("")) {
-            Cow::Borrowed(text) => {
-                let mut joined = String::with_capacity(text.len() + trimmed.len() + 1);
-                joined.push_str(text);
-                joined
-            }
-            Cow::Owned(text) => text,
-        };
-        if (*trailing_space || leading_space) && !joined.is_empty() {
-            joined.push(' ');
+/// `text` without the white space around it, borrowed from where it was if it was.
+fn trimmed(text: Cow<'_, str>) -> Cow<'_, str> {
+    match text {
+        Cow::Borrowed(text) => Cow::Borrowed(text.trim()),
+        Cow::Owned(mut text) => {
+            let start = text.len() - text.trim_start().len();
+            let end = text.trim_end().len();
+            text.truncate(end);
+            text.drain(..start);
+            Cow::Owned(text)
         }
-        joined.push_str(trimmed);
-        cell.text = Cow::Owned(joined);
-        cell.span.end = span.end;
     }
-    *trailing_space = ends_with_space;
-    Ok(())
+}
+
+/// `text`, then `separator`, then `more`.
+fn joined<'t>(text: Cow<'t, str>, separator: &str, more: &str) -> Cow<'t, str> {
+    let mut joined = match text {
+        Cow::Borrowed(text) => {
+            let mut joined = String::with_capacity(text.len() + more.len() + 1);
+            joined.push_str(text);
+            joined
+        }
+        Cow::Owned(text) => text,
+    };
+    joined.push_str(separator);
+    joined.push_str(more);
+    Cow::Owned(joined)
+}
+
+impl Reading {
+    /// Appends one text node to the first value found at an element path. XML text split by comments or CDATA
+    /// stays one value; a boundary that carried spaces contributes one separator while an adjacent boundary
+    /// contributes none.
+    fn add<'t>(&mut self, cell: &mut Cell<'t>, tag: &Tag<'t>) -> Result<(), &'static str> {
+        let decoded = if tag.cdata { Cow::Borrowed(tag.value) } else { decode(tag.value)? };
+        if decoded.trim().is_empty() {
+            self.trailing_space = cell.span != ABSENT;
+            return Ok(());
+        }
+        let leading_space = decoded.len() != decoded.trim_start().len();
+        let trailing_space = decoded.len() != decoded.trim_end().len();
+        if cell.span == ABSENT {
+            (cell.text, cell.span) = (trimmed(decoded), tag.written());
+        } else {
+            let spaced = (self.trailing_space || leading_space) && !cell.text.is_empty();
+            let separator = if spaced { " " } else { "" };
+            cell.text = joined(std::mem::take(&mut cell.text), separator, decoded.trim());
+            cell.span.end = tag.span.end;
+        }
+        self.trailing_space = trailing_space;
+        Ok(())
+    }
 }
 
 /// Calls `each` with every `records` element of `text`, until it says stop.
@@ -324,113 +292,187 @@ pub(crate) fn scan<'t>(
     paths: &[&str],
     mut each: impl for<'a> FnMut(Result<Found<'a, 't>, Broken>) -> bool,
 ) {
-    let wanted: Vec<Vec<&str>> = paths.iter().map(|path| path.split('/').collect()).collect();
-    let (mut count, mut seen) = (0, false);
-    let mut cells: Vec<Cell<'t>> = (0..paths.len()).map(|_| Cell { text: Cow::Borrowed(""), span: ABSENT }).collect();
-    let mut capturing = vec![false; paths.len()];
-    let mut trailing_space = vec![false; paths.len()];
-    let mut stack: Vec<&str> = Vec::new();
-    let mut record_start = None;
-    // The leaf just read, whose closing tag (XML) says nothing.
-    let mut leaf: Option<&str> = None;
+    let mut reader = Reader::new(records, paths);
     for tag in tags(text) {
-        let tag = match tag {
-            Ok(tag) => tag,
-            Err(mut broken) => {
-                broken.row = count;
+        let step = match tag {
+            Ok(tag) => reader.read(tag),
+            Err(broken) => Step::Broken(Broken { row: reader.count, ..broken }),
+        };
+        let more = match step {
+            Step::Continue => true,
+            Step::Record(found) => each(Ok(found)),
+            Step::Broken(broken) => {
                 each(Err(broken));
-                return;
+                false
             }
         };
-        if tag.name.is_empty() {
-            if record_start.is_some() {
-                for (slot, path) in wanted.iter().enumerate() {
-                    if ends_with(&stack, path) && (cells[slot].span == ABSENT || capturing[slot]) {
-                        if let Err(what) =
-                            append_text(&mut cells[slot], &mut trailing_space[slot], tag.value, tag.span, tag.cdata)
-                        {
-                            each(Err(Broken { row: count, span: tag.span, what }));
-                            return;
-                        }
-                        capturing[slot] = true;
-                    }
-                }
-                if !tag.value.trim().is_empty() && wanted.iter().any(|path| ends_with(&stack, path)) {
-                    leaf = stack.last().copied();
-                }
-            }
-            continue;
-        }
-        seen = true;
-        let Some(begin) = record_start else {
-            if !tag.closing && tag.name.eq_ignore_ascii_case(records) && !tag.empty {
-                count += 1;
-                record_start = Some(tag.at);
-                for cell in &mut cells {
-                    *cell = Cell { text: Cow::Borrowed(""), span: ABSENT };
-                }
-                capturing.fill(false);
-                trailing_space.fill(false);
-                stack.clear();
-                stack.push(tag.name);
-            }
-            continue;
-        };
-        let after_leaf = leaf.take();
-        if tag.closing {
-            if tag.name.eq_ignore_ascii_case(records) {
-                let whole = Span { start: begin.start, end: tag.at.end };
-                record_start = None;
-                if !each(Ok(Found { number: count, whole, cells: &cells })) {
-                    return;
-                }
-                stack.clear();
-                capturing.fill(false);
-                trailing_space.fill(false);
-            } else if after_leaf == Some(tag.name) {
-                for (slot, path) in wanted.iter().enumerate() {
-                    if ends_with(&stack, path) {
-                        capturing[slot] = false;
-                        trailing_space[slot] = false;
-                    }
-                }
-                if stack.last().is_some_and(|name| name.eq_ignore_ascii_case(tag.name)) {
-                    stack.pop();
-                }
-            } else {
-                // Also closes what an unclosed empty element (SGML) left open inside it.
-                if let Some(depth) = stack.iter().rposition(|name| name.eq_ignore_ascii_case(tag.name)) {
-                    for (slot, path) in wanted.iter().enumerate() {
-                        if ends_with(&stack, path) {
-                            capturing[slot] = false;
-                            trailing_space[slot] = false;
-                        }
-                    }
-                    stack.truncate(depth);
-                }
-            }
-        } else {
-            if let Some(previous) = after_leaf
-                && stack.last().is_some_and(|name| name.eq_ignore_ascii_case(previous))
-            {
-                for (slot, path) in wanted.iter().enumerate() {
-                    if ends_with(&stack, path) {
-                        capturing[slot] = false;
-                        trailing_space[slot] = false;
-                    }
-                }
-                stack.pop();
-            }
-            if tag.empty {
-                continue;
-            }
-            stack.push(tag.name);
+        if !more {
+            return;
         }
     }
-    if let Some(begin) = record_start {
-        each(Err(Broken { row: count, span: begin, what: "the record is never closed" }));
-    } else if !seen {
-        each(Err(Broken { row: 0, span: Span { start: 0, end: text.len().min(1) }, what: "there are no tags in it" }));
+    if let Some(broken) = reader.ended(text) {
+        each(Err(broken));
+    }
+}
+
+/// What a tag did to the record being read.
+enum Step<'a, 't> {
+    Continue,
+    /// The record closed: its cells are ready.
+    Record(Found<'a, 't>),
+    Broken(Broken),
+}
+
+/// Marks a row of [`Reader::wanted`]: the names of one path.
+struct Wanted;
+
+/// Where reading one wanted value stands.
+#[derive(Clone, Copy, Default)]
+struct Reading {
+    /// Text is still being added to it.
+    capturing: bool,
+    /// What was added last ended in a space, which the next text joins with.
+    trailing_space: bool,
+}
+
+/// The tags of one text, read as records.
+struct Reader<'p, 't> {
+    records: &'p str,
+    /// Each wanted path as the names of its elements, outermost first.
+    wanted: Groups<Wanted, &'p str>,
+    /// The value at each wanted path, in the order they were asked for.
+    cells: Vec<Cell<'t>>,
+    reading: Vec<Reading>,
+    /// How many records have begun.
+    count: usize,
+    /// Where the record being read began: `None` between records.
+    record: Option<Span>,
+    /// The elements open at this point of the record, outermost first.
+    stack: Vec<&'t str>,
+    /// The leaf just read, whose closing tag (XML) says nothing.
+    leaf: Option<&'t str>,
+    seen: bool,
+}
+
+impl<'p, 't> Reader<'p, 't> {
+    fn new(records: &'p str, paths: &[&'p str]) -> Reader<'p, 't> {
+        let names =
+            paths.iter().enumerate().flat_map(|(at, path)| path.split('/').map(move |name| (Id::new(at as u32), name)));
+        Reader {
+            records,
+            wanted: Groups::build(paths.len(), names),
+            cells: paths.iter().map(|_| Cell::absent()).collect(),
+            reading: vec![Reading::default(); paths.len()],
+            count: 0,
+            record: None,
+            stack: Vec::new(),
+            leaf: None,
+            seen: false,
+        }
+    }
+
+    fn read(&mut self, tag: Tag<'t>) -> Step<'_, 't> {
+        if tag.name.is_empty() {
+            return self.text(&tag);
+        }
+        self.seen = true;
+        let Some(begin) = self.record else {
+            self.begin(&tag);
+            return Step::Continue;
+        };
+        let after_leaf = self.leaf.take();
+        if tag.closing {
+            return self.close(begin, &tag, after_leaf);
+        }
+        self.open(&tag, after_leaf);
+        Step::Continue
+    }
+
+    /// Text inside the record goes to every wanted value the open elements lead to.
+    fn text(&mut self, tag: &Tag<'t>) -> Step<'_, 't> {
+        if self.record.is_none() {
+            return Step::Continue;
+        }
+        for (path, names) in self.wanted.iter() {
+            let (cell, reading) = (&mut self.cells[path.index()], &mut self.reading[path.index()]);
+            if ends_with(&self.stack, names) && (cell.span == ABSENT || reading.capturing) {
+                if let Err(what) = reading.add(cell, tag) {
+                    return Step::Broken(Broken { row: self.count, span: tag.span, what });
+                }
+                reading.capturing = true;
+            }
+        }
+        if !tag.value.trim().is_empty() && self.wanted.iter().any(|(_, names)| ends_with(&self.stack, names)) {
+            self.leaf = self.stack.last().copied();
+        }
+        Step::Continue
+    }
+
+    /// Outside a record, only the opening of one matters.
+    fn begin(&mut self, tag: &Tag<'t>) {
+        if tag.closing || tag.empty || !tag.name.eq_ignore_ascii_case(self.records) {
+            return;
+        }
+        self.count += 1;
+        self.record = Some(tag.at);
+        self.cells.iter_mut().for_each(|cell| *cell = Cell::absent());
+        self.reading.fill(Reading::default());
+        self.stack.clear();
+        self.stack.push(tag.name);
+    }
+
+    fn open(&mut self, tag: &Tag<'t>, after_leaf: Option<&'t str>) {
+        // An SGML leaf has no closing tag: the next opening one ends it.
+        if let Some(previous) = after_leaf
+            && self.stack.last().is_some_and(|name| name.eq_ignore_ascii_case(previous))
+        {
+            self.release();
+            self.stack.pop();
+        }
+        if !tag.empty {
+            self.stack.push(tag.name);
+        }
+    }
+
+    fn close(&mut self, begin: Span, tag: &Tag<'t>, after_leaf: Option<&'t str>) -> Step<'_, 't> {
+        if tag.name.eq_ignore_ascii_case(self.records) {
+            self.record = None;
+            self.stack.clear();
+            self.reading.fill(Reading::default());
+            let whole = Span { start: begin.start, end: tag.at.end };
+            return Step::Record(Found { number: self.count, whole, cells: &self.cells });
+        }
+        if after_leaf == Some(tag.name) {
+            self.release();
+            if self.stack.last().is_some_and(|name| name.eq_ignore_ascii_case(tag.name)) {
+                self.stack.pop();
+            }
+        // Also closes what an unclosed empty element (SGML) left open inside it.
+        } else if let Some(depth) = self.stack.iter().rposition(|name| name.eq_ignore_ascii_case(tag.name)) {
+            self.release();
+            self.stack.truncate(depth);
+        }
+        Step::Continue
+    }
+
+    /// Stops reading the values whose element is closing.
+    fn release(&mut self) {
+        for (path, _) in self.wanted.iter().filter(|(_, names)| ends_with(&self.stack, names)) {
+            self.reading[path.index()] = Reading::default();
+        }
+    }
+
+    /// What is wrong with a text that ended, if anything is.
+    fn ended(&self, text: &str) -> Option<Broken> {
+        match self.record {
+            Some(begin) => Some(Broken { row: self.count, span: begin, what: "the record is never closed" }),
+            None if !self.seen => Some(Broken {
+                row: 0,
+                span: Span { start: 0, end: text.len().min(1) },
+                what: "there are no tags in it",
+            }),
+            None => None,
+        }
     }
 }
 

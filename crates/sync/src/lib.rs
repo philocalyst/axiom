@@ -3,8 +3,8 @@
 //! The model owns source declarations and their typed formats. This crate
 //! binds those declarations to the engine's run, reads local files or runs
 //! declared commands, and plans changes against an append-only source catalog.
-//! It never writes files itself; the caller decides whether to show a dry run
-//! or apply the returned changes.
+//! Planning writes nothing: the caller decides whether to show a dry run or to
+//! [`apply`] the changes it returned.
 //!
 //! | module          | job                                                              |
 //! |-----------------|------------------------------------------------------------------|
@@ -18,6 +18,7 @@
 //! | `world`         | borrowed reconciliation state bound from the book and run      |
 //! | `sink`          | Axiom output merged into the journal, a file or a param          |
 //! | `write`         | the file a day belongs to, day order, short dates                |
+//! | `apply`         | a plan's changes written into the project, confined to it        |
 //! | `diff`          | what would be written, as a unified diff                         |
 //! | `command`       | running commands, all at once                                    |
 //! | `planner`       | model-native source selection, reads, reconciliation and changes |
@@ -35,6 +36,7 @@
 //! | memos from a declared local `read` source             | [`read_memos`]                       |
 
 mod amount;
+mod apply;
 mod binding;
 mod cell;
 mod command;
@@ -58,6 +60,7 @@ use std::borrow::Cow;
 
 use axiom_core::{Day, FileId, Loc, Qty};
 
+pub use apply::apply;
 pub use format::read_memos;
 pub use paths::matching_paths;
 pub use planner::{GeneratedSource, PlanOutcome, SourceFailure, SourceRegistry, SourceResult, plan};

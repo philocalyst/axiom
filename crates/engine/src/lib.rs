@@ -48,6 +48,7 @@ mod infer;
 mod ledger;
 mod lots;
 mod motion;
+mod owners;
 mod plan;
 mod post;
 mod reconcile;
@@ -175,33 +176,13 @@ pub struct Run {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// What one occurrence instantiated: a stretch of [`Run::promised_flows`].
+pub type PromisedFlows = axiom_core::Run<RuntimeFlow>;
+
+/// The inputs one occurrence left out, in declaration order: a stretch of [`Run::missing_inputs`].
+pub type OmittedInputs = axiom_core::Run<u16>;
+
 /// One expected occurrence of a contract.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct RuntimeRange {
-    start: u32,
-    len: u32,
-}
-
-impl RuntimeRange {
-    pub(crate) fn new(start: usize, len: usize) -> RuntimeRange {
-        RuntimeRange {
-            start: u32::try_from(start).expect("runtime result pool index fits u32"),
-            len: u32::try_from(len).expect("runtime result range fits u32"),
-        }
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.len == 0
-    }
-
-    /// Returns the indexed portion of a caller-owned shared pool.
-    pub fn get<'a, T>(self, pool: &'a [T]) -> Option<&'a [T]> {
-        let start = self.start as usize;
-        let end = start.checked_add(self.len as usize)?;
-        pool.get(start..end)
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct Promise {
     pub contract: Id<Contract>,
@@ -215,8 +196,8 @@ pub struct Promise {
     /// The contract occurrence was explicitly waived by the active terms.
     pub waived: bool,
     /// Runtime flow and omitted-input ranges in the parent Run's pools.
-    pub flows: RuntimeRange,
-    pub missing_inputs: RuntimeRange,
+    pub flows: PromisedFlows,
+    pub missing_inputs: OmittedInputs,
 }
 
 impl Promise {
@@ -231,16 +212,12 @@ impl Run {
     /// Instantiated item flows for one expected occurrence, borrowed from the
     /// shared run pool. Group order and source order are preserved.
     pub fn promise_flows(&self, promise: &Promise) -> &[RuntimeFlow] {
-        let start = promise.flows.start as usize;
-        let end = start + promise.flows.len as usize;
-        self.promised_flows.get(start..end).expect("promise flow range belongs to this Run")
+        promise.flows.get(&self.promised_flows).expect("promise flow range belongs to this Run")
     }
 
     /// Input declaration indices omitted from one expected occurrence.
     pub fn promise_missing_inputs(&self, promise: &Promise) -> &[u16] {
-        let start = promise.missing_inputs.start as usize;
-        let end = start + promise.missing_inputs.len as usize;
-        self.missing_inputs.get(start..end).expect("promise input range belongs to this Run")
+        promise.missing_inputs.get(&self.missing_inputs).expect("promise input range belongs to this Run")
     }
 }
 

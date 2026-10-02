@@ -1,45 +1,45 @@
- 39    642,565,471      161,745,752      161,658,580        87,172            0
-99.95% (161,658,580B) (heap allocation functions) malloc/new/new[], --alloc-fns, etc.
-->68.57% (110,916,304B) 0x2A8C55: alloc::raw_vec::RawVecInner<A>::finish_grow
-| ->67.25% (108,768,000B) 0x2A8A39: alloc::raw_vec::RawVec<T,A>::grow_one
-| | ->67.25% (108,768,000B) 0x299908: axiom_syntax::parse
-| |   ->67.25% (108,768,000B) 0x14EC90: std::sys::backtrace::__rust_begin_short_backtrace
-| |     ->67.25% (108,768,000B) 0x14F4B0: core::ops::function::FnOnce::call_once{{vtable.shim}}
-| |       ->67.25% (108,768,000B) 0x2C9F33: std::sys::thread::unix::Thread::new::thread_start
-| |         ->67.25% (108,768,000B) 0x4924AA3: start_thread (pthread_create.c:447)
-| |           ->67.25% (108,768,000B) 0x49B1A63: clone (clone.S:100)
-| |             
-| ->01.33% (2,148,304B) in 2+ places, all below ms_print's threshold (02.00%)
-| 
-->20.25% (32,746,528B) 0x22C895: alloc::raw_vec::RawVecInner<A>::finish_grow
-| ->11.67% (18,874,368B) 0x22C139: alloc::raw_vec::RawVec<T,A>::grow_one
-| | ->11.67% (18,874,368B) 0x1EBA3A: axiom_model::flows::record
-| |   ->11.67% (18,874,368B) 0x1D6045: axiom_model::build
-| |     ->11.67% (18,874,368B) 0x178B51: axiom::commands::run_action
-| |       ->11.67% (18,874,368B) 0x16A36A: axiom::main
-| |         ->11.67% (18,874,368B) 0x14DA62: std::sys::backtrace::__rust_begin_short_backtrace
-| |           ->11.67% (18,874,368B) 0x14DA28: std::rt::lang_start::{{closure}}
-| |             ->11.67% (18,874,368B) 0x2C53C5: std::rt::lang_start_internal
-| |               ->11.67% (18,874,368B) 0x183F94: main
-| |                 
-| ->06.49% (10,496,000B) 0x22C6E9: alloc::raw_vec::RawVec<T,A>::grow_one
-| | ->06.48% (10,485,760B) 0x1EBB3A: axiom_model::flows::record
-| | | ->06.48% (10,485,760B) 0x1D6045: axiom_model::build
-| | |   ->06.48% (10,485,760B) 0x178B51: axiom::commands::run_action
-| | |     ->06.48% (10,485,760B) 0x16A36A: axiom::main
-| | |       ->06.48% (10,485,760B) 0x14DA62: std::sys::backtrace::__rust_begin_short_backtrace
-| | |         ->06.48% (10,485,760B) 0x14DA28: std::rt::lang_start::{{closure}}
-| | |           ->06.48% (10,485,760B) 0x2C53C5: std::rt::lang_start_internal
-| | |             ->06.48% (10,485,760B) 0x183F94: main
+ 28    909,833,747       76,871,080       76,675,084       195,996            0
+99.75% (76,675,084B) (heap allocation functions) malloc/new/new[], --alloc-fns, etc.
+->39.95% (30,706,656B) 0x37B426: alloc::raw_vec::RawVecInner<A>::finish_grow
+| ->39.93% (30,695,040B) 0x37B55C: alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+| | ->24.98% (19,205,760B) 0x2E4622: axiom_model::lower::record::record
+| | | ->24.98% (19,205,760B) 0x2BBECB: axiom_model::build
+| | |   ->24.98% (19,205,760B) 0x1CD024: axiom::commands::run
+| | |     ->24.98% (19,205,760B) 0x1AE3BB: axiom::main
+| | |       ->24.98% (19,205,760B) 0x1916F2: std::sys::backtrace::__rust_begin_short_backtrace
+| | |         ->24.98% (19,205,760B) 0x18E748: std::rt::lang_start::{{closure}}
+| | |           ->24.98% (19,205,760B) 0x53DF35: std::rt::lang_start_internal
+| | |             ->24.98% (19,205,760B) 0x1D6474: main
 | | |               
-| | ->00.01% (10,240B) in 1+ places, all below ms_print's threshold (02.00%)
+| | ->14.95% (11,489,280B) 0x2E4603: axiom_model::lower::record::record
+| | | ->14.95% (11,489,280B) 0x2BBECB: axiom_model::build
+| | |   ->14.95% (11,489,280B) 0x1CD024: axiom::commands::run
+| | |     ->14.95% (11,489,280B) 0x1AE3BB: axiom::main
+| | |       ->14.95% (11,489,280B) 0x1916F2: std::sys::backtrace::__rust_begin_short_backtrace
+| | |         ->14.95% (11,489,280B) 0x18E748: std::rt::lang_start::{{closure}}
+| | |           ->14.95% (11,489,280B) 0x53DF35: std::rt::lang_start_internal
+| | |             ->14.95% (11,489,280B) 0x1D6474: main
+| | |               
+| | ->00.00% (0B) in 1+ places, all below ms_print's threshold (02.00%)
 | | 
-| ->02.06% (3,330,816B) 0x22C92C: alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
-| | ->02.06% (3,330,816B) in 2+ places, all below ms_print's threshold (02.00%)
-| | 
-| ->00.03% (45,344B) in 1+ places, all below ms_print's threshold (02.00%)
+| ->00.02% (11,616B) in 1+ places, all below ms_print's threshold (02.00%)
 | 
-->04.28% (6,926,001B) 0x14C60A: alloc::raw_vec::RawVecInner<A>::finish_grow
-| ->04.28% (6,926,001B) 0x2C2E2B: std::fs::read_to_string::inner
-| | ->04.28% (6,926,001B) 0x17822D: axiom::commands::run_action
-| |   ->04.28% (6,926,001B) 0x16A36A: axiom::main
+->27.26% (20,952,328B) 0x51DC56: alloc::raw_vec::RawVecInner<A>::finish_grow
+| ->26.29% (20,207,448B) 0x51DCCC: alloc::raw_vec::RawVecInner<A>::reserve::do_reserve_and_handle
+| | ->19.93% (15,318,528B) 0x4FF64A: axiom_syntax::parse_in::{{closure}}
+| | | ->19.93% (15,318,528B) 0x4FBAA6: axiom_syntax::parse_in
+| | |   ->19.93% (15,318,528B) 0x4D496A: axiom_syntax::parse
+| | |     ->19.93% (15,318,528B) 0x190072: std::sys::backtrace::__rust_begin_short_backtrace
+| | |       ->19.93% (15,318,528B) 0x1953BB: core::ops::function::FnOnce::call_once{{vtable.shim}}
+| | |         ->19.93% (15,318,528B) 0x543543: std::sys::thread::unix::Thread::new::thread_start
+| | |           ->19.93% (15,318,528B) 0x4924AA3: start_thread (pthread_create.c:447)
+| | |             ->19.93% (15,318,528B) 0x49B1A63: clone (clone.S:100)
+| | |               
+| | ->06.36% (4,888,920B) 0x4FF62A: axiom_syntax::parse_in::{{closure}}
+| |   ->06.36% (4,888,920B) 0x4FBAA6: axiom_syntax::parse_in
+| |     ->06.36% (4,888,920B) 0x4D496A: axiom_syntax::parse
+| |       ->06.36% (4,888,920B) 0x190072: std::sys::backtrace::__rust_begin_short_backtrace
+| |         ->06.36% (4,888,920B) 0x1953BB: core::ops::function::FnOnce::call_once{{vtable.shim}}
+| |           ->06.36% (4,888,920B) 0x543543: std::sys::thread::unix::Thread::new::thread_start
+| |             ->06.36% (4,888,920B) 0x4924AA3: start_thread (pthread_create.c:447)
+| |               ->06.36% (4,888,920B) 0x49B1A63: clone (clone.S:100)

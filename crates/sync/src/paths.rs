@@ -24,87 +24,94 @@ pub(crate) fn is_project_path(path: &str) -> bool {
 /// order. This does not read contents or run commands.
 pub fn matching_paths(root: &Path, pattern: &str) -> Result<Vec<String>, Diagnostic> {
     if !is_project_path(pattern) {
-        return Err(Diagnostic::error("sync-read-path", format!("`{pattern}` is not a project-relative path")));
+        return Err(read_path(format!("`{pattern}` is not a project-relative path")));
     }
     let root = fs::canonicalize(root)
         .map_err(|error| Diagnostic::error("sync-project-root", format!("could not resolve project root: {error}")))?;
     if !root.is_dir() {
         return Err(Diagnostic::error("sync-project-root", "the project root is not a directory"));
     }
+    let mut files = expand(&root, pattern).and_then(|paths| files_among(&root, paths)).map_err(read_path)?;
+    files.sort();
+    Ok(files)
+}
 
+fn read_path(message: String) -> Diagnostic {
+    Diagnostic::error("sync-read-path", message)
+}
+
+/// The paths a pattern names, one folder level at a time: a part without a wildcard is joined as it is, and one
+/// with a wildcard is every entry of the folders so far that it matches.
+fn expand(root: &Path, pattern: &str) -> Result<Vec<String>, String> {
     let mut found = vec![String::new()];
     for part in pattern.split('/').filter(|part| !part.is_empty()) {
         let mut next = Vec::new();
         for folder in &found {
-            let joined = |entry: &str| {
-                if folder.is_empty() { entry.to_string() } else { format!("{folder}/{entry}") }
-            };
-            if !is_pattern(part) {
-                next.push(joined(part));
-                continue;
-            }
-            let directory = confined(&root, &root.join(folder))?;
-            let entries = match fs::read_dir(directory) {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => {
-                    return Err(Diagnostic::error(
-                        "sync-read-path",
-                        format!("could not read `{folder}` while expanding `{pattern}`: {error}"),
-                    ));
-                }
-            };
-            for entry in entries {
-                let entry = entry.map_err(|error| {
-                    Diagnostic::error(
-                        "sync-read-path",
-                        format!("could not list `{folder}` while expanding `{pattern}`: {error}"),
-                    )
-                })?;
-                let entry = entry.file_name().to_string_lossy().into_owned();
-                if !entry.starts_with('.') && glob(part, &entry) {
-                    next.push(joined(&entry));
-                }
+            if is_pattern(part) {
+                next.extend(matching_entries(root, folder, part, pattern)?);
+            } else {
+                next.push(join(folder, part));
             }
         }
         found = next;
     }
+    Ok(found)
+}
 
+fn join(folder: &str, entry: &str) -> String {
+    if folder.is_empty() { entry.to_string() } else { format!("{folder}/{entry}") }
+}
+
+/// The entries of `folder` that the pattern part matches, as project paths. Hidden entries never match, and a
+/// folder that is not there has none.
+fn matching_entries(root: &Path, folder: &str, part: &str, pattern: &str) -> Result<Vec<String>, String> {
+    let directory = confined(root, &root.join(folder))?;
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("could not read `{folder}` while expanding `{pattern}`: {error}")),
+    };
+    let mut matching = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("could not list `{folder}` while expanding `{pattern}`: {error}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.') && glob(part, &name) {
+            matching.push(join(folder, &name));
+        }
+    }
+    Ok(matching)
+}
+
+/// The paths that are files, each resolved through the file system to somewhere inside the project. A path
+/// that is not there is left out.
+fn files_among(root: &Path, paths: Vec<String>) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
-    for path in found {
+    for path in paths {
         let canonical = match fs::canonicalize(root.join(&path)) {
             Ok(path) => path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(Diagnostic::error("sync-read-path", format!("could not resolve `{path}`: {error}")));
-            }
+            Err(error) => return Err(format!("could not resolve `{path}`: {error}")),
         };
-        if !canonical.starts_with(&root) {
-            return Err(Diagnostic::error("sync-read-path", format!("`{path}` leaves the project through a symlink")));
+        if !canonical.starts_with(root) {
+            return Err(format!("`{path}` leaves the project through a symlink"));
         }
         if canonical.is_file() {
             files.push(path);
         }
     }
-    files.sort();
     Ok(files)
 }
 
-fn confined(root: &Path, path: &Path) -> Result<PathBuf, Diagnostic> {
+fn confined(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let canonical = match fs::canonicalize(path) {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(path.to_path_buf()),
-        Err(error) => {
-            return Err(Diagnostic::error(
-                "sync-read-path",
-                format!("could not resolve `{}`: {error}", path.display()),
-            ));
-        }
+        Err(error) => return Err(format!("could not resolve `{}`: {error}", path.display())),
     };
     if canonical.starts_with(root) {
         Ok(canonical)
     } else {
-        Err(Diagnostic::error("sync-read-path", format!("`{}` leaves the project through a symlink", path.display())))
+        Err(format!("`{}` leaves the project through a symlink", path.display()))
     }
 }
 

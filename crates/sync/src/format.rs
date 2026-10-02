@@ -5,13 +5,14 @@
 use std::borrow::Cow;
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, FileId, Id, Qty, calendar::DateLayout};
+use axiom_core::{Day, Diagnostic, FileId, Id, Qty, calendar::DateLayout};
+use axiom_model::Text;
 use axiom_model::sync::{Column, Fetch, Field, Format, Rule, Shape, Source, Spec};
 use axiom_model::{Book, Purpose};
 
 use crate::amount::amount;
 use crate::cell::{ABSENT, Cell, MemoJoin};
-use crate::csv::Reader as CsvReader;
+use crate::csv::{Broken, Reader as CsvReader};
 use crate::date::iso_day;
 use crate::{Facts, Record, Span, Unit, tagged};
 
@@ -24,10 +25,10 @@ struct Harvest<'t> {
 }
 
 impl<'t> Harvest<'t> {
-    fn take(&mut self, read: Result<Record<'t>, Diagnostic>) -> bool {
+    fn take(&mut self, read: Result<Record<'t>, RowError>) -> bool {
         match read {
             Ok(record) => self.records.push(record),
-            Err(problem) => self.problems.push(problem),
+            Err(problem) => self.problems.push(*problem),
         }
         if self.problems.len() < MAX_PROBLEMS {
             return true;
@@ -48,6 +49,9 @@ struct Row<'r, 't, 'n, 's> {
     book: &'n Book<'s>,
 }
 
+/// What is wrong with a row, boxed so that the result of reading a cell or a field stays small.
+type RowError = Box<Diagnostic>;
+
 impl<'t> Row<'_, 't, '_, '_> {
     fn error(&self, code: &'static str, headline: String, span: Span, label: impl Into<String>) -> Diagnostic {
         let span = if span == ABSENT { self.whole } else { span };
@@ -62,7 +66,7 @@ impl<'t> Row<'_, 't, '_, '_> {
         }
     }
 
-    fn cell<'r>(&'r self, bound: &Bound, place: usize) -> Result<&'r Cell<'t>, Diagnostic>
+    fn cell<'r>(&'r self, bound: &Bound, place: usize) -> Result<&'r Cell<'t>, RowError>
     where
         't: 'r,
     {
@@ -70,7 +74,7 @@ impl<'t> Row<'_, 't, '_, '_> {
             let end = self.cells.last().map_or(0, |cell| cell.span.end);
             let column = bound.spec.places[place];
             let headline = format!("has {} columns, but {} is missing", self.cells.len(), self.shown(column));
-            self.error("short-row", headline, Span { start: end, end }, "the row ends here")
+            Box::new(self.error("short-row", headline, Span { start: end, end }, "the row ends here"))
         })
     }
 
@@ -78,7 +82,7 @@ impl<'t> Row<'_, 't, '_, '_> {
         format!("in {}", self.shown(bound.spec.places[place]))
     }
 
-    fn first<'r>(&'r self, bound: &Bound) -> Result<Option<&'r Cell<'t>>, Diagnostic>
+    fn first<'r>(&'r self, bound: &Bound) -> Result<Option<&'r Cell<'t>>, RowError>
     where
         't: 'r,
     {
@@ -91,20 +95,15 @@ impl<'t> Row<'_, 't, '_, '_> {
         Ok(None)
     }
 
-    fn money<'r>(&'r self, bound: &Bound, unit: Unit<'_>) -> Result<Option<Qty>, Diagnostic>
+    fn money<'r>(&'r self, bound: &Bound, unit: Unit<'_>) -> Result<Option<Qty>, RowError>
     where
         't: 'r,
     {
         let cell = self.cell(bound, 0)?;
         let span = if cell.span == ABSENT { self.whole } else { cell.span };
         amount(&cell.text, unit.scale).map_err(|why| {
-            why.diagnostic(
-                &format!("{} {}", self.what, self.number),
-                span.loc(self.file),
-                self.label(bound, 0),
-                &cell.text,
-                unit,
-            )
+            let place = format!("{} {}", self.what, self.number);
+            Box::new(why.diagnostic(&place, span.loc(self.file), self.label(bound, 0), &cell.text, unit))
         })
     }
 }
@@ -123,6 +122,14 @@ impl<'f> Plan<'f> {
     }
 }
 
+/// The day a cell says, in the layout its field declares, else as `YYYY-MM-DD`.
+fn day_of(cell: &Cell<'_>, spec: Option<&Spec>) -> Option<Day> {
+    match spec.and_then(|spec| spec.layout.as_ref()) {
+        Some(layout) => layout.read(&cell.text),
+        None => iso_day(&cell.text),
+    }
+}
+
 struct Reader<'f, 'n, 's> {
     format: &'f Format,
     book: &'n Book<'s>,
@@ -133,7 +140,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         self.format.specs.iter().find(|spec| spec.field == field)
     }
 
-    fn plan(&self, mut locate: impl FnMut(Column) -> Result<usize, Diagnostic>) -> Result<Plan<'f>, Diagnostic> {
+    fn plan(&self, mut locate: impl FnMut(Column) -> Result<usize, RowError>) -> Result<Plan<'f>, RowError> {
         let mut plan = Plan(std::array::from_fn(|_| None));
         for spec in self.format.specs.iter() {
             let slots = spec.places.iter().copied().map(&mut locate).collect::<Result<Vec<_>, _>>()?;
@@ -146,115 +153,73 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         Ok(plan)
     }
 
-    fn day(&self, cell: &Cell<'_>, spec: Option<&Spec>) -> Option<axiom_core::Day> {
-        match spec.and_then(|spec| spec.layout.as_ref()) {
-            Some(layout) => layout.read(&cell.text),
-            None => iso_day(&cell.text),
-        }
-    }
-
-    fn rows<'t>(&self, text: &'t str, file: FileId, unit: Unit<'_>, units: &[Unit<'_>], out: &mut Harvest<'t>) {
+    fn rows<'t>(&self, text: &'t str, file: FileId, units: Units, out: &mut Harvest<'t>) {
         let mut csv = CsvReader::new(text);
         let mut cells = Vec::new();
         let Some(first) = csv.next(&mut cells) else {
             return;
         };
-        let header_row =
-            Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book: self.book };
+        let header = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book: self.book };
         if let Err(broken) = first {
-            out.problems.push(header_row.error("bad-csv", broken.what.into(), broken.span, "here"));
+            out.problems.push(header.error("bad-csv", broken.what.into(), broken.span, "here"));
             return;
         }
-        let locate = |column: Column| match column {
-            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
-            Column::Index(_) => Err(Diagnostic::error("bad-format", "columns are counted from 1")),
-            Column::Header(header) => {
-                let name = self.book.text(header);
-                header_row.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(name)).ok_or_else(|| {
-                    let choices: Vec<&str> = header_row.cells.iter().map(|cell| cell.text.as_ref()).collect();
-                    let listed = choices.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ");
-                    let error = header_row
-                        .error(
-                            "no-such-column",
-                            format!("the export has no column \"{name}\""),
-                            header_row.whole,
-                            "the header row",
-                        )
-                        .note(format!("its columns are {listed}"));
-                    match closest(name, choices.iter().copied()) {
-                        Some(near) => error.help(format!("did you mean \"{near}\"?")),
-                        None => error,
-                    }
-                })
-            }
-            Column::Path(_) => Err(Diagnostic::error("bad-format", "a rows format names columns")),
-        };
-        let plan = match self.plan(locate) {
+        let plan = match self.plan(|column| self.in_header(&header, column)) {
             Ok(plan) => plan,
             Err(problem) => {
-                out.problems.push(problem);
+                out.problems.push(*problem);
                 return;
             }
         };
-        let has_headers = self
-            .format
-            .specs
-            .iter()
-            .flat_map(|spec| spec.places.iter())
-            .any(|place| matches!(*place, Column::Header(_)));
-        let dated = plan.of(Field::Date).and_then(|bound| header_row.cell(bound, 0).ok());
-        let dateless = dated.is_none_or(|cell| self.day(cell, self.spec(Field::Date)).is_none());
-        let mut more = has_headers || dateless || out.take(self.record(&plan, &header_row, unit, units));
+        let mut more =
+            !self.is_a_record(&plan, &header) || out.take(Fields { plan: &plan, row: &header }.record(units));
         while more {
             let Some(read) = csv.next(&mut cells) else {
                 break;
             };
             let row = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book: self.book };
             let record = match read {
-                Ok(()) => self.record(&plan, &row, unit, units),
-                Err(broken) => Err(row.error("bad-csv", broken.what.into(), broken.span, "here")),
+                Ok(()) => Fields { plan: &plan, row: &row }.record(units),
+                Err(broken) => Err(row.error("bad-csv", broken.what.into(), broken.span, "here").into()),
             };
             more = out.take(record);
         }
     }
 
-    fn tagged<'t>(
-        &self,
-        record_name: &str,
-        text: &'t str,
-        file: FileId,
-        unit: Unit<'_>,
-        units: &[Unit<'_>],
-        out: &mut Harvest<'t>,
-    ) {
-        let mut paths: Vec<&str> = Vec::new();
-        for spec in self.format.specs.iter() {
-            for place in spec.places.iter().copied() {
-                if let Column::Path(path) = place {
-                    let path = self.book.text(path);
-                    if !paths.contains(&path) {
-                        paths.push(path);
-                    }
-                }
+    /// Where a column is in an export that has a header row: an index counts from 1, and a header is looked for
+    /// in `header`.
+    fn in_header(&self, header: &Row, column: Column) -> Result<usize, RowError> {
+        match column {
+            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
+            Column::Index(_) => Err(bad_format("columns are counted from 1").into()),
+            Column::Header(name) => {
+                let name = self.book.text(name);
+                let found = header.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(name));
+                found.ok_or_else(|| no_such_column(header, name).into())
             }
-            if let Rule::Sign { place: Column::Path(path), .. } = spec.rule {
-                let path = self.book.text(path);
-                if !paths.contains(&path) {
-                    paths.push(path);
-                }
-            }
+            Column::Path(_) => Err(bad_format("a rows format names columns").into()),
         }
-        let locate = |column: Column| match column {
-            Column::Path(path) => {
-                let path = self.book.text(path);
-                Ok(paths.iter().position(|known| *known == path).unwrap_or(0))
+    }
+
+    /// Whether the first row of an export is a record, and not the header: no column is found by its header,
+    /// and the row has a day where the date goes.
+    fn is_a_record(&self, plan: &Plan, first: &Row) -> bool {
+        let dated = plan.of(Field::Date).and_then(|bound| first.cell(bound, 0).ok());
+        !names_a_header(self.format) && dated.is_some_and(|cell| day_of(cell, self.spec(Field::Date)).is_some())
+    }
+
+    fn tagged<'t>(&self, record_name: &str, text: &'t str, file: FileId, units: Units, out: &mut Harvest<'t>) {
+        let paths = distinct_paths(self.book, self.columns());
+        let locate = |column: Column| -> Result<usize, RowError> {
+            match column {
+                Column::Path(path) => Ok(path_slot(self.book, &paths, path)),
+                _ => Err(bad_format("a tagged format names paths").into()),
             }
-            _ => Err(Diagnostic::error("bad-format", "a tagged format names paths")),
         };
         let plan = match self.plan(locate) {
             Ok(plan) => plan,
             Err(problem) => {
-                out.problems.push(problem);
+                out.problems.push(*problem);
                 return;
             }
         };
@@ -269,145 +234,56 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                         whole: found.whole,
                         book: self.book,
                     };
-                    self.record(&plan, &row, unit, units)
+                    Fields { plan: &plan, row: &row }.record(units)
                 }
-                Err(broken) => Err(Diagnostic::error("bad-tags", format!("record {}: {}", broken.row, broken.what))
-                    .label(broken.span.loc(file), "here")),
+                Err(broken) => Err(bad_tags(&broken, file).into()),
             };
             out.take(record)
         });
     }
 
-    fn record<'t>(
-        &self,
-        plan: &Plan,
-        row: &Row<'_, 't, 'n, 's>,
-        account_unit: Unit<'_>,
-        units: &[Unit<'_>],
-    ) -> Result<Record<'t>, Diagnostic> {
-        let bound = |field| plan.of(field);
-        let text = |field| -> Result<Option<Cow<'t, str>>, Diagnostic> {
-            let cell = bound(field).map(|bound| row.first(bound)).transpose()?.flatten();
-            Ok(cell.map(|cell| cell.text.clone()))
-        };
+    /// Every column the format reads, field by field: the places of a field, then where its sign is.
+    fn columns(&self) -> impl Iterator<Item = Column> {
+        self.format.specs.iter().flat_map(|spec| {
+            let sign = match spec.rule {
+                Rule::Sign { place, .. } => Some(place),
+                _ => None,
+            };
+            spec.places.iter().copied().chain(sign)
+        })
+    }
+}
+
+/// What an export's amounts can be in: the unit of the account it is of, and the units the book has, which a
+/// record may name instead.
+#[derive(Clone, Copy)]
+struct Units<'a, 'u> {
+    account: Unit<'u>,
+    book: &'a [Unit<'u>],
+}
+
+/// What the format says of one row or record: where each field is, and the cells to read them from.
+struct Fields<'a, 'r, 't, 'n, 's> {
+    plan: &'a Plan<'a>,
+    row: &'a Row<'r, 't, 'n, 's>,
+}
+
+impl<'t> Fields<'_, '_, 't, '_, '_> {
+    /// The record the row holds. Each field is read in the order the faults are reported in.
+    fn record(&self, units: Units) -> Result<Record<'t>, RowError> {
         let mut facts = Facts::default();
-        let currency = text(Field::Currency)?.filter(|code| !code.eq_ignore_ascii_case(account_unit.name));
-        let unit = match currency.as_deref() {
-            None => account_unit,
-            Some(code) => match units.iter().find(|known| known.name.eq_ignore_ascii_case(code)) {
-                Some(&known) => known,
-                None => {
-                    let cell = bound(Field::Currency).map(|bound| row.cell(bound, 0)).transpose()?;
-                    return Err(row.error(
-                        "bad-currency",
-                        format!("the book has no unit `{}`", code.to_uppercase()),
-                        cell.map_or(ABSENT, |cell| cell.span),
-                        "the currency",
-                    ));
-                }
-            },
-        };
-        facts.currency = currency.map(|code| uppercase(code));
-
-        let Some(date) = bound(Field::Date) else {
-            return Err(Diagnostic::error("bad-format", "the compiled feed format has no date field"));
-        };
-        let cell = row.cell(date, 0)?;
-        let day = self.day(cell, Some(date.spec)).ok_or_else(|| {
-            let shown = row.shown(date.spec.places[0]);
-            if cell.span == ABSENT {
-                return row.error("missing-field", format!("it has no {shown}"), ABSENT, "this record");
-            }
-            let layout = date.spec.layout.as_ref().map_or_else(|| "YYYY-MM-DD".to_string(), ToString::to_string);
-            let error = row.error(
-                "bad-date",
-                format!("`{}` is not a date written {layout}", cell.text),
-                cell.span,
-                row.label(date, 0),
-            );
-            match date
-                .spec
-                .layout
-                .as_ref()
-                .map(DateLayout::swapped)
-                .filter(|swapped| swapped.read(&cell.text).is_some())
-            {
-                Some(swapped) => error.help(format!("if the day comes first, write the pattern as \"{swapped}\"")),
-                None => error,
-            }
-        })?;
-
-        let money = |field: Field| -> Result<Option<Qty>, Diagnostic> {
-            bound(field).map(|bound| row.money(bound, unit)).transpose().map(Option::flatten)
-        };
-        let (gross, fee) = (money(Field::Gross)?, money(Field::Fee)?);
-        let qty = if let Some(amount) = bound(Field::Amount) {
-            let qty = row.money(amount, unit)?.ok_or_else(|| {
-                let cell = row.cell(amount, 0).map_or(ABSENT, |cell| cell.span);
-                let label = format!("{} is empty", row.shown(amount.spec.places[0]));
-                row.error("bad-amount", "there is no amount".into(), cell, label)
-            })?;
-            match amount.spec.rule {
-                Rule::Flipped => -qty,
-                Rule::Sign { into, .. } => {
-                    let expected = self.book.text(into);
-                    let sign = amount.sign.and_then(|slot| row.cells.get(slot)).filter(|cell| !cell.text.is_empty());
-                    let Some(sign) = sign else {
-                        return Err(row.error(
-                            "missing-field",
-                            "it has no sign for its amount".into(),
-                            ABSENT,
-                            "this record",
-                        ));
-                    };
-                    if sign.text.eq_ignore_ascii_case(expected) { qty.abs() } else { -qty.abs() }
-                }
-                _ => qty,
-            }
-        } else if let (Some(debit), Some(credit)) = (bound(Field::Debit), bound(Field::Credit)) {
-            let out = row.money(debit, unit)?.unwrap_or_default().abs();
-            let into = row.money(credit, unit)?.unwrap_or_default().abs();
-            if !out.is_zero() && !into.is_zero() {
-                return Err(row.error(
-                    "bad-amount",
-                    "both the debit and the credit are filled in".into(),
-                    row.whole,
-                    "a row moves money one way",
-                ));
-            }
-            into - out
-        } else {
-            gross.ok_or_else(|| row.error("bad-amount", "there is no amount".into(), ABSENT, "this record"))?
-                - fee.unwrap_or_default().abs()
-        };
+        let currency = self.text(Field::Currency)?.filter(|code| !code.eq_ignore_ascii_case(units.account.name));
+        let unit = self.unit(currency.as_deref(), units)?;
+        facts.currency = currency.map(uppercase);
+        let day = self.day()?;
+        let (gross, fee) = (self.money(Field::Gross, unit)?, self.money(Field::Fee, unit)?);
+        let qty = self.qty(unit, gross, fee)?;
         (facts.gross, facts.fee) = (gross.map(Qty::abs), fee.map(Qty::abs));
-
-        let balance = money(Field::Balance)?;
-        let pending = match bound(Field::Pending) {
-            None => false,
-            Some(pending) => {
-                let cell = row.first(pending)?;
-                let says = |word: &str| cell.is_some_and(|cell| cell.text.eq_ignore_ascii_case(word));
-                match pending.spec.rule {
-                    Rule::Is(value) => says(self.book.text(value)),
-                    _ => ["pending", "true", "yes", "y", "1", "p"].iter().any(|word| says(word)),
-                }
-            }
-        };
-
-        let (memo, memo_span) = match bound(Field::Memo) {
-            None => (Cow::Borrowed(""), row.whole),
-            Some(memo) => {
-                let mut joined = MemoJoin::default();
-                for at in 0..memo.slots.len() {
-                    let cell = row.cell(memo, at)?;
-                    joined.push(cell);
-                }
-                joined.finish().unwrap_or((Cow::Borrowed(""), row.cell(memo, 0)?.span))
-            }
-        };
-        let at = if memo_span == ABSENT { row.whole } else { memo_span }.loc(row.file);
-        facts.code = text(Field::Code)?.and_then(code_of);
+        let balance = self.money(Field::Balance, unit)?;
+        let pending = self.pending()?;
+        let (memo, memo_span) = self.memo()?;
+        let at = if memo_span == ABSENT { self.row.whole } else { memo_span }.loc(self.row.file);
+        facts.code = self.text(Field::Code)?.and_then(code_of);
         for (field, slot) in [
             (Field::Id, &mut facts.id),
             (Field::Party, &mut facts.party),
@@ -416,10 +292,128 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
             (Field::Object, &mut facts.object),
             (Field::Route, &mut facts.route),
         ] {
-            *slot = text(field)?;
+            *slot = self.text(field)?;
         }
         let facts = (facts != Facts::default()).then(|| Box::new(facts));
         Ok(Record { day, qty, memo, balance, pending, at, facts })
+    }
+
+    /// The first non-empty text at a field's places.
+    fn text(&self, field: Field) -> Result<Option<Cow<'t, str>>, RowError> {
+        let cell = self.plan.of(field).map(|bound| self.row.first(bound)).transpose()?.flatten();
+        Ok(cell.map(|cell| cell.text.clone()))
+    }
+
+    fn money(&self, field: Field, unit: Unit<'_>) -> Result<Option<Qty>, RowError> {
+        self.plan.of(field).map(|bound| self.row.money(bound, unit)).transpose().map(Option::flatten)
+    }
+
+    /// What the amounts are in: the account's unit, unless the row names a currency the book has.
+    fn unit<'u>(&self, currency: Option<&str>, units: Units<'_, 'u>) -> Result<Unit<'u>, RowError> {
+        let Some(code) = currency else { return Ok(units.account) };
+        if let Some(&known) = units.book.iter().find(|known| known.name.eq_ignore_ascii_case(code)) {
+            return Ok(known);
+        }
+        let cell = self.plan.of(Field::Currency).map(|bound| self.row.cell(bound, 0)).transpose()?;
+        let headline = format!("the book has no unit `{}`", code.to_uppercase());
+        Err(self.row.error("bad-currency", headline, cell.map_or(ABSENT, |cell| cell.span), "the currency").into())
+    }
+
+    fn day(&self) -> Result<Day, RowError> {
+        let Some(date) = self.plan.of(Field::Date) else {
+            return Err(Diagnostic::error("bad-format", "the compiled feed format has no date field").into());
+        };
+        let cell = self.row.cell(date, 0)?;
+        day_of(cell, Some(date.spec)).ok_or_else(|| self.bad_date(date, cell).into())
+    }
+
+    fn bad_date(&self, date: &Bound, cell: &Cell<'_>) -> Diagnostic {
+        let row = self.row;
+        let shown = row.shown(date.spec.places[0]);
+        if cell.span == ABSENT {
+            return row.error("missing-field", format!("it has no {shown}"), ABSENT, "this record");
+        }
+        let layout = date.spec.layout.as_ref().map_or_else(|| "YYYY-MM-DD".to_string(), ToString::to_string);
+        let error = row.error(
+            "bad-date",
+            format!("`{}` is not a date written {layout}", cell.text),
+            cell.span,
+            row.label(date, 0),
+        );
+        match date.spec.layout.as_ref().map(DateLayout::swapped).filter(|swapped| swapped.read(&cell.text).is_some()) {
+            Some(swapped) => error.help(format!("if the day comes first, write the pattern as \"{swapped}\"")),
+            None => error,
+        }
+    }
+
+    /// The signed amount into the account: as written, else a debit and a credit, else the gross less the fee.
+    fn qty(&self, unit: Unit<'_>, gross: Option<Qty>, fee: Option<Qty>) -> Result<Qty, RowError> {
+        if let Some(amount) = self.plan.of(Field::Amount) {
+            return self.written(amount, unit);
+        }
+        if let (Some(debit), Some(credit)) = (self.plan.of(Field::Debit), self.plan.of(Field::Credit)) {
+            return self.debited(debit, credit, unit);
+        }
+        let gross = gross.ok_or_else(|| {
+            Box::new(self.row.error("bad-amount", "there is no amount".into(), ABSENT, "this record"))
+        })?;
+        Ok(gross - fee.unwrap_or_default().abs())
+    }
+
+    /// An amount column, and what its rule does to the sign.
+    fn written(&self, amount: &Bound, unit: Unit<'_>) -> Result<Qty, RowError> {
+        let row = self.row;
+        let qty = row.money(amount, unit)?.ok_or_else(|| {
+            let cell = row.cell(amount, 0).map_or(ABSENT, |cell| cell.span);
+            let label = format!("{} is empty", row.shown(amount.spec.places[0]));
+            Box::new(row.error("bad-amount", "there is no amount".into(), cell, label))
+        })?;
+        match amount.spec.rule {
+            Rule::Flipped => Ok(-qty),
+            Rule::Sign { into, .. } => {
+                let sign = amount.sign.and_then(|slot| row.cells.get(slot)).filter(|cell| !cell.text.is_empty());
+                let Some(sign) = sign else {
+                    let headline = "it has no sign for its amount".into();
+                    return Err(row.error("missing-field", headline, ABSENT, "this record").into());
+                };
+                Ok(if sign.text.eq_ignore_ascii_case(row.book.text(into)) { qty.abs() } else { -qty.abs() })
+            }
+            _ => Ok(qty),
+        }
+    }
+
+    /// Money out of the account in one column and into it in another: a row moves it one way.
+    fn debited(&self, debit: &Bound, credit: &Bound, unit: Unit<'_>) -> Result<Qty, RowError> {
+        let out = self.row.money(debit, unit)?.unwrap_or_default().abs();
+        let into = self.row.money(credit, unit)?.unwrap_or_default().abs();
+        if !out.is_zero() && !into.is_zero() {
+            let both = "both the debit and the credit are filled in";
+            return Err(self.row.error("bad-amount", both.into(), self.row.whole, "a row moves money one way").into());
+        }
+        Ok(into - out)
+    }
+
+    fn pending(&self) -> Result<bool, RowError> {
+        let Some(pending) = self.plan.of(Field::Pending) else { return Ok(false) };
+        let cell = self.row.first(pending)?;
+        let says = |word: &str| cell.is_some_and(|cell| cell.text.eq_ignore_ascii_case(word));
+        Ok(match pending.spec.rule {
+            Rule::Is(value) => says(self.row.book.text(value)),
+            _ => ["pending", "true", "yes", "y", "1", "p"].iter().any(|word| says(word)),
+        })
+    }
+
+    /// The memo cells joined, and where the first is.
+    fn memo(&self) -> Result<(Cow<'t, str>, Span), RowError> {
+        let Some(memo) = self.plan.of(Field::Memo) else { return Ok((Cow::Borrowed(""), self.row.whole)) };
+        let mut joined = MemoJoin::default();
+        for at in 0..memo.slots.len() {
+            joined.push(self.row.cell(memo, at)?);
+        }
+        match joined.finish() {
+            Some(found) => Ok(found),
+            None => Ok((Cow::Borrowed(""), self.row.cell(memo, 0)?.span)),
+        }
     }
 }
 
@@ -432,10 +426,10 @@ pub fn read<'t, 'n, 's>(
     units: &[Unit<'_>],
 ) -> (Vec<Record<'t>>, Vec<Diagnostic>) {
     let reader = Reader { format, book };
-    let mut out = Harvest::default();
+    let (mut out, units) = (Harvest::default(), Units { account: unit, book: units });
     match &format.shape {
-        Shape::Rows => reader.rows(text, file, unit, units, &mut out),
-        Shape::Tagged { records } => reader.tagged(book.name(*records), text, file, unit, units, &mut out),
+        Shape::Rows => reader.rows(text, file, units, &mut out),
+        Shape::Tagged { records } => reader.tagged(book.name(*records), text, file, units, &mut out),
     }
     (out.records, out.problems)
 }
@@ -472,12 +466,12 @@ pub fn read_memos<'t, 's>(
     }
     match &format.shape {
         Shape::Rows => read_row_memos(book, format, memo, text, file),
-        Shape::Tagged { records } => read_tagged_memos(book, format, memo, book.name(*records), text, file),
+        Shape::Tagged { records } => read_tagged_memos(book, memo, book.name(*records), text, file),
     }
 }
 
-fn read_row_memos<'t, 's>(
-    book: &Book<'s>,
+fn read_row_memos<'t>(
+    book: &Book<'_>,
     format: &Format,
     memo: &Spec,
     text: &'t str,
@@ -487,54 +481,53 @@ fn read_row_memos<'t, 's>(
     let Some(header) = csv.next(&mut cells) else {
         return Ok(Vec::new());
     };
-    let span = whole(&cells);
     if let Err(broken) = header {
-        return Err(vec![Diagnostic::error("bad-csv", broken.what).label(broken.span.loc(file), "here")]);
+        return Err(vec![bad_csv(&broken, file)]);
     }
-    let first = Row { number: csv.row, file, what: "row", cells: &cells, whole: span, book };
-    let locate = |column: Column| -> Result<usize, Diagnostic> {
-        match column {
-            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
-            Column::Index(_) => Err(Diagnostic::error("bad-format", "columns are counted from 1")),
-            Column::Header(header) => {
-                first.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(book.text(header))).ok_or_else(|| {
-                    Diagnostic::error("no-such-column", format!("the export has no column \"{}\"", book.text(header)))
-                        .label(first.whole.loc(file), "the header row")
-                })
-            }
-            Column::Path(_) => Err(Diagnostic::error("bad-format", "a rows format names columns")),
-        }
-    };
-    let memo_slots =
-        memo.places.iter().copied().map(locate).collect::<Result<Vec<_>, _>>().map_err(|problem| vec![problem])?;
-    let date_spec = format.specs.iter().find(|spec| spec.field == Field::Date);
-    let date_slot = date_spec
-        .and_then(|spec| spec.places.first().copied())
-        .map(locate)
-        .transpose()
-        .map_err(|problem| vec![problem])?;
-    let has_headers =
-        format.specs.iter().flat_map(|spec| spec.places.iter()).any(|place| matches!(place, Column::Header(_)));
-    let first_is_record = !has_headers
-        && date_slot.and_then(|slot| first.cells.get(slot)).is_some_and(|cell| {
-            date_spec
-                .and_then(|spec| spec.layout.as_ref())
-                .map_or_else(|| iso_day(&cell.text).is_some(), |layout| layout.read(&cell.text).is_some())
-        });
+    let first = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book };
+    let slots = memo.places.iter().map(|&column| header_slot(book, &first, column)).collect::<Result<Vec<_>, _>>()?;
     let mut memos = Vec::new();
-    if first_is_record {
-        take_row_memo(&first, &memo_slots, &mut memos)?;
+    if first_row_is_a_record(book, format, &first)? {
+        take_row_memo(&first, &slots, &mut memos)?;
     }
     while let Some(read) = csv.next(&mut cells) {
         let row = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book };
         match read {
-            Ok(()) => take_row_memo(&row, &memo_slots, &mut memos)?,
-            Err(broken) => {
-                return Err(vec![Diagnostic::error("bad-csv", broken.what).label(broken.span.loc(file), "here")]);
-            }
+            Ok(()) => take_row_memo(&row, &slots, &mut memos)?,
+            Err(broken) => return Err(vec![bad_csv(&broken, file)]),
         }
     }
     Ok(memos)
+}
+
+/// Where a column is in an export whose first row is `first`: an index counts from 1, and a header is looked for
+/// in the row.
+fn header_slot(book: &Book<'_>, first: &Row, column: Column) -> Result<usize, Vec<Diagnostic>> {
+    let problem = |diagnostic: Diagnostic| vec![diagnostic];
+    match column {
+        Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
+        Column::Index(_) => Err(problem(bad_format("columns are counted from 1"))),
+        Column::Header(header) => {
+            let name = book.text(header);
+            first.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(name)).ok_or_else(|| {
+                let missing = format!("the export has no column \"{name}\"");
+                problem(
+                    Diagnostic::error("no-such-column", missing).label(first.whole.loc(first.file), "the header row"),
+                )
+            })
+        }
+        Column::Path(_) => Err(problem(bad_format("a rows format names columns"))),
+    }
+}
+
+/// Whether the first row of an export is a record, and not the header: no column is found by its header, and
+/// the row has a day where the date goes.
+fn first_row_is_a_record(book: &Book<'_>, format: &Format, first: &Row) -> Result<bool, Vec<Diagnostic>> {
+    let date = format.specs.iter().find(|spec| spec.field == Field::Date);
+    let slot = date.and_then(|spec| spec.places.first().copied()).map(|column| header_slot(book, first, column));
+    let slot = slot.transpose()?;
+    let dated = slot.and_then(|slot| first.cells.get(slot)).is_some_and(|cell| day_of(cell, date).is_some());
+    Ok(!names_a_header(format) && dated)
 }
 
 fn take_row_memo<'t>(
@@ -560,64 +553,108 @@ fn take_row_memo<'t>(
     Ok(())
 }
 
-fn read_tagged_memos<'t, 's>(
-    book: &Book<'s>,
-    _format: &Format,
+fn read_tagged_memos<'t>(
+    book: &Book<'_>,
     memo: &Spec,
     record_name: &str,
     text: &'t str,
     file: FileId,
 ) -> Result<Vec<Cow<'t, str>>, Vec<Diagnostic>> {
-    let mut paths = Vec::with_capacity(memo.places.len());
-    for place in memo.places.iter().copied() {
-        let Column::Path(path) = place else {
-            return Err(vec![Diagnostic::error("bad-format", "a tagged format names paths")]);
-        };
-        let path = book.text(path);
-        if !paths.contains(&path) {
-            paths.push(path);
-        }
+    if !memo.places.iter().all(|place| matches!(place, Column::Path(_))) {
+        return Err(vec![bad_format("a tagged format names paths")]);
     }
+    let paths = distinct_paths(book, memo.places.iter().copied());
     let slots: Vec<usize> = memo
         .places
         .iter()
-        .map(|place| {
-            let Column::Path(path) = place else {
-                return Err(Diagnostic::error("bad-format", "a tagged format names paths"));
-            };
-            Ok(paths.iter().position(|known| *known == book.text(*path)).unwrap_or(0))
+        .filter_map(|place| match place {
+            Column::Path(path) => Some(path_slot(book, &paths, *path)),
+            _ => None,
         })
-        .collect::<Result<_, _>>()
-        .map_err(|problem| vec![problem])?;
+        .collect();
     let mut memos = Vec::new();
     let mut problems = Vec::new();
     tagged::scan(text, record_name, &paths, |found| match found {
-        Ok(found) => {
-            let mut joined = MemoJoin::default();
-            for &slot in &slots {
-                let Some(cell) = found.cells.get(slot) else {
-                    problems.push(Diagnostic::error(
-                        "bad-tags",
-                        "the tagged record has fewer cells than the format requests",
-                    ));
-                    return false;
-                };
-                joined.push(cell);
+        Ok(found) => match take_tagged_memo(found.cells, &slots, &mut memos) {
+            Ok(()) => true,
+            Err(problem) => {
+                problems.push(problem);
+                false
             }
-            if let Some((memo, _)) = joined.finish() {
-                memos.push(memo);
-            }
-            true
-        }
+        },
         Err(broken) => {
-            problems.push(
-                Diagnostic::error("bad-tags", format!("record {}: {}", broken.row, broken.what))
-                    .label(broken.span.loc(file), "here"),
-            );
+            problems.push(bad_tags(&broken, file));
             false
         }
     });
     if problems.is_empty() { Ok(memos) } else { Err(problems) }
+}
+
+fn take_tagged_memo<'t>(cells: &[Cell<'t>], slots: &[usize], memos: &mut Vec<Cow<'t, str>>) -> Result<(), Diagnostic> {
+    let mut joined = MemoJoin::default();
+    for &slot in slots {
+        let Some(cell) = cells.get(slot) else {
+            return Err(Diagnostic::error("bad-tags", "the tagged record has fewer cells than the format requests"));
+        };
+        joined.push(cell);
+    }
+    if let Some((memo, _)) = joined.finish() {
+        memos.push(memo);
+    }
+    Ok(())
+}
+
+/// Whether any column of the format is found by its header.
+fn names_a_header(format: &Format) -> bool {
+    format.specs.iter().flat_map(|spec| spec.places.iter()).any(|place| matches!(place, Column::Header(_)))
+}
+
+/// The paths among `columns`, each once, in the order they are first named.
+fn distinct_paths<'b>(book: &'b Book<'_>, columns: impl Iterator<Item = Column>) -> Vec<&'b str> {
+    let mut paths = Vec::new();
+    for column in columns {
+        if let Column::Path(path) = column {
+            let path = book.text(path);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
+/// Where `path` is among the paths a tagged export is read for.
+fn path_slot(book: &Book<'_>, paths: &[&str], path: Text) -> usize {
+    let path = book.text(path);
+    paths.iter().position(|known| *known == path).unwrap_or(0)
+}
+
+fn bad_format(message: &'static str) -> Diagnostic {
+    Diagnostic::error("bad-format", message)
+}
+
+/// A row of an export that could not be split into cells.
+fn bad_csv(broken: &Broken, file: FileId) -> Diagnostic {
+    Diagnostic::error("bad-csv", broken.what).label(broken.span.loc(file), "here")
+}
+
+/// A record of an export that could not be read for its tags.
+fn bad_tags(broken: &Broken, file: FileId) -> Diagnostic {
+    Diagnostic::error("bad-tags", format!("record {}: {}", broken.row, broken.what))
+        .label(broken.span.loc(file), "here")
+}
+
+/// The header row has no column called `name`: what it has instead, and the nearest of those.
+fn no_such_column(header: &Row, name: &str) -> Diagnostic {
+    let choices: Vec<&str> = header.cells.iter().map(|cell| cell.text.as_ref()).collect();
+    let listed = choices.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ");
+    let headline = format!("the export has no column \"{name}\"");
+    let error = header.error("no-such-column", headline, header.whole, "the header row");
+    let error = error.note(format!("its columns are {listed}"));
+    match closest(name, choices.iter().copied()) {
+        Some(near) => error.help(format!("did you mean \"{near}\"?")),
+        None => error,
+    }
 }
 
 pub fn date_layout(format: &Format) -> Option<&DateLayout> {

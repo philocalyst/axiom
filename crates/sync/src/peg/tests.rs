@@ -18,7 +18,7 @@ fn generated_names_match_hyphens_and_paths_as_spaces_without_allocating_per_matc
     let id =
         book.patterns.push(Pattern { name: None, program: Box::new([Op::Name(sym)]), loc: axiom_core::Loc::default() });
     let patterns = Patterns::new(&book);
-    assert_eq!(patterns.starts(id), Some(&[b"trader".to_vec()][..]));
+    assert_eq!(patterns.starts(id).map(Iterator::collect::<Vec<_>>), Some(vec![&b"trader"[..]]));
 
     let mut run = Run::default();
     let found = run.matches_at(id, b"TRADER JOES MARKET", 0, &patterns);

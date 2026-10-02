@@ -97,6 +97,56 @@ struct Told<'r, 's> {
     via: Option<Reading<'s>>,
 }
 
+/// An account's records and how each meets what the book already has: the stage between reading a statement
+/// and writing its lines. Every vector after `paired` has an entry for each record in it.
+struct Statement<'a, 't, 's> {
+    account: &'s str,
+    /// Each record beside the reading of its memo, by day, a day's records in the export's order.
+    paired: Vec<(Record<'t>, Reading<'s>)>,
+    existing: Option<&'a Account<'s>>,
+    /// The occurrences of the account's contracts that are due and not written.
+    dues: Vec<Due<'s>>,
+    /// The flow of the account a record is already written as.
+    matched: Vec<Option<usize>>,
+    /// The due occurrence a record keeps.
+    kept: Vec<Option<usize>>,
+    others: Vec<Option<Other<'s>>>,
+    exchanges: Vec<Exchange>,
+}
+
+impl Statement<'_, '_, '_> {
+    /// Every flow the book has of the account.
+    fn flows(&self) -> &[Existing<'_>] {
+        self.existing.map_or(&[][..], |account| &account.flows)
+    }
+
+    /// The balance the statement ends on and its day, unless the account is already asserted on that day.
+    fn closing(&self) -> Option<(Day, Qty)> {
+        let asserted = |day: &Day| self.existing.is_some_and(|account| account.asserted.contains(day));
+        closing_of_paired(&self.paired).filter(|(day, _)| !asserted(day))
+    }
+}
+
+/// The codes of the pending flows a statement writes, each for the record that later posts it to settle. A day
+/// counts on from the flows the account already has on it.
+struct PendingCodes(Map<Day, usize>);
+
+impl PendingCodes {
+    fn of(statement: &Statement) -> PendingCodes {
+        let mut per_day = Map::default();
+        if statement.paired.iter().any(|(record, _)| record.pending) {
+            statement.flows().iter().for_each(|flow| *per_day.entry(flow.day).or_default() += 1);
+        }
+        PendingCodes(per_day)
+    }
+
+    fn next(&mut self, day: Day) -> String {
+        let number = self.0.entry(day).or_default();
+        *number += 1;
+        format!("pending-{}-{number}", day.to_string().replace('-', ""))
+    }
+}
+
 impl<'b, 's> World<'b, 's> {
     /// Validate and plan feed inserts against a registered source file, then
     /// commit the in-memory reconciliation delta only after all records pass.
@@ -248,74 +298,98 @@ impl<'b, 's> World<'b, 's> {
         feed: &Feed<'b, 's>,
         records: Vec<Record<'t>>,
     ) -> Result<(Vec<Line<'s>>, Option<Day>), Vec<Diagnostic>> {
-        // A memo may say its own amount or day: what the record has to be matched by.
-        let readings = self.recognizer.read_all(&records);
-        let mut paired: Vec<_> = records.into_iter().zip(readings).collect();
-        self.adopt(feed, &mut paired)?;
-        // Stable, so that a day's records keep the export's order. Keep each
-        // reading beside its memo through reconciliation and planning.
-        paired.sort_by_key(|(record, _)| record.day);
+        let statement = self.statement(account, feed, records)?;
+        let mut lines = self.lines(&statement, feed);
+        let closing = statement.closing();
+        let asserts =
+            closing.map(|(day, balance)| Line::statement(day, format!("{account} = {}", signed(balance, feed.unit))));
+        lines.extend(asserts);
+        Ok((lines, closing.map(|(day, _)| day)))
+    }
 
+    /// Everything the lines of an account's records depend on: how each record meets what the book already has.
+    fn statement<'a, 't>(
+        &'a self,
+        account: &'s str,
+        feed: &Feed<'b, 's>,
+        records: Vec<Record<'t>>,
+    ) -> Result<Statement<'a, 't, 's>, Vec<Diagnostic>> {
+        let paired = self.ordered(feed, records)?;
         let existing = self.accounts.get(account);
         let flows = existing.map_or(&[][..], |account| &account.flows);
         let matched = reconcile_paired(&paired, flows, feed.unit.name);
-        let told = self.told(&paired, &matched)?;
-        let others: Vec<Option<Other<'s>>> = (0..paired.len())
-            .map(|at| told[at].as_ref().map(|told| self.other(feed, account, &paired[at].0, told)))
-            .collect();
-        // Only a record that is neither written nor pending can keep a promise.
-        let parties: Vec<Option<&str>> = (0..paired.len())
-            .map(|at| {
-                let record = &paired[at].0;
-                let who = others[at].as_ref().filter(|_| !record.pending).and_then(|other| other.who);
-                who.filter(|who| !who.account).map(|who| who.name)
-            })
-            .collect();
+        let others = self.others(feed, account, &paired, &matched)?;
         let dues: Vec<Due> = self.dues.iter().filter(|due| due.account == account).cloned().collect();
-        let kept = keep_paired(&paired, &parties, &dues);
-
-        // Pending flows carry a code of their own, for the record that posts
-        // them to settle. It counts on from the flows the account has that day.
-        let mut per_day: Map<Day, usize> = Map::default();
-        if paired.iter().any(|(record, _)| record.pending) {
-            flows.iter().for_each(|flow| *per_day.entry(flow.day).or_default() += 1);
-        }
-        let mut pending_code = |day: Day| {
-            let number = per_day.entry(day).or_default();
-            *number += 1;
-            format!("pending-{}-{number}", day.to_string().replace('-', ""))
-        };
+        let kept = keep_paired(&paired, &parties(&paired, &others), &dues);
         let exchanges = self.exchanges(&paired, &others, &kept);
-        let mut lines = Vec::new();
-        for (at, (record, _)) in paired.iter().enumerate().filter(|(_, (record, _))| !record.qty.is_zero()) {
-            let line = match (matched[at], kept[at], &others[at]) {
-                (Some(flow), _, _) => {
-                    let settles = flows[flow].settle.filter(|_| !record.pending);
-                    settles.map(|code| Line::statement(record.day, format!("^{code} settled")))
+        Ok(Statement { account, paired, existing, dues, matched, kept, others, exchanges })
+    }
+
+    /// Each record beside the reading of its memo, by day. A memo may say its own amount or day, which is what the
+    /// record has to be matched by.
+    fn ordered<'t>(
+        &self,
+        feed: &Feed<'b, 's>,
+        records: Vec<Record<'t>>,
+    ) -> Result<Vec<(Record<'t>, Reading<'s>)>, Vec<Diagnostic>> {
+        let readings = self.recognizer.read_all(&records);
+        let mut paired: Vec<_> = records.into_iter().zip(readings).collect();
+        self.adopt(feed, &mut paired)?;
+        // Stable, so that a day's records keep the export's order.
+        paired.sort_by_key(|(record, _)| record.day);
+        Ok(paired)
+    }
+
+    /// The other end of each record that is not yet written, if anyone is known.
+    fn others(
+        &self,
+        feed: &Feed<'b, 's>,
+        account: &str,
+        records: &[(Record<'_>, Reading<'s>)],
+        matched: &[Option<usize>],
+    ) -> Result<Vec<Option<Other<'s>>>, Vec<Diagnostic>> {
+        let told = self.told(records, matched)?;
+        let others = records
+            .iter()
+            .zip(&told)
+            .map(|((record, _), told)| told.as_ref().map(|told| self.other(feed, account, record, told)));
+        Ok(others.collect())
+    }
+
+    /// The lines an account's records are written as, in the order of the records.
+    fn lines(&self, statement: &Statement<'_, '_, 's>, feed: &Feed<'b, 's>) -> Vec<Line<'s>> {
+        let mut codes = PendingCodes::of(statement);
+        let moving = statement.paired.iter().enumerate().filter(|(_, (record, _))| !record.qty.is_zero());
+        moving.filter_map(|(at, _)| self.line(statement, feed, at, &mut codes)).collect()
+    }
+
+    /// The line the record at `at` is written as, if it is written at all: a written record only settles, a
+    /// kept promise is an occurrence, an exchange is one line for its two records, and any other is a flow.
+    fn line(
+        &self,
+        statement: &Statement<'_, '_, 's>,
+        feed: &Feed<'b, 's>,
+        at: usize,
+        codes: &mut PendingCodes,
+    ) -> Option<Line<'s>> {
+        let Statement { account, paired, dues, matched, kept, others, exchanges, .. } = statement;
+        let record = &paired[at].0;
+        match (matched[at], kept[at], &others[at]) {
+            (Some(flow), _, _) => {
+                let settles = statement.flows()[flow].settle.filter(|_| !record.pending);
+                settles.map(|code| Line::statement(record.day, format!("^{code} settled")))
+            }
+            (None, Some(due), _) => Some(occurrence(&dues[due], record, account, self.unit_of(feed, record))),
+            (None, None, Some(other)) => match exchanges[at] {
+                Exchange::Second => None,
+                Exchange::First(with) => Some(self.exchange(account, feed, record, &paired[with].0, other)),
+                Exchange::No => {
+                    let code = record.pending.then(|| codes.next(record.day));
+                    Some(self.new_flow(account, feed, record, other, code.as_deref()))
                 }
-                (None, Some(due), _) => Some(occurrence(&dues[due], record, account, self.unit_of(feed, record))),
-                (None, None, Some(other)) => match exchanges[at] {
-                    Exchange::Second => None,
-                    Exchange::First(with) => Some(self.exchange(account, feed, record, &paired[with].0, other)),
-                    Exchange::No => {
-                        let code = record.pending.then(|| pending_code(record.day));
-                        Some(self.new_flow(account, feed, record, other, code.as_deref()))
-                    }
-                },
-                (None, None, None) => None,
-            };
-            lines.extend(line);
+            },
+            (None, None, None) => None,
         }
-        let closing =
-            closing_of_paired(&paired).filter(|(day, _)| existing.is_none_or(|acct| !acct.asserted.contains(day)));
-        if let Some((day, balance)) = closing {
-            let shown = match balance.is_negative() {
-                true => format!("-{}", money(balance.abs(), feed.unit)),
-                false => money(balance, feed.unit),
-            };
-            lines.push(Line::statement(day, format!("{account} = {shown}")));
-        }
-        Ok((lines, closing.map(|(day, _)| day)))
     }
 
     /// Gives a record the amount and the day its memo says of itself, when a
@@ -620,6 +694,16 @@ fn tie_error(book: &Book<'_>, record: &Record, tie: &Tie) -> Diagnostic {
     diagnostic
 }
 
+/// The party each record was with, where a promise of that party could be kept: only a record that is neither
+/// written nor pending can keep one, and an account is no party.
+fn parties<'s>(records: &[(Record, Reading)], others: &[Option<Other<'s>>]) -> Vec<Option<&'s str>> {
+    let party = |(record, _): &(Record, Reading), other: &Option<Other<'s>>| {
+        let who = other.as_ref().filter(|_| !record.pending).and_then(|other| other.who);
+        who.filter(|who| !who.account).map(|who| who.name)
+    };
+    records.iter().zip(others).map(|(record, other)| party(record, other)).collect()
+}
+
 /// `01 flat`, or `08 phone 47.30 USD` when the record was for another amount.
 fn occurrence<'a>(due: &Due, record: &Record, account: &'a str, unit: Unit<'a>) -> Line<'a> {
     let amount = match record.qty == due.qty {
@@ -639,6 +723,14 @@ pub fn money(qty: Qty, unit: Unit) -> String {
         _ => qty.show(unit.scale),
     };
     format!("{} {}", digits.to_string().replace(',', "_"), unit.name)
+}
+
+/// `money`, with the sign of a negative amount written before it.
+fn signed(qty: Qty, unit: Unit) -> String {
+    match qty.is_negative() {
+        true => format!("-{}", money(qty.abs(), unit)),
+        false => money(qty, unit),
+    }
 }
 
 /// The balance a statement ends on: that of the last day that has one, when

@@ -161,27 +161,43 @@ impl Folder {
     /// gives its dates: a folder or file named `YYYY` gives the year, and `MM`
     /// directly beneath it (a folder, or `MM.ax`), or a file `YYYY-MM.ax`, gives the month.
     pub fn of(path: &str) -> Folder {
-        let number = |text: &str, width: usize| {
-            let digits = text.len() == width && text.bytes().all(|byte| byte.is_ascii_digit());
-            digits.then(|| text.parse::<i32>().ok()).flatten()
-        };
-        let month = |text: &str| number(text, 2).filter(|month| (1..=12).contains(month)).map(|month| month as u8);
         let (mut folder, mut year_at) = (Folder::default(), 0);
         for (at, segment) in path.strip_suffix(".ax").unwrap_or(path).split('/').enumerate() {
-            match folder.year {
-                None => match segment.split_once('-') {
-                    Some((year, text)) => {
-                        if let (Some(year), Some(month)) = (number(year, 4), month(text)) {
-                            return Folder { year: Some(year), month: Some(month) };
-                        }
-                    }
-                    None => (folder.year, year_at) = (number(segment, 4), at),
-                },
-                Some(_) if at == year_at + 1 => folder.month = month(segment),
-                Some(_) => {}
+            match (folder.year, Named::of(segment)) {
+                (None, Some(Named::YearMonth(year, month))) => return Folder { year: Some(year), month: Some(month) },
+                (None, Some(Named::Year(year))) => (folder.year, year_at) = (Some(year), at),
+                (Some(_), Some(Named::Month(month))) if at == year_at + 1 => folder.month = Some(month),
+                (Some(_), _) if at == year_at + 1 => folder.month = None,
+                _ => {}
             }
         }
         folder
+    }
+}
+
+/// What one segment of a path says of the dates written below it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Named {
+    /// `2026`: four digits.
+    Year(i32),
+    /// `03`: two digits, of a month.
+    Month(u8),
+    /// `2026-03`.
+    YearMonth(i32, u8),
+}
+
+impl Named {
+    /// The period a segment names, if it names one.
+    pub fn of(segment: &str) -> Option<Named> {
+        let digits = |text: &str, width: usize| {
+            let all = text.len() == width && text.bytes().all(|byte| byte.is_ascii_digit());
+            all.then(|| text.parse::<i32>().ok()).flatten()
+        };
+        let month = |text: &str| digits(text, 2).filter(|month| (1..=12).contains(month)).map(|month| month as u8);
+        match segment.split_once('-') {
+            Some((year, text)) => Some(Named::YearMonth(digits(year, 4)?, month(text)?)),
+            None => digits(segment, 4).map(Named::Year).or_else(|| month(segment).map(Named::Month)),
+        }
     }
 }
 

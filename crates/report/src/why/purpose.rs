@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use axiom_core::{Day, Days, Id, Qty, spread};
 use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, Book, Limit, Period, Purpose, PurposeRoot};
+use axiom_model::{Amount, Book, Law, Limit, Period, Purpose, PurposeRoot};
 
 use crate::calendar::Periods;
 use crate::headroom::{current, latest, room, window_words};
@@ -21,28 +21,51 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, target: &str) -> Result
     let purpose = book.purpose(target).map_err(|_| {
         resolve::nothing_named("purpose", target, book.purposes.values().map(|purpose| book.name(purpose.name)))
     })?;
-    let year = run.today.year();
-    let year_window = year_days(year).unwrap_or(Days::ALWAYS);
+    let year_window = year_days(run.today.year()).unwrap_or(Days::ALWAYS);
     let cutoff = year_window.last().min(run.today);
-    let period = Periods::covering(Period::Year, year_window.first(), cutoff);
     let lens = lens.on(cutoff);
+    let laws = governing_laws(book, purpose);
+    let (activity, largest) = activity_sections(lens, run, purpose, year_window, cutoff);
+    Ok(Report::new(format!("Why #{}", book.name(book.purposes[purpose].name)))
+        .with(about_section(book, &book.purposes[purpose]))
+        .with(super::laws_table(book, &laws))
+        .with(limits_section(lens, run, &laws, year_window, cutoff))
+        .with(budget_section(lens, run, purpose, year_window))
+        .with(activity)
+        .with(largest))
+}
 
+/// The laws of a purpose and of every purpose it is within, each once.
+fn governing_laws(book: &Book<'_>, purpose: Id<Purpose>) -> Vec<Id<Law>> {
     let mut laws = Vec::new();
     for ancestor in book.purposes.lineage(purpose) {
         laws.extend(book.purposes[ancestor].laws.iter().copied());
     }
     laws.sort_unstable();
     laws.dedup();
+    laws
+}
 
+fn about_section<'s>(book: &'s Book<'_>, item: &Purpose) -> Section<'s> {
     let mut about = Section::new([Column::left("Purpose"), Column::left("Value")]).headed("Purpose");
-    let item = &book.purposes[purpose];
     about.push(Row::new([Cell::Name(book.name(item.name)), Cell::Word(root_name(item.root))]));
     if let Some(doc) = item.doc {
         for line in crate::table::doc_lines(book.name(doc)) {
             about.note(Cell::Said(std::borrow::Cow::Owned(line.to_owned())));
         }
     }
+    about
+}
 
+/// What the purpose's laws have counted against their limits this year, by the latest reading of each.
+fn limits_section<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    laws: &[Id<Law>],
+    year_window: Days,
+    cutoff: Day,
+) -> Section<'s> {
+    let book = lens.book();
     let all_headroom = current(book, run, year_window.first(), cutoff);
     let governing = laws.iter().copied().collect::<std::collections::BTreeSet<_>>();
     let readings = latest(
@@ -62,8 +85,20 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, target: &str) -> Result
     if limits.rows.is_empty() {
         limits.note("No headroom has been recorded for this purpose this year.");
     }
+    limits
+}
 
-    let budgets = budget_section(lens, run, purpose, year_window);
+/// What the purpose came to this year, and the parties it came to most with.
+fn activity_sections<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    purpose: Id<Purpose>,
+    year_window: Days,
+    cutoff: Day,
+) -> (Section<'s>, Section<'s>) {
+    let book = lens.book();
+    let item = &book.purposes[purpose];
+    let period = Periods::covering(Period::Year, year_window.first(), cutoff);
     let (total, parties, unpriced) = totals(book, run, lens, purpose, period, cutoff);
     let mut activity = Section::new([Column::left("This year"), Column::right("Amount")]).headed("Activity");
     activity.push(Row::new([Cell::Name(book.name(item.name)), Cell::base(book, total)]));
@@ -82,14 +117,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, target: &str) -> Result
         largest.note("No priced flows of this purpose this year.");
     }
     activity.unpriced(unpriced, "flow");
-
-    Ok(Report::new(format!("Why #{}", book.name(item.name)))
-        .with(about)
-        .with(super::laws_table(book, &laws))
-        .with(limits)
-        .with(budgets)
-        .with(activity)
-        .with(largest))
+    (activity, largest)
 }
 
 fn budget_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, purpose: Id<Purpose>, days: Days) -> Section<'s> {

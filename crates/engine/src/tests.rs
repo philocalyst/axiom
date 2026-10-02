@@ -578,8 +578,8 @@ fn a_promise_is_late_by_the_days_until_it_is_kept_or_the_horizon_if_it_never_is(
         due: Day(100),
         kept: kept.map(|day| (Day(day), Id::new(0))),
         waived: false,
-        flows: crate::RuntimeRange::default(),
-        missing_inputs: crate::RuntimeRange::default(),
+        flows: Default::default(),
+        missing_inputs: Default::default(),
     };
     assert_eq!(promise(Some(95)).late(Day(200)), 0, "kept early");
     assert_eq!(promise(Some(103)).late(Day(200)), 3, "kept late");

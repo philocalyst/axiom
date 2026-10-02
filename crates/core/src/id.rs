@@ -8,7 +8,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
 use std::marker::PhantomData;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, Range};
 
 pub struct Id<T> {
     raw: u32,
@@ -66,6 +66,10 @@ impl<T> fmt::Debug for Id<T> {
     }
 }
 
+fn index(len: usize) -> u32 {
+    u32::try_from(len).expect("fewer than 2^32 items")
+}
+
 /// A vector indexed by `Id<T>`.
 #[derive(Clone, PartialEq)]
 pub struct Arena<T> {
@@ -78,9 +82,17 @@ impl<T> Arena<T> {
     }
 
     pub fn push(&mut self, item: T) -> Id<T> {
-        let id = Id::new(u32::try_from(self.items.len()).expect("fewer than 2^32 items"));
+        let id = Id::new(index(self.items.len()));
         self.items.push(item);
         id
+    }
+
+    /// Appends `items`, and returns the run they now occupy: how a variable-length
+    /// part joins one flat arena.
+    pub fn extend(&mut self, items: impl IntoIterator<Item = T>) -> Run<T> {
+        let start = index(self.items.len());
+        self.items.extend(items);
+        Run::new(Id::new(start), index(self.items.len()) - start)
     }
 
     /// Reserves room for `additional` items without changing any existing id.
@@ -187,6 +199,20 @@ impl<T> Run<T> {
         self.len == 0
     }
 
+    /// The run of the ids `range.start .. range.end`: how a part is named once it has been
+    /// appended to a pool that is kept as a plain `Vec` or slice.
+    pub fn of(range: Range<usize>) -> Run<T> {
+        let start = index(range.start);
+        Run::new(Id::new(start), index(range.end) - start)
+    }
+
+    /// The items of this run in `pool`, which holds every id of the arena it is a run of; `None`
+    /// where the pool is too short.
+    pub fn get(self, pool: &[T]) -> Option<&[T]> {
+        let start = self.start as usize;
+        pool.get(start..start + self.len as usize)
+    }
+
     /// The ids in the run, in order.
     pub fn ids(self) -> Ids<T> {
         Ids { next: self.start, end: self.start + self.len, of: PhantomData }
@@ -204,6 +230,13 @@ impl<T> Clone for Run<T> {
 }
 
 impl<T> Copy for Run<T> {}
+
+impl<T> Default for Run<T> {
+    /// The empty run.
+    fn default() -> Run<T> {
+        Run::new(Id::new(0), 0)
+    }
+}
 
 impl<T> PartialEq for Run<T> {
     fn eq(&self, other: &Run<T>) -> bool {
@@ -271,6 +304,28 @@ mod tests {
         assert_eq!((run.len(), run.ids().len()), (3, 3));
         let inside = |at: u32| run.contains(Id::new(at));
         assert_eq!([0, 1, 2, 3, 4].map(inside), [false, true, true, true, false]);
+    }
+
+    #[test]
+    fn extending_an_arena_returns_the_run_it_appended() {
+        let mut arena = Arena::from(vec!['a']);
+        let first = arena.extend("bc".chars());
+        let none = arena.extend(std::iter::empty());
+        let last = arena.extend(['d']);
+        assert_eq!((&arena[first], &arena[none], &arena[last]), (&['b', 'c'][..], &[][..], &['d'][..]));
+        assert_eq!((first.start(), first.len(), none.is_empty(), last.start()), (Id::new(1), 2, true, Id::new(3)));
+    }
+
+    #[test]
+    fn a_run_names_a_stretch_of_a_pool_kept_as_a_vec() {
+        let pool = vec!['a', 'b', 'c', 'd'];
+        let run = Run::of(1..3);
+        assert_eq!((run.start(), run.len()), (Id::new(1), 2));
+        assert_eq!(run.get(&pool), Some(&['b', 'c'][..]));
+        assert_eq!(Run::of(4..4).get(&pool), Some(&[][..]), "an empty run at the end is in the pool");
+        assert_eq!(Run::of(3..6).get(&pool), None, "a run past the pool is not");
+        assert_eq!(Run::<char>::default().get(&pool), Some(&[][..]));
+        assert!(Run::<char>::default().is_empty());
     }
 
     #[test]
