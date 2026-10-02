@@ -333,6 +333,12 @@ impl Column {
         at
     }
 
+    /// Appends every value of `other`.
+    pub fn extend(&mut self, other: &Column) {
+        self.tags.extend_from_slice(&other.tags);
+        self.payloads.extend_from_slice(&other.payloads);
+    }
+
     /// The value at `at` with its tag, whatever its type. Panics if `at` is past the end.
     pub fn datum(&self, at: u32) -> Datum {
         Datum { tag: self.tags[at as usize], payload: self.payloads[at as usize] }
