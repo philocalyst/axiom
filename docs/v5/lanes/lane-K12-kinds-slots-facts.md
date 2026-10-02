@@ -5,9 +5,9 @@ and §5. Then read [`../research/ASSOCIATIONS.md`](../research/ASSOCIATIONS.md) 
 `/home/user/axiom/.claude/worktrees/lane-k12`, on branch `claude/great-wozniak-pnqn7x-v5-k12`.
 
 **Your crates:** `model`, `syntax` (the `has` line grammar only), `systems` (the `.ax` declarations), and the readers in
-`engine`, `report` and `sync` that you must move to the new store. Lane C's primitives (`core::tagless`, `core::dayset`)
-are merged into your base, or will be merged mid-lane with notice from the orchestrator. Use them, and do not
-re-implement them.
+`engine`, `report` and `sync` that you must move to the new store. Lane C's primitives (`core::tagless`, `core::dayset`, `core::placement`) are in your base, and lane C2's `core::facts`
+(the store itself, with `Key<V>`, `Builder`, `Steps`, `days_where`) is merged into it or will be before you reach step 5,
+with notice from the orchestrator. Use them, and do not re-implement them.
 
 ## Why
 
@@ -106,11 +106,21 @@ In `systems/src/us/*.ax` and `std.ax`:
 Keep the slot names that the laws read, so no law changes in this lane. K6 renames `employer` to `sponsor` when the
 relator lands. Run every example, fix what is genuinely wrong, and list it.
 
-### 5. `Facts`: one store, typed keys (DESIGN §3.2)
+### 5. `Facts`: one store, typed keys
 
-Build `Facts` exactly as DESIGN §3.2 describes. Values go in a `core::tagless::Column`. Rows are a dense numbering of
-every holder. The model still keeps separate arenas for places, entities, commodities, assets, kinds and contracts:
-number holders by concatenating them (`HolderIndex` from a per-sort offset), not by merging the arenas. K3 merges them.
+`core::facts` is the store (lane C2): a `Builder` that paints statements in source order and freezes by one counting
+sort, a frozen `Facts` read by `at`, `steps` and `days_where`, and `inherited` for the fall back up a chain. Read its
+module doc first. You do not build the store. You:
+- **Number the holders.** The model still keeps separate arenas for places, entities, commodities, assets, kinds and
+  contracts. Number them by concatenating them: a `HolderIndex` from a per-sort offset, so that `Id<Place>` and
+  `Id<Entity>` map to a dense `u32` and back. K3 merges the arenas; you do not.
+- **Resolve the engine's keys by name, once.** The engine reads a built-in slot (`opened`, `lives`, `restricted`, …)
+  through a typed `Key<V>`. Do not hard-code slot ids as constants: a number in the engine that has to agree with the
+  order of declarations in `std.ax` is a bug waiting for an edit. Declare the built-in slots in `std.ax`, and when the
+  book is built look each up by name into one `Slots` struct of typed keys (`pub opened: Key<Day>`, …), checking that the
+  declared range is the type the key claims. A mismatch is an internal error naming the slot, reported at build time and
+  tested. The engine borrows `&Slots` beside the facts.
+- **Build the store** from every declaration and statement, in source order, and freeze it into the book.
 
 Then move, one family per commit, every value that changes on a day or is said about a thing into `Facts`:
 - **`Prop` rows** (declared `has` properties), `book.rs::prop`, `props.rs::put`, `PropTable` and `Props`;
