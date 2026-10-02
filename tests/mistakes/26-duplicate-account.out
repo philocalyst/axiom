@@ -8,6 +8,8 @@ error[duplicate-account]: account `assets/checking` is declared twice
 7 │ account assets/checking : cash
   │         ───────┬───────
   │                ╰── declared again here
+  │
+  = help: keep the declaration you mean and delete the other
 
 error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
   ╭─[26-duplicate-account.ax:8:9]
