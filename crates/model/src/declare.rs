@@ -15,7 +15,7 @@ use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
 use crate::kinds::{self, NativeKinds};
 use crate::names::{Names, Scoped};
-use crate::problem::{Noun, Problem, Reads, unresolved};
+use crate::problem::{self, Noun, Reads, unresolved};
 use crate::props::PropTable;
 use crate::resolve::End;
 use crate::scope::{Home, Scopes};
@@ -501,7 +501,7 @@ pub(crate) fn declare<'a, 's>(
         let (file, decl) = (written.file(), written.node);
         let symbol = decl.name.0;
         if let Some(&first) = commodity_by_name.get(symbol) {
-            diags.push(declared_twice(Noun::Commodity, Word::of(file, symbol), commodities[first].loc));
+            diags.push(problem::declared_twice(Noun::Commodity, Word::of(file, symbol), commodities[first].loc, None));
             continue;
         }
         let kind = resolve_kind(
@@ -566,9 +566,7 @@ pub(crate) fn declare<'a, 's>(
             commodity_by_name.get(word.text).copied().or_else(|| {
                 let suggestion =
                     axiom_core::diag::closest(word.text, commodity_by_name.keys().copied()).map(|near| near as &str);
-                diags.push(
-                    Problem::Unknown { noun: Noun::BaseCommodity, word, nearest: suggestion, unused: &[] }.diagnostic(),
-                );
+                diags.push(problem::unknown(Noun::BaseCommodity, word, suggestion, &[]));
                 None
             })
         })
@@ -593,7 +591,12 @@ pub(crate) fn declare<'a, 's>(
         }
         let path = decl.name.0;
         if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
-            diags.push(declared_twice(Noun::Entity, Word::of(file, path), Some(first_file.loc(first.name.0))));
+            diags.push(problem::declared_twice(
+                Noun::Entity,
+                Word::of(file, path),
+                Some(first_file.loc(first.name.0)),
+                None,
+            ));
             continue;
         }
         let doc = written.item.doc.map(|doc| names.intern(doc.0));
@@ -781,7 +784,7 @@ pub(crate) fn declare<'a, 's>(
         let (file, decl) = (written.file(), written.node);
         let path = decl.name.0;
         if let Some(&first) = declared_account_paths.get(path) {
-            diags.push(declared_twice(Noun::Account, Word::of(file, path), Some(first)));
+            diags.push(problem::declared_twice(Noun::Account, Word::of(file, path), Some(first), None));
             continue;
         }
         declared_account_paths.insert(path, file.loc(path));
@@ -852,7 +855,7 @@ pub(crate) fn declare<'a, 's>(
         let (file, decl) = (written.file(), written.node);
         let path = decl.name.0;
         if let Some(&first) = asset_names.get(path) {
-            diags.push(declared_twice(Noun::Asset, Word::of(file, path), Some(assets[first].loc)));
+            diags.push(problem::declared_twice(Noun::Asset, Word::of(file, path), Some(assets[first].loc), None));
             continue;
         }
         let kind = resolve_kind(
@@ -1308,10 +1311,6 @@ fn is_path_child(parent: &str, child: &str) -> bool {
     child.len() > parent.len()
         && child.as_bytes().starts_with(parent.as_bytes())
         && child.as_bytes().get(parent.len()) == Some(&b'/')
-}
-
-fn declared_twice(noun: Noun, word: Word, first: Option<Loc>) -> Diagnostic {
-    Problem::DeclaredTwice { noun, word, first, advice: None }.diagnostic()
 }
 
 #[cfg(test)]

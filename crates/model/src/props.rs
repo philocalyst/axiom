@@ -24,7 +24,7 @@ use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
 use crate::law::{Ty, Value};
-use crate::problem::{Problem, Twice};
+use crate::problem::{self, Twice};
 use crate::scope::Home;
 use crate::values::describe;
 
@@ -587,7 +587,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
         let wanted = format!("a type: {}", list(&TYPES.map(|ty| ty.0)));
         let ty = self.arg(&wanted, ty)?;
         if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text) {
-            return Err(Problem::BuiltInProperty { word: name }.diagnostic());
+            return Err(problem::built_in_property(name));
         }
         Ok(Assign::Has(Has { name: self.world.book.names.intern(name.text), ty, loc: Some(name.loc) }))
     }
@@ -831,7 +831,7 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
         }
         let key = (target_key(target.target), has.name, statement.date);
         if let Some(first) = seen.get(&key).copied() {
-            diags.push(Problem::Twice { what: Twice::PropertyChange, again: line.loc, first }.diagnostic());
+            diags.push(problem::twice(Twice::PropertyChange, line.loc, first));
             continue;
         }
         seen.insert(key, line.loc);
@@ -1121,7 +1121,7 @@ fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_,
         };
         let at = written.item.loc;
         if let Some(first) = seen.insert(system, at) {
-            diags.push(Problem::Twice { what: Twice::SystemCurrency, again: at, first }.diagnostic());
+            diags.push(problem::twice(Twice::SystemCurrency, at, first));
             continue;
         }
         match world.commodity_of(Word::of(written.file(), unit.0)) {
@@ -1141,7 +1141,7 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
         };
         let at = written.item.loc;
         if let Some(first) = seen.insert(system, at) {
-            diags.push(Problem::Twice { what: Twice::SystemRates, again: at, first }.diagnostic());
+            diags.push(problem::twice(Twice::SystemRates, at, first));
             continue;
         }
         let policy = match policy {
@@ -1185,7 +1185,7 @@ fn read_has_lines<'s>(
         };
         if is_builtin_line(world.book.name(has.name)) || FIELD_WORDS.contains(&world.book.name(has.name)) {
             let word = Word { text: world.book.name(has.name), loc: has.loc.unwrap_or(line.loc) };
-            diags.push(Problem::BuiltInProperty { word }.diagnostic());
+            diags.push(problem::built_in_property(word));
             continue;
         }
         if own.iter().any(|earlier: &Has| earlier.name == has.name) {

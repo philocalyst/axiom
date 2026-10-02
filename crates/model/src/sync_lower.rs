@@ -10,7 +10,7 @@ use crate::book::{Book, CodeRule, CodeScope, Role};
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::Word;
-use crate::problem::{Noun, Problem};
+use crate::problem::{self, Noun};
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
 use crate::sync::{
@@ -51,9 +51,7 @@ pub(crate) fn declare<'a, 's>(
         let name = world.book.names.intern(source.name.0);
         if let Some(first) = by_name.get(&(written.home(), name)) {
             let word = Word::of(file, source.name.0);
-            diags.push(
-                Problem::DeclaredTwice { noun: Noun::Pattern, word, first: Some(first.loc), advice: None }.diagnostic(),
-            );
+            diags.push(problem::declared_twice(Noun::Pattern, word, Some(first.loc), None));
             continue;
         }
         let loc = file.loc(source.name.0);
@@ -173,9 +171,7 @@ fn resolve_named(
         let visible =
             named.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name));
         let nearest = closest(name.0, visible);
-        return Err(
-            Problem::Unknown { noun: Noun::Pattern, word: Word::of(file, name.0), nearest, unused: &[] }.diagnostic()
-        );
+        return Err(problem::unknown(Noun::Pattern, Word::of(file, name.0), nearest, &[]));
     };
     let nearest = named
         .iter()
@@ -438,9 +434,7 @@ fn lower_formats<'s>(
         let name = world.book.names.intern(source.name.0);
         if let Some(first) = by_name.get(&(written.home(), name)) {
             let word = Word::of(file, source.name.0);
-            diags.push(
-                Problem::DeclaredTwice { noun: Noun::Format, word, first: Some(first.loc), advice: None }.diagnostic(),
-            );
+            diags.push(problem::declared_twice(Noun::Format, word, Some(first.loc), None));
             continue;
         }
         let loc = file.loc(source.name.0);
@@ -756,9 +750,7 @@ fn lower_sources<'s>(
         let name = world.book.names.intern(sync.name.0);
         if let Some(first) = declared.get(&(written.home(), name)) {
             let word = Word::of(file, sync.name.0);
-            diags.push(
-                Problem::DeclaredTwice { noun: Noun::Sync, word, first: Some(*first), advice: None }.diagnostic(),
-            );
+            diags.push(problem::declared_twice(Noun::Sync, word, Some(*first), None));
             continue;
         }
         declared.insert((written.home(), name), file.loc(sync.name.0));
@@ -881,14 +873,14 @@ fn resolve_format(
     name: ast::Name<'_>,
 ) -> Result<Id<Format>, Diagnostic> {
     let scope = scopes.of(from);
-    let unknown = |noun| {
+    let missing = |noun| {
         let visible =
             (formats.iter()).filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name));
         let nearest = closest(name.0, visible);
-        Problem::Unknown { noun, word: Word::of(file, name.0), nearest, unused: &[] }.diagnostic()
+        problem::unknown(noun, Word::of(file, name.0), nearest, &[])
     };
     let Some(sym) = names.get(name.0) else {
-        return Err(unknown(Noun::Format));
+        return Err(missing(Noun::Format));
     };
     let candidates: Vec<_> = formats
         .iter()
@@ -896,7 +888,7 @@ fn resolve_format(
         .map(|candidate| (scope.rank(candidate.home), candidate.id, candidate.loc))
         .collect();
     let Some(rank) = candidates.iter().map(|(rank, _, _)| *rank).min() else {
-        return Err(unknown(Noun::VisibleFormat));
+        return Err(missing(Noun::VisibleFormat));
     };
     let mut best = candidates.iter().filter(|(other_rank, _, _)| *other_rank == rank);
     let (_, id, first_loc) = *best.next().expect("the minimum rank came from a candidate");

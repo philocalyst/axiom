@@ -12,7 +12,7 @@ use crate::collect::Collected;
 use crate::errors::Word;
 use crate::kinds;
 use crate::names::Scoped;
-use crate::problem::{Noun, Problem, Reads, unresolved};
+use crate::problem::{self, Noun, Reads, unresolved};
 use crate::scope::{Home, Scopes};
 
 pub(crate) struct NativePurposes {
@@ -70,7 +70,7 @@ pub(crate) fn declare_sites<'s>(
         }
         if let Some(&first) = seen.get(&(home, text)) {
             let (word, earlier) = (Word::of(file, text), drafts.get(first).and_then(|purpose| purpose.loc));
-            diags.push(Problem::Duplicate { noun: Noun::Purpose, word, first: earlier }.diagnostic());
+            diags.push(problem::duplicate(Noun::Purpose, word, earlier));
             draft_of.push(first);
             continue;
         }

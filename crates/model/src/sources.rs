@@ -9,7 +9,7 @@ use crate::Source;
 use crate::book::System;
 use crate::errors::Word;
 use crate::paths;
-use crate::problem::{Noun, Problem};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 
 /// One source, and where its declarations live.
@@ -86,7 +86,7 @@ impl SystemIndex<'_> {
     /// The `unknown-system` diagnostic for a `use` or `lives` naming no system.
     pub fn unknown(&self, word: Word) -> Diagnostic {
         let nearest = closest(word.text, self.by_path.keys().copied());
-        Problem::Unknown { noun: Noun::System, word, nearest, unused: &[] }.diagnostic()
+        problem::unknown(Noun::System, word, nearest, &[])
     }
 }
 

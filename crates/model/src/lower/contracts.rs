@@ -17,7 +17,7 @@ use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
-use crate::problem::{Noun, Problem, Twice};
+use crate::problem::{self, Noun, Twice};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -45,7 +45,7 @@ pub(crate) fn contracts<'a, 's>(
         let name = world.book.names.intern(node.name.0);
         if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
             let (word, first) = (Word::of(contract.file(), node.name.0), Some(world.book.contracts[first].loc));
-            diags.push(Problem::Duplicate { noun: Noun::Contract, word, first }.diagnostic());
+            diags.push(problem::duplicate(Noun::Contract, word, first));
             continue;
         }
         let id = world.book.contracts.push(empty_contract(name, loc, world.book.roots.me));
@@ -262,7 +262,7 @@ fn contract_loan<'s>(
         return Some(None);
     };
     if let Some(duplicate) = written.next() {
-        diags.push(Problem::Twice { what: Twice::ContractLoan, again: duplicate.loc, first: prop.loc }.diagnostic());
+        diags.push(problem::twice(Twice::ContractLoan, duplicate.loc, prop.loc));
         return None;
     }
 
@@ -390,7 +390,7 @@ fn contract_loan<'s>(
         match nested.name.0 {
             "prepay" => {
                 if let Some(first) = prepay_loc {
-                    diags.push(Problem::Twice { what: Twice::LoanPrepay, again: nested.loc, first }.diagnostic());
+                    diags.push(problem::twice(Twice::LoanPrepay, nested.loc, first));
                     return None;
                 }
                 prepay_loc = Some(nested.loc);
@@ -435,7 +435,7 @@ fn loan_resets<'s>(
         return Some(None);
     };
     if let Some(second) = resets.next() {
-        diags.push(Problem::Twice { what: Twice::LoanResets, again: second.0.loc, first: first.0.loc }.diagnostic());
+        diags.push(problem::twice(Twice::LoanResets, second.0.loc, first.0.loc));
         return None;
     }
 
@@ -1051,7 +1051,7 @@ fn contract_days(
             _ => continue,
         };
         if let Some(previous) = seen.insert(prop.name.0, prop.loc) {
-            diags.push(Problem::Twice { what: Twice::ContractDate, again: prop.loc, first: previous }.diagnostic());
+            diags.push(problem::twice(Twice::ContractDate, prop.loc, previous));
             valid = false;
             continue;
         }
@@ -1140,7 +1140,7 @@ fn grace_property(
         return Some(None);
     };
     if let Some(second) = written.next() {
-        diags.push(Problem::Twice { what: Twice::ContractGrace, again: second.loc, first: first.loc }.diagnostic());
+        diags.push(problem::twice(Twice::ContractGrace, second.loc, first.loc));
         return None;
     }
     let span = span_property(file, props, "grace", diags)?;
@@ -1308,7 +1308,7 @@ fn contract_area<'s>(
             continue;
         }
         if let Some(first) = first_loc {
-            diags.push(Problem::Twice { what: Twice::ContractArea, again: prop.loc, first }.diagnostic());
+            diags.push(problem::twice(Twice::ContractArea, prop.loc, first));
             return Err(());
         }
         first_loc = Some(prop.loc);
@@ -1384,7 +1384,7 @@ fn contract_deposit<'s>(
             continue;
         }
         if let Some(first) = first_loc {
-            diags.push(Problem::Twice { what: Twice::ContractDeposit, again: prop.loc, first }.diagnostic());
+            diags.push(problem::twice(Twice::ContractDeposit, prop.loc, first));
             return Err(());
         }
         first_loc = Some(prop.loc);

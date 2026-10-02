@@ -1,10 +1,9 @@
 //! What the model says is wrong, for the problems that come in families.
 //!
 //! A name nothing answers to, a name several things answer to, a thing declared twice, a code that names no
-//! transaction: each is said the same way wherever it is found, so each is a variant here, holding the facts
-//! borrowed from the book, and [`Problem::diagnostic`] is the one place its words are written. A caller
-//! decides that something is wrong and says what; it never words it. One-off diagnostics stay where they
-//! arise, for the catalog is for families.
+//! transaction: each is said the same way wherever it is found, so each is one function here, taking the facts
+//! borrowed from the book, and its words are written once. A caller decides that something is wrong and says
+//! what; it never words it. One-off diagnostics stay where they arise, for the catalog is for families.
 
 use axiom_core::{Diagnostic, Id, Interner, Loc};
 
@@ -206,55 +205,21 @@ impl Twice {
     }
 }
 
-/// A problem of a kind that recurs, with the facts it is about.
-pub(crate) enum Problem<'a> {
-    /// A name nothing answers to. `nearest` is the closest name that is known, offered as the fix; `unused`
-    /// lists the systems that declare it without being used here.
-    Unknown { noun: Noun, word: Word<'a>, nearest: Option<&'a str>, unused: &'a [Unused<'a>] },
-    /// A name several things answer to, each with the shortest way to write only it.
-    Ambiguous { noun: Noun, word: Word<'a>, candidates: &'a [Candidate] },
-    /// A name several things answer to, said plainly: only what they are is listed, without a way out.
-    AmbiguousName { noun: Noun, word: Word<'a>, among: &'a [String], reads: Reads },
-    /// A name declared twice in one scope. A first declaration without a location is built in.
-    Duplicate { noun: Noun, word: Word<'a>, first: Option<Loc> },
-    /// A name declared again after the declaration that `first` locates, if any, with the advice that goes
-    /// with it. Declarations of commodities, entities, accounts and assets give none.
-    DeclaredTwice { noun: Noun, word: Word<'a>, first: Option<Loc>, advice: Option<&'static str> },
-    /// A property a kind may not declare because every kind has it.
-    BuiltInProperty { word: Word<'a> },
-    /// Something that may be written once, written again at `again` after `first`.
-    Twice { what: Twice, again: Loc, first: Loc },
-    /// A code that names no earlier transaction.
-    UnknownCode { used: CodeUse, code: &'a str, at: Loc },
-    /// A code that names several earlier transactions.
-    AmbiguousCode { used: CodeUse, code: &'a str, at: Loc, first: Loc, second: Loc },
+/// Something that may be written once, written again at `again` after `first`.
+pub(crate) fn twice(what: Twice, again: Loc, first: Loc) -> Diagnostic {
+    let [code, message, second, earlier] = what.words();
+    Diagnostic::error(code, message).label(again, second).context(first, earlier)
 }
 
-impl Problem<'_> {
-    pub(crate) fn diagnostic(self) -> Diagnostic {
-        match self {
-            Problem::Unknown { noun, word, nearest, unused } => unknown(noun, word, nearest, unused),
-            Problem::Ambiguous { noun, word, candidates } => ambiguous(noun, word, candidates),
-            Problem::AmbiguousName { noun, word, among, reads } => ambiguous_name(noun, word, among, reads),
-            Problem::Duplicate { noun, word, first } => duplicate(noun, word, first),
-            Problem::DeclaredTwice { noun, word, first, advice } => declared_twice(noun, word, first, advice),
-            Problem::BuiltInProperty { word } => {
-                Diagnostic::error("reserved-property", format!("`{}` is a built-in property", word.text))
-                    .label(word.loc, "choose another name")
-                    .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them")
-            }
-            Problem::Twice { what, again, first } => {
-                let [code, message, second, earlier] = what.words();
-                Diagnostic::error(code, message).label(again, second).context(first, earlier)
-            }
-            Problem::UnknownCode { used, code, at } => unknown_code(used, code, at),
-            Problem::AmbiguousCode { used, code, at, first, second } => ambiguous_code(used, code, at, first, second),
-        }
-    }
+/// A property a kind may not declare because every kind has it.
+pub(crate) fn built_in_property(word: Word) -> Diagnostic {
+    Diagnostic::error("reserved-property", format!("`{}` is a built-in property", word.text))
+        .label(word.loc, "choose another name")
+        .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them")
 }
 
 /// `there is no place `chekcing``, with the closest known name as the fix.
-fn unknown(noun: Noun, word: Word, nearest: Option<&str>, unused: &[Unused]) -> Diagnostic {
+pub(crate) fn unknown(noun: Noun, word: Word, nearest: Option<&str>, unused: &[Unused]) -> Diagnostic {
     let name = noun.words().0;
     let mut diagnostic =
         Diagnostic::error(format!("unknown-{}", noun.slug()), format!("there is no {name} `{}`", word.text))
@@ -270,7 +235,7 @@ fn unknown(noun: Noun, word: Word, nearest: Option<&str>, unused: &[Unused]) -> 
     diagnostic
 }
 
-fn ambiguous(noun: Noun, word: Word, candidates: &[Candidate]) -> Diagnostic {
+pub(crate) fn ambiguous(noun: Noun, word: Word, candidates: &[Candidate]) -> Diagnostic {
     let (which, plural) = (if candidates.len() == 2 { "either of these" } else { "any of these" }, noun.words().1);
     let mut diagnostic =
         Diagnostic::error(format!("ambiguous-{}", noun.slug()), format!("`{}` could be {which} {plural}", word.text))
@@ -288,7 +253,7 @@ fn ambiguous(noun: Noun, word: Word, candidates: &[Candidate]) -> Diagnostic {
     diagnostic
 }
 
-fn ambiguous_name(noun: Noun, word: Word, among: &[String], reads: Reads) -> Diagnostic {
+pub(crate) fn ambiguous_name(noun: Noun, word: Word, among: &[String], reads: Reads) -> Diagnostic {
     let could = match reads {
         Reads::Mean => "mean",
         Reads::Name => "name",
@@ -297,7 +262,7 @@ fn ambiguous_name(noun: Noun, word: Word, among: &[String], reads: Reads) -> Dia
         .label(word.loc, format!("could {could} {}", among.join(" or ")))
 }
 
-fn duplicate(noun: Noun, word: Word, first: Option<Loc>) -> Diagnostic {
+pub(crate) fn duplicate(noun: Noun, word: Word, first: Option<Loc>) -> Diagnostic {
     let (text, loc, noun) = (word.text, word.loc, noun.words().0);
     match first {
         Some(first) => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is declared twice"))
@@ -310,7 +275,7 @@ fn duplicate(noun: Noun, word: Word, first: Option<Loc>) -> Diagnostic {
     }
 }
 
-fn declared_twice(noun: Noun, word: Word, first: Option<Loc>, advice: Option<&str>) -> Diagnostic {
+pub(crate) fn declared_twice(noun: Noun, word: Word, first: Option<Loc>, advice: Option<&str>) -> Diagnostic {
     let mut diagnostic =
         Diagnostic::error(noun.duplicate_code(), format!("{} `{}` is declared twice", noun.words().0, word.text))
             .label(word.loc, "declared again here");
@@ -323,7 +288,7 @@ fn declared_twice(noun: Noun, word: Word, first: Option<Loc>, advice: Option<&st
     }
 }
 
-fn unknown_code(used: CodeUse, code: &str, at: Loc) -> Diagnostic {
+pub(crate) fn unknown_code(used: CodeUse, code: &str, at: Loc) -> Diagnostic {
     match used {
         CodeUse::Against => Diagnostic::error("unknown-against", "this code names no earlier transaction")
             .label(at, format!("`{code}` has not named a transaction yet"))
@@ -336,7 +301,7 @@ fn unknown_code(used: CodeUse, code: &str, at: Loc) -> Diagnostic {
     }
 }
 
-fn ambiguous_code(used: CodeUse, code: &str, at: Loc, first: Loc, second: Loc) -> Diagnostic {
+pub(crate) fn ambiguous_code(used: CodeUse, code: &str, at: Loc, first: Loc, second: Loc) -> Diagnostic {
     let (diagnostic, help) = match used {
         CodeUse::Against => (
             Diagnostic::error("ambiguous-against", "this code names more than one earlier transaction")
@@ -367,11 +332,11 @@ pub(crate) fn unresolved<T>(
     match miss {
         Miss::Unknown { suggestion } => {
             let nearest = suggestion.map(|sym| names.name(sym));
-            Problem::Unknown { noun, word, nearest, unused: &[] }.diagnostic()
+            unknown(noun, word, nearest, &[])
         }
         Miss::Ambiguous(ids) => {
             let among: Vec<_> = ids.iter().map(|&id| describe(id)).collect();
-            Problem::AmbiguousName { noun, word, among: &among, reads }.diagnostic()
+            ambiguous_name(noun, word, &among, reads)
         }
     }
 }
@@ -393,9 +358,7 @@ mod tests {
     #[test]
     fn an_unknown_name_offers_its_nearest_as_an_edit_and_names_the_systems_that_declare_it() {
         let unused = [Unused { name: "chekcing", system: "us" }];
-        let problem =
-            Problem::Unknown { noun: Noun::Place, word: word("chekcing"), nearest: Some("checking"), unused: &unused };
-        let diagnostic = problem.diagnostic();
+        let diagnostic = unknown(Noun::Place, word("chekcing"), Some("checking"), &unused);
 
         assert_eq!(diagnostic.code, "unknown-place");
         assert_eq!(diagnostic.message, "there is no place `chekcing`");
@@ -407,20 +370,18 @@ mod tests {
 
     #[test]
     fn a_noun_gives_each_family_its_own_code_and_words() {
-        let ambiguous = Problem::Ambiguous { noun: Noun::Place, word: word("x"), candidates: &[] }.diagnostic();
-        assert_eq!((&*ambiguous.code, &*ambiguous.message), ("ambiguous-place", "`x` could be any of these accounts"));
+        let several = ambiguous(Noun::Place, word("x"), &[]);
+        assert_eq!((&*several.code, &*several.message), ("ambiguous-place", "`x` could be any of these accounts"));
 
-        let base = Problem::Unknown { noun: Noun::BaseCommodity, word: word("ZZZ"), nearest: None, unused: &[] };
-        assert_eq!(base.diagnostic().code, "unknown-commodity");
-        let twice = Problem::DeclaredTwice { noun: Noun::Pattern, word: word("p"), first: Some(at(9)), advice: None };
-        assert_eq!(twice.diagnostic().code, "duplicate-pattern");
-        let twice = Problem::DeclaredTwice { noun: Noun::Asset, word: word("car"), first: None, advice: None };
-        assert_eq!(twice.diagnostic().code, "duplicate-declaration");
+        let base = unknown(Noun::BaseCommodity, word("ZZZ"), None, &[]);
+        assert_eq!(base.code, "unknown-commodity");
+        assert_eq!(declared_twice(Noun::Pattern, word("p"), Some(at(9)), None).code, "duplicate-pattern");
+        assert_eq!(declared_twice(Noun::Asset, word("car"), None, None).code, "duplicate-declaration");
     }
 
     #[test]
     fn a_declaration_of_a_built_in_is_told_to_go() {
-        let diagnostic = Problem::Duplicate { noun: Noun::Kind, word: word("asset"), first: None }.diagnostic();
+        let diagnostic = duplicate(Noun::Kind, word("asset"), None);
 
         assert_eq!(diagnostic.message, "kind `asset` is built in");
         assert_eq!(diagnostic.help[0].text, "delete this declaration");
@@ -428,7 +389,7 @@ mod tests {
 
     #[test]
     fn something_written_twice_points_at_both_and_tells_each_what_it_is() {
-        let diagnostic = Problem::Twice { what: Twice::LoanPrepay, again: at(20), first: at(4) }.diagnostic();
+        let diagnostic = twice(Twice::LoanPrepay, at(20), at(4));
 
         assert_eq!(diagnostic.message, "a loan has one prepayment rule");
         assert_eq!((diagnostic.labels[0].loc, diagnostic.labels[0].primary), (at(20), true));
@@ -439,10 +400,10 @@ mod tests {
 
     #[test]
     fn a_code_that_names_two_transactions_is_worded_for_what_it_was_asked_to_name() {
-        let ambiguous = |used| Problem::AmbiguousCode { used, code: "inv", at: at(0), first: at(5), second: at(9) };
+        let ambiguous = |used| ambiguous_code(used, "inv", at(0), at(5), at(9));
 
-        assert_eq!(ambiguous(CodeUse::Against).diagnostic().code, "ambiguous-against");
-        let waiver = ambiguous(CodeUse::ClaimWaiver).diagnostic();
+        assert_eq!(ambiguous(CodeUse::Against).code, "ambiguous-against");
+        let waiver = ambiguous(CodeUse::ClaimWaiver);
         assert_eq!(waiver.code, "ambiguous-claim-reference");
         assert_eq!(waiver.labels.len(), 3);
         assert_eq!(waiver.help[0].text, "use a code that appears on only one earlier transaction");

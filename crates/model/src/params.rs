@@ -15,7 +15,7 @@ use crate::declare::World;
 use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
 use crate::names::Scoped;
-use crate::problem::{Noun, Problem};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 
 /// What every row of a param looks like.
@@ -47,7 +47,7 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, 
         let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
         if let Some((_, first)) = earlier {
             let (word, first) = (Word::of(file, name), Some(first.loc));
-            diags.push(Problem::Duplicate { noun: Noun::Param, word, first }.diagnostic());
+            diags.push(problem::duplicate(Noun::Param, word, first));
             continue;
         }
 

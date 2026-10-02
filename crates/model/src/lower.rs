@@ -21,7 +21,7 @@ use crate::book::Input;
 use crate::declare::World;
 use crate::errors::Word;
 use crate::law::Ty;
-use crate::problem::{Noun, Problem};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -321,7 +321,7 @@ fn inputs<'s>(
         if let Some(first) = seen.get(&symbol) {
             let advice = Some("keep one declaration so every occurrence has one binding");
             let word = Word { text: name.0, loc: prop.loc };
-            diags.push(Problem::DeclaredTwice { noun: Noun::Input, word, first: Some(*first), advice }.diagnostic());
+            diags.push(problem::declared_twice(Noun::Input, word, Some(*first), advice));
             continue;
         }
         seen.insert(symbol, prop.loc);

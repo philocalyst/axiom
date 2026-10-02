@@ -21,7 +21,7 @@ use crate::journal::{
     WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
-use crate::problem::{CodeUse, Problem, Twice};
+use crate::problem::{self, CodeUse, Twice};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -158,11 +158,11 @@ impl CodeIndex {
         let problem = match self.by_code.get(&symbol).copied() {
             Some(CodeTarget::Unique { txn, .. }) => return Some(txn),
             Some(CodeTarget::Ambiguous { first, second }) => {
-                Problem::AmbiguousCode { used, code: code.name(), at, first, second }
+                problem::ambiguous_code(used, code.name(), at, first, second)
             }
-            None => Problem::UnknownCode { used, code: code.name(), at },
+            None => problem::unknown_code(used, code.name(), at),
         };
-        diags.push(problem.diagnostic());
+        diags.push(problem);
         None
     }
 }
@@ -823,7 +823,7 @@ fn lower_occurrence<'a, 's>(
         if let Some(input_at) = input {
             if bound[input_at] {
                 let first = inputs[input_at].loc;
-                diags.push(Problem::Twice { what: Twice::ContractInput, again: leg.loc, first }.diagnostic());
+                diags.push(problem::twice(Twice::ContractInput, leg.loc, first));
                 continue;
             }
             if !file[leg.tail].is_empty() {
@@ -916,7 +916,7 @@ fn lower_occurrence<'a, 's>(
             Some((template_at, leg_at)) => {
                 if replaced_legs.contains(&(template_at, leg_at)) {
                     let first = templates[template_at].legs[leg_at].flow.loc;
-                    diags.push(Problem::Twice { what: Twice::TemplateLeg, again: leg.loc, first }.diagnostic());
+                    diags.push(problem::twice(Twice::TemplateLeg, leg.loc, first));
                     continue;
                 }
                 replaced_legs.push((template_at, leg_at));
@@ -929,9 +929,7 @@ fn lower_occurrence<'a, 's>(
                 // to the same group and subtracts it from the header's
                 // remainder.
                 if let Some((_, first_loc)) = added_ends.iter().find(|(place, _)| *place == endpoint.place) {
-                    diags.push(
-                        Problem::Twice { what: Twice::AdditionalEnd, again: leg.loc, first: *first_loc }.diagnostic(),
-                    );
+                    diags.push(problem::twice(Twice::AdditionalEnd, leg.loc, *first_loc));
                     continue;
                 }
                 added_ends.push((endpoint.place, leg.loc));

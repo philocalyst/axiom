@@ -27,7 +27,7 @@ use crate::errors::Word;
 use crate::journal::Select as LotSelect;
 use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
 use crate::names::Rank as NameRank;
-use crate::problem::{Noun, Problem};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -185,9 +185,7 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
                         .any(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
                 });
                 let nearest = closest(text, visible);
-                diags.push(
-                    Problem::Unknown { noun: Noun::Law, word: Word { text, loc }, nearest, unused: &[] }.diagnostic(),
-                );
+                diags.push(problem::unknown(Noun::Law, Word { text, loc }, nearest, &[]));
             }
             targets => {
                 let mut diagnostic =

@@ -15,7 +15,7 @@ use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word};
 use crate::kinds;
 use crate::names::{Found, Names, Scoped};
-use crate::problem::{Noun, Problem, Unused};
+use crate::problem::{self, Noun, Unused};
 use crate::scope::Home;
 
 /// A place written in a flow, and the entity it stood for if it was one.
@@ -46,7 +46,7 @@ impl<'s> World<'s> {
     fn explain_commodity(&self, word: Word) -> Diagnostic {
         let symbols = self.book.commodities.values().map(|commodity| self.book.name(commodity.symbol));
         let nearest = closest(word.text, symbols);
-        Problem::Unknown { noun: Noun::Commodity, word, nearest, unused: &[] }.diagnostic().note(format!(
+        problem::unknown(Noun::Commodity, word, nearest, &[]).note(format!(
             "commodities are declared with `commodity {}`; USD, EUR, GBP… come with `use std`",
             word.text
         ))
@@ -116,7 +116,7 @@ impl<'s> World<'s> {
         let entities = &self.book.entities;
         let candidates =
             self.candidates(&self.book.lookup.entities.names, ids, |id| entities[id].path, |id| entities[id].loc);
-        Problem::Ambiguous { noun: Noun::Entity, word, candidates: &candidates }.diagnostic()
+        problem::ambiguous(Noun::Entity, word, &candidates)
     }
 
     /// Why `word` names nothing `home` can see: the closest name it can see, and the systems that declare it
@@ -134,7 +134,7 @@ impl<'s> World<'s> {
             })
             .map(|system| Unused { name: word.text, system })
             .collect();
-        Problem::Unknown { noun, word, nearest, unused: &unused }.diagnostic()
+        problem::unknown(noun, word, nearest, &unused)
     }
 
     pub fn entity(&self, home: Home, word: Word) -> Result<Id<Entity>, Diagnostic> {
@@ -157,7 +157,7 @@ impl<'s> World<'s> {
         let purposes = &self.book.purposes;
         let candidates =
             self.candidates(&self.book.lookup.purposes.names, ids, |id| purposes[id].name, |id| purposes[id].loc);
-        Problem::Ambiguous { noun: Noun::Purpose, word, candidates: &candidates }.diagnostic()
+        problem::ambiguous(Noun::Purpose, word, &candidates)
     }
 
     pub fn purpose(&self, home: Home, word: Word) -> Result<Id<Purpose>, Diagnostic> {
@@ -176,7 +176,7 @@ impl<'s> World<'s> {
                 let places = &self.book.places;
                 let names = &self.book.lookup.places;
                 let candidates = self.candidates(names, &ids, |id| places[id].path, |id| places[id].loc);
-                Err(Problem::Ambiguous { noun: Noun::Place, word, candidates: &candidates }.diagnostic())
+                Err(problem::ambiguous(Noun::Place, word, &candidates))
             }
         }
     }
@@ -313,7 +313,7 @@ impl<'s> World<'s> {
         let (places, names) = (&self.book.lookup.places, &self.book.names);
         let known = places.keys(names);
         let closest = closest(word.text, known);
-        let mut diagnostic = Problem::Unknown { noun: Noun::Place, word, nearest: closest, unused: &[] }.diagnostic();
+        let mut diagnostic = problem::unknown(Noun::Place, word, closest, &[]);
         // Old chart roots no longer assign place classes. Preserve a useful
         // refusal for paths that look like an attempt to use the v3 chart.
         if legacy_chart_path(word.text) {
@@ -407,7 +407,7 @@ impl<'s> World<'s> {
                         }
                     })
                     .collect();
-                Err(Problem::Ambiguous { noun: Noun::Param, word, candidates: &candidates }.diagnostic())
+                Err(problem::ambiguous(Noun::Param, word, &candidates))
             }
         }
     }
@@ -425,7 +425,7 @@ impl<'s> World<'s> {
             .filter_map(|&hidden| self.param_system(hidden))
             .map(|system| Unused { name: leaf, system })
             .collect();
-        Problem::Unknown { noun: Noun::Param, word, nearest, unused: &unused }.diagnostic()
+        problem::unknown(Noun::Param, word, nearest, &unused)
     }
 
     pub fn system(&self, word: Word) -> Result<Id<System>, Diagnostic> {

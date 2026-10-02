@@ -8,7 +8,7 @@ use crate::book::{Bracket, Commodity, Schedule};
 use crate::declare::World;
 use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
-use crate::problem::{Noun, Problem};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 
 impl Value {
@@ -181,7 +181,7 @@ impl<'s> World<'s> {
     /// Why `word` is no asset, with the nearest asset as the fix.
     pub(crate) fn missing_asset(&self, word: Word<'_>) -> Diagnostic {
         let nearest = closest(word.text, self.book.assets.values().map(|asset| self.book.name(asset.name)));
-        Problem::Unknown { noun: Noun::Asset, word, nearest, unused: &[] }.diagnostic()
+        problem::unknown(Noun::Asset, word, nearest, &[])
     }
 
     /// `0 USD 10% | 12_400 USD 12% | …`: marginal brackets, ascending from zero,

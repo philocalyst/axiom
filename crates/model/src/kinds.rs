@@ -10,7 +10,7 @@ use crate::book::{Class, Kind, Miss, Sort, System};
 use crate::collect::Collected;
 use crate::errors::{Candidate, Word};
 use crate::names::Scoped;
-use crate::problem::{Noun, Problem, Unused};
+use crate::problem::{self, Noun, Unused};
 use crate::scope::{Home, Scopes};
 
 /// The kind tree built from the promoted S5 declaration nodes. `declarations`
@@ -91,12 +91,12 @@ pub(crate) fn declare_sites<'s>(
         written.push((file, decl, home));
         if let Some(&first) = duplicate_of.get(&(home, name)) {
             let (word, earlier) = (Word::of(file, name), drafts[first].loc);
-            diags.push(Problem::Duplicate { noun: Noun::Kind, word, first: earlier }.diagnostic());
+            diags.push(problem::duplicate(Noun::Kind, word, earlier));
             draft_of.push(first);
             continue;
         }
         if let Some(first) = ROOTS.iter().position(|&(root, _)| root == name) {
-            diags.push(Problem::Duplicate { noun: Noun::Kind, word: Word::of(file, name), first: None }.diagnostic());
+            diags.push(problem::duplicate(Noun::Kind, Word::of(file, name), None));
             duplicate_of.insert((home, name), first);
             draft_of.push(first);
             continue;
@@ -238,7 +238,7 @@ pub(crate) fn unresolved(
                 .map(|system| Unused { name: word.text, system })
                 .collect();
             let nearest = suggestion.map(|sym| names.name(sym));
-            Problem::Unknown { noun: Noun::Kind, word, nearest, unused: &unused }.diagnostic()
+            problem::unknown(Noun::Kind, word, nearest, &unused)
         }
         Miss::Ambiguous(ids) => {
             let candidates: Vec<Candidate> = ids
@@ -261,7 +261,7 @@ pub(crate) fn unresolved(
                     }
                 })
                 .collect();
-            Problem::Ambiguous { noun: Noun::Kind, word, candidates: &candidates }.diagnostic()
+            problem::ambiguous(Noun::Kind, word, &candidates)
         }
     }
 }
