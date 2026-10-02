@@ -14,6 +14,7 @@ pub mod hash;
 pub mod id;
 pub mod num;
 pub mod par;
+pub mod sparse;
 pub mod sym;
 pub mod tagless;
 #[cfg(test)]
@@ -32,6 +33,7 @@ pub use groups::Groups;
 pub use hash::{Map, Set};
 pub use id::{Arena, Id, Run};
 pub use num::{Dec, Qty, Ratio};
+pub use sparse::Sparse;
 pub use sym::{Interner, Sym};
 pub use tagless::{Column, Tag};
 pub use timeline::Timeline;
