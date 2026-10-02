@@ -1,17 +1,70 @@
-warning[budget]: expenses/food: 690.00 USD in 2026-01 against a limit of 650.00 USD, over by 40.00 USD
-   ╭─[77-budget-overspend.ax:15:1]
-   │
- 6 │ account expenses/food
- 7 │   budget 650 USD monthly
-   │   ───────────┬──────────
-   │              ╰── 690.00 USD
-   ⋮
-15 │ 2026-01-19 checking -> groceries 210.00 USD
-   │ ─────────────────────┬─────────────────────
-   │                      ╰── this flow: 210.00 USD into expenses/food/groceries
-   │
-   = help: at most 170.00 USD more can go in this month
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[77-budget-overspend.ax:6:9]
+  │
+6 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-1 warning
-✓ 5 flows · 5 places · 2 laws enforced · net worth 2,250.00 USD
-[exit status 0]
+error[chart-account]: `expenses/food/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[77-budget-overspend.ax:8:9]
+  │
+8 │ account expenses/food/groceries
+  │         ───────────┬───────────
+  │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/food/dining` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[77-budget-overspend.ax:9:9]
+  │
+9 │ account expenses/food/dining
+  │         ──────────┬─────────
+  │                   ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[77-budget-overspend.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[77-budget-overspend.ax:13:1]
+   │
+13 │ 2026-01-05 checking -> groceries 300.00 USD
+   │ ─────────────────────┬─────────────────────
+   │                      ╰── no complete flow can be formed here
+   │
+   = note: also at 77-budget-overspend.ax:14, 77-budget-overspend.ax:15, 77-budget-overspend.ax:16
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `groceries`
+   ╭─[77-budget-overspend.ax:13:24]
+   │
+13 │ 2026-01-05 checking -> groceries 300.00 USD
+   │                        ────┬────
+   │                            ╰── not a known entity
+   │
+   = note: also at 77-budget-overspend.ax:15
+
+error[unknown-entity]: there is no entity `dining`
+   ╭─[77-budget-overspend.ax:14:24]
+   │
+14 │ 2026-01-12 checking -> dining 180.00 USD
+   │                        ───┬──
+   │                           ╰── not a known entity
+   │
+   = note: also at 77-budget-overspend.ax:16
+
+✗ 12 errors
+[exit status 1]

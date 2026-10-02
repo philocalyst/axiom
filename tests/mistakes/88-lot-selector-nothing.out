@@ -1,3 +1,24 @@
+error[unknown-kind]: there is no kind `broker`
+  ╭─[88-lot-selector-nothing.ax:8:28]
+  │
+8 │ account assets/brokerage : broker
+  │                            ───┬──
+  │                               ╰── not a known kind
+  │
+  = help: did you mean `grocer`?
+8 - account assets/brokerage : broker
+8 + account assets/brokerage : grocer
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[88-lot-selector-nothing.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
 error[insufficient-holding]: assets/brokerage does not hold 3 VTI
    ╭─[88-lot-selector-nothing.ax:15:1]
    │
@@ -10,5 +31,5 @@ error[insufficient-holding]: assets/brokerage does not hold 3 VTI
    = help: record the purchase before this flow, or check the quantity; the missing amount is left
            as a negative balance so the rest of the ledger stays consistent
 
-✗ 1 error
+✗ 3 errors
 [exit status 1]

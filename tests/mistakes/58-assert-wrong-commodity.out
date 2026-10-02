@@ -1,13 +1,49 @@
-error[assertion]: assets/checking has never held EUR; it holds 915.80 USD
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[58-assert-wrong-commodity.ax:6:9]
+  │
+6 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[58-assert-wrong-commodity.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[58-assert-wrong-commodity.ax:10:1]
+   │
+10 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[58-assert-wrong-commodity.ax:10:24]
+   │
+10 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+error[assertion]: assets/checking has never held EUR; it holds 1,000.00 USD
    ╭─[58-assert-wrong-commodity.ax:11:1]
    │
 11 │ 2026-01-31 checking = 915.80 EUR
    │ ────────────────┬───────────────
    │                 ╰── 915.80 EUR more than the ledger holds
    │
-   = help: assert in USD: 915.80 USD
+   = help: assert in USD: 1,000.00 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 11 + 2026-01-31 checking = 915.80 EUR !
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

@@ -7,5 +7,15 @@ error[unexpected-character]: unexpected character 'é'
   │
   = note: also at r08-unicode-name.ax:5
 
-✗ 2 errors
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r08-unicode-name.ax:4:9]
+  │
+4 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+✗ 3 errors
 [exit status 1]

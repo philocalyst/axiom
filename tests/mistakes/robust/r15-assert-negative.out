@@ -1,21 +1,54 @@
-warning[overdraft]: balance below zero: -50.00 USD against a minimum of 0.00 USD, short by 50.00 USD
-   ╭─[r15-assert-negative.ax:7:1]
-   │
- 7 │ 2026-01-08 checking -> food 150 USD
-   │ ─────────────────┬─────────────────
-   │                  ╰── this flow: 150.00 USD from assets/checking to expenses/food
-   │
-   ├─[std.ax:28:10] (built in)
-   │
-28 │     warn balance >= empty "balance below zero"
-   │          ───┬───
-   │             ╰── -50.00 USD
-   │
-   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
-           usually for a fee.
-   = help: move money in before the payment clears, or look for a pending payment or a missing
-           deposit that explains it.
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r15-assert-negative.ax:4:9]
+  │
+4 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-1 warning
-✓ 2 flows · 3 places · 1 law enforced · net worth -50.00 USD
-[exit status 0]
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r15-assert-negative.ax:5:9]
+  │
+5 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+  ╭─[r15-assert-negative.ax:7:1]
+  │
+7 │ 2026-01-08 checking -> food 150 USD
+  │ ─────────────────┬─────────────────
+  │                  ╰── no complete flow can be formed here
+  │
+  = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+  ╭─[r15-assert-negative.ax:7:24]
+  │
+7 │ 2026-01-08 checking -> food 150 USD
+  │                        ──┬─
+  │                          ╰── not a known entity
+
+error[assertion]: assets/checking holds 100.00 USD, not -50.00 USD
+  ╭─[r15-assert-negative.ax:8:1]
+  │
+6 │ 2025-12-31 equity/opening -> checking 100 USD
+  │ ──────────────────────┬──────────────────────
+  │                       ╰── +100.00 USD from equity/opening
+7 │ 2026-01-08 checking -> food 150 USD
+8 │ 2026-01-31 checking = -50 USD
+  │ ──────────────┬──────────────
+  │               ╰── 150.00 USD less than the ledger holds
+  │
+  = note: 150.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+  = help: record the missing flow
+  = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+8 + 2026-01-31 checking = -50 USD !
+
+✗ 5 errors
+[exit status 1]

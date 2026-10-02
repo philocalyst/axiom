@@ -1,21 +1,38 @@
-warning[overdraft]: balance below zero: -600.00 USD against a minimum of 0.00 USD, short by 600.00 USD
-   ╭─[r16-huge-spread.ax:9:1]
-   │
- 9 │ 0001-01-01..9999-12-31 checking -> food 600 USD
-   │ ───────────────────────┬───────────────────────
-   │                        ╰── this flow: 600.00 USD from assets/checking to expenses/food
-   │
-   ├─[std.ax:28:10] (built in)
-   │
-28 │     warn balance >= empty "balance below zero"
-   │          ───┬───
-   │             ╰── -600.00 USD
-   │
-   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
-           usually for a fee.
-   = help: move money in before the payment clears, or look for a pending payment or a missing
-           deposit that explains it.
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r16-huge-spread.ax:5:9]
+  │
+5 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-1 warning
-✓ 2 flows · 3 places · 1 law enforced · net worth 400.00 USD
-[exit status 0]
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r16-huge-spread.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+  ╭─[r16-huge-spread.ax:9:1]
+  │
+9 │ 0001-01-01..9999-12-31 checking -> food 600 USD
+  │ ───────────────────────┬───────────────────────
+  │                        ╰── no complete flow can be formed here
+  │
+  = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+  ╭─[r16-huge-spread.ax:9:36]
+  │
+9 │ 0001-01-01..9999-12-31 checking -> food 600 USD
+  │                                    ──┬─
+  │                                      ╰── not a known entity
+
+✗ 4 errors
+[exit status 1]

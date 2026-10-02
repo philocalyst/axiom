@@ -1,14 +1,51 @@
-error[unknown-code]: no transaction is marked `#check-1014`
+error[chart-account]: `expenses/home` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[51-settle-unknown-code.ax:6:9]
+  │
+6 │ account expenses/home
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[51-settle-unknown-code.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/home`
+   ╭─[51-settle-unknown-code.ax:10:7]
+   │
+ 9 │ entity plumber : org
+10 │   via expenses/home
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/home`
+
+error[unknown-purpose]: there is no purpose `check-1041`
+   ╭─[51-settle-unknown-code.ax:13:43]
+   │
+13 │ 2026-02-01 checking -> plumber (350 USD) #check-1041
+   │                                           ─────┬────
+   │                                                ╰── not a known purpose
+
+error[hash-code]: a code is written `^code`, and `#name` is a purpose
    ╭─[51-settle-unknown-code.ax:14:12]
    │
 14 │ 2026-02-06 #check-1014 settled
    │            ─────┬─────
-   │                 ╰── nothing carries this code
+   │                 ╰── a purpose goes in a flow's tail, and this is where a code is meant
    │
-   = note: an event names the transaction it changes by its code
-   = help: did you mean `#check-1041`?
+   = help: write `^check-1014`
 14 - 2026-02-06 #check-1014 settled
-14 + 2026-02-06 #check-1041 settled
+14 + 2026-02-06 ^check-1014 settled
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

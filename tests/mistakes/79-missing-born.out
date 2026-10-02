@@ -10,13 +10,34 @@ error[unset-property]: `born` is not set on `me`, so `deferral-limit` cannot be 
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:41:20] (built in)
+   ├─[us/401k.ax:43:20] (built in)
    │
-41 │     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if own…
+43 │     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if own…
    │                    ────┬────
    │                        ╰── `deferral-limit` reads it here
    │
    = help: add a `born …` line under the declaration of `me`
 
-✗ 1 error
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[79-missing-born.ax:13:9]
+   │
+13 │ account income/salary : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[79-missing-born.ax:15:7]
+   │
+14 │ entity acme : employer
+15 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+✗ 3 errors
 [exit status 1]

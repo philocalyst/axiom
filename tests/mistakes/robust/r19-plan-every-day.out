@@ -1,2 +1,33 @@
-✓ 1 flow · 3 places · 1 law enforced · net worth 1,000.00 USD
-[exit status 0]
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r19-plan-every-day.ax:5:9]
+  │
+5 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r19-plan-every-day.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[plan-is-a-contract]: `every` is gone: what repeats is a contract
+  ╭─[r19-plan-every-day.ax:9:1]
+  │
+9 │ every day from 2026-01-01 until 9999-12 checking -> food 1 USD
+  │ ──┬──
+  │   ╰── a promise of flows, with a name and a party
+  │
+  = note: a contract states its schedule once, and the journal records each time it is kept
+  = help: write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08
+          NAME` says it
+
+✗ 3 errors
+[exit status 1]

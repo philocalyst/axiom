@@ -1,3 +1,14 @@
+error[unknown-kind]: there is no kind `broker`
+  ╭─[68-gain-under-on-in.ax:9:28]
+  │
+9 │ account assets/brokerage : broker
+  │                            ───┬──
+  │                               ╰── not a known kind
+  │
+  = help: did you mean `grocer`?
+9 - account assets/brokerage : broker
+9 + account assets/brokerage : grocer
+
 error[law-variable]: `gain` is not available in this law
    ╭─[68-gain-under-on-in.ax:12:10]
    │
@@ -7,5 +18,15 @@ error[law-variable]: `gain` is not available in this law
    │
    = help: `gain` is provided by `on gain` laws
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[68-gain-under-on-in.ax:13:9]
+   │
+13 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+✗ 3 errors
 [exit status 1]

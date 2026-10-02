@@ -1,3 +1,39 @@
+error[chart-account]: `expenses/food/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[08-zero-not-empty.ax:8:9]
+  │
+8 │ account expenses/food/groceries
+  │         ───────────┬───────────
+  │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[08-zero-not-empty.ax:9:9]
+  │
+9 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[08-zero-not-empty.ax:12:1]
+   │
+12 │ 2026-01-08 visa -> groceries 84.20 USD
+   │ ───────────────────┬──────────────────
+   │                    ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `groceries`
+   ╭─[08-zero-not-empty.ax:12:20]
+   │
+12 │ 2026-01-08 visa -> groceries 84.20 USD
+   │                    ────┬────
+   │                        ╰── not a known entity
+
 error[bare-zero]: a bare `0` has no commodity; write `empty`
    ╭─[08-zero-not-empty.ax:14:19]
    │
@@ -10,5 +46,5 @@ error[bare-zero]: a bare `0` has no commodity; write `empty`
 14 - 2026-01-31 visa = 0
 14 + 2026-01-31 visa = empty
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

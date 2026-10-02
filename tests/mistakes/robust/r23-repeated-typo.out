@@ -1,14 +1,22 @@
-error[unknown-place]: there is no place `grocries`
-   ╭─[r23-repeated-typo.ax:10:24]
-   │
-10 │ 2026-01-16 checking -> grocries 10 USD
-   │                        ────┬───
-   │                            ╰── not a known place
-   │
-   = note: it is written on 3 lines, and none of them is kept
-   = help: did you mean `groceries`?
-10 - 2026-01-16 checking -> grocries 10 USD
-10 + 2026-01-16 checking -> groceries 10 USD
+error[chart-account]: `expenses/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r23-repeated-typo.ax:6:9]
+  │
+6 │ account expenses/groceries
+  │         ─────────┬────────
+  │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r23-repeated-typo.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+✗ 2 errors
 [exit status 1]

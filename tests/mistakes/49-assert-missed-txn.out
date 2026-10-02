@@ -1,4 +1,82 @@
-error[assertion]: assets/checking holds 3,015.80 USD, not 2,970.80 USD
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[49-assert-missed-txn.ax:7:9]
+  │
+7 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/rent` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[49-assert-missed-txn.ax:8:9]
+  │
+8 │ account expenses/rent
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[49-assert-missed-txn.ax:9:9]
+  │
+9 │ account income/salary : wages
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[49-assert-missed-txn.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[49-assert-missed-txn.ax:13:7]
+   │
+12 │ entity acme : employer
+13 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+error[unknown-place]: there is no place `expenses/rent`
+   ╭─[49-assert-missed-txn.ax:15:7]
+   │
+14 │ entity landlord : org
+15 │   via expenses/rent
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/rent`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[49-assert-missed-txn.ax:21:1]
+   │
+21 │ 2026-01-18 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[49-assert-missed-txn.ax:21:24]
+   │
+21 │ 2026-01-18 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+error[assertion]: assets/checking holds 3,100.00 USD, not 2,970.80 USD
    ╭─[49-assert-missed-txn.ax:22:1]
    │
 17 │ 2025-12-31 equity/opening -> checking 1_000.00 USD
@@ -7,21 +85,19 @@ error[assertion]: assets/checking holds 3,015.80 USD, not 2,970.80 USD
 18 │
 19 │ 2026-01-15 acme -> checking 3_900 USD
    │ ──────────────────┬──────────────────
-   │                   ╰── +3,900.00 USD from income/salary
+   │                   ╰── +3,900.00 USD from acme
 20 │ 2026-01-16 checking -> landlord 1_800 USD
    │ ────────────────────┬────────────────────
-   │                     ╰── -1,800.00 USD to expenses/rent
+   │                     ╰── -1,800.00 USD to landlord
 21 │ 2026-01-18 checking -> food 84.20 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── -84.20 USD to expenses/food
 22 │ 2026-01-31 checking = 2_970.80 USD
    │ ─────────────────┬────────────────
-   │                  ╰── 45.00 USD less than the ledger holds
+   │                  ╰── 129.20 USD less than the ledger holds
    │
-   = note: 45.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = note: 129.20 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 22 + 2026-01-31 checking = 2_970.80 USD !
 
-✗ 1 error
+✗ 9 errors
 [exit status 1]

@@ -1,14 +1,51 @@
-error[event-before-flow]: `#check-1041` is settled 2026-02-06, 4 days before it was written
-   ╭─[57-settle-before-written.ax:14:12]
+error[chart-account]: `expenses/home` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[57-settle-before-written.ax:6:9]
+  │
+6 │ account expenses/home
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[57-settle-before-written.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/home`
+   ╭─[57-settle-before-written.ax:10:7]
+   │
+ 9 │ entity plumber : org
+10 │   via expenses/home
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/home`
+
+error[unknown-purpose]: there is no purpose `check-1041`
+   ╭─[57-settle-before-written.ax:13:43]
    │
 13 │ 2026-02-10 checking -> plumber (350 USD) #check-1041
-   │ ──────────────────────────┬─────────────────────────
-   │                           ╰── written on 2026-02-10
+   │                                           ─────┬────
+   │                                                ╰── not a known purpose
+
+error[hash-code]: a code is written `^code`, and `#name` is a purpose
+   ╭─[57-settle-before-written.ax:14:12]
+   │
 14 │ 2026-02-06 #check-1041 settled
    │            ─────┬─────
-   │                 ╰── settled on 2026-02-06
+   │                 ╰── a purpose goes in a flow's tail, and this is where a code is meant
    │
-   = help: an event happens on or after the flow it changes: date it 2026-02-10 or later
+   = help: write `^check-1041`
+14 - 2026-02-06 #check-1041 settled
+14 + 2026-02-06 ^check-1041 settled
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

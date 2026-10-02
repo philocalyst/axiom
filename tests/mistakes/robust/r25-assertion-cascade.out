@@ -1,4 +1,66 @@
-error[assertion]: assets/checking holds 3,915.80 USD, not 3,900.72 USD
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r25-assertion-cascade.ax:8:9]
+  │
+8 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r25-assertion-cascade.ax:9:9]
+  │
+9 │ account income/salary : wages
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[r25-assertion-cascade.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[r25-assertion-cascade.ax:13:7]
+   │
+12 │ entity acme : employer
+13 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[r25-assertion-cascade.ax:18:1]
+   │
+18 │ 2026-01-10 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = note: also at r25-assertion-cascade.ax:22, r25-assertion-cascade.ax:26,
+           r25-assertion-cascade.ax:30, r25-assertion-cascade.ax:34, … (1 more)
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[r25-assertion-cascade.ax:18:24]
+   │
+18 │ 2026-01-10 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+   │
+   = note: also at r25-assertion-cascade.ax:22, r25-assertion-cascade.ax:26,
+           r25-assertion-cascade.ax:30, r25-assertion-cascade.ax:34, … (1 more)
+
+error[assertion]: assets/checking holds 4,000.00 USD, not 3,900.72 USD
    ╭─[r25-assertion-cascade.ax:19:1]
    │
 15 │ 2025-12-31 equity/opening -> checking 1_000 USD
@@ -7,18 +69,106 @@ error[assertion]: assets/checking holds 3,915.80 USD, not 3,900.72 USD
 16 │
 17 │ 2026-01-05 acme -> checking 3_000 USD
    │ ──────────────────┬──────────────────
-   │                   ╰── +3,000.00 USD from income/salary
+   │                   ╰── +3,000.00 USD from acme
 18 │ 2026-01-10 checking -> food 84.20 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── -84.20 USD to expenses/food
 19 │ 2026-01-31 checking = 3_900.72 USD
    │ ─────────────────┬────────────────
-   │                  ╰── 15.08 USD less than the ledger holds
+   │                  ╰── 99.28 USD less than the ledger holds
    │
-   = note: 15.08 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = note: 99.28 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 19 + 2026-01-31 checking = 3_900.72 USD !
 
-✗ 1 error
+error[assertion]: assets/checking holds 7,000.00 USD, not 6,809.62 USD
+   ╭─[r25-assertion-cascade.ax:23:1]
+   │
+21 │ 2026-02-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from acme
+22 │ 2026-02-12 checking -> food 91.10 USD
+23 │ 2026-02-28 checking = 6_809.62 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── another 91.10 USD less than the ledger holds
+   │
+   = note: the 99.28 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 91.10 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+23 + 2026-02-28 checking = 6_809.62 USD !
+
+error[assertion]: assets/checking holds 10,000.00 USD, not 9,732.27 USD
+   ╭─[r25-assertion-cascade.ax:27:1]
+   │
+25 │ 2026-03-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from acme
+26 │ 2026-03-14 checking -> food 77.35 USD
+27 │ 2026-03-31 checking = 9_732.27 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── another 77.35 USD less than the ledger holds
+   │
+   = note: the 190.38 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 77.35 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+27 + 2026-03-31 checking = 9_732.27 USD !
+
+error[assertion]: assets/checking holds 13,000.00 USD, not 12,644.27 USD
+   ╭─[r25-assertion-cascade.ax:31:1]
+   │
+29 │ 2026-04-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from acme
+30 │ 2026-04-11 checking -> food 88.00 USD
+31 │ 2026-04-30 checking = 12_644.27 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 88.00 USD less than the ledger holds
+   │
+   = note: the 267.73 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 88.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+31 + 2026-04-30 checking = 12_644.27 USD !
+
+error[assertion]: assets/checking holds 16,000.00 USD, not 15,574.37 USD
+   ╭─[r25-assertion-cascade.ax:35:1]
+   │
+33 │ 2026-05-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from acme
+34 │ 2026-05-16 checking -> food 69.90 USD
+35 │ 2026-05-31 checking = 15_574.37 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 69.90 USD less than the ledger holds
+   │
+   = note: the 355.73 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 69.90 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+35 + 2026-05-31 checking = 15_574.37 USD !
+
+error[assertion]: assets/checking holds 19,000.00 USD, not 18,479.12 USD
+   ╭─[r25-assertion-cascade.ax:39:1]
+   │
+37 │ 2026-06-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from acme
+38 │ 2026-06-13 checking -> food 95.25 USD
+39 │ 2026-06-30 checking = 18_479.12 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 95.25 USD less than the ledger holds
+   │
+   = note: the 425.63 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 95.25 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+39 + 2026-06-30 checking = 18_479.12 USD !
+
+✗ 22 errors
 [exit status 1]

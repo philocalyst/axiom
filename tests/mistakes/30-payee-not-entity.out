@@ -1,12 +1,59 @@
-error[unknown-entity]: `groceries` is a place, not an entity, so it cannot be a payee
-   ╭─[30-payee-not-entity.ax:15:46]
+error[chart-account]: `expenses/food/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[30-payee-not-entity.ax:6:9]
+  │
+6 │ account expenses/food/groceries
+  │         ───────────┬───────────
+  │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/food/dining` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[30-payee-not-entity.ax:7:9]
+  │
+7 │ account expenses/food/dining
+  │         ──────────┬─────────
+  │                   ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[30-payee-not-entity.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/food/groceries`
+   ╭─[30-payee-not-entity.ax:11:7]
+   │
+10 │ entity trader-joes : org
+11 │   via expenses/food/groceries
+   │       ───────────┬───────────
+   │                  ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/food/groceries`
+
+error[v3-party]: `/ groceries` is written the other way round now
+   ╭─[30-payee-not-entity.ax:15:44]
    │
 15 │ 2026-01-08 checking -> groceries 84.20 USD / groceries
-   │                                              ────┬────
-   │                                                  ╰── a payee is an entity: a person or a company
+   │                                            ─────┬─────
+   │                                                 ╰── `groceries` is where the flow ends, and the party it went through is `via`
    │
-   = note: `groceries` is the place `expenses/food/groceries`
-   = help: drop the payee, or use the entity that stands for this place
+   = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+           USD via paypal`
+   = help: `groceries` is who it went through: `via groceries`
+15 - 2026-01-08 checking -> groceries 84.20 USD / groceries
+15 + 2026-01-08 checking -> groceries 84.20 USD via groceries
+   = help: if `groceries` is an asset, it is bought: `#purchase of groceries`
+15 - 2026-01-08 checking -> groceries 84.20 USD / groceries
+15 + 2026-01-08 checking -> groceries 84.20 USD #purchase of groceries
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

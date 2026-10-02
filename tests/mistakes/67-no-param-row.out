@@ -1,3 +1,24 @@
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[67-no-param-row.ax:14:9]
+   │
+14 │ account income/salary : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[67-no-param-row.ax:17:7]
+   │
+16 │ entity acme : employer
+17 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
 error[no-param-row]: `us/401k` has no figures for 2023: its figures start in 2024
    ╭─[67-no-param-row.ax:20:3]
    │
@@ -6,9 +27,9 @@ error[no-param-row]: `us/401k` has no figures for 2023: its figures start in 202
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:73:7] (built in)
+   ├─[us/401k.ax:75:7] (built in)
    │
-73 │ param limit
+75 │ param limit
    │       ──┬──
    │         ╰── `limit` has no row for 2023
    │
@@ -16,5 +37,5 @@ error[no-param-row]: `us/401k` has no figures for 2023: its figures start in 202
    = help: start the journal in 2024, or add 2023 rows: copy the system's file into `systems/` and
            write them there
 
-✗ 1 error
+✗ 3 errors
 [exit status 1]

@@ -1,2 +1,38 @@
-✓ 2 flows · 3 places · 1 law enforced · net worth 915.80 USD
-[exit status 0]
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r02-crlf.ax:5:9]
+  │
+5 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r02-crlf.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+  ╭─[r02-crlf.ax:9:1]
+  │
+9 │ 2026-01-08 checking -> food 84.20 USD
+  │ ──────────────────┬──────────────────
+  │                   ╰── no complete flow can be formed here
+  │
+  = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+  ╭─[r02-crlf.ax:9:24]
+  │
+9 │ 2026-01-08 checking -> food 84.20 USD
+  │                        ──┬─
+  │                          ╰── not a known entity
+
+✗ 4 errors
+[exit status 1]

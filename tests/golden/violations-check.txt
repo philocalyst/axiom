@@ -1,127 +1,145 @@
 error[unknown-property]: `benificiary` is not a property of an account of kind `529-plan`
-   ╭─[03-violations.ax:55:3]
+   ╭─[03-violations.ax:38:3]
    │
-54 │ account assets/college : 529-plan
-55 │   benificiary me
-   │   ─────┬─────
-   │        ╰── no such property
+37 │ account college : 529-plan at fidelity
+38 │   benificiary me
+   │   ───────┬──────
+   │          ╰── no such property
    │
-   = note: its properties are `owner`, `holds`, `select`, `opened`, `closed`, `budget`, `liquidity`,
-           `beneficiary`, `pays`, `taxed-by-kind` or `deductible`
+   = note: its properties are `beneficiary`, `closed`, `deductible`, `holds`, `liquidity`, `opened`,
+           `select` or `taxed-by-kind`
    = help: did you mean `beneficiary`?
-55 -   benificiary me
-55 +   beneficiary me
+38 -   benificiary me
+38 +   beneficiary
 
 error[deferral-limit]: 401(k) deferrals over the yearly limit: 26,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 1,500.00 USD
-   ╭─[03-violations.ax:70:1]
+   ╭─[03-violations.ax:45:1]
    │
-70 │ 2026-01-30 acme -> retirement 26_000 USD
+45 │ 2026-01-30 acme -> retirement 26_000 USD
    │ ────────────────────┬───────────────────
-   │                     ╰── this flow: 26,000.00 USD into assets/retirement
+   │                     ╰── this flow: 26,000.00 USD into retirement
    │
-   ├─[us/401k.ax:42:13] (built in)
+   ├─[us/401k.ax:44:13] (built in)
    │
-42 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearl…
-   │             ────────────┬────────────    ─────────┬─────────
-   │                         │                         ╰── 24,500.00 USD
-   │                         ╰── 26,000.00 USD
+44 │     require value(tally(elective-deferrals), USD) <= limit[year] + extra "401(k) deferrals ov…
+   │             ──────────────────┬──────────────────    ─────────┬─────────
+   │                               │                               ╰── 24,500.00 USD
+   │                               ╰── 26,000.00 USD
    │
    = note: Elective deferrals are capped for each person and calendar year, across every plan they
            hold (IRC §402(g)), with a catch-up from age 50 and a larger one from 60 through 63 (IRC
            §414(v)). Employer contributions do not count. This payment took the year's deferrals
            over the cap. Any excess must also be returned by the plan before April 15 of the next
            year, or it is taxed twice (IRC §402(g)(2)).
-   = help: at most 24,500.00 USD more can count toward `elective-deferrals` this year
    = help: ask payroll to lower the deferral, and have the plan return the excess.
 
-error[ambiguous-lots]: ambiguous lot: assets/wallet holds 2 lots that differ and no policy applies
-   ╭─[03-violations.ax:94:1]
+error[ambiguous-lots]: ambiguous lot: wallet holds 2 lots that differ and no policy applies
+   ╭─[03-violations.ax:56:1]
    │
-84 │ 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
+54 │ 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
    │ ─────────────────────────┬────────────────────────
    │                          ╰── acquired 2026-02-10: 0.50 BTC, basis 30,000.00 USD; from it alone the gain is 9,000.00 USD
-85 │ 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
+55 │ 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
    │ ─────────────────────────┬────────────────────────
    │                          ╰── acquired 2026-02-20: 0.50 BTC, basis 45,000.00 USD; from it alone the gain is 1,500.00 USD
-   ⋮
-94 │ 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
+56 │ 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
    │ ────────────────────────┬────────────────────────
    │                         ╰── 0.25 BTC could come from any of them
    │
    = note: the sale still moves the oldest lot first, so the lines after it stay consistent
    = note: later sales from this place are booked the same way, without another report
-   = help: name the lot, `assets/wallet[2026-02-10]`, or a policy, `assets/wallet[fifo]` (or lifo,
-           hifo, prorata), or give the account `select fifo`
+   = help: name the lot, `wallet[2026-02-10]`, or a policy, `wallet[fifo]` (or lifo, hifo, prorata),
+           or give the account `select fifo`
 
-error[unknown-place]: there is no place `grocries`
-    ╭─[03-violations.ax:100:24]
+error[purpose-disagreement]: this flow's purpose sources disagree
+    ╭─[03-violations.ax:60:46]
     │
-100 │ 2026-03-02 checking -> grocries 84.20 USD
-    │                        ────┬───
-    │                            ╰── not a known place
+ 60 │ 2026-03-02 checking -> trader-joes 84.20 USD #rent
+    │ ─────────────────────────┬─────────────────────┬──
+    │                          │                     ╰── the written purpose is `#rent`
+    │                          ╰── these sources classify the same flow differently
     │
-    = help: did you mean `groceries`?
-100 - 2026-03-02 checking -> grocries 84.20 USD
-100 + 2026-03-02 checking -> groceries 84.20 USD
+    ├─[std.ax:110:11] (built in)
+    │
+109 │ kind grocer : merchant
+110 │   purpose groceries
+    │           ────┬────
+    │               ╰── party kind `grocer` gives purpose `#groceries`
 
-error[price-disagrees]: the price does not match the amounts
-    ╭─[03-violations.ax:108:52]
-    │
-108 │ 2026-03-04 checking 1_000 USD -> brokerage 4 VTI @ 285.70 USD
-    │                               ─┬                   ─────┬────
-    │                                │                        ╰── this price
-    │                                ╰── 1,000.00 USD for 4 VTI
-    │
-    = note: 4 VTI × 285.70 USD = 1,142.80 USD, but 1,000.00 USD was written
-    = note: 1,000.00 USD ÷ 4 VTI = 250.00000 USD per VTI, which is not the price written
-    = help: if the 142.80 USD difference is a fee or a rounding, write it as a leg:
-              checking -> 1_000.00 USD
-                brokerage 4 VTI @ 285.70 USD
-                expenses/fees 142.80 USD
+error[price-disagrees]: the stated price does not match the flow amounts
+   ╭─[03-violations.ax:64:50]
+   │
+64 │ 2026-03-04 checking 1_000 USD -> brokerage 4 VTI @ 285.70 USD
+   │ ──────────────────────────────┬────────────────────────┬─────
+   │                               │                        ╰── this price implies a different amount
+   │                               ╰── the written quantities disagree with the price
 
 error[purpose]: grant money spent outside its purpose
-    ╭─[03-violations.ax:121:1]
+    ╭─[03-violations.ax:70:1]
     │
-121 │ 2026-04-02 project -> dining 300 USD
-    │ ──────────────────┬─────────────────
-    │                   ╰── this flow: 300.00 USD of restricted money leaving assets/bank/project
+ 70 │ 2026-04-02 education-fund -> theater 300 USD #fun
+    │ ────────────────────────┬────────────────────────
+    │                         ╰── this flow: 300.00 USD of restricted money leaving education-fund
     │
-    ├─[std.ax:198:13] (built in)
+    ├─[std.ax:156:13] (built in)
     │
-198 │     require to is self.purpose "grant money spent outside its purpose"
-    │             ─┬    ──────┬─────
-    │              │          ╰── education
-    │              ╰── expenses/dining
-    │
-    = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
-    = help: pay it from another account, or, if the funder agreed to the change, update `purpose` on
-            the grant.
+156 │     require purpose is self.grant-purpose "grant money spent outside its purpose"
+    │             ───┬───    ─────────┬────────
+    │                │                ╰── no value (`grant-purpose` is not set)
+    │                ╰── #fun
+
+error[assertion]: checking holds 59,000.00 USD, not 57,915.80 USD
+   ╭─[03-violations.ax:75:1]
+   │
+41 │ opening 2025-12-31
+42 │   checking 100_000 USD
+   │   ──────────┬─────────
+   │             ╰── +100,000.00 USD from opening
+   ⋮
+50 │ 2026-02-02 retirement -> checking 10_000 USD
+   │ ──────────────────────┬─────────────────────
+   │                       ╰── +10,000.00 USD from retirement
+   ⋮
+54 │ 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
+   │ ─────────────────────────┬────────────────────────
+   │                          ╰── -30,000.00 USD to wallet
+55 │ 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
+   │ ─────────────────────────┬────────────────────────
+   │                          ╰── -45,000.00 USD to wallet
+56 │ 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── +24,000.00 USD from wallet
+   ⋮
+75 │ 2026-12-31 checking = 57_915.80 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 1,084.20 USD less than the ledger holds
+   │
+   = note: 1,084.20 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+75 + 2026-12-31 checking = 57_915.80 USD !
 
 error[deadline]: grant money left unspent at the deadline
-    ╭─[std.ax:204:3] (built in)
+    ╭─[std.ax:157:3] (built in)
     │
-204 │   law deadline
+157 │   law deadline
     │   ──────┬─────
     │         ╰── checked for scholarship on 2026-12-31
-205 │     by self.until
-206 │     require remaining == empty "grant money left unspent at the deadline"
+158 │     by self.until
+159 │     require remaining == empty "grant money left unspent at the deadline"
     │             ────┬────
     │                 ╰── 900.00 USD
-    │
-    = note: A grant ends on its `until` date, and unspent money is owed back.
-    = help: spend what is left on the grant's purpose before the deadline, or ask the funder for an
-            extension and move `until`.
 
 note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2027-04-15
-   ╭─[03-violations.ax:78:1]
+   ╭─[03-violations.ax:50:1]
    │
-78 │ 2026-02-02 retirement -> checking 10_000 USD
+50 │ 2026-02-02 retirement -> checking 10_000 USD
    │ ──────────────────────┬─────────────────────
    │                       ╰── this flow: a gain of 10,000.00 USD on 10,000.00 USD
    │
-   ├─[us/401k.ax:54:13] (built in)
+   ├─[us/401k.ax:56:13] (built in)
    │
-54 │     require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-w…
+56 │     require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-w…
    │             ────┬────
    │                 ╰── 37y9m21d
    │
@@ -131,4 +149,4 @@ note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, du
            substantially equal payments, and others in §72(t)(2)), keep the withdrawal and mark it
            `!` with the reason.
 
-✗ 7 errors · 1 priced
+✗ 8 errors · 1 priced

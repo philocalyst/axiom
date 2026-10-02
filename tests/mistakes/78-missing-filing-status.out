@@ -1,2 +1,33 @@
-✓ 2 flows · 3 places · 9 laws enforced · net worth 7,120.00 USD
-[exit status 0]
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[78-missing-filing-status.ax:11:9]
+   │
+11 │ account income/salary : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/taxes/federal` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[78-missing-filing-status.ax:12:9]
+   │
+12 │ account expenses/taxes/federal : federal-tax
+   │         ───────────┬──────────
+   │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[78-missing-filing-status.ax:14:7]
+   │
+13 │ entity acme : employer
+14 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+✗ 3 errors
+[exit status 1]

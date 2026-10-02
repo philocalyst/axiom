@@ -1,3 +1,24 @@
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[76-kind-typo-in-law.ax:12:9]
+   │
+12 │ account income/salary : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[76-kind-typo-in-law.ax:14:7]
+   │
+13 │ entity acme : employer
+14 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
 error[unknown-name]: `wage` means nothing in this law
    ╭─[76-kind-typo-in-law.ax:18:16]
    │
@@ -11,5 +32,15 @@ error[unknown-name]: `wage` means nothing in this law
 18 -   when from is wage
 18 +   when from is wages
 
-✗ 1 error
+error[type-mismatch]: cannot compare an amount with an amount
+   ╭─[76-kind-typo-in-law.ax:19:18]
+   │
+19 │   warn amount <= 10_000 USD "a very large paycheck"
+   │        ───┬──    ─────┬────
+   │           │           ╰── this is an amount
+   │           ╰── this is an amount
+   │
+   = note: `<` and its kin compare two amounts, numbers, dates or spans
+
+✗ 4 errors
 [exit status 1]

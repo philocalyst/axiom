@@ -1,15 +1,598 @@
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:44:9]
+   │
+44 │ account income/salary    : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `income/freelance` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:45:9]
+   │
+45 │ account income/freelance
+   │         ────────┬───────
+   │                 ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:52:9]
+   │
+52 │ account expenses/groceries
+   │         ─────────┬────────
+   │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/dining` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:55:9]
+   │
+55 │ account expenses/dining
+   │         ───────┬───────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/transport` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:58:9]
+   │
+58 │ account expenses/transport
+   │         ─────────┬────────
+   │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/fun` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:62:9]
+   │
+62 │ account expenses/fun
+   │         ──────┬─────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/subscriptions` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:65:9]
+   │
+65 │ account expenses/subscriptions
+   │         ───────────┬──────────
+   │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/clothing` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:68:9]
+   │
+68 │ account expenses/clothing
+   │         ────────┬────────
+   │                 ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/personal-care` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:71:9]
+   │
+71 │ account expenses/personal-care
+   │         ───────────┬──────────
+   │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/utilities` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:74:9]
+   │
+74 │ account expenses/utilities
+   │         ─────────┬────────
+   │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/gifts` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:79:9]
+   │
+79 │ account expenses/gifts
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/insurance` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:82:9]
+   │
+82 │ account expenses/insurance
+   │         ─────────┬────────
+   │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/medical` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:85:9]
+   │
+85 │ account expenses/medical
+   │         ────────┬───────
+   │                 ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/rent` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:90:9]
+   │
+90 │ account expenses/rent
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/phone` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:91:9]
+   │
+91 │ account expenses/phone
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/car` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:92:9]
+   │
+92 │ account expenses/car
+   │         ──────┬─────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/car-repair` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:93:9]
+   │
+93 │ account expenses/car-repair
+   │         ─────────┬─────────
+   │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/student-loan` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:94:9]
+   │
+94 │ account expenses/student-loan
+   │         ──────────┬──────────
+   │                   ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/health` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:96:9]
+   │
+96 │ account expenses/health : pretax-benefit
+   │         ───────┬───────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/fees` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[accounts.ax:97:9]
+   │
+97 │ account expenses/fees
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/travel` is a v3 chart account: v4 has no income, expense or equity accounts
+    ╭─[accounts.ax:100:9]
+    │
+100 │ account expenses/travel
+    │         ───────┬───────
+    │                ╰── what a flow is for is its purpose, and whom it is with is its party
+    │
+    = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+            for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/taxes/federal` is a v3 chart account: v4 has no income, expense or equity accounts
+    ╭─[accounts.ax:101:9]
+    │
+101 │ account expenses/taxes/federal : federal-tax
+    │         ───────────┬──────────
+    │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+    │
+    = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+            for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/taxes/payroll` is a v3 chart account: v4 has no income, expense or equity accounts
+    ╭─[accounts.ax:102:9]
+    │
+102 │ account expenses/taxes/payroll
+    │         ───────────┬──────────
+    │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+    │
+    = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+            for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+    ╭─[accounts.ax:108:7]
+    │
+107 │ entity studio : employer
+108 │   via income/salary
+    │       ──────┬──────
+    │             ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account income/salary`
+
+error[unknown-place]: there is no place `expenses/travel`
+    ╭─[accounts.ax:111:7]
+    │
+110 │ entity airline : org
+111 │   via expenses/travel
+    │       ───────┬───────
+    │              ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = note: also at accounts.ax:113
+    = help: declare a full account path and its kind: `account expenses/travel`
+
+error[unknown-place]: there is no place `expenses/rent`
+    ╭─[accounts.ax:116:7]
+    │
+115 │ entity landlord : org
+116 │   via expenses/rent
+    │       ──────┬──────
+    │             ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/rent`
+
+error[unknown-place]: there is no place `expenses/transport`
+    ╭─[accounts.ax:118:7]
+    │
+117 │ entity metro : org
+118 │   via expenses/transport
+    │       ─────────┬────────
+    │                ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = note: also at accounts.ax:148
+    = help: declare a full account path and its kind: `account expenses/transport`
+
+error[unknown-place]: there is no place `expenses/fun`
+    ╭─[accounts.ax:120:7]
+    │
+119 │ entity gym : org
+120 │   via expenses/fun
+    │       ──────┬─────
+    │             ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = note: also at accounts.ax:160
+    = help: declare a full account path and its kind: `account expenses/fun`
+
+error[unknown-place]: there is no place `expenses/utilities`
+    ╭─[accounts.ax:122:7]
+    │
+121 │ entity power-co : org
+122 │   via expenses/utilities
+    │       ─────────┬────────
+    │                ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/utilities`
+
+error[unknown-place]: there is no place `expenses/phone`
+    ╭─[accounts.ax:124:7]
+    │
+123 │ entity mint-mobile : org
+124 │   via expenses/phone
+    │       ───────┬──────
+    │              ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/phone`
+
+error[unknown-place]: there is no place `expenses/subscriptions`
+    ╭─[accounts.ax:126:7]
+    │
+125 │ entity netflix : org
+126 │   via expenses/subscriptions
+    │       ───────────┬──────────
+    │                  ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = note: also at accounts.ax:128, accounts.ax:130, accounts.ax:132, accounts.ax:134, … (1 more)
+    = help: declare a full account path and its kind: `account expenses/subscriptions`
+
+error[unknown-place]: there is no place `expenses/groceries`
+    ╭─[accounts.ax:138:7]
+    │
+137 │ entity aldi : org
+138 │   via expenses/groceries
+    │       ─────────┬────────
+    │                ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = note: also at accounts.ax:140, accounts.ax:142
+    = help: declare a full account path and its kind: `account expenses/groceries`
+
+error[unknown-place]: there is no place `expenses/medical`
+    ╭─[accounts.ax:144:7]
+    │
+143 │ entity urgent-care : org
+144 │   via expenses/medical
+    │       ────────┬───────
+    │               ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = note: also at accounts.ax:146
+    = help: declare a full account path and its kind: `account expenses/medical`
+
+error[unknown-place]: there is no place `expenses/car`
+    ╭─[accounts.ax:150:7]
+    │
+149 │ entity carmax-finance : org
+150 │   via expenses/car
+    │       ──────┬─────
+    │             ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/car`
+
+error[unknown-place]: there is no place `expenses/student-loan`
+    ╭─[accounts.ax:152:7]
+    │
+151 │ entity mohela : org
+152 │   via expenses/student-loan
+    │       ──────────┬──────────
+    │                 ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/student-loan`
+
+error[unknown-place]: there is no place `expenses/personal-care`
+    ╭─[accounts.ax:154:7]
+    │
+153 │ entity barber : org
+154 │   via expenses/personal-care
+    │       ───────────┬──────────
+    │                  ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/personal-care`
+
+error[unknown-place]: there is no place `expenses/car-repair`
+    ╭─[accounts.ax:156:7]
+    │
+155 │ entity kwik-brakes : org
+156 │   via expenses/car-repair
+    │       ─────────┬─────────
+    │                ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/car-repair`
+
+error[unknown-place]: there is no place `expenses/insurance`
+    ╭─[accounts.ax:158:7]
+    │
+157 │ entity progressive : org
+158 │   via expenses/insurance
+    │       ─────────┬────────
+    │                ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/insurance`
+
+error[unknown-place]: there is no place `expenses/gifts`
+    ╭─[accounts.ax:162:7]
+    │
+161 │ entity food-bank : org
+162 │   via expenses/gifts
+    │       ───────┬──────
+    │              ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/gifts`
+
+error[unknown-place]: there is no place `income/freelance`
+    ╭─[accounts.ax:164:7]
+    │
+163 │ entity corner-cafe : org
+164 │   via income/freelance
+    │       ────────┬───────
+    │               ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account income/freelance`
+
+error[unknown-place]: there is no place `expenses/fees`
+    ╭─[accounts.ax:166:7]
+    │
+165 │ entity first-bank : org
+166 │   via expenses/fees
+    │       ──────┬──────
+    │             ╰── not a known place
+    │
+    = note: assets, liabilities, income, expenses and equity are not special account roots
+    = help: declare a full account path and its kind: `account expenses/fees`
+
+error[v3-party]: `/ landlord` is written the other way round now
+  ╭─[journal/2025/09.ax:9:39]
+  │
+9 │ 2025-09-01 checking -> rent 1_150 USD / landlord
+  │                                       ─────┬────
+  │                                            ╰── `landlord` is where the flow ends, and the party it went through is `via`
+  │
+  = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+          USD via paypal`
+  = note: also at journal/2025/10.ax:1, journal/2025/11.ax:1, journal/2025/12.ax:1,
+          journal/2026/01.ax:1, … (1 more)
+  = help: `rent` is who it went through: `via rent`
+9 - 2025-09-01 checking -> rent 1_150 USD / landlord
+9 + 2025-09-01 checking -> landlord 1_150 USD via rent
+  = help: if `rent` is an asset, it is bought: `#purchase of rent`
+9 - 2025-09-01 checking -> rent 1_150 USD / landlord
+9 + 2025-09-01 checking -> landlord 1_150 USD #purchase of rent
+
+error[v3-party]: `/ metro` is written the other way round now
+   ╭─[journal/2025/09.ax:10:41]
+   │
+10 │ 2025-09-01 checking -> transport 48 USD / metro
+   │                                         ───┬───
+   │                                            ╰── `metro` is where the flow ends, and the party it went through is `via`
+   │
+   = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+           USD via paypal`
+   = note: also at journal/2025/10.ax:2, journal/2025/11.ax:2, journal/2025/12.ax:2,
+           journal/2026/01.ax:2, … (1 more)
+   = help: `transport` is who it went through: `via transport`
+10 - 2025-09-01 checking -> transport 48 USD / metro
+10 + 2025-09-01 checking -> metro 48 USD via transport
+   = help: if `transport` is an asset, it is bought: `#purchase of transport`
+10 - 2025-09-01 checking -> transport 48 USD / metro
+10 + 2025-09-01 checking -> metro 48 USD #purchase of transport
+
+error[v3-party]: `/ gym` is written the other way round now
+   ╭─[journal/2025/09.ax:11:35]
+   │
+11 │ 2025-09-01 checking -> fun 29 USD / gym
+   │                                   ──┬──
+   │                                     ╰── `gym` is where the flow ends, and the party it went through is `via`
+   │
+   = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+           USD via paypal`
+   = note: also at journal/2025/10.ax:3, journal/2025/11.ax:3, journal/2025/12.ax:3,
+           journal/2026/01.ax:3, … (1 more)
+   = help: `fun` is who it went through: `via fun`
+11 - 2025-09-01 checking -> fun 29 USD / gym
+11 + 2025-09-01 checking -> gym 29 USD via fun
+   = help: if `fun` is an asset, it is bought: `#purchase of fun`
+11 - 2025-09-01 checking -> fun 29 USD / gym
+11 + 2025-09-01 checking -> gym 29 USD #purchase of fun
+
+error[assertion]: assets/bank/checking holds 1,842.10 USD, not 615.10 USD
+   ╭─[journal/2025/09.ax:12:1]
+   │
+ 2 │ opening 2025-09-01
+ 3 │   checking    4_942.10 USD
+   │   ────────────┬───────────
+   │               ╰── +4,942.10 USD from opening
+   ⋮
+ 7 │ 2025-09-01 checking -> savings 2_400 USD for emergency-fund
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── -2,400.00 USD to assets/bank/savings
+ 8 │ 2025-09-01 checking -> savings 700 USD for insurance-fund
+   │ ────────────────────────────┬────────────────────────────
+   │                             ╰── -700.00 USD to assets/bank/savings
+   ⋮
+12 │ 2025-09-01 checking = 615.10 USD
+   │ ────────────────┬───────────────
+   │                 ╰── 1,227.00 USD less than the ledger holds
+   │
+   = note: 1,227.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+12 + 2025-09-01 checking = 615.10 USD !
+
+error[v3-party]: `/ power-co` is written the other way round now
+   ╭─[journal/2025/09.ax:15:44]
+   │
+15 │ 2025-09-03 checking -> utilities 61.84 USD / power-co
+   │                                            ─────┬────
+   │                                                 ╰── `power-co` is where the flow ends, and the party it went through is `via`
+   │
+   = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+           USD via paypal`
+   = note: also at journal/2025/10.ax:12, journal/2025/11.ax:4, journal/2025/12.ax:4,
+           journal/2026/01.ax:4, … (1 more)
+   = help: `utilities` is who it went through: `via utilities`
+15 - 2025-09-03 checking -> utilities 61.84 USD / power-co
+15 + 2025-09-03 checking -> power-co 61.84 USD via utilities
+   = help: if `utilities` is an asset, it is bought: `#purchase of utilities`
+15 - 2025-09-03 checking -> utilities 61.84 USD / power-co
+15 + 2025-09-03 checking -> power-co 61.84 USD #purchase of utilities
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[journal/2025/09.ax:16:1]
+   │
+16 │ 2025-09-04 visa -> dining 21.14 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── no complete flow can be formed here
+   │
+   = note: also at journal/2025/09.ax:35, journal/2025/09.ax:38, journal/2025/09.ax:41,
+           journal/2025/09.ax:42, … (43 more)
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `dining`
+   ╭─[journal/2025/09.ax:16:20]
+   │
+16 │ 2025-09-04 visa -> dining 21.14 USD
+   │                    ───┬──
+   │                       ╰── not a known entity
+   │
+   = note: also at journal/2025/09.ax:35, journal/2025/09.ax:38, journal/2025/09.ax:42,
+           journal/2025/09.ax:60, … (33 more)
+
+error[v3-party]: `/ trader-joes` is written the other way round now
+   ╭─[journal/2025/09.ax:24:40]
+   │
+24 │ 2025-09-05 visa -> groceries 68.30 USD / trader-joes
+   │                                        ──────┬──────
+   │                                              ╰── `trader-joes` is where the flow ends, and the party it went through is `via`
+   │
+   = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+           USD via paypal`
+   = note: also at journal/2025/09.ax:53, journal/2025/12.ax:42, journal/2026/01.ax:34,
+           journal/2026/01.ax:51, … (2 more)
+   = help: `groceries` is who it went through: `via groceries`
+24 - 2025-09-05 visa -> groceries 68.30 USD / trader-joes
+24 + 2025-09-05 visa -> trader-joes 68.30 USD via groceries
+   = help: if `groceries` is an asset, it is bought: `#purchase of groceries`
+24 - 2025-09-05 visa -> groceries 68.30 USD / trader-joes
+24 + 2025-09-05 visa -> trader-joes 68.30 USD #purchase of groceries
+
+error[v3-party]: `/ mint-mobile` is written the other way round now
+   ╭─[journal/2025/09.ax:32:33]
+   │
+32 │ 2025-09-08 visa -> phone 40 USD / mint-mobile
+   │                                 ──────┬──────
+   │                                       ╰── `mint-mobile` is where the flow ends, and the party it went through is `via`
+   │
+   = note: v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20
+           USD via paypal`
+   = note: also at journal/2025/10.ax:19, journal/2025/11.ax:21, journal/2025/12.ax:12,
+           journal/2026/01.ax:11, … (1 more)
+   = help: `phone` is who it went through: `via phone`
+32 - 2025-09-08 visa -> phone 40 USD / mint-mobile
+32 + 2025-09-08 visa -> mint-mobile 40 USD via phone
+   = help: if `phone` is an asset, it is bought: `#purchase of phone`
+32 - 2025-09-08 visa -> phone 40 USD / mint-mobile
+32 + 2025-09-08 visa -> mint-mobile 40 USD #purchase of phone
+
+… 108 more diagnostics not shown (108 errors); `--all` shows every one
+
+✗ 284 errors
+✗ rests on a book with 284 errors (`axiom check` lists them): what they touch may be wrong
+
 Limits in 2026
 
-  Who  Limit                             Window        Counted           Cap   Room left    Used
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  me   budget on expenses/insurance      2026     1,152.00 USD  1,200.00 USD   48.00 USD     96%
-  me   budget on expenses/personal-care  2026-02     35.00 USD     40.00 USD    5.00 USD   87.5%
-  me   budget on expenses/utilities      2026-02     61.84 USD    100.00 USD   38.16 USD  61.84%
-  me   budget on expenses/transport      2026-02     63.54 USD    120.00 USD   56.46 USD  52.95%
-  me   budget on expenses/groceries      2026-02    150.35 USD    350.00 USD  199.65 USD  42.96%
-  me   budget on expenses/subscriptions  2026-02     38.15 USD     90.00 USD   51.85 USD  42.39%
-  me   budget on expenses/dining         2026-02     50.26 USD    150.00 USD   99.74 USD  33.51%
-  me   budget on expenses/fun            2026-02     29.00 USD    120.00 USD   91.00 USD  24.17%
-  me   budget on expenses/clothing       2026-02      0.00 USD     80.00 USD   80.00 USD      0%
-  me   budget on expenses/gifts          2026         0.00 USD    500.00 USD  500.00 USD      0%
-  me   budget on expenses/medical        2026         0.00 USD    400.00 USD  400.00 USD      0%
+  Who  Limit  Window  Counted  Cap  Room left  Used
+  ─────────────────────────────────────────────────
+  · No limit was read in 2026. Laws record what they count when a `require` or `warn` compares two
+    amounts.

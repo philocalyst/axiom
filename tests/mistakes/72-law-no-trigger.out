@@ -1,13 +1,38 @@
-error[missing-trigger]: this law has no trigger
-  ╭─[72-law-no-trigger.ax:8:3]
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[72-law-no-trigger.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[72-law-no-trigger.ax:7:9]
   │
 7 │ account expenses/food
-8 │   law monthly-cap
-  │   ───────┬───────
-  │          ╰── when does it apply?
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
   │
-  = help: start the body with a trigger: `on in|out|gain|spend`, `each month|year`, `by DATE` or
-          `always`
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[72-law-no-trigger.ax:12:1]
+   │
+12 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[72-law-no-trigger.ax:12:24]
+   │
+12 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+✗ 4 errors
 [exit status 1]

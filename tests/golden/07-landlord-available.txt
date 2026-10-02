@@ -1,9 +1,679 @@
+error[purpose-disagreement]: this flow's purpose sources disagree
+    ╭─[contracts.ax:5:3]
+    │
+  5 │   irs 1_215 USD #federal-tax
+    │   ─────────────┬────────────
+    │                ╰── these sources classify the same flow differently
+    │
+    ├─[std.ax:118:8] (built in)
+    │
+117 │ kind employer : org
+118 │   pays wages
+    │        ──┬──
+    │          ╰── party kind `employer` gives purpose `#wages`
+    │
+    ├─[us.ax:120:11] (built in)
+    │
+119 │ entity irs : tax-authority
+120 │   purpose federal-tax
+    │           ─────┬─────
+    │                ╰── party `irs` gives purpose `#federal-tax`
+    │
+    = note: also at journal/2025/09.ax:15, journal/2025/09.ax:16
+
+error[contract-occurrence-date]: this day is outside every contract schedule's grace window
+   ╭─[journal/2025/01.ax:11:1]
+   │
+11 │ 2025-01-28 paycheck
+   │ ─────────┬─────────
+   │          ╰── no active scheduled occurrence is close enough to this date
+   │
+   = note: also at journal/2025/02.ax:16, journal/2025/03.ax:17, journal/2025/04.ax:14,
+           journal/2025/05.ax:11, … (7 more)
+
+error[assertion]: checking holds 17,309.20 USD, not 23,482.20 USD
+   ╭─[journal/2025/01.ax:18:1]
+   │
+ 1 │ 2025-01-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 5 │ 2025-01-08 checking -> trader-joes 178.86 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -178.86 USD to trader-joes
+ 6 │ 2025-01-15 checking -> trader-joes 138.10 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -138.10 USD to trader-joes
+ 7 │ 2025-01-19 checking -> cafe 200.66 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -200.66 USD to cafe
+ 8 │ 2025-01-22 checking -> home-supplies 223.18 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -223.18 USD to home-supplies
+   ⋮
+18 │ 2025-01-31 checking = 23_482.20 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 6,173.00 USD more than the ledger holds
+   │
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+18 + 2025-01-31 checking = 23_482.20 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 278,759.79 USD
+   ╭─[journal/2025/02.ax:18:1]
+   │
+18 │ 2025-02-28 home-loan = 278_759.79 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── 240.21 USD less than the ledger holds
+   │
+   = note: 240.21 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+18 + 2025-02-28 home-loan = 278_759.79 USD !
+
+error[assertion]: checking holds 14,528.77 USD, not 26,874.77 USD
+   ╭─[journal/2025/02.ax:20:1]
+   │
+ 4 │ 2025-02-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+12 │ 2025-02-08 checking -> trader-joes 204.31 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -204.31 USD to trader-joes
+13 │ 2025-02-15 checking -> trader-joes 163.88 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -163.88 USD to trader-joes
+14 │ 2025-02-19 checking -> cafe 99.86 USD #dining
+   │ ──────────────────────┬──────────────────────
+   │                       ╰── -99.86 USD to cafe
+15 │ 2025-02-22 checking -> home-supplies 362.38 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -362.38 USD to home-supplies
+   ⋮
+20 │ 2025-02-28 checking = 26_874.77 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 6,173.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+20 + 2025-02-28 checking = 26_874.77 USD !
+
+error[assertion]: deposit-bank holds 0.00 USD, not 2,400.00 USD
+   ╭─[journal/2025/02.ax:21:1]
+   │
+21 │ 2025-02-28 deposit-bank = 2_400.00 USD
+   │ ───────────────────┬──────────────────
+   │                    ╰── 2,400.00 USD more than the ledger holds
+   │
+   = note: 2,400.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+21 + 2025-02-28 deposit-bank = 2_400.00 USD !
+
+error[assertion]: deposits holds 0.00 USD, not 2,400.00 USD
+   ╭─[journal/2025/02.ax:22:1]
+   │
+22 │ 2025-02-28 deposits = 2_400.00 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── 2,400.00 USD more than the ledger holds
+   │
+   = note: 2,400.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+22 + 2025-02-28 deposits = 2_400.00 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 278,518.22 USD
+   ╭─[journal/2025/03.ax:19:1]
+   │
+19 │ 2025-03-31 home-loan = 278_518.22 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 241.57 USD less than the ledger holds
+   │
+   = note: the 240.21 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 241.57 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+19 + 2025-03-31 home-loan = 278_518.22 USD !
+
+error[assertion]: checking holds 11,931.32 USD, not 30,450.32 USD
+   ╭─[journal/2025/03.ax:21:1]
+   │
+ 2 │ 2025-03-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+10 │ 2025-03-08 checking -> trader-joes 144.50 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -144.50 USD to trader-joes
+   ⋮
+14 │ 2025-03-15 checking -> trader-joes 172.04 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -172.04 USD to trader-joes
+15 │ 2025-03-19 checking -> cafe 101.88 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -101.88 USD to cafe
+16 │ 2025-03-22 checking -> home-supplies 229.03 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -229.03 USD to home-supplies
+   ⋮
+21 │ 2025-03-31 checking = 30_450.32 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 12,346.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+21 + 2025-03-31 checking = 30_450.32 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 278,275.29 USD
+   ╭─[journal/2025/04.ax:19:1]
+   │
+19 │ 2025-04-30 home-loan = 278_275.29 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 242.93 USD less than the ledger holds
+   │
+   = note: the 481.78 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 242.93 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+19 + 2025-04-30 home-loan = 278_275.29 USD !
+
+error[assertion]: checking holds 9,188.67 USD, not 33,880.67 USD
+   ╭─[journal/2025/04.ax:21:1]
+   │
+ 1 │ 2025-04-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 7 │ 2025-04-08 checking -> trader-joes 190.94 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -190.94 USD to trader-joes
+ 8 │ 2025-04-15 checking -> trader-joes 219.22 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -219.22 USD to trader-joes
+   ⋮
+12 │ 2025-04-19 checking -> cafe 111.05 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -111.05 USD to cafe
+13 │ 2025-04-22 checking -> home-supplies 271.44 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -271.44 USD to home-supplies
+   ⋮
+21 │ 2025-04-30 checking = 33_880.67 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 18,519.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+21 + 2025-04-30 checking = 33_880.67 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 278,031.00 USD
+   ╭─[journal/2025/05.ax:13:1]
+   │
+13 │ 2025-05-31 home-loan = 278_031.00 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 244.29 USD less than the ledger holds
+   │
+   = note: the 724.71 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 244.29 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+13 + 2025-05-31 home-loan = 278_031.00 USD !
+
+error[assertion]: checking holds 6,274.60 USD, not 37,139.60 USD
+   ╭─[journal/2025/05.ax:15:1]
+   │
+ 2 │ 2025-05-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 7 │ 2025-05-08 checking -> trader-joes 215.29 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -215.29 USD to trader-joes
+ 8 │ 2025-05-15 checking -> trader-joes 233.73 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -233.73 USD to trader-joes
+ 9 │ 2025-05-19 checking -> cafe 188.11 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -188.11 USD to cafe
+10 │ 2025-05-22 checking -> home-supplies 326.94 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -326.94 USD to home-supplies
+   ⋮
+15 │ 2025-05-31 checking = 37_139.60 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 24,692.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+15 + 2025-05-31 checking = 37_139.60 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 277,785.33 USD
+   ╭─[journal/2025/06.ax:19:1]
+   │
+19 │ 2025-06-30 home-loan = 277_785.33 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 245.67 USD less than the ledger holds
+   │
+   = note: the 969.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 245.67 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+19 + 2025-06-30 home-loan = 277_785.33 USD !
+
+error[assertion]: checking holds 3,413.25 USD, not 40,451.25 USD
+   ╭─[journal/2025/06.ax:21:1]
+   │
+ 1 │ 2025-06-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 6 │ 2025-06-08 checking -> trader-joes 257.15 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -257.15 USD to trader-joes
+   ⋮
+11 │ 2025-06-15 checking -> trader-joes 125.59 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -125.59 USD to trader-joes
+12 │ 2025-06-19 checking -> cafe 235.94 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -235.94 USD to cafe
+   ⋮
+16 │ 2025-06-22 checking -> home-supplies 292.67 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -292.67 USD to home-supplies
+   ⋮
+21 │ 2025-06-30 checking = 40_451.25 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 30,865.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+21 + 2025-06-30 checking = 40_451.25 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 277,538.28 USD
+   ╭─[journal/2025/07.ax:13:1]
+   │
+13 │ 2025-07-31 home-loan = 277_538.28 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 247.05 USD less than the ledger holds
+   │
+   = note: the 1,214.67 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 247.05 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+13 + 2025-07-31 home-loan = 277_538.28 USD !
+
+error[assertion]: checking holds 568.20 USD, not 43,779.20 USD
+   ╭─[journal/2025/07.ax:15:1]
+   │
+ 2 │ 2025-07-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 7 │ 2025-07-08 checking -> trader-joes 157.31 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -157.31 USD to trader-joes
+ 8 │ 2025-07-15 checking -> trader-joes 134.14 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -134.14 USD to trader-joes
+ 9 │ 2025-07-19 checking -> cafe 142.44 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -142.44 USD to cafe
+10 │ 2025-07-22 checking -> home-supplies 461.16 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -461.16 USD to home-supplies
+   ⋮
+15 │ 2025-07-31 checking = 43_779.20 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 37,038.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+15 + 2025-07-31 checking = 43_779.20 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 277,289.84 USD
+   ╭─[journal/2025/08.ax:13:1]
+   │
+13 │ 2025-08-31 home-loan = 277_289.84 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 248.44 USD less than the ledger holds
+   │
+   = note: the 1,461.72 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 248.44 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+13 + 2025-08-31 home-loan = 277_289.84 USD !
+
+error[assertion]: checking holds -2,251.07 USD, not 47,132.93 USD
+   ╭─[journal/2025/08.ax:15:1]
+   │
+ 2 │ 2025-08-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 7 │ 2025-08-08 checking -> trader-joes 161.69 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -161.69 USD to trader-joes
+ 8 │ 2025-08-15 checking -> trader-joes 189.79 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -189.79 USD to trader-joes
+ 9 │ 2025-08-19 checking -> cafe 198.62 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -198.62 USD to cafe
+10 │ 2025-08-22 checking -> home-supplies 319.17 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -319.17 USD to home-supplies
+   ⋮
+15 │ 2025-08-31 checking = 47_132.93 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 43,211.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+15 + 2025-08-31 checking = 47_132.93 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 277,040.01 USD
+   ╭─[journal/2025/09.ax:39:1]
+   │
+39 │ 2025-09-30 home-loan = 277_040.01 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 249.83 USD less than the ledger holds
+   │
+   = note: the 1,710.16 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 249.83 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+39 + 2025-09-30 home-loan = 277_040.01 USD !
+
+error[assertion]: bills holds 0.00 USD, not 14,200.00 USD
+   ╭─[journal/2025/09.ax:40:1]
+   │
+40 │ 2025-09-30 bills = 14_200 USD
+   │ ──────────────┬──────────────
+   │               ╰── 14,200.00 USD more than the ledger holds
+   │
+   = note: 14,200.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+40 + 2025-09-30 bills = 14_200 USD !
+
+error[assertion]: rental-bank holds 1,755.98 USD, not 1,601.38 USD
+   ╭─[journal/2025/09.ax:41:1]
+   │
+ 7 │ 2025-09-03 rental-bank -> rentlist 149 USD #advertising of house
+   │ ────────────────────────────────┬───────────────────────────────
+   │                                 ╰── -149.00 USD to rentlist
+   ⋮
+11 │ 2025-09-06 rental-bank -> fresh-paint 1_150 USD #repair of house
+   │ ────────────────────────────────┬───────────────────────────────
+   │                                 ╰── -1,150.00 USD to fresh-paint
+   ⋮
+23 │ 2025-09-12 deposit-bank -> rental-bank 350 USD #forfeited-deposit of house
+   │ ─────────────────────────────────────┬────────────────────────────────────
+   │                                      ╰── +350.00 USD from deposit-bank
+   ⋮
+33 │ 2025-09-20 rental-bank -> hardware-hank 96 USD #repair of house
+   │ ───────────────────────────────┬───────────────────────────────
+   │                                ╰── -96.00 USD to hardware-hank
+   ⋮
+41 │ 2025-09-30 rental-bank = 1_601.38 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── 154.60 USD less than the ledger holds
+   │
+   = note: 154.60 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+41 + 2025-09-30 rental-bank = 1_601.38 USD !
+
+error[assertion]: checking holds -4,900.37 USD, not 50,656.63 USD
+   ╭─[journal/2025/09.ax:42:1]
+   │
+ 1 │ 2025-09-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+12 │ 2025-09-08 checking -> trader-joes 205.73 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -205.73 USD to trader-joes
+   ⋮
+24 │ 2025-09-15 checking -> trader-joes 127.53 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -127.53 USD to trader-joes
+   ⋮
+30 │ 2025-09-19 checking -> cafe 100.13 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -100.13 USD to cafe
+   ⋮
+34 │ 2025-09-22 checking -> home-supplies 265.91 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -265.91 USD to home-supplies
+   ⋮
+42 │ 2025-09-30 checking = 50_656.63 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 49,384.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+42 + 2025-09-30 checking = 50_656.63 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 276,788.77 USD
+   ╭─[journal/2025/10.ax:21:1]
+   │
+21 │ 2025-10-31 home-loan = 276_788.77 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 251.24 USD less than the ledger holds
+   │
+   = note: the 1,959.99 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 251.24 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+21 + 2025-10-31 home-loan = 276_788.77 USD !
+
+error[assertion]: checking holds -24,274.12 USD, not 37,455.88 USD
+   ╭─[journal/2025/10.ax:24:1]
+   │
+ 4 │ 2025-10-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 8 │ 2025-10-08 checking -> trader-joes 221.65 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -221.65 USD to trader-joes
+   ⋮
+11 │ 2025-10-08 checking -> rental-bank 16_500 USD #transfer
+   │ ───────────────────────────┬───────────────────────────
+   │                            ╰── -16,500.00 USD to rental-bank
+12 │ 2025-10-10 rental-bank -> summit-roofing 14_200 USD ^inv-roof
+13 │ 2025-10-15 checking -> trader-joes 171.31 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -171.31 USD to trader-joes
+14 │ 2025-10-19 checking -> cafe 143.41 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -143.41 USD to cafe
+15 │ 2025-10-22 checking -> home-supplies 387.38 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -387.38 USD to home-supplies
+   ⋮
+24 │ 2025-10-31 checking = 37_455.88 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 55,557.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+24 + 2025-10-31 checking = 37_455.88 USD !
+
+error[assertion]: deposit-bank holds -2,400.00 USD, not 2,500.00 USD
+   ╭─[journal/2025/10.ax:25:1]
+   │
+25 │ 2025-10-31 deposit-bank = 2_500.00 USD
+   │ ───────────────────┬──────────────────
+   │                    ╰── another 2,500.00 USD more than the ledger holds
+   │
+   = note: the 2,400.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 2,500.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+25 + 2025-10-31 deposit-bank = 2_500.00 USD !
+
+error[assertion]: deposits holds 0.00 USD, not 2,500.00 USD
+   ╭─[journal/2025/10.ax:26:1]
+   │
+26 │ 2025-10-31 deposits = 2_500.00 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── 2,500.00 USD more than the ledger holds
+   │
+   = note: 2,500.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+26 + 2025-10-31 deposits = 2_500.00 USD !
+
+error[assertion]: lender holds 279,000.00 USD, not 276,536.12 USD
+   ╭─[journal/2025/11.ax:13:1]
+   │
+13 │ 2025-11-30 home-loan = 276_536.12 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── another 252.65 USD less than the ledger holds
+   │
+   = note: the 2,211.23 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 252.65 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+13 + 2025-11-30 home-loan = 276_536.12 USD !
+
+error[assertion]: checking holds -27,223.19 USD, not 40,679.81 USD
+   ╭─[journal/2025/11.ax:16:1]
+   │
+ 1 │ 2025-11-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 7 │ 2025-11-08 checking -> trader-joes 194.38 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -194.38 USD to trader-joes
+ 8 │ 2025-11-15 checking -> trader-joes 155.97 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -155.97 USD to trader-joes
+ 9 │ 2025-11-19 checking -> cafe 225.04 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -225.04 USD to cafe
+10 │ 2025-11-22 checking -> home-supplies 423.68 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -423.68 USD to home-supplies
+   ⋮
+16 │ 2025-11-30 checking = 40_679.81 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 61,730.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+16 + 2025-11-30 checking = 40_679.81 USD !
+
+error[assertion]: lender holds 2,717.95 USD, not 0.00 USD
+   ╭─[journal/2025/12.ax:36:1]
+   │
+23 │ 2025-12-29 rental-bank -> home-loan 276_282.05 USD ^loan
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -276,282.05 USD from rental-bank
+   ⋮
+36 │ 2025-12-31 home-loan = empty
+   │ ──────────────┬─────────────
+   │               ╰── another 254.07 USD less than the ledger holds
+   │
+   = note: the 2,463.88 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 254.07 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+36 + 2025-12-31 home-loan = empty !
+
+error[assertion]: checking holds 99,790.60 USD, not 173,866.60 USD
+   ╭─[journal/2025/12.ax:39:1]
+   │
+ 2 │ 2025-12-01 checking -> oak-street 1_950 USD #rent
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── -1,950.00 USD to oak-street
+   ⋮
+ 7 │ 2025-12-08 checking -> trader-joes 169.29 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -169.29 USD to trader-joes
+ 8 │ 2025-12-15 checking -> trader-joes 188.93 USD #groceries
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -188.93 USD to trader-joes
+ 9 │ 2025-12-19 checking -> cafe 179.28 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── -179.28 USD to cafe
+10 │ 2025-12-22 checking -> home-supplies 480.04 USD #household
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── -480.04 USD to home-supplies
+   ⋮
+35 │ 2025-12-29 rental-bank -> checking 129_981.33 USD #transfer
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── +129,981.33 USD from rental-bank
+   ⋮
+39 │ 2025-12-31 checking = 173_866.60 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── another 6,173.00 USD more than the ledger holds
+   │
+   = note: the 67,903.00 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 6,173.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+39 + 2025-12-31 checking = 173_866.60 USD !
+
+✗ 44 errors
+✗ rests on a book with 44 errors (`axiom check` lists them): what they touch may be wrong
+
 Available on 2026-04-16
 
 What you can spend
-  In hand                         Amount
-  ──────────────────────────────────────
-  Money in hand           173,866.60 USD
-    assets/bank/checking  173,866.60 USD
-  ──────────────────────────────────────
-  Available to spend      173,866.60 USD
+  In hand                    Amount
+  ─────────────────────────────────
+  Money in hand       95,045.20 USD
+    checking          99,790.60 USD
+    deposit-bank      -4,900.00 USD
+    rental-bank          154.60 USD
+  ─────────────────────────────────
+  Available to spend  95,045.20 USD
