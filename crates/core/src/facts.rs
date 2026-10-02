@@ -17,7 +17,7 @@
 //! ```
 //!
 //! A read finds the slot among a holder's entries (a scan for the handful there usually are, a binary search for a
-//! long row), binary-searches that entry's days, and reads the value: it touches four bytes of day and seventeen of
+//! long row), finds the step among that entry's days the same way, and reads the value: it touches four bytes of day and seventeen of
 //! value, and allocates nothing. Reading a whole slot is a slice, and a stepper over it is [`Steps`].
 //!
 //! # Steps and gaps
@@ -214,7 +214,7 @@ impl Facts {
     /// ```
     pub fn at<V: Field>(&self, key: Key<V>, holder: u32, day: Day) -> Option<V> {
         let steps = self.steps_of(key.slot, holder)?;
-        let begun = self.days[steps.clone()].partition_point(|&from| from <= day);
+        let begun = begun_by(&self.days[steps.clone()], day);
         read(&self.values, (steps.start + begun - 1) as u32)
     }
 
@@ -310,6 +310,21 @@ fn find_slot(row: &[Entry], slot: SlotId) -> Option<usize> {
     }
     let at = row.partition_point(|entry| entry.slot < slot);
     row.get(at).is_some_and(|entry| entry.slot == slot).then_some(at)
+}
+
+/// The most steps an entry has for a scan to find the one a day is in sooner than a search does. Where the two cross in
+/// the benchmark in the tests, whole reads of random holders: the scan was faster by about a sixth up to 8 steps, and
+/// the branches it lets the processor guess are what pays, so it is the cold reads that gain.
+const SCAN_STEPS_UP_TO: usize = 8;
+
+/// How many of `days`, the days an entry's steps begin on, have begun by `day`: at least one, for an entry begins at
+/// [`Day::MIN`].
+fn begun_by(days: &[Day], day: Day) -> usize {
+    if days.len() <= SCAN_STEPS_UP_TO {
+        days.iter().take_while(|&&from| from <= day).count()
+    } else {
+        days.partition_point(|&from| from <= day)
+    }
 }
 
 /// The value of step `at`, or `None` if it is a gap.
@@ -904,6 +919,20 @@ mod tests {
         assert_eq!(facts.slots(1).collect::<Vec<_>>(), [SlotId(0), SlotId(2), SlotId(3)]);
         assert_eq!(facts.slots(2).collect::<Vec<_>>(), [SlotId(1)]);
         assert_eq!(facts.slots(0).len(), 0, "a holder that said nothing has no slots");
+    }
+
+    #[test]
+    fn a_day_is_found_in_an_entry_of_few_steps_and_of_many() {
+        for steps in [1, 2, 7, 8, 9, 10, 40] {
+            let paints: Vec<(Days, u32)> =
+                (0..steps).map(|step| (days(step * 10, step * 10 + 9), step as u32)).collect();
+            let facts = painted(&paints);
+            for day in -5..steps * 10 + 5 {
+                let expected = (0..steps * 10).contains(&day).then_some(day as u32 / 10);
+                assert_eq!(facts.at(LETTER, 0, Day(day)), expected, "{steps} steps, day {day}");
+            }
+            assert_eq!(facts.at(LETTER, 0, Day::MAX), None);
+        }
     }
 
     #[test]
