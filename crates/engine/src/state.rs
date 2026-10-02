@@ -12,8 +12,11 @@
 use std::hash::{Hash, Hasher};
 
 use axiom_core::hash::FxHasher;
-use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
-use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, Subject, Value};
+use axiom_core::{Arena, Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
+use axiom_model::{
+    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow,
+    Subject, Value,
+};
 
 use crate::eval::Outcome;
 use crate::assets::Assets;
@@ -97,6 +100,14 @@ pub(crate) struct Record {
     pub ambiguous: Set<Id<Place>>,
     /// What was already reported missing.
     pub missing: Set<Missing>,
+    /// Native contract occurrences already kept by a journal transaction.
+    pub promises: Vec<crate::Promise>,
+    /// Shared item-level flows for the kept promise ranges.
+    pub promised_flows: Vec<RuntimeFlow>,
+    /// Runtime detail overrides referenced by `promised_flows`.
+    pub promise_runtime_details: Arena<RuntimeDetail>,
+    /// Missing required template inputs, in declaration order within each promise.
+    pub promise_missing_inputs: Vec<u16>,
 }
 
 /// What a value could not be computed without. A report is about this, not
@@ -191,6 +202,10 @@ pub(crate) struct Scratch {
     pub done: Vec<(Id<Law>, Subject)>,
     /// Reused union of the purpose/window reader lists for one opening.
     pub purpose_rules: Vec<Rule>,
+    /// Reused output pools for the canonical contract materializer.
+    pub runtime_flows: Vec<RuntimeFlow>,
+    pub runtime_details: Arena<RuntimeDetail>,
+    pub missing_inputs: Vec<u16>,
 }
 
 impl Clone for Scratch {

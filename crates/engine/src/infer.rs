@@ -18,7 +18,7 @@ use crate::State;
 use crate::events::Events;
 use crate::motion::Amounts;
 use crate::sides::Sides;
-use crate::timeline::{Fact, Moment};
+use crate::timeline::{Fact, Moment, SourceFact, SourceOrder};
 
 /// What the solve pass found.
 pub(crate) struct Solution {
@@ -35,7 +35,11 @@ pub(crate) fn solve(book: &Book, events: &Events, sides: &Sides) -> Solution {
     let unknown: Vec<Id<Flow>> = book
         .flows
         .iter()
-        .filter(|(id, flow)| flow.infer == Infer::Unknown && is_real(events.state(*id, flow)))
+        .filter(|(id, flow)| {
+            flow.infer == Infer::Unknown
+                && book.txns[flow.txn].occurrence.is_none()
+                && is_real(events.state(*id, flow))
+        })
         .map(|(id, _)| id)
         .collect();
     if unknown.is_empty() {
@@ -199,7 +203,10 @@ impl Stretches<'_> {
         let mut steps = Vec::new();
         for &id in &self.book.touching[place] {
             let flow = &self.book.flows[id];
-            for (moment, direction) in lands(id, flow, self.events.state(id, flow)).into_iter().flatten() {
+            if self.book.txns[flow.txn].occurrence.is_some() {
+                continue;
+            }
+            for (moment, direction) in lands(self.book, id, flow, self.events.state(id, flow)).into_iter().flatten() {
                 for (end, _, sign) in ends(flow, place).filter(|&(_, u, _)| u == unit) {
                     steps.push((moment, self.step_of(place, flow, id, end, sign * direction)));
                 }
@@ -272,12 +279,19 @@ impl Stretches<'_> {
 /// When a flow's value moves, and in which direction: a real flow lands once,
 /// a settled one when it settles, and a returned one lands and later reverses.
 /// Pending, void and planned flows never move value.
-fn lands(id: Id<Flow>, flow: &Flow, state: State) -> [Option<(Moment, i64)>; 2] {
+fn lands(book: &Book, id: Id<Flow>, flow: &Flow, state: State) -> [Option<(Moment, i64)>; 2] {
     let on = |day, fact| Moment { day, fact };
+    let txn = &book.txns[flow.txn];
+    let source = SourceOrder {
+        txn: u32::try_from(flow.txn.index()).unwrap_or(u32::MAX),
+        flow: u32::try_from(id.index().saturating_sub(txn.flows.start().index()))
+            .unwrap_or(u32::MAX),
+    };
+    let source_fact = Fact::Source(source, SourceFact::Flow(id));
     match state {
-        State::Actual => [Some((on(flow.day, Fact::Flow(id)), 1)), None],
+        State::Actual => [Some((on(flow.day, source_fact), 1)), None],
         State::Settled(day) => [Some((on(day, Fact::Settle(id)), 1)), None],
-        State::Returned(day) => [Some((on(flow.day, Fact::Flow(id)), 1)), Some((on(day, Fact::Settle(id)), -1))],
+        State::Returned(day) => [Some((on(flow.day, source_fact), 1)), Some((on(day, Fact::Settle(id)), -1))],
         State::Pending | State::Void | State::Planned => [None, None],
     }
 }

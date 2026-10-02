@@ -310,6 +310,7 @@ pub fn gap_words(book: &Book, pad: &Pad) -> String {
 pub fn cause_cell<'s>(book: &'s Book<'_>, cause: Cause) -> Cell<'s> {
     match cause {
         Cause::Flow(flow) => Cell::Source(book.flows[flow].loc),
+        Cause::Transaction(txn) => Cell::Source(book.txns[txn].loc),
         Cause::Applied(_) => Cell::text("hypothetical flow"),
         Cause::Time => Cell::text("period end"),
     }

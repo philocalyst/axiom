@@ -8,9 +8,11 @@
 //! 1. `Split`: a commodity is split, so the day's flows are in the new units;
 //! 2. `Settle`: a pending flow settles (it lands now) or an actual one is
 //!    returned (it reverses now), lowest flow first;
-//! 3. `Flow`: journal flows in declaration order;
-//! 4. `Assert`: end-of-day balance assertions, in declaration order;
-//! 5. `Deadline`: `by` laws whose date this is, and `each` laws whose period
+//! 3. `Source`: journal flows and written contract occurrences, interleaved
+//!    in source transaction/flow order;
+//! 4. `ClaimChange`: explicit claim write-offs after same-day movements;
+//! 5. `Assert`: end-of-day balance assertions, in declaration order;
+//! 6. `Deadline`: `by` laws whose date this is, and `each` laws whose period
 //!    closes this day (a month's last day, December 31, or an `each year
 //!    closing` law's closing day), in rule order.
 //!
@@ -24,19 +26,17 @@
 //! before the day", so a price is in force from its own day for everything
 //! that day.
 //!
-//! The facts are not stored as one sorted stream. Flows, assertions, splits and
-//! settlement changes are each already sorted, and deadlines come from a heap
-//! that holds the next one of every timed rule, worked out as the fold reaches
-//! it. [`Timeline`] merges those five, so a fork copies four numbers and a heap
-//! of a few entries, and the plan holds nothing that depends on the day the
-//! fold stops.
+//! The facts are not stored as one sorted stream. Flows, kept occurrences,
+//! assertions, splits, settlement changes and claim changes are each already
+//! sorted, and deadlines come from a heap that holds the next one of every
+//! timed rule. [`Timeline`] merges those sparse streams with cursors.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use axiom_core::calendar::Window;
 use axiom_core::{Day, Days, Id, Period};
-use axiom_model::{Book, Closing, Flow, Law, Mode, Rule, Subject, Trigger, Value};
+use axiom_model::{Book, Closing, Flow, Law, Mode, Rule, Subject, Trigger, Txn, Value};
 
 use crate::checkpoint::CheckpointPhase;
 use crate::State;
@@ -50,11 +50,26 @@ use crate::state::World;
 pub(crate) enum Fact {
     Split(u32),
     Settle(Id<Flow>),
-    Flow(Id<Flow>),
+    /// A source-ordered journal flow or a written contract occurrence.
+    Source(SourceOrder, SourceFact),
+    /// Full write-off of all remaining claims from one source transaction.
+    ClaimChange(u32),
     Assert(u32),
     /// A timed rule (an index into `Rules::timed`) and the days it runs for:
     /// the deadline itself, or the month or year it closes.
     Deadline(u32, Days),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) struct SourceOrder {
+    pub txn: u32,
+    pub flow: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) enum SourceFact {
+    Flow(Id<Flow>),
+    Occurrence(Id<Txn>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -72,7 +87,13 @@ impl Moment {
     /// After every journal flow of `day`, before its assertions: where a flow
     /// applied on `day` takes its place.
     pub fn after_flows(day: Day) -> Moment {
-        Moment { day, fact: Fact::Flow(Id::new(u32::MAX)) }
+        Moment {
+            day,
+            fact: Fact::Source(
+                SourceOrder { txn: u32::MAX, flow: u32::MAX },
+                SourceFact::Flow(Id::new(u32::MAX)),
+            ),
+        }
     }
 
     /// After everything the journal holds for `day`, before its closings.
@@ -92,12 +113,16 @@ pub(crate) fn start(book: &Book, events: &Events) -> Option<Day> {
             .then_some(flow.day)
     };
     let flow = book.flows.iter().find_map(real);
+    let occurrences = book.txns.iter().filter_map(|(_, txn)| {
+        txn.occurrence.map(|_| txn.day)
+    });
     let others = [
         book.asserts.first().map(|a| a.day),
         events.changes.first().map(|&(day, _)| day),
         book.splits.first().map(|s| s.day),
+        book.claim_changes.first().map(|change| change.day),
     ];
-    others.into_iter().chain([flow]).flatten().min()
+    others.into_iter().chain([flow]).flatten().chain(occurrences).min()
 }
 
 /// The last day the journal has a fact on. Periods close and deadlines fire up
@@ -109,7 +134,12 @@ pub(crate) fn last_fact(book: &Book, events: &Events) -> Option<Day> {
     let last_flow = book.flows.as_slice().last().map(|flow| flow.day);
     let last_assert = book.asserts.last().map(|assert| assert.day);
     let last_change = events.changes.last().map(|&(day, _)| day);
-    [last_flow, last_assert, last_change].into_iter().flatten().max()
+    let last_occurrence = book.txns.iter().filter_map(|(_, txn)| txn.occurrence.map(|_| txn.day)).max();
+    let last_claim_change = book.claim_changes.last().map(|change| change.day);
+    [last_flow, last_assert, last_change, last_occurrence, last_claim_change]
+        .into_iter()
+        .flatten()
+        .max()
 }
 
 /// A `by` law's date for one subject, or the day an `each` law closes a period.
@@ -210,19 +240,31 @@ fn key(plan: &Plan, due: Deadline) -> (Id<Law>, Subject, Day) {
 enum Stream {
     Split,
     Flow,
+    Occurrence,
     Change,
+    ClaimChange,
     Assert,
     Deadline,
 }
 
 impl Stream {
-    const ALL: [Stream; 5] = [Stream::Split, Stream::Flow, Stream::Change, Stream::Assert, Stream::Deadline];
+    const ALL: [Stream; 7] = [
+        Stream::Split,
+        Stream::Flow,
+        Stream::Occurrence,
+        Stream::Change,
+        Stream::ClaimChange,
+        Stream::Assert,
+        Stream::Deadline,
+    ];
 
     fn of(fact: Fact) -> Stream {
         match fact {
             Fact::Split(_) => Stream::Split,
-            Fact::Flow(_) => Stream::Flow,
+            Fact::Source(_, SourceFact::Flow(_)) => Stream::Flow,
+            Fact::Source(_, SourceFact::Occurrence(_)) => Stream::Occurrence,
             Fact::Settle(_) => Stream::Change,
+            Fact::ClaimChange(_) => Stream::ClaimChange,
             Fact::Assert(_) => Stream::Assert,
             Fact::Deadline(..) => Stream::Deadline,
         }
@@ -235,8 +277,8 @@ impl Stream {
 #[derive(Clone)]
 pub(crate) struct Timeline {
     /// How many facts of each stream but the deadlines were consumed.
-    done: [usize; 4],
-    heads: [Option<Moment>; 5],
+    done: [usize; 6],
+    heads: [Option<Moment>; 7],
     /// The next deadline of every timed rule that has one, soonest first.
     due: BinaryHeap<Reverse<Deadline>>,
     /// What closed on the day of the last deadline, by law, subject and the
@@ -252,8 +294,8 @@ impl Timeline {
         let first =
             rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.period_start));
         let mut timeline = Timeline {
-            done: [0; 4],
-            heads: [None; 5],
+            done: [0; 6],
+            heads: [None; 7],
             due: first.map(Reverse).collect(),
             closed: (Day::MIN, Vec::new()),
         };
@@ -286,7 +328,9 @@ impl Timeline {
         let mut timeline = Timeline::new(plan);
         timeline.done[Stream::Split as usize] = book.splits.partition_point(|split| split.day <= day);
         timeline.done[Stream::Flow as usize] = book.flows.as_slice().partition_point(|flow| flow.day <= day);
+        timeline.done[Stream::Occurrence as usize] = plan.occurrence_txns.partition_point(|&id| book.txns[id].day <= day);
         timeline.done[Stream::Change as usize] = changes.partition_point(|&(when, _)| when <= day);
+        timeline.done[Stream::ClaimChange as usize] = book.claim_changes.partition_point(|change| change.day <= day);
         timeline.done[Stream::Assert as usize] = book.asserts.partition_point(|assert| {
             assert.day < day || (assertions && assert.day == day)
         });
@@ -324,9 +368,31 @@ impl Timeline {
             Stream::Split => book.splits.get(at()).map(|sp| Moment { day: sp.day, fact: Fact::Split(at() as u32) }),
             Stream::Flow => {
                 let id = Id::new(at() as u32);
-                book.flows.get(id).map(|flow| Moment { day: flow.day, fact: Fact::Flow(id) })
+                book.flows.get(id).and_then(|flow| {
+                    let txn = book.txns.get(flow.txn)?;
+                    if txn.occurrence.is_some() {
+                        return None;
+                    }
+                    let local = id.index().checked_sub(txn.flows.start().index())?;
+                    let source = SourceOrder {
+                        txn: u32::try_from(flow.txn.index()).ok()?,
+                        flow: u32::try_from(local).ok()?,
+                    };
+                    Some(Moment { day: flow.day, fact: Fact::Source(source, SourceFact::Flow(id)) })
+                })
             }
+            Stream::Occurrence => plan.occurrence_txns.get(at()).and_then(|&id| {
+                let txn = book.txns.get(id)?;
+                Some(Moment {
+                    day: txn.day,
+                    fact: Fact::Source(
+                        SourceOrder { txn: u32::try_from(id.index()).ok()?, flow: 0 },
+                        SourceFact::Occurrence(id),
+                    ),
+                })
+            }),
             Stream::Change => plan.events.changes.get(at()).map(|&(day, id)| Moment { day, fact: Fact::Settle(id) }),
+            Stream::ClaimChange => book.claim_changes.get(at()).map(|change| Moment { day: change.day, fact: Fact::ClaimChange(at() as u32) }),
             Stream::Assert => book.asserts.get(at()).map(|a| Moment { day: a.day, fact: Fact::Assert(at() as u32) }),
             Stream::Deadline => {
                 let next = self.due.peek();
@@ -364,7 +430,12 @@ impl Timeline {
     fn skip_unreal(&mut self, plan: &Plan) {
         let next = &mut self.done[Stream::Flow as usize];
         while let Some(flow) = plan.book.flows.get(Id::new(*next as u32)) {
-            if matches!(plan.events.state(Id::new(*next as u32), flow), State::Actual | State::Returned(_)) {
+            let id = Id::new(*next as u32);
+            if plan.book.txns[flow.txn].occurrence.is_some() {
+                *next += 1;
+                continue;
+            }
+            if matches!(plan.events.state(id, flow), State::Actual | State::Returned(_)) {
                 break;
             }
             *next += 1;
@@ -383,8 +454,9 @@ mod tests {
         let order = [
             Moment { day, fact: Fact::Split(3) },
             Moment { day, fact: Fact::Settle(b) },
-            Moment { day, fact: Fact::Flow(a) },
-            Moment { day, fact: Fact::Flow(b) },
+            Moment { day, fact: Fact::Source(SourceOrder { txn: 1, flow: 0 }, SourceFact::Flow(a)) },
+            Moment { day, fact: Fact::Source(SourceOrder { txn: 1, flow: 1 }, SourceFact::Flow(b)) },
+            Moment { day, fact: Fact::ClaimChange(0) },
             Moment { day, fact: Fact::Assert(0) },
             Moment { day, fact: Fact::Deadline(3, Days::on(day)) },
             Moment { day: Day(101), fact: Fact::Split(0) },
@@ -395,5 +467,27 @@ mod tests {
                 && Moment::after_flows(day) >= order[3]
                 && Moment::after_flows(day) < order[4]
         );
+    }
+
+    #[test]
+    fn source_transactions_interleave_by_transaction_before_claim_changes() {
+        let day = Day(100);
+        let first = Moment {
+            day,
+            fact: Fact::Source(
+                SourceOrder { txn: 4, flow: 0 },
+                SourceFact::Occurrence(Id::new(4)),
+            ),
+        };
+        let next_flow = Moment {
+            day,
+            fact: Fact::Source(
+                SourceOrder { txn: 5, flow: 0 },
+                SourceFact::Flow(Id::new(9)),
+            ),
+        };
+        let claim = Moment { day, fact: Fact::ClaimChange(0) };
+        let assertion = Moment { day, fact: Fact::Assert(0) };
+        assert!(first < next_flow && next_flow < claim && claim < assertion);
     }
 }

@@ -140,6 +140,41 @@ asset condo : property
 }
 
 #[test]
+fn a_written_contract_occurrence_posts_its_materialized_flows_once() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+entity lumen
+account checking
+contract payroll with lumen
+  6_173 USD monthly on 15 into checking
+  from 2026-01-01
+  until 2026-01-31
+2026-01-15 payroll
+";
+    with_run(text, day(2026, 1, 15), |book, run| {
+        let checking = book.place("checking").unwrap();
+        let usd = book.commodity("USD").unwrap();
+        let held = run
+            .holdings
+            .iter()
+            .find(|holding| (holding.place, holding.unit) == (checking, usd))
+            .expect("the written occurrence posts cash into checking");
+        assert_eq!(held.qty().0, 617_300, "the occurrence posts exactly once");
+        assert_eq!(run.promises.len(), 1);
+        let promise = run.promises[0];
+        assert_eq!(promise.due, day(2026, 1, 15));
+        assert_eq!(promise.kept.map(|(when, _)| when), Some(day(2026, 1, 15)));
+        let promised = run.promise_flows(&promise);
+        assert_eq!(promised.len(), 1);
+        assert_eq!(promised[0].flow.arrive.qty.0, 617_300);
+        assert_eq!(promised[0].txn.source_txn(), promise.kept.map(|(_, txn)| txn));
+        assert!(!run.monitor_complete, "this does not claim the due/claim monitor is complete");
+    });
+}
+
+#[test]
 fn temporal_peak_and_low_keep_intraday_extrema() {
     let text = "\
 base USD

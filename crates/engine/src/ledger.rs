@@ -15,7 +15,7 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{Arena, Cadence, Day, Diagnostic, Id, Qty, Ratio, Span, par};
+use axiom_core::{Arena, Cadence, Day, Days, Diagnostic, Id, Qty, Ratio, Span, par};
 use axiom_model::{
     Amount, Book, Commodity, Contract, End, Fault, Flow, FlowExpressions, FlowSide, FlowView,
     Infer, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Mode, OccurrenceTail,
@@ -29,8 +29,8 @@ use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
-use crate::timeline::{Fact, Moment, Timeline};
-use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
+use crate::timeline::{Fact, Moment, SourceFact, Timeline};
+use crate::{Applied, Cause, Holding, Options, Posted, Promise, Recorded, Run, RuntimeRange, State, explain};
 
 /// Why one native contract occurrence could not be materialized.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -562,9 +562,21 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     ) -> Result<(), TemplateError> {
         let book = self.plan.book;
         let group_start = out.len();
-        let recognized = book.contracts[contract_id]
+        let recognized = match book.contracts[contract_id]
             .recognition_on_schedule(&template.flow, schedule, due)
-            .map_err(TemplateError::Forecast)?;
+        {
+            Ok(recognized) => recognized,
+            // A contract without an authored `from` date uses Day::MIN as
+            // the template's storage anchor. Its default recognition day is
+            // the occurrence itself; shifting that sentinel by `due - MIN`
+            // overflows even though no date arithmetic is semantically
+            // needed. Explicit recognition periods are resolved before this
+            // shift in `recognition_on_schedule` and keep their normal path.
+            Err(axiom_model::ForecastError::Overflow) if template.flow.day == Day::MIN => {
+                Days::on(due)
+            }
+            Err(error) => return Err(TemplateError::Forecast(error)),
+        };
 
         let mut header = written_group
             .and_then(|group| group.group.header)
@@ -794,7 +806,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             detail_override,
             details,
             out,
-        );
+        )?;
 
         let extra_leg_capacity = written_group.map_or(0, |group| group.group.legs.len());
         let mut leg_values = Vec::with_capacity(template.legs.len() + extra_leg_capacity);
@@ -1050,7 +1062,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 None,
                 details,
                 out,
-            );
+            )?;
             debug_assert!(leg_position >= group_start + 1);
             leg_positions.push(Some(leg_position));
         }
@@ -1158,7 +1170,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 None,
                 details,
                 out,
-            );
+            )?;
         }
 
         if let Some(written_group) = written_group {
@@ -1251,7 +1263,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     None,
                     details,
                     out,
-                );
+                )?;
             }
         }
         Ok(())
@@ -1556,14 +1568,23 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         detail_override: Option<axiom_model::Detail>,
         details: &mut Arena<RuntimeDetail>,
         out: &mut Vec<RuntimeFlow>,
-    ) {
+    ) -> Result<(), TemplateError> {
         let book = self.plan.book;
         let stored = *book.flow_view(&flow).detail();
         let original = detail_override.unwrap_or(stored);
         let shifted = if source_day == flow.day {
             original
+        } else if flow.day == Day::MIN {
+            // The no-`from` terms anchor is a sentinel rather than an
+            // authored date. In particular, do not overflow while moving an
+            // empty/default Detail from that anchor to the occurrence day.
+            original
         } else {
-            original.moved(source_day.0 - flow.day.0)
+            let shift = source_day
+                .0
+                .checked_sub(flow.day.0)
+                .ok_or(TemplateError::InvalidTemplate { loc: flow.loc })?;
+            original.moved(shift)
         };
         flow.day = source_day;
         let detail = (shifted != stored).then(|| details.push(RuntimeDetail(shifted)));
@@ -1573,6 +1594,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             ordinal,
             txn,
         });
+        Ok(())
     }
 
     fn apply_view(
@@ -1702,10 +1724,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             pads: record.pads,
             // These collections are populated by the native state monitors.
             assets,
-            promises: Vec::new(),
-            promised_flows: Box::default(),
-            runtime_details: Arena::new(),
-            missing_inputs: Box::default(),
+            promises: record.promises,
+            promised_flows: record.promised_flows.into_boxed_slice(),
+            runtime_details: record.promise_runtime_details,
+            missing_inputs: record.promise_missing_inputs.into_boxed_slice(),
             open_claims: Box::default(),
             monitor_complete: false,
             checks: record.checks.into(),
@@ -1738,7 +1760,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 let split = self.plan.book.splits[at as usize];
                 self.world.holdings.scale(split.unit, split.ratio);
             }
-            Fact::Flow(id) => self.post_journal(id, moment.day, false),
+            Fact::Source(_, SourceFact::Flow(id)) => self.post_journal(id, moment.day, false),
+            Fact::Source(_, SourceFact::Occurrence(txn)) => {
+                self.post_written_occurrence(txn, moment.day)
+            }
+            Fact::ClaimChange(_) => {}
             // A settlement lands a pending flow; a return runs an actual one backwards.
             Fact::Settle(id) => {
                 let returned = matches!(
@@ -1750,6 +1776,143 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             Fact::Assert(index) => self.reconcile(index as usize),
             Fact::Deadline(rule, period) => self.deadline(rule as usize, moment.day, period),
         }
+    }
+
+    /// Posts a written contract occurrence through the canonical materializer.
+    /// The occurrence transaction's flows are metadata overlays, not journal
+    /// movements; only the runtime flows produced here are posted.
+    fn post_written_occurrence(&mut self, txn_id: Id<axiom_model::Txn>, day: Day) {
+        let book = self.plan.book;
+        let Some(txn) = book.txns.get(txn_id) else { return };
+        let (Some(contract_id), Some(schedule), Some(written_id)) =
+            (txn.contract, txn.contract_schedule, txn.occurrence)
+        else {
+            self.record.report(
+                Diagnostic::error(
+                    "contract-occurrence-source",
+                    "this transaction does not identify a complete contract occurrence",
+                )
+                .label(txn.loc, "the occurrence cannot be materialized"),
+            );
+            return;
+        };
+        let Some(written) = book.written_occurrences.get(written_id) else {
+            self.record.report(
+                Diagnostic::error(
+                    "contract-occurrence-source",
+                    "this transaction points at a missing occurrence record",
+                )
+                .label(txn.loc, "the occurrence cannot be materialized"),
+            );
+            return;
+        };
+        let due = written.due;
+        let Some(contract) = book.contracts.get(contract_id) else {
+            self.record.report(
+                Diagnostic::error(
+                    "contract-occurrence-source",
+                    "this occurrence points at a missing contract",
+                )
+                .label(txn.loc, "the occurrence cannot be materialized"),
+            );
+            return;
+        };
+        let through = Days::new(contract.days.first(), due).unwrap_or(Days::on(due));
+        let count = contract
+            .occurrences(through)
+            .filter(|occurrence| occurrence.schedule == schedule && occurrence.day <= due)
+            .count();
+        let Some(ordinal) = count
+            .checked_sub(1)
+            .and_then(|index| u32::try_from(index).ok())
+        else {
+            self.record.report(
+                Diagnostic::error(
+                    "contract-occurrence-source",
+                    "this occurrence is not part of its contract schedule",
+                )
+                .label(txn.loc, "the occurrence cannot be materialized"),
+            );
+            return;
+        };
+
+        // Reuse pools between source occurrences. Taking them from Scratch
+        // keeps the materializer borrow disjoint from the mutable posting path.
+        let mut flows = std::mem::take(&mut self.scratch.runtime_flows);
+        let mut details = std::mem::take(&mut self.scratch.runtime_details);
+        let mut missing = std::mem::take(&mut self.scratch.missing_inputs);
+        flows.clear();
+        details.truncate(0);
+        missing.clear();
+        let made = self.instantiate_occurrence(
+            contract_id,
+            schedule,
+            due,
+            ordinal,
+            Some(txn_id),
+            &mut flows,
+            &mut details,
+            &mut missing,
+        );
+        let made = match made {
+            Ok(made) => made,
+            Err(error) => {
+                self.record.report(
+                    Diagnostic::error(
+                        "contract-occurrence-materialization",
+                        format!("could not materialize this occurrence: {error:?}"),
+                    )
+                    .label(txn.loc, "this written occurrence could not be applied"),
+                );
+                self.scratch.runtime_flows = flows;
+                self.scratch.runtime_details = details;
+                self.scratch.missing_inputs = missing;
+                return;
+            }
+        };
+
+        let flow_start = self.record.promised_flows.len();
+        let missing_start = self.record.promise_missing_inputs.len();
+        let output_flows = made.flows(&flows).unwrap_or_default();
+        let output_missing = made.missing(&missing).unwrap_or_default();
+        for runtime in output_flows {
+            let mut retained = runtime.clone();
+            if let Some(detail_id) = runtime.detail {
+                if let Some(detail) = details.get(detail_id).copied() {
+                    retained.detail = Some(self.record.promise_runtime_details.push(detail));
+                }
+            }
+            self.record.promised_flows.push(retained);
+            let view = book.runtime_flow_view(runtime, &details);
+            let amounts = Amounts::written(&runtime.flow);
+            let motion = Motion::from_view_at(
+                book,
+                view,
+                runtime.txn,
+                Cause::Transaction(txn_id),
+                day,
+                amounts,
+                runtime.ordinal,
+            );
+            self.post(&motion);
+        }
+        self.record.promise_missing_inputs.extend_from_slice(output_missing);
+        self.record.promises.push(Promise {
+            contract: contract_id,
+            schedule,
+            ordinal,
+            due,
+            kept: Some((day, txn_id)),
+            waived: false,
+            flows: RuntimeRange::new(flow_start, self.record.promised_flows.len() - flow_start),
+            missing_inputs: RuntimeRange::new(
+                missing_start,
+                self.record.promise_missing_inputs.len() - missing_start,
+            ),
+        });
+        self.scratch.runtime_flows = flows;
+        self.scratch.runtime_details = details;
+        self.scratch.missing_inputs = missing;
     }
 
     /// A journal flow as it moves on `day`, its quantities solved.
@@ -2832,6 +2995,91 @@ contract flat with landlord
             .expect("the same shared pools accept another occurrence");
         assert_eq!(repeated.flows(&forecast_flows).unwrap().len(), 1);
         assert_eq!(repeated.missing(&missing).unwrap(), [0]);
+    }
+
+    #[test]
+    fn occurrence_missing_input_omits_only_its_item_and_posts_known_flows() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+account checking
+entity landlord
+purpose utilities : spending
+contract flat with landlord
+  100 USD monthly on 1 from checking
+  input water USD
+  input gas USD
+  + 12% of water #utilities
+  + 10% of gas #utilities
+  from 2026-01-01
+2026-02-01 flat
+  water = 155 USD
+";
+        let book = source_book(source);
+        let flat = book.contract("flat").expect("contract id");
+        let due = Day::from_ymd(2026, 2, 1).unwrap();
+        let run = crate::run(&book, Options { today: due, relaxed: false });
+
+        let checking = book.place("checking").unwrap();
+        let landlord = book.entities[book.contracts[flat].party].place.unwrap();
+        let usd = book.commodity("USD").unwrap();
+        let held_at = |place| {
+            run.holdings
+                .iter()
+                .find(|holding| holding.place == place && holding.unit == usd)
+                .map_or(Qty::ZERO, |holding| holding.qty())
+        };
+        assert_eq!(held_at(checking), Qty(-11_860));
+        assert_eq!(held_at(landlord), Qty(11_860));
+        let promise = run
+            .promises
+            .iter()
+            .find(|promise| promise.contract == flat && promise.due == due)
+            .expect("the incomplete kept occurrence remains visible");
+        assert!(promise.kept.is_some());
+        assert_eq!(run.promise_missing_inputs(promise), [1]);
+        assert_eq!(run.promise_flows(promise).len(), 2);
+    }
+
+    #[test]
+    fn loan_occurrence_without_from_uses_its_due_day_as_default_recognition() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+entity bank
+asset car
+account checking
+contract car-loan with bank
+  loan 3_000 USD on 2026-01-01 at 0% over 3m for car
+  monthly on 1 from checking
+";
+        let book = source_book(source);
+        let contract = book.contract("car-loan").expect("contract id");
+        let due = Day::from_ymd(2026, 2, 1).unwrap();
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(Options { today: due, relaxed: false });
+        let (mut flows, mut details, mut missing) =
+            (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
+        let output = ledger
+            .instantiate_occurrence(
+                contract,
+                ScheduleKind::Regular,
+                due,
+                0,
+                None,
+                &mut flows,
+                &mut details,
+                &mut missing,
+            )
+            .expect("the default Day::MIN template anchor is not a runtime date");
+        let flows = output.flows(&flows).unwrap();
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].flow.day, due);
+        assert_eq!(flows[0].flow.out.qty, Qty(100_000));
+        assert_eq!(flows[0].flow.recognized, axiom_core::Days::on(due));
+        assert!(output.missing(&missing).unwrap().is_empty());
     }
 
     #[test]

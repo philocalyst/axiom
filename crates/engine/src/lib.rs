@@ -416,6 +416,10 @@ impl Hash for Parcel {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Cause {
     Flow(Id<Flow>),
+    /// A source transaction whose grouped contract occurrence was materialized
+    /// by the engine. This keeps occurrence provenance distinct from a
+    /// hypothetical `Applied` flow and from template metadata flow IDs.
+    Transaction(Id<Txn>),
     Applied(u32),
     /// A period ending or a deadline passing.
     Time,

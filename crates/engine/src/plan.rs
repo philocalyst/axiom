@@ -11,8 +11,8 @@
 
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
 use axiom_model::{
-    Asset, Book, Commodity, Entity, Field, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value,
-    Var,
+    Asset, Book, Commodity, Entity, Field, Flow, Func, Kind, Op, Place, Rule, Subject, Txn, Ty,
+    Value, Var,
 };
 
 use crate::events::{self, Events};
@@ -89,6 +89,9 @@ pub struct Plan<'b, 's> {
     /// Places under kinds read by a widened total. Only law-referenced kinds
     /// are indexed, so books without those reads pay no grouping cost.
     pub(crate) kind_places: Map<Id<Kind>, Box<[Id<Place>]>>,
+    /// Sparse dated transaction rows that keep a scheduled contract occurrence.
+    /// Ordinary transactions are already represented by their flows.
+    pub(crate) occurrence_txns: Box<[Id<Txn>]>,
     /// The day of the first fact that starts a period; before it there is nothing to close.
     pub(crate) period_start: Option<Day>,
     last_fact: Option<Day>,
@@ -141,6 +144,12 @@ impl<'b, 's> Plan<'b, 's> {
         let place_owners = place_owners(book, &entity_owners, &mut problems);
         let (temporal, temporal_dates, daily_temporal) =
             temporal_queries(book, &entity_owners, &place_owners);
+        let mut occurrence_txns: Vec<_> = book
+            .txns
+            .iter()
+            .filter_map(|(id, txn)| txn.occurrence.is_some().then_some(id))
+            .collect();
+        occurrence_txns.sort_unstable_by_key(|&id| (book.txns[id].day, id));
         let mut plan = Plan {
             book,
             amounts: solution.amounts,
@@ -157,6 +166,7 @@ impl<'b, 's> Plan<'b, 's> {
             entity_owners,
             place_owners,
             kind_places,
+            occurrence_txns: occurrence_txns.into_boxed_slice(),
             period_start: timeline::start(book, &events),
             last_fact: timeline::last_fact(book, &events),
             events,

@@ -70,7 +70,8 @@ impl Ledger<'_, '_, '_> {
         let watched = !m.opening;
         self.scratch.worth.clear();
         // A `!` on an assertion accepts its gap: it is never unused.
-        if let (Cause::Flow(_) | Cause::Applied(_), true, Some(waive)) = (m.cause, watched, m.waive)
+        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), true, Some(waive)) =
+            (m.cause, watched, m.waive)
         {
             self.record.waivers.entry(waive.loc).or_insert(false);
         }
@@ -807,7 +808,7 @@ impl Ledger<'_, '_, '_> {
     fn source_flow(&self, m: &Motion) -> Option<Id<axiom_model::Flow>> {
         match m.cause {
             Cause::Flow(flow) => Some(flow),
-            Cause::Applied(_) | Cause::Time => None,
+            Cause::Transaction(_) | Cause::Applied(_) | Cause::Time => None,
         }
     }
 
@@ -818,6 +819,11 @@ impl Ledger<'_, '_, '_> {
     fn event_key(&self, m: &Motion) -> EventKey {
         let sequence = match m.cause {
             Cause::Flow(flow) => u64::try_from(flow.index()).unwrap_or(u64::MAX),
+            Cause::Transaction(txn) => u64::try_from(txn.index())
+                .unwrap_or(u64::MAX >> 32)
+                .checked_shl(32)
+                .and_then(|prefix| prefix.checked_add(u64::from(m.flow_ordinal)))
+                .unwrap_or(u64::MAX),
             Cause::Applied(ordinal) => u64::from(ordinal),
             Cause::Time => 0,
         };
