@@ -20,10 +20,19 @@ struct Tag<'t> {
     empty: bool,
     at: Span,
     value: &'t str,
-    /// Where the value is, without the spaces around it.
+    /// Where the value is, with the white space around it.
     span: Span,
     /// A CDATA text segment, not an element boundary.
     cdata: bool,
+}
+
+impl Tag<'_> {
+    /// Where the text of the tag is, without the white space around it.
+    fn written(&self) -> Span {
+        let (leading, trailing) =
+            (self.value.len() - self.value.trim_start().len(), self.value.len() - self.value.trim_end().len());
+        Span { start: self.span.start.saturating_add(leading), end: self.span.end.saturating_sub(trailing) }
+    }
 }
 
 /// The tags of a text, skipping declarations, comments and processing
@@ -219,67 +228,58 @@ fn ends_with(open: &[&str], wanted: &[&str]) -> bool {
         && open[open.len() - wanted.len()..].iter().zip(wanted).all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
-/// Append one text node to the first value found at an element path. XML text
-/// split by comments or CDATA stays one value; a boundary that carried spaces
-/// contributes one separator while an adjacent boundary contributes none.
-fn append_text<'t>(
-    cell: &mut Cell<'t>,
-    trailing_space: &mut bool,
-    raw: &'t str,
-    span: Span,
-    cdata: bool,
-) -> Result<(), &'static str> {
-    let decoded = if cdata { Cow::Borrowed(raw) } else { decode(raw)? };
-    let value = decoded.as_ref();
-    if value.trim().is_empty() {
-        *trailing_space = cell.span != ABSENT;
-        return Ok(());
-    }
-    let leading_bytes = raw.len() - raw.trim_start().len();
-    let trailing_bytes = raw.len() - raw.trim_end().len();
-    let part_span =
-        Span { start: span.start.saturating_add(leading_bytes), end: span.end.saturating_sub(trailing_bytes) };
-
-    if cell.span == ABSENT {
-        let value = decoded.as_ref();
-        let ends_with_space = value.len() != value.trim_end().len();
-        cell.text = match decoded {
-            Cow::Borrowed(text) => Cow::Borrowed(text.trim()),
-            Cow::Owned(mut text) => {
-                let start = text.len() - text.trim_start().len();
-                let end = text.trim_end().len();
-                text.truncate(end);
-                text.drain(..start);
-                Cow::Owned(text)
-            }
-        };
-        cell.span = part_span;
-        *trailing_space = ends_with_space;
-        return Ok(());
-    }
-
-    let value = decoded.as_ref();
-    let trimmed = value.trim();
-    let leading_space = value.len() != value.trim_start().len();
-    let ends_with_space = value.len() != value.trim_end().len();
-    if !trimmed.is_empty() {
-        let mut joined = match std::mem::replace(&mut cell.text, Cow::Borrowed("")) {
-            Cow::Borrowed(text) => {
-                let mut joined = String::with_capacity(text.len() + trimmed.len() + 1);
-                joined.push_str(text);
-                joined
-            }
-            Cow::Owned(text) => text,
-        };
-        if (*trailing_space || leading_space) && !joined.is_empty() {
-            joined.push(' ');
+/// `text` without the white space around it, borrowed from where it was if it was.
+fn trimmed(text: Cow<'_, str>) -> Cow<'_, str> {
+    match text {
+        Cow::Borrowed(text) => Cow::Borrowed(text.trim()),
+        Cow::Owned(mut text) => {
+            let start = text.len() - text.trim_start().len();
+            let end = text.trim_end().len();
+            text.truncate(end);
+            text.drain(..start);
+            Cow::Owned(text)
         }
-        joined.push_str(trimmed);
-        cell.text = Cow::Owned(joined);
-        cell.span.end = span.end;
     }
-    *trailing_space = ends_with_space;
-    Ok(())
+}
+
+/// `text`, then `separator`, then `more`.
+fn joined<'t>(text: Cow<'t, str>, separator: &str, more: &str) -> Cow<'t, str> {
+    let mut joined = match text {
+        Cow::Borrowed(text) => {
+            let mut joined = String::with_capacity(text.len() + more.len() + 1);
+            joined.push_str(text);
+            joined
+        }
+        Cow::Owned(text) => text,
+    };
+    joined.push_str(separator);
+    joined.push_str(more);
+    Cow::Owned(joined)
+}
+
+impl Reading {
+    /// Appends one text node to the first value found at an element path. XML text split by comments or CDATA
+    /// stays one value; a boundary that carried spaces contributes one separator while an adjacent boundary
+    /// contributes none.
+    fn add<'t>(&mut self, cell: &mut Cell<'t>, tag: &Tag<'t>) -> Result<(), &'static str> {
+        let decoded = if tag.cdata { Cow::Borrowed(tag.value) } else { decode(tag.value)? };
+        if decoded.trim().is_empty() {
+            self.trailing_space = cell.span != ABSENT;
+            return Ok(());
+        }
+        let leading_space = decoded.len() != decoded.trim_start().len();
+        let trailing_space = decoded.len() != decoded.trim_end().len();
+        if cell.span == ABSENT {
+            (cell.text, cell.span) = (trimmed(decoded), tag.written());
+        } else {
+            let spaced = (self.trailing_space || leading_space) && !cell.text.is_empty();
+            let separator = if spaced { " " } else { "" };
+            cell.text = joined(std::mem::take(&mut cell.text), separator, decoded.trim());
+            cell.span.end = tag.span.end;
+        }
+        self.trailing_space = trailing_space;
+        Ok(())
+    }
 }
 
 /// Calls `each` with every `records` element of `text`, until it says stop.
@@ -396,7 +396,7 @@ impl<'p, 't> Reader<'p, 't> {
         for (path, names) in self.wanted.iter() {
             let (cell, reading) = (&mut self.cells[path.index()], &mut self.reading[path.index()]);
             if ends_with(&self.stack, names) && (cell.span == ABSENT || reading.capturing) {
-                if let Err(what) = append_text(cell, &mut reading.trailing_space, tag.value, tag.span, tag.cdata) {
+                if let Err(what) = reading.add(cell, tag) {
                     return Step::Broken(Broken { row: self.count, span: tag.span, what });
                 }
                 reading.capturing = true;
