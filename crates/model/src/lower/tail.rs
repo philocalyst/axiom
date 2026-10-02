@@ -5,11 +5,11 @@
 //! contract's term line or an `also` line does with the rest is theirs, and is said where they read it.
 
 use axiom_core::calendar::{self, Period, Window};
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Run, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Ratio, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
-use super::record::CodeIndex;
+use super::flow::FlowCx;
 use crate::book::{Commodity, Entity, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -135,19 +135,9 @@ pub(super) fn written_waive<'s>(world: &mut World<'s>, waive: ast::Waive<'s>) ->
     Waive { loc: waive.at, reason: waive.reason.map(|text| world.book.quoted_text(text.0)) }
 }
 
-/// What a flow's tail needs to be read: where it is written and what its expressions compiled to.
-pub(super) struct FlowTail<'a, 's> {
-    pub home: Home,
-    pub file: &'a ast::File<'s>,
-    /// The day the flow is dated, which a relative `for` and `due` count from.
-    pub day: Day,
-    pub roots: &'a Map<ast::ExprId, NodeId>,
-    pub code_index: &'a CodeIndex,
-}
-
-impl<'s> FlowTail<'_, 's> {
+impl<'s> FlowCx<'_, 's> {
     /// Reads every clause of a flow's tail: the codes it adds to the pool, and what the rest of it says.
-    pub fn lower(
+    pub fn lower_tail(
         &self,
         world: &mut World<'s>,
         clauses: ast::Many<ast::Clause<'s>>,

@@ -1,17 +1,18 @@
 //! Native S5 journal records. This pass reads the source AST directly and
 //! appends resolved records to the pooled Book arenas.
 
-use axiom_core::{Day, Days, Diagnostic, Dim, Groups, Id, Loc, Map, Qty, Run};
+use axiom_core::{Day, Days, Diagnostic, Dim, Groups, Id, Loc, Map, Qty, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity, Subject};
 
 use super::flow::{
-    OtherSide, ResolvedEnd, empty_codes, flow_roots, journal_end, lower_items, make_flow, make_resolved_flow, priced,
-    push_flow_expressions, push_quantity_root, push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
+    Codes, Ends, FlowCx, OtherSide, Parent, ResolvedEnd, ResolvedQuantity, Shape, empty_codes, flow_roots, journal_end,
+    lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root, push_tail_roots,
+    resolve_amount, resolve_end, resolve_quantity,
 };
 use super::push_amount_root;
 use super::staged::Staged;
-use super::tail::{FlowTail, Reach, written_purpose};
+use super::tail::{Reach, Tail, written_purpose};
 use crate::book::{Amount, Change as BookChange, FlowSide, Place, ScheduleKind, TemplateAmount, TermsState};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
@@ -192,6 +193,14 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
     );
 }
 
+/// What the lowering of one transaction has made so far.
+struct Built {
+    flow_roots: Vec<FlowExpressions>,
+    groups: Vec<JournalGroup>,
+    /// Whether anything said so far makes the transaction wrong.
+    successful: bool,
+}
+
 fn lower_txn<'a, 's>(
     world: &mut World<'s>,
     site: &Site<'a, 's>,
@@ -202,261 +211,257 @@ fn lower_txn<'a, 's>(
 ) {
     let (file, home) = (&site.source.file, site.home);
     let mut staged = Staged::open(world);
-    let txn_id = Id::new(staged.book.txns.len() as u32);
+    let txn = Id::new(staged.book.txns.len() as u32);
     let diagnostic_start = diags.len();
-
-    let roots = flow_roots(file, &written.flow);
-    let name = staged.book.names.intern("journal");
-    let compiled = if roots.is_empty() {
-        Some((crate::book::TemplateProgram::default(), Map::default()))
-    } else {
-        crate::laws::compile_template(&mut staged, diags, file, home, Ty::Flow, name, &[], &roots).map(
-            |(program, nodes)| {
-                let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
-                (program, by_expr)
-            },
-        )
-    };
-    let Some((program, root_ids)) = compiled else {
+    let Some((program, root_ids)) = compile_flow_roots(&mut staged, file, home, &written.flow, diags) else {
         push_rejected_txn(&mut staged, item, written.date);
         return;
     };
-
-    let (header_codes, header_tail) = FlowTail { home, file, day: written.date, roots: &root_ids, code_index }.lower(
-        &mut staged,
-        written.flow.tail,
-        diags,
-    );
+    let cx = FlowCx { file, home, day: written.date, txn, loc: item.loc, roots: &root_ids, code_index };
+    let (header_codes, header_tail) = cx.lower_tail(&mut staged, written.flow.tail, diags);
     let txn_waive = header_tail.waive;
-    let mut flow_roots = Vec::new();
-    let mut groups = Vec::new();
-    let mut successful = header_tail.valid;
-    let body_has_group = !written.flow.body.legs.is_empty() || !written.flow.body.items.is_empty();
+    let mut built = Built { flow_roots: Vec::new(), groups: Vec::new(), successful: header_tail.valid };
 
-    let from = written.flow.from.end.map(|end| resolve_end(&mut staged, home, file, end, diags));
-    let to = written.flow.to.end.map(|end| resolve_end(&mut staged, home, file, end, diags));
-    if from.is_some_and(|end| end.is_none()) || to.is_some_and(|end| end.is_none()) {
-        successful = false;
-    }
-
-    if let (Some(Some(from)), Some(Some(to))) = (from, to) {
-        if written.flow.body.legs.is_empty() {
-            let flow_at = staged.flows().len();
-            match make_flow(
-                &mut staged,
-                file,
-                written.date,
-                from,
-                to,
-                written.flow.from.amount,
-                written.flow.to.amount,
-                header_tail,
-                header_codes,
-                txn_id,
-                item.loc,
-                &root_ids,
-                diags,
-            ) {
-                Some((flow, exprs)) => {
-                    staged.book.flows.push(flow);
-                    if let Some(exprs) = exprs {
-                        flow_roots.push(FlowExpressions { flow: flow_at, ..exprs });
-                    }
-                    if body_has_group {
-                        let items = lower_items(
-                            &mut staged,
-                            home,
-                            file,
-                            written.flow.body.items,
-                            from,
-                            to,
-                            FlowSide::Out,
-                            txn_id,
-                            written.date,
-                            header_codes,
-                            &root_ids,
-                            code_index,
-                            Mode::Actual,
-                            None,
-                            &mut flow_roots,
-                            diags,
-                        );
-                        groups.push(JournalGroup {
-                            header: Some(flow_at),
-                            source: journal_end(from),
-                            side: FlowSide::Out,
-                            total: None,
-                            legs: Box::default(),
-                            leg_quantities: Box::default(),
-                            items,
-                        });
-                    }
-                }
-                None => successful = false,
-            }
-        } else {
+    let flow = &written.flow;
+    let from = flow.from.end.map(|end| resolve_end(&mut staged, &cx, end, diags));
+    let to = flow.to.end.map(|end| resolve_end(&mut staged, &cx, end, diags));
+    built.successful &= !from.is_some_and(|end| end.is_none()) && !to.is_some_and(|end| end.is_none());
+    match (from, to) {
+        (Some(Some(from)), Some(Some(to))) if file[flow.body.legs].is_empty() => {
+            let ends = Ends { from, to };
+            lower_named_flow(&mut staged, &cx, flow, ends, header_tail, header_codes, &mut built, diags)
+        }
+        (Some(Some(_)), Some(Some(_))) => {
             diags.push(
                 Diagnostic::error("flow-shape", "a flow with both named ends cannot also have split legs")
                     .label(item.loc, "these legs do not have an unnamed side to fill")
                     .help("name one end in the header and put the other ends on its indented legs"),
             );
-            successful = false;
+            built.successful = false;
         }
-    } else if written.flow.body.legs.is_empty() {
-        diags.push(
-            Diagnostic::error("flow-shape", "a flow needs a named end and at least one leg")
-                .label(item.loc, "no complete flow can be formed here")
-                .help("write both ends in the header, or write one end and indent the other legs"),
-        );
-        successful = false;
-    } else {
-        let (source, source_is_from) = match (from, to) {
-            (Some(Some(source)), None) => (source, true),
-            (None, Some(Some(source))) => (source, false),
-            _ => {
-                diags.push(
-                    Diagnostic::error("flow-shape", "a split header names exactly one end")
-                        .label(item.loc, "the named end of the split is missing or ambiguous"),
-                );
-                push_rejected_txn(&mut staged, item, written.date);
-                return;
-            }
-        };
-        let source_qty = if source_is_from { written.flow.from.amount } else { written.flow.to.amount };
-        let source_side = if source_is_from { FlowSide::Out } else { FlowSide::Arrive };
-        let base = staged.book.base;
-        let total =
-            source_qty.and_then(|qty| resolve_quantity(&mut staged, file, qty, base, source_side, &root_ids, diags));
-        if source_qty.is_some() && total.is_none() {
-            successful = false;
-        }
-        let mut legs = Vec::with_capacity(written.flow.body.legs.len());
-        let mut leg_quantities = Vec::with_capacity(written.flow.body.legs.len());
-        for leg in &file[written.flow.body.legs] {
-            let Some(other) = resolve_end(&mut staged, home, file, leg.end, diags) else {
-                successful = false;
-                continue;
-            };
-            let (from, to) = if source_is_from { (source, other) } else { (other, source) };
-            let mut tail = header_tail.clone();
-            let (leg_codes, leg_tail) = FlowTail { home, file, day: written.date, roots: &root_ids, code_index }.lower(
-                &mut staged,
-                leg.tail,
-                diags,
+        _ if file[flow.body.legs].is_empty() => {
+            diags.push(
+                Diagnostic::error("flow-shape", "a flow needs a named end and at least one leg")
+                    .label(item.loc, "no complete flow can be formed here")
+                    .help("write both ends in the header, or write one end and indent the other legs"),
             );
-            tail = tail.merge(leg_tail);
-            let unit = total.map_or(staged.book.base, |total| total.amount.unit);
-            let Some(quantity) =
-                resolve_quantity(&mut staged, file, leg.amount, unit, source_side.other(), &root_ids, diags)
-            else {
-                successful = false;
-                continue;
-            };
-            let header_amount = total.map_or_else(|| Amount::zero(unit), |total| total.amount);
-            let (out, arrive) = if source_is_from {
-                (Amount::zero(header_amount.unit), quantity.amount)
-            } else {
-                (quantity.amount, Amount::zero(header_amount.unit))
-            };
-            let flow_at = staged.flows().len();
-            let basis_root = tail.basis_root;
-            if let Some(flow) = make_resolved_flow(
-                &mut staged,
-                written.date,
-                from,
-                to,
-                out,
-                arrive,
-                quantity.infer,
-                quantity.mode,
-                tail,
-                header_codes,
-                leg_codes,
-                txn_id,
-                leg.loc,
-                diags,
-            ) {
-                staged.book.flows.push(flow);
-                legs.push(flow_at);
-                leg_quantities.push(quantity.group);
-                push_flow_expressions(
-                    &mut flow_roots,
-                    flow_at,
-                    (!source_is_from).then_some(quantity.root).flatten(),
-                    source_is_from.then_some(quantity.root).flatten(),
-                    basis_root,
-                );
-            } else {
-                successful = false;
-            }
+            built.successful = false;
         }
-        let remainder_end = legs
-            .first()
-            .map(|&offset| {
-                let leg = staged.flow(offset);
-                if source_is_from { leg.to } else { leg.from }
-            })
-            .map(|place| ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) })
-            .unwrap_or(source);
-        let items = lower_items(
+        (Some(Some(source)), None) => lower_split_flow(
             &mut staged,
-            home,
-            file,
-            written.flow.body.items,
+            &cx,
+            flow,
             source,
-            remainder_end,
-            source_side,
-            txn_id,
-            written.date,
+            FlowSide::Out,
+            &header_tail,
             header_codes,
-            &root_ids,
-            code_index,
-            Mode::Actual,
-            None,
-            &mut flow_roots,
+            &mut built,
             diags,
-        );
-        if !written.flow.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && legs.is_empty() {
-            successful = false;
+        ),
+        (None, Some(Some(source))) => lower_split_flow(
+            &mut staged,
+            &cx,
+            flow,
+            source,
+            FlowSide::Arrive,
+            &header_tail,
+            header_codes,
+            &mut built,
+            diags,
+        ),
+        _ => {
+            diags.push(
+                Diagnostic::error("flow-shape", "a split header names exactly one end")
+                    .label(item.loc, "the named end of the split is missing or ambiguous"),
+            );
+            push_rejected_txn(&mut staged, item, written.date);
+            return;
         }
-        groups.push(JournalGroup {
-            header: None,
-            source: journal_end(source),
-            side: source_side,
-            total: total.map(|total| total.group),
-            legs: legs.into_boxed_slice(),
-            leg_quantities: leg_quantities.into_boxed_slice(),
-            items,
-        });
     }
 
-    if diags.len() != diagnostic_start {
-        successful = false;
-    }
-    if !successful {
+    if diags.len() != diagnostic_start || !built.successful {
         push_rejected_txn(&mut staged, item, written.date);
         return;
     }
-
-    let program_id = if !program.nodes.is_empty() || !flow_roots.is_empty() || !groups.is_empty() {
-        Some(staged.book.journal_programs.push(JournalProgram {
+    let program = (!program.nodes.is_empty() || !built.flow_roots.is_empty() || !built.groups.is_empty()).then(|| {
+        staged.book.journal_programs.push(JournalProgram {
             program,
-            flow_roots: flow_roots.into_boxed_slice(),
-            groups: groups.into_boxed_slice(),
-        }))
-    } else {
-        None
-    };
+            flow_roots: built.flow_roots.into_boxed_slice(),
+            groups: built.groups.into_boxed_slice(),
+        })
+    });
     let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
-    let txn = Txn {
-        program: program_id,
-        codes: header_codes,
-        waive: txn_waive,
-        doc,
-        ..journal_txn(&staged, written.date, item.loc)
-    };
-    staged.book.txns.push(txn);
+    let record =
+        Txn { program, codes: header_codes, waive: txn_waive, doc, ..journal_txn(&staged, written.date, item.loc) };
+    staged.book.txns.push(record);
     staged.commit();
+}
+
+/// The expressions a transaction's header, legs and items compute by, compiled as one program, and which node
+/// each came to.
+fn compile_flow_roots<'s>(
+    staged: &mut Staged<'_, 's>,
+    file: &ast::File<'s>,
+    home: Home,
+    flow: &ast::Flow<'s>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(crate::book::TemplateProgram, Map<ast::ExprId, NodeId>)> {
+    let roots = flow_roots(file, flow);
+    if roots.is_empty() {
+        return Some((crate::book::TemplateProgram::default(), Map::default()));
+    }
+    let name = staged.book.names.intern("journal");
+    let (program, nodes) = crate::laws::compile_template(staged, diags, file, home, Ty::Flow, name, &[], &roots)?;
+    let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
+    Some((program, by_expr))
+}
+
+/// A header that names both its ends is one flow, with the items under it as a group of their own.
+fn lower_named_flow<'s>(
+    staged: &mut Staged<'_, 's>,
+    cx: &FlowCx<'_, 's>,
+    written: &ast::Flow<'s>,
+    ends: Ends,
+    header_tail: Tail,
+    header_codes: Run<Sym>,
+    built: &mut Built,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let flow_at = staged.flows().len();
+    let Some((flow, exprs)) = make_flow(staged, cx, written, ends, header_tail, header_codes, diags) else {
+        built.successful = false;
+        return;
+    };
+    staged.book.flows.push(flow);
+    if let Some(exprs) = exprs {
+        built.flow_roots.push(FlowExpressions { flow: flow_at, ..exprs });
+    }
+    if cx.file[written.body.items].is_empty() {
+        return;
+    }
+    let parent = Parent { ends, side: FlowSide::Out, mode: Mode::Actual, header_codes, tail: None };
+    let items = lower_items(staged, cx, written.body.items, parent, &mut built.flow_roots, diags);
+    built.groups.push(JournalGroup {
+        header: Some(flow_at),
+        source: journal_end(ends.from),
+        side: FlowSide::Out,
+        total: None,
+        legs: Box::default(),
+        leg_quantities: Box::default(),
+        items,
+    });
+}
+
+/// A header that names one end is the source of its legs, which name the others, and of the items under it.
+fn lower_split_flow<'s>(
+    staged: &mut Staged<'_, 's>,
+    cx: &FlowCx<'_, 's>,
+    written: &ast::Flow<'s>,
+    source: ResolvedEnd,
+    source_side: FlowSide,
+    header_tail: &Tail,
+    header_codes: Run<Sym>,
+    built: &mut Built,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let source_qty = match source_side {
+        FlowSide::Out => written.from.amount,
+        FlowSide::Arrive => written.to.amount,
+    };
+    let base = staged.book.base;
+    let total = source_qty.and_then(|qty| resolve_quantity(staged, cx, qty, base, source_side, diags));
+    if source_qty.is_some() && total.is_none() {
+        built.successful = false;
+    }
+    let mut split = SplitLegs { legs: Vec::new(), quantities: Vec::new() };
+    for leg in &cx.file[written.body.legs] {
+        if !lower_leg(staged, cx, leg, source, source_side, total, header_tail, header_codes, &mut split, built, diags)
+        {
+            built.successful = false;
+        }
+    }
+    let leg_end = split.legs.first().map(|&offset| {
+        let leg = staged.flow(offset);
+        ResolvedEnd {
+            place: if source_side == FlowSide::Out { leg.to } else { leg.from },
+            entity: None,
+            select: Run::new(Id::new(0), 0),
+        }
+    });
+    let parent = Parent {
+        ends: Ends { from: source, to: leg_end.unwrap_or(source) },
+        side: source_side,
+        mode: Mode::Actual,
+        header_codes,
+        tail: None,
+    };
+    let items = lower_items(staged, cx, written.body.items, parent, &mut built.flow_roots, diags);
+    if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && split.legs.is_empty() {
+        built.successful = false;
+    }
+    built.groups.push(JournalGroup {
+        header: None,
+        source: journal_end(source),
+        side: source_side,
+        total: total.map(|total| total.group),
+        legs: split.legs.into_boxed_slice(),
+        leg_quantities: split.quantities.into_boxed_slice(),
+        items,
+    });
+}
+
+/// The legs of a split so far: where each flow went, and what each said it moved.
+struct SplitLegs {
+    legs: Vec<u32>,
+    quantities: Vec<JournalQuantity>,
+}
+
+/// One leg of a split: a flow between the source and the end it names. False after the problem is said.
+fn lower_leg<'s>(
+    staged: &mut Staged<'_, 's>,
+    cx: &FlowCx<'_, 's>,
+    leg: &ast::Leg<'s>,
+    source: ResolvedEnd,
+    source_side: FlowSide,
+    total: Option<ResolvedQuantity>,
+    header_tail: &Tail,
+    header_codes: Run<Sym>,
+    split: &mut SplitLegs,
+    built: &mut Built,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some(other) = resolve_end(staged, cx, leg.end, diags) else {
+        return false;
+    };
+    let source_is_from = source_side == FlowSide::Out;
+    let (from, to) = if source_is_from { (source, other) } else { (other, source) };
+    let (leg_codes, leg_tail) = cx.lower_tail(staged, leg.tail, diags);
+    let tail = header_tail.clone().merge(leg_tail);
+    let unit = total.map_or(staged.book.base, |total| total.amount.unit);
+    let Some(quantity) = resolve_quantity(staged, cx, leg.amount, unit, source_side.other(), diags) else {
+        return false;
+    };
+    let header_amount = total.map_or_else(|| Amount::zero(unit), |total| total.amount);
+    let zero = Amount::zero(header_amount.unit);
+    let (out, arrive) = if source_is_from { (zero, quantity.amount) } else { (quantity.amount, zero) };
+    let flow_at = staged.flows().len();
+    let basis_root = tail.basis_root;
+    let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
+    let codes = Codes { header: header_codes, local: leg_codes };
+    let Some(flow) = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags) else {
+        return false;
+    };
+    staged.book.flows.push(flow);
+    split.legs.push(flow_at);
+    split.quantities.push(quantity.group);
+    push_flow_expressions(
+        &mut built.flow_roots,
+        flow_at,
+        (!source_is_from).then_some(quantity.root).flatten(),
+        source_is_from.then_some(quantity.root).flatten(),
+        basis_root,
+    );
+    true
 }
 
 fn lower_opening<'a, 's>(
@@ -505,13 +510,15 @@ fn lower_opening_balances<'a, 's>(
         push_rejected_txn(&mut staged, item, opening.date);
         return;
     };
+    let cx =
+        FlowCx { file, home: site.home, day: opening.date, txn: txn_id, loc: item.loc, roots: &root_ids, code_index };
     let mut flow_roots = Vec::new();
     for leg in &file[opening.lines] {
         let whole_asset = if matches!(leg.amount, Quantity::Whole) { staged.book.asset(leg.end.name.0) } else { None };
         let end = if let Some(asset) = whole_asset {
             Some(ResolvedEnd { place: staged.book.assets[asset].place, entity: None, select: Run::new(Id::new(0), 0) })
         } else {
-            resolve_end(&mut staged, site.home, file, leg.end, diags)
+            resolve_end(&mut staged, &cx, leg.end, diags)
         };
         let Some(end) = end else {
             if matches!(leg.amount, Quantity::Whole) {
@@ -523,9 +530,7 @@ fn lower_opening_balances<'a, 's>(
             continue;
         };
         let fallback = whole_asset.map_or(staged.book.base, |asset| staged.book.assets[asset].unit);
-        let Some(quantity) =
-            resolve_quantity(&mut staged, file, leg.amount, fallback, FlowSide::Out, &Map::default(), diags)
-        else {
+        let Some(quantity) = resolve_quantity(&mut staged, &cx, leg.amount, fallback, FlowSide::Out, diags) else {
             continue;
         };
         if !matches!(leg.amount, Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
@@ -535,9 +540,7 @@ fn lower_opening_balances<'a, 's>(
             );
             continue;
         }
-        let tail = FlowTail { home: site.home, file, day: opening.date, roots: &root_ids, code_index }
-            .lower(&mut staged, leg.tail, diags)
-            .1;
+        let tail = cx.lower_tail(&mut staged, leg.tail, diags).1;
         if end.select.len() != 0 {
             diags.push(
                 Diagnostic::error("opening-selector", "an opening line sets a whole place")
@@ -554,24 +557,10 @@ fn lower_opening_balances<'a, 's>(
         };
         let amount = quantity.amount;
         let basis_root = tail.basis_root;
-        let header_codes = Run::new(staged.codes().start(), 0);
-        let local_codes = empty_codes(&staged);
-        if let Some(mut flow) = make_resolved_flow(
-            &mut staged,
-            opening.date,
-            from,
-            to,
-            amount,
-            amount,
-            Infer::Known,
-            Mode::Opening,
-            tail,
-            header_codes,
-            local_codes,
-            txn_id,
-            leg.loc,
-            diags,
-        ) {
+        let codes = Codes { header: Run::new(staged.codes().start(), 0), local: empty_codes(&staged) };
+        let shape =
+            Shape { ends: Ends { from, to }, out: amount, arrive: amount, infer: Infer::Known, mode: Mode::Opening };
+        if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, tail, leg.loc, diags) {
             flow.owner =
                 whole_asset.map_or(staged.book.places[end.place].owner, |asset| staged.book.assets[asset].owner);
             let flow_at = staged.flows().len();
@@ -755,16 +744,17 @@ fn lower_occurrence<'a, 's>(
     };
     let Some((program, root_ids)) = compiled else { return };
     let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
+    let txn_id = Id::new(staged.book.txns.len() as u32);
+    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
     let occurrence_amount = amount.and_then(|amount| {
-        resolve_amount(&staged, file, amount, fallback, &roots, diags)
+        resolve_amount(&staged, &cx, amount, fallback, diags)
             .map(|(literal, root)| root.map_or(TemplateAmount::Literal(literal), TemplateAmount::Computed))
     });
     if amount.is_some() && occurrence_amount.is_none() {
         return;
     }
 
-    let (codes, header_tail) = FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }
-        .lower(&mut staged, statement.tail, diags);
+    let (codes, header_tail) = cx.lower_tail(&mut staged, statement.tail, diags);
     if !header_tail.valid || header_tail.price.is_some() {
         if header_tail.price.is_some() {
             diags.push(
@@ -785,7 +775,6 @@ fn lower_occurrence<'a, 's>(
         waive: header_tail.waive,
     };
 
-    let txn_id = Id::new(staged.book.txns.len() as u32);
     let mut input_values: Vec<Option<Amount>> = vec![None; inputs.len()];
     let mut bound = vec![false; inputs.len()];
     let mut replaced_legs = Vec::new();
@@ -857,7 +846,7 @@ fn lower_occurrence<'a, 's>(
             continue;
         }
 
-        let Some(endpoint) = resolve_end(&mut staged, site.home, file, leg.end, diags) else {
+        let Some(endpoint) = resolve_end(&mut staged, &cx, leg.end, diags) else {
             continue;
         };
         let mut matching = None;
@@ -934,7 +923,7 @@ fn lower_occurrence<'a, 's>(
             FlowSide::Out => base_flow.out.unit,
             FlowSide::Arrive => base_flow.arrive.unit,
         };
-        let Some(quantity) = resolve_quantity(&mut staged, file, leg.amount, fallback, side, &roots, diags) else {
+        let Some(quantity) = resolve_quantity(&mut staged, &cx, leg.amount, fallback, side, diags) else {
             continue;
         };
         if quantity.mode == Mode::Opening {
@@ -944,12 +933,7 @@ fn lower_occurrence<'a, 's>(
             );
             continue;
         }
-        let (local_codes, written_tail) =
-            FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }.lower(
-                &mut staged,
-                leg.tail,
-                diags,
-            );
+        let (local_codes, written_tail) = cx.lower_tail(&mut staged, leg.tail, diags);
         let mut tail = header_tail.clone().merge(written_tail);
         if !tail.valid {
             continue;
@@ -1017,22 +1001,10 @@ fn lower_occurrence<'a, 's>(
         };
         let to = ResolvedEnd { place: endpoint.place, entity: endpoint.entity, select: endpoint.select };
         let local_codes = if local_codes.is_empty() { base_flow.codes } else { local_codes };
-        let Some(mut flow) = make_resolved_flow(
-            &mut staged,
-            statement.date,
-            from,
-            to,
-            out,
-            arrive,
-            quantity.infer,
-            quantity.mode,
-            tail.clone(),
-            codes,
-            local_codes,
-            txn_id,
-            leg.loc,
-            diags,
-        ) else {
+        let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
+        let flow_codes = Codes { header: codes, local: local_codes };
+        let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, flow_codes, tail.clone(), leg.loc, diags)
+        else {
             continue;
         };
         flow.owner = base_flow.owner;
@@ -1071,24 +1043,9 @@ fn lower_occurrence<'a, 's>(
         };
         let side = template_side(&staged, template);
         let (from, to, common) = occurrence_item_ends(&staged, template, side);
-        let items = lower_items(
-            &mut staged,
-            site.home,
-            file,
-            statement.body.items,
-            from,
-            to,
-            side,
-            txn_id,
-            statement.date,
-            codes,
-            &roots,
-            code_index,
-            Mode::Actual,
-            Some(&header_tail),
-            &mut flow_roots,
-            diags,
-        );
+        let parent =
+            Parent { ends: Ends { from, to }, side, mode: Mode::Actual, header_codes: codes, tail: Some(&header_tail) };
+        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
         let template_at = 0;
         if written_groups[template_at].is_none() {
             written_groups[template_at] = Some(occurrence_group_draft(template_at, template, side));
@@ -1255,11 +1212,9 @@ fn lower_loan_origin<'a, 's>(
     };
     let Some((program, root_ids)) = compiled else { return };
     let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
-    let (codes, mut tail) = FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }.lower(
-        &mut staged,
-        statement.tail,
-        diags,
-    );
+    let txn_id = Id::new(staged.book.txns.len() as u32);
+    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
+    let (codes, mut tail) = cx.lower_tail(&mut staged, statement.tail, diags);
     let basis_root = tail.basis_root;
     let waive = tail.waive;
     if tail.price.is_some() {
@@ -1276,27 +1231,18 @@ fn lower_loan_origin<'a, 's>(
     // The debt tab's outflow records the owner's new liability; the same
     // principal arrives in the account named by the payment schedule.
     tail.payee = Some(party);
-    let txn_id = Id::new(staged.book.txns.len() as u32);
     let empty = Run::new(Id::new(0), 0);
     let from = ResolvedEnd { place: loan.debt, entity: None, select: empty };
     let to = ResolvedEnd { place: funding, entity: None, select: empty };
-    let no_local_codes = empty_codes(&staged);
-    let Some(mut flow) = make_resolved_flow(
-        &mut staged,
-        loan.on,
-        from,
-        to,
-        loan.principal,
-        loan.principal,
-        Infer::Known,
-        Mode::Actual,
-        tail,
-        codes,
-        no_local_codes,
-        txn_id,
-        loc,
-        diags,
-    ) else {
+    let shape = Shape {
+        ends: Ends { from, to },
+        out: loan.principal,
+        arrive: loan.principal,
+        infer: Infer::Known,
+        mode: Mode::Actual,
+    };
+    let flow_codes = Codes { header: codes, local: empty_codes(&staged) };
+    let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, flow_codes, tail, loc, diags) else {
         return;
     };
     flow.owner = owner;
@@ -1483,13 +1429,9 @@ fn lower_owes<'a, 's>(
     };
     let mut staged = Staged::open(world);
     let txn_id = Id::new(staged.book.txns.len() as u32);
+    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
     let diagnostic_start = diags.len();
-    let (header_codes, header_tail) =
-        FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }.lower(
-            &mut staged,
-            statement.tail,
-            diags,
-        );
+    let (header_codes, header_tail) = cx.lower_tail(&mut staged, statement.tail, diags);
     if !header_tail.valid {
         return;
     }
@@ -1498,48 +1440,18 @@ fn lower_owes<'a, 's>(
     let mut groups = Vec::new();
     if let Some(written_amount) = amount {
         let base = staged.book.base;
-        let Some((amount, root)) = resolve_amount(&staged, file, written_amount, base, &roots, diags) else {
+        let Some((amount, root)) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
             return;
         };
-        let no_local_codes = empty_codes(&staged);
-        if let Some(mut flow) = make_resolved_flow(
-            &mut staged,
-            statement.date,
-            from,
-            to,
-            amount,
-            amount,
-            Infer::Known,
-            mode,
-            header_tail.clone(),
-            header_codes,
-            no_local_codes,
-            txn_id,
-            loc,
-            diags,
-        ) {
+        let shape = Shape { ends: Ends { from, to }, out: amount, arrive: amount, infer: Infer::Known, mode };
+        let codes = Codes { header: header_codes, local: empty_codes(&staged) };
+        if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, header_tail.clone(), loc, diags) {
             flow.owner = owner;
             staged.book.flows.push(flow);
             push_flow_expressions(&mut flow_roots, 0, root, root, header_tail.basis_root);
             if !statement.body.items.is_empty() {
-                let items = lower_items(
-                    &mut staged,
-                    site.home,
-                    file,
-                    statement.body.items,
-                    from,
-                    to,
-                    FlowSide::Out,
-                    txn_id,
-                    statement.date,
-                    header_codes,
-                    &roots,
-                    code_index,
-                    mode,
-                    None,
-                    &mut flow_roots,
-                    diags,
-                );
+                let parent = Parent { ends: Ends { from, to }, side: FlowSide::Out, mode, header_codes, tail: None };
+                let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
                 groups.push(JournalGroup {
                     header: Some(0),
                     source: journal_end(from),
@@ -1552,24 +1464,9 @@ fn lower_owes<'a, 's>(
             }
         }
     } else {
-        let items = lower_items(
-            &mut staged,
-            site.home,
-            file,
-            statement.body.items,
-            from,
-            to,
-            FlowSide::Out,
-            txn_id,
-            statement.date,
-            header_codes,
-            &roots,
-            code_index,
-            mode,
-            Some(&header_tail),
-            &mut flow_roots,
-            diags,
-        );
+        let parent =
+            Parent { ends: Ends { from, to }, side: FlowSide::Out, mode, header_codes, tail: Some(&header_tail) };
+        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
         groups.push(JournalGroup {
             header: None,
             source: journal_end(from),
@@ -1638,9 +1535,9 @@ fn lower_basis<'a, 's>(
     };
     let mut staged = Staged::open(world);
     let txn_id = Id::new(staged.book.txns.len() as u32);
+    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
     let diagnostic_start = diags.len();
-    let (header_codes, mut tail) = FlowTail { home: site.home, file, day: statement.date, roots: &roots, code_index }
-        .lower(&mut staged, statement.tail, diags);
+    let (header_codes, mut tail) = cx.lower_tail(&mut staged, statement.tail, diags);
     tail.detail.since = since.or(tail.detail.since);
     let basis_root = match written_amount {
         ast::Amount::Literal(literal) => {
@@ -1694,23 +1591,10 @@ fn lower_basis<'a, 's>(
     let from = ResolvedEnd { place: unknown, entity: Some(staged.book.roots.unknown), select: empty };
     let to = ResolvedEnd { place: asset_place, entity: None, select: empty };
     let quantity = Amount::new(Qty(1), asset_unit);
-    let no_local_codes = empty_codes(&staged);
-    let Some(mut flow) = make_resolved_flow(
-        &mut staged,
-        statement.date,
-        from,
-        to,
-        quantity,
-        quantity,
-        Infer::Known,
-        Mode::Actual,
-        tail,
-        header_codes,
-        no_local_codes,
-        txn_id,
-        loc,
-        diags,
-    ) else {
+    let shape =
+        Shape { ends: Ends { from, to }, out: quantity, arrive: quantity, infer: Infer::Known, mode: Mode::Actual };
+    let codes = Codes { header: header_codes, local: empty_codes(&staged) };
+    let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, tail, loc, diags) else {
         return;
     };
     flow.owner = asset_owner;

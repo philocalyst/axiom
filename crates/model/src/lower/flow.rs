@@ -1,14 +1,14 @@
 //! Making a flow from what was written: its ends, its quantities, its tail and the items under it.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Run, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Ratio, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity};
 
 use super::push_amount_root;
 use super::record::{CodeIndex, infer_for_flow};
 use super::staged::Staged;
-use super::tail::{FlowTail, Tail};
-use crate::book::{Amount, FlowSide, Place, Sign, TemplateAmount, TemplateItemParent};
+use super::tail::Tail;
+use crate::book::{Amount, Commodity, FlowSide, Place, Sign, TemplateAmount, TemplateItemParent};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{
@@ -31,6 +31,56 @@ pub(super) struct ResolvedQuantity {
     pub mode: Mode,
     pub root: Option<NodeId>,
     pub group: JournalQuantity,
+}
+
+/// What the flows of one record are made against: where it is written, what its expressions compiled to, and
+/// which transaction they belong to.
+#[derive(Clone, Copy)]
+pub(super) struct FlowCx<'a, 's> {
+    pub file: &'a ast::File<'s>,
+    pub home: Home,
+    /// The day the record is dated, which a relative `for` and `due` count from.
+    pub day: Day,
+    pub txn: Id<Txn>,
+    /// The record's own place in the source.
+    pub loc: Loc,
+    pub roots: &'a Map<ast::ExprId, NodeId>,
+    pub code_index: &'a CodeIndex,
+}
+
+/// The two ends of a flow.
+#[derive(Clone, Copy)]
+pub(super) struct Ends {
+    pub from: ResolvedEnd,
+    pub to: ResolvedEnd,
+}
+
+/// The codes a flow carries: its header's, which every flow of the record inherits, and its own.
+#[derive(Clone, Copy)]
+pub(super) struct Codes {
+    pub header: Run<Sym>,
+    pub local: Run<Sym>,
+}
+
+/// What a flow moves: the amounts out of one end and into the other, and how sure they are.
+#[derive(Clone, Copy)]
+pub(super) struct Shape {
+    pub ends: Ends,
+    pub out: Amount,
+    pub arrive: Amount,
+    pub infer: Infer,
+    pub mode: Mode,
+}
+
+/// The flow whose items are being lowered: between which ends, on which side, how it is made and what it says.
+#[derive(Clone, Copy)]
+pub(super) struct Parent<'t> {
+    pub ends: Ends,
+    pub side: FlowSide,
+    pub mode: Mode,
+    pub header_codes: Run<Sym>,
+    /// What its tail says, which an item's own tail adds to.
+    pub tail: Option<&'t Tail>,
 }
 
 pub(super) fn flow_roots<'s>(file: &ast::File<'s>, flow: &ast::Flow<'s>) -> Vec<(ast::ExprId, Ty)> {
@@ -73,13 +123,13 @@ pub(super) fn push_quantity_root<'s>(quantity: Quantity<'s>, roots: &mut Vec<(as
 
 pub(super) fn resolve_quantity<'s>(
     world: &mut World<'s>,
-    file: &ast::File<'s>,
+    cx: &FlowCx<'_, 's>,
     quantity: Quantity<'s>,
     fallback: Id<crate::book::Commodity>,
-    side: crate::book::FlowSide,
-    roots: &Map<ast::ExprId, NodeId>,
+    side: FlowSide,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
+    let (file, roots) = (cx.file, cx.roots);
     // A literal that is no amount costs the whole quantity and says nothing: the diagnostic is dropped here, as it
     // always was, and is not the caller's to report.
     let resolve_literal = |world: &World<'s>, literal: ast::Literal<'s>| -> Option<Amount> {
@@ -171,35 +221,53 @@ pub(super) fn resolve_quantity<'s>(
     Some(resolved)
 }
 
+/// The flow a header with both its ends named makes: what it says moves, checked and priced, and the expressions
+/// its amounts and basis are computed by.
 pub(super) fn make_flow<'s>(
     world: &mut World<'s>,
-    file: &ast::File<'s>,
-    day: Day,
-    from: ResolvedEnd,
-    to: ResolvedEnd,
-    out: Option<Quantity<'s>>,
-    arrive: Option<Quantity<'s>>,
+    cx: &FlowCx<'_, 's>,
+    written: &ast::Flow<'s>,
+    ends: Ends,
     mut tail: Tail,
-    header_codes: Run<axiom_core::Sym>,
-    txn: Id<Txn>,
-    loc: Loc,
-    roots: &Map<ast::ExprId, NodeId>,
+    header_codes: Run<Sym>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Flow, Option<FlowExpressions>)> {
-    let out =
-        out.and_then(|quantity| resolve_quantity(world, file, quantity, world.book.base, FlowSide::Out, roots, diags));
-    let arrive = arrive.and_then(|quantity| {
-        resolve_quantity(
-            world,
-            file,
-            quantity,
-            out.map_or(world.book.base, |q| q.amount.unit),
-            FlowSide::Arrive,
-            roots,
-            diags,
-        )
+    let loc = cx.loc;
+    let out = written
+        .from
+        .amount
+        .and_then(|quantity| resolve_quantity(world, cx, quantity, world.book.base, FlowSide::Out, diags));
+    let arrive = written.to.amount.and_then(|quantity| {
+        let fallback = out.map_or(world.book.base, |out| out.amount.unit);
+        resolve_quantity(world, cx, quantity, fallback, FlowSide::Arrive, diags)
     });
-    let (out_amount, arrive_amount, infer, mode) = match (out, arrive) {
+    let (mut out_amount, mut arrive_amount, infer, mode) = stated_amounts(loc, out, arrive, diags)?;
+    let roots = (out.and_then(|quantity| quantity.root), arrive.and_then(|quantity| quantity.root));
+    let basis_root = tail.basis_root;
+    if let Some(price) = tail.price.take() {
+        (out_amount, arrive_amount) = apply_price(world, out, arrive, price, loc, diags)?;
+    }
+    let codes = Codes { header: header_codes, local: empty_codes(world) };
+    let shape = Shape { ends, out: out_amount, arrive: arrive_amount, infer, mode };
+    let flow = make_resolved_flow(world, cx, shape, codes, tail, loc, diags)?;
+    let expressions = (roots.0.is_some() || roots.1.is_some() || basis_root.is_some()).then_some(FlowExpressions {
+        flow: 0,
+        out: roots.0,
+        arrive: roots.1,
+        basis: basis_root,
+    });
+    Some((flow, expressions))
+}
+
+/// The amounts a header states for each side, whichever sides it states, and how sure they are; a transfer states
+/// the same amount at both ends.
+fn stated_amounts(
+    loc: Loc,
+    out: Option<ResolvedQuantity>,
+    arrive: Option<ResolvedQuantity>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Amount, Amount, Infer, Mode)> {
+    let stated = match (out, arrive) {
         (None, None) => {
             diags.push(
                 Diagnostic::error("flow-amount", "a flow needs an amount or an inference marker")
@@ -209,12 +277,8 @@ pub(super) fn make_flow<'s>(
         }
         (Some(a), Some(b)) => {
             let infer = if !matches!(a.infer, Infer::Known) { a.infer } else { b.infer };
-            (
-                a.amount,
-                b.amount,
-                infer,
-                if a.mode == Mode::Pending || b.mode == Mode::Pending { Mode::Pending } else { Mode::Actual },
-            )
+            let mode = if a.mode == Mode::Pending || b.mode == Mode::Pending { Mode::Pending } else { Mode::Actual };
+            (a.amount, b.amount, infer, mode)
         }
         (Some(a), None) => (a.amount, a.amount, a.infer, a.mode),
         (None, Some(b)) => (b.amount, b.amount, b.infer, b.mode),
@@ -231,119 +295,72 @@ pub(super) fn make_flow<'s>(
         );
         return None;
     }
-    let root_exprs = (out.and_then(|q| q.root), arrive.and_then(|q| q.root));
-    let basis_root = tail.basis_root;
-    let no_local_codes = empty_codes(world);
-    if let Some((rate, quote, at)) = tail.price {
-        let quoted = match (out, arrive) {
-            (Some(out), None) if out.root.is_none() => Some(priced(world, out.amount, quote, rate, at, diags)?),
-            (None, Some(arrive)) if arrive.root.is_none() => {
-                Some(priced(world, arrive.amount, quote, rate, at, diags)?)
-            }
-            (Some(out), Some(arrive)) if out.root.is_none() && arrive.root.is_none() => {
-                let expected = if out.amount.unit == quote {
-                    priced(world, arrive.amount, quote, rate, at, diags)?
-                } else if arrive.amount.unit == quote {
-                    priced(world, out.amount, quote, rate, at, diags)?
-                } else {
-                    diags.push(
-                        Diagnostic::error("price-unit", "the stated price unit must match one side of the flow")
-                            .label(at, "the quote unit appears on neither side"),
-                    );
-                    return None;
-                };
-                let actual = if out.amount.unit == quote { out.amount } else { arrive.amount };
-                if expected != actual {
-                    diags.push(
-                        Diagnostic::error("price-disagrees", "the stated price does not match the flow amounts")
-                            .label(at, "this price implies a different amount")
-                            .label(loc, "the written quantities disagree with the price"),
-                    );
-                    return None;
-                }
-                None
-            }
-            _ => {
+    Some(stated)
+}
+
+/// `@ 285.70 USD`: the amount at each end once the price has said what the side that was not written is.
+fn apply_price(
+    world: &World<'_>,
+    out: Option<ResolvedQuantity>,
+    arrive: Option<ResolvedQuantity>,
+    (rate, quote, at): (Ratio, Id<Commodity>, Loc),
+    loc: Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Amount, Amount)> {
+    let quoted = match (out, arrive) {
+        (Some(out), None) if out.root.is_none() => Some(priced(world, out.amount, quote, rate, at, diags)?),
+        (None, Some(arrive)) if arrive.root.is_none() => Some(priced(world, arrive.amount, quote, rate, at, diags)?),
+        (Some(out), Some(arrive)) if out.root.is_none() && arrive.root.is_none() => {
+            let expected = if out.amount.unit == quote {
+                priced(world, arrive.amount, quote, rate, at, diags)?
+            } else if arrive.amount.unit == quote {
+                priced(world, out.amount, quote, rate, at, diags)?
+            } else {
                 diags.push(
-                    Diagnostic::error("price-shape", "a written price needs a literal quantity")
-                        .label(at, "this price cannot be applied to a computed or missing amount")
-                        .help("write one literal quantity and let the price determine the other side"),
+                    Diagnostic::error("price-unit", "the stated price unit must match one side of the flow")
+                        .label(at, "the quote unit appears on neither side"),
+                );
+                return None;
+            };
+            let actual = if out.amount.unit == quote { out.amount } else { arrive.amount };
+            if expected != actual {
+                diags.push(
+                    Diagnostic::error("price-disagrees", "the stated price does not match the flow amounts")
+                        .label(at, "this price implies a different amount")
+                        .label(loc, "the written quantities disagree with the price"),
                 );
                 return None;
             }
-        };
-        tail.price = None;
-        let (out_amount, arrive_amount) = match (out, arrive, quoted) {
-            (Some(out), None, Some(arrive)) => (out.amount, arrive),
-            (None, Some(arrive), Some(out)) => (out, arrive.amount),
-            (Some(out), Some(arrive), None) => (out.amount, arrive.amount),
-            _ => return None,
-        };
-        return make_resolved_flow(
-            world,
-            day,
-            from,
-            to,
-            out_amount,
-            arrive_amount,
-            infer,
-            mode,
-            tail,
-            header_codes,
-            no_local_codes,
-            txn,
-            loc,
-            diags,
-        )
-        .map(|flow| {
-            (
-                flow,
-                (root_exprs.0.is_some() || root_exprs.1.is_some() || basis_root.is_some()).then_some(FlowExpressions {
-                    flow: 0,
-                    out: root_exprs.0,
-                    arrive: root_exprs.1,
-                    basis: basis_root,
-                }),
-            )
-        });
+            None
+        }
+        _ => {
+            diags.push(
+                Diagnostic::error("price-shape", "a written price needs a literal quantity")
+                    .label(at, "this price cannot be applied to a computed or missing amount")
+                    .help("write one literal quantity and let the price determine the other side"),
+            );
+            return None;
+        }
+    };
+    match (out, arrive, quoted) {
+        (Some(out), None, Some(arrive)) => Some((out.amount, arrive)),
+        (None, Some(arrive), Some(out)) => Some((out, arrive.amount)),
+        (Some(out), Some(arrive), None) => Some((out.amount, arrive.amount)),
+        _ => None,
     }
-    let flow = make_resolved_flow(
-        world,
-        day,
-        from,
-        to,
-        out_amount,
-        arrive_amount,
-        infer,
-        mode,
-        tail,
-        header_codes,
-        no_local_codes,
-        txn,
-        loc,
-        diags,
-    )?;
-    let expressions = (root_exprs.0.is_some() || root_exprs.1.is_some() || basis_root.is_some())
-        .then_some(FlowExpressions { flow: 0, out: root_exprs.0, arrive: root_exprs.1, basis: basis_root });
-    Some((flow, expressions))
 }
 
 pub(super) fn make_resolved_flow(
     world: &mut World<'_>,
-    day: Day,
-    from: ResolvedEnd,
-    to: ResolvedEnd,
-    out: Amount,
-    arrive: Amount,
-    infer: Infer,
-    mode: Mode,
+    cx: &FlowCx,
+    shape: Shape,
+    codes: Codes,
     tail: Tail,
-    header_codes: Run<axiom_core::Sym>,
-    local_codes: Run<axiom_core::Sym>,
-    txn: Id<Txn>,
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Flow> {
+    let Shape { ends: Ends { from, to }, out, arrive, infer, mode } = shape;
+    let (day, txn) = (cx.day, cx.txn);
     let purpose = infer_for_flow(
         world,
         from.place,
@@ -393,8 +410,8 @@ pub(super) fn make_resolved_flow(
         description: tail.description,
         origin: Origin::Written,
         select,
-        header_codes,
-        codes: local_codes,
+        header_codes: codes.header,
+        codes: codes.local,
         loc,
         waive: tail.waive,
         detail,
@@ -403,11 +420,11 @@ pub(super) fn make_resolved_flow(
 
 pub(super) fn resolve_end<'s>(
     world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
+    cx: &FlowCx<'_, 's>,
     written: ast::End<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedEnd> {
+    let (home, file) = (cx.home, cx.file);
     let word = Word::of(file, written.name.0);
     let Some(end) = world.end(home, word).or_report(diags) else {
         return None;
@@ -445,33 +462,24 @@ pub(super) fn resolve_end<'s>(
     })
 }
 
+/// The items under a flow: each is lowered to its place in the transaction's groups, and to a flow of its own
+/// when it says something its parent does not.
 pub(super) fn lower_items<'s>(
     staged: &mut Staged<'_, 's>,
-    home: Home,
-    file: &ast::File<'s>,
+    cx: &FlowCx<'_, 's>,
     items: ast::Many<ast::LineItem<'s>>,
-    from: ResolvedEnd,
-    to: ResolvedEnd,
-    parent_side: crate::book::FlowSide,
-    txn: Id<Txn>,
-    day: Day,
-    header_codes: Run<axiom_core::Sym>,
-    roots: &Map<ast::ExprId, NodeId>,
-    code_index: &CodeIndex,
-    mode: Mode,
-    inherited_tail: Option<&Tail>,
+    parent: Parent<'_>,
     flow_roots: &mut Vec<FlowExpressions>,
     diags: &mut Vec<Diagnostic>,
 ) -> Box<[JournalItem]> {
     let mut lowered = Vec::with_capacity(items.len());
-    for item in &file[items] {
-        let Some(amount) = resolve_amount(staged, file, item.amount, staged.book.base, roots, diags) else {
+    for item in &cx.file[items] {
+        let Some(amount) = resolve_amount(staged, cx, item.amount, staged.book.base, diags) else {
             continue;
         };
-        let (local_codes, item_tail) = FlowTail { home, file, day, roots, code_index }.lower(staged, item.tail, diags);
-        let mut tail = inherited_tail.cloned().unwrap_or(Tail::new());
-        tail = tail.merge(item_tail);
-        let has_own_metadata = tail.purpose.is_some()
+        let (local_codes, item_tail) = cx.lower_tail(staged, item.tail, diags);
+        let tail = parent.tail.cloned().unwrap_or_else(Tail::new).merge(item_tail);
+        let says_something = tail.purpose.is_some()
             || tail.description.is_some()
             || tail.detail != Detail::NONE
             || tail.basis_root.is_some()
@@ -480,27 +488,21 @@ pub(super) fn lower_items<'s>(
             || tail.price.is_some()
             || tail.waive.is_some()
             || !local_codes.is_empty();
-        let flow = if has_own_metadata {
-            let from_flow = if item.sign == ast::Sign::Less { to } else { from };
-            let to_flow = if item.sign == ast::Sign::Less { from } else { to };
+        let flow = if says_something {
             let basis_root = tail.basis_root;
-            make_resolved_flow(
-                staged,
-                day,
-                from_flow,
-                to_flow,
-                amount.0,
-                amount.0,
-                Infer::Known,
-                mode,
-                tail,
-                header_codes,
-                local_codes,
-                txn,
-                item.loc,
-                diags,
-            )
-            .map(|flow| {
+            let (from, to) = match item.sign {
+                ast::Sign::Less => (parent.ends.to, parent.ends.from),
+                _ => (parent.ends.from, parent.ends.to),
+            };
+            let shape = Shape {
+                ends: Ends { from, to },
+                out: amount.0,
+                arrive: amount.0,
+                infer: Infer::Known,
+                mode: parent.mode,
+            };
+            let codes = Codes { header: parent.header_codes, local: local_codes };
+            make_resolved_flow(staged, cx, shape, codes, tail, item.loc, diags).map(|flow| {
                 let offset = staged.flows().len();
                 staged.book.flows.push(flow);
                 push_flow_expressions(flow_roots, offset, None, None, basis_root);
@@ -517,7 +519,7 @@ pub(super) fn lower_items<'s>(
                 ast::Sign::Less => Sign::Less,
             },
             parent: TemplateItemParent::Header,
-            side: parent_side,
+            side: parent.side,
             amount: amount.1.map_or(TemplateAmount::Literal(amount.0), TemplateAmount::Computed),
             loc: item.loc,
         });
@@ -539,17 +541,16 @@ pub(super) fn push_flow_expressions(
 
 pub(super) fn resolve_amount<'s>(
     world: &World<'s>,
-    file: &ast::File<'s>,
+    cx: &FlowCx<'_, 's>,
     amount: ast::Amount<'s>,
     fallback: Id<crate::book::Commodity>,
-    roots: &Map<ast::ExprId, NodeId>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Amount, Option<NodeId>)> {
     match amount {
         ast::Amount::Literal(literal) => {
-            world.literal_amount(file, literal, Some(fallback)).or_report(diags).map(|amount| (amount, None))
+            world.literal_amount(cx.file, literal, Some(fallback)).or_report(diags).map(|amount| (amount, None))
         }
-        ast::Amount::Computed(root) => Some((Amount::zero(fallback), Some(*roots.get(&root)?))),
+        ast::Amount::Computed(root) => Some((Amount::zero(fallback), Some(*cx.roots.get(&root)?))),
     }
 }
 
