@@ -541,6 +541,7 @@ impl Fixture {
             touching,
             asserts: self.asserts,
             endings: Vec::new(),
+            claim_changes: Vec::new(),
             events: self.events,
             prices: Prices::default(),
             splits: self.splits,

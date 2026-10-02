@@ -978,6 +978,7 @@ pub(crate) fn household() -> Household {
         assertion_programs: Arena::new(),
         events: Vec::new(),
         endings: Vec::new(),
+        claim_changes: Vec::new(),
         prices: Prices::default(),
         lookup: Default::default(),
         splits: Vec::new(),
