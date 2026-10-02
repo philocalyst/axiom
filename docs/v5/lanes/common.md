@@ -139,7 +139,7 @@ through the diagnostic catalog once it exists (lane K0), never by hand in a new 
   - end every message with these two lines:
 
     ```
-    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
     Claude-Session: https://claude.ai/code/session_01DZMgABaaMrSoCXHzmY1D6u
     ```
 - **Do not push, and do not merge.** The orchestrator merges.
