@@ -8,8 +8,8 @@ use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Ratio, Set, 
 use axiom_syntax::{Decl, DeclKind, ExprKind, ItemKind, Setting, Verb};
 
 use crate::book::{
-    Asset, At, Basis, Book, Books, Class, Commodity, Entity, Kind, KindRoots, Lookup, Place, Prop,
-    Purpose, Role, Roots, Share, Sort, System,
+    Asset, At, Basis, Book, Books, Class, Commodity, Entity, Kind, KindRoots, Lookup, Place, Prop, Purpose, Role,
+    Roots, Share, Sort, System,
 };
 use crate::errors::{Word, unknown};
 use crate::kinds::{self, NativeKinds};
@@ -126,20 +126,11 @@ impl World<'_> {
 /// Merge another frozen property batch without discarding earlier rows. The
 /// stable sort preserves write order for same-name, same-day rows, so an
 /// earlier value remains the one in force as specified by [`crate::prop`].
-fn merge_props(
-    names: &Interner<'_>,
-    existing: &[Prop],
-    additions: &[(PropTarget, Prop)],
-) -> Box<[Prop]> {
+fn merge_props(names: &Interner<'_>, existing: &[Prop], additions: &[(PropTarget, Prop)]) -> Box<[Prop]> {
     let mut rows = Vec::with_capacity(existing.len() + additions.len());
     rows.extend_from_slice(existing);
     rows.extend(additions.iter().map(|(_, prop)| *prop));
-    rows.sort_by(|a, b| {
-        names
-            .name(a.name)
-            .cmp(names.name(b.name))
-            .then_with(|| a.since.cmp(&b.since))
-    });
+    rows.sort_by(|a, b| names.name(a.name).cmp(names.name(b.name)).then_with(|| a.since.cmp(&b.since)));
     rows.into_boxed_slice()
 }
 
@@ -190,14 +181,8 @@ mod property_finalization_tests {
 
         assert_eq!(twice.len(), 4);
         assert_eq!(names.name(twice[0].name), "amount");
-        assert_eq!(
-            prop(&twice, label, first_day).unwrap().value,
-            Value::Num(Ratio::int(1))
-        );
-        assert_eq!(
-            prop(&twice, label, later_day).unwrap().value,
-            Value::Num(Ratio::int(3))
-        );
+        assert_eq!(prop(&twice, label, first_day).unwrap().value, Value::Num(Ratio::int(1)));
+        assert_eq!(prop(&twice, label, later_day).unwrap().value, Value::Num(Ratio::int(3)));
 
         let again = merge_props(&names, &twice, &[]);
         assert_eq!(again.len(), twice.len());
@@ -215,14 +200,8 @@ pub(crate) struct Settings<'s> {
     pub relaxed: bool,
 }
 
-pub(crate) fn settings<'a, 's>(
-    sites: &[Site<'a, 's>],
-    diags: &mut Vec<Diagnostic>,
-) -> Settings<'s> {
-    let mut settings = Settings {
-        base: None,
-        relaxed: false,
-    };
+pub(crate) fn settings<'a, 's>(sites: &[Site<'a, 's>], diags: &mut Vec<Diagnostic>) -> Settings<'s> {
+    let mut settings = Settings { base: None, relaxed: false };
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -231,10 +210,7 @@ pub(crate) fn settings<'a, 's>(
             };
             match file[id] {
                 Setting::Base(name) => {
-                    let word = Word {
-                        text: name.0,
-                        loc: file.loc(name.0),
-                    };
+                    let word = Word { text: name.0, loc: file.loc(name.0) };
                     match settings.base {
                         Some(first) if first.text != word.text => diags.push(
                             Diagnostic::error("duplicate-base", "the base currency is set twice")
@@ -247,8 +223,7 @@ pub(crate) fn settings<'a, 's>(
                     }
                 }
                 Setting::Relaxed => settings.relaxed = true,
-                Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {
-                }
+                Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {}
             }
         }
     }
@@ -272,10 +247,7 @@ pub(crate) fn scopes(
                     if let Setting::Use(name) = file[id] {
                         match systems.find(name.0) {
                             Some(system) => used.push((site.home, system)),
-                            None => diags.push(systems.unknown(Word {
-                                text: name.0,
-                                loc: file.loc(name.0),
-                            })),
+                            None => diags.push(systems.unknown(Word { text: name.0, loc: file.loc(name.0) })),
                         }
                     }
                 }
@@ -300,10 +272,7 @@ pub(crate) fn scopes(
     }
     let std = systems.find("std");
     Scopes::new(tree, |home| {
-        let own = used
-            .iter()
-            .filter(|&&(user, _)| user == home)
-            .map(|&(_, system)| system);
+        let own = used.iter().filter(|&&(user, _)| user == home).map(|&(_, system)| system);
         own.chain(std).collect()
     })
 }
@@ -455,12 +424,7 @@ fn check_cross_namespace_names(
         }
     }
 
-    claims.sort_unstable_by(|a, b| {
-        a.spelling
-            .cmp(b.spelling)
-            .then(a.order.cmp(&b.order))
-            .then(a.space.cmp(&b.space))
-    });
+    claims.sort_unstable_by(|a, b| a.spelling.cmp(b.spelling).then(a.order.cmp(&b.order)).then(a.space.cmp(&b.space)));
 
     let mut start = 0;
     while start < claims.len() {
@@ -494,10 +458,8 @@ fn check_cross_namespace_names(
             )
             .label(later.loc, format!("this {} also answers to `{spelling}`", later.space.article()));
             for first in earlier {
-                diagnostic = diagnostic.context(
-                    first.loc,
-                    format!("{} `{}` was declared earlier", first.space.article(), first.declared),
-                );
+                diagnostic = diagnostic
+                    .context(first.loc, format!("{} `{}` was declared earlier", first.space.article(), first.declared));
             }
             diagnostic = diagnostic.help("rename one declaration or use a different account path");
             diags.push(diagnostic);
@@ -517,15 +479,7 @@ fn push_name_claims<'s>(
     aliases: bool,
 ) {
     let mut push = |spelling| {
-        claims.push(NameClaim {
-            spelling,
-            declared,
-            space,
-            home,
-            loc,
-            order,
-            contract_party,
-        });
+        claims.push(NameClaim { spelling, declared, space, home, loc, order, contract_party });
     };
     push(declared);
     if aliases {
@@ -565,14 +519,8 @@ pub(crate) fn declare<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> World<'s> {
     let native_kinds = kinds::declare_sites(sites, &mut names, &systems_tree, &scopes, diags);
-    let native_purposes = crate::purposes::declare_sites(
-        sites,
-        &mut names,
-        &systems_tree,
-        &scopes,
-        &native_kinds.index,
-        diags,
-    );
+    let native_purposes =
+        crate::purposes::declare_sites(sites, &mut names, &systems_tree, &scopes, &native_kinds.index, diags);
     check_cross_namespace_names(sites, &scopes, &systems_tree, diags);
 
     let mut commodities = Arena::new();
@@ -590,12 +538,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let symbol = decl.name.0;
             if let Some(&first) = commodity_by_name.get(symbol) {
-                diags.push(duplicate_decl(
-                    "commodity",
-                    symbol,
-                    file.loc(symbol),
-                    commodities[first].loc,
-                ));
+                diags.push(duplicate_decl("commodity", symbol, file.loc(symbol), commodities[first].loc));
                 continue;
             }
             let kind = resolve_kind(
@@ -648,11 +591,7 @@ pub(crate) fn declare<'a, 's>(
         && !commodity_by_name.contains_key("USD")
         && commodity_by_name.len() > 1
     {
-        let first = commodity_by_name
-            .values()
-            .next()
-            .and_then(|&id| commodities[id].loc)
-            .unwrap_or_default();
+        let first = commodity_by_name.values().next().and_then(|&id| commodities[id].loc).unwrap_or_default();
         diags.push(
             Diagnostic::error("base-currency-required", "a book with several currencies needs a base currency")
                 .label(first, "choose the currency amounts are converted into")
@@ -664,14 +603,8 @@ pub(crate) fn declare<'a, 's>(
         .and_then(|word| {
             commodity_by_name.get(word.text).copied().or_else(|| {
                 let suggestion =
-                    axiom_core::diag::closest(word.text, commodity_by_name.keys().copied())
-                        .map(|near| near as &str);
-                diags.push(unknown(
-                    "unknown-commodity",
-                    "base commodity",
-                    word,
-                    suggestion,
-                ));
+                    axiom_core::diag::closest(word.text, commodity_by_name.keys().copied()).map(|near| near as &str);
+                diags.push(unknown("unknown-commodity", "base commodity", word, suggestion));
                 None
             })
         })
@@ -681,10 +614,8 @@ pub(crate) fn declare<'a, 's>(
         .expect("a book always has a base commodity");
 
     let mut entity_drafts: Vec<EntityDraft<'s>> = Vec::new();
-    let mut explicit_entities: Map<
-        &'s str,
-        (Home, &'a axiom_syntax::File<'s>, &'a Decl<'s>, Option<Sym>),
-    > = Map::default();
+    let mut explicit_entities: Map<&'s str, (Home, &'a axiom_syntax::File<'s>, &'a Decl<'s>, Option<Sym>)> =
+        Map::default();
     let mut first_entity_paths = Vec::new();
     let mut owner_names: Set<&'s str> = Set::default();
     let mut declared_entity_names = Set::default();
@@ -695,10 +626,7 @@ pub(crate) fn declare<'a, 's>(
                 continue;
             };
             let decl = &file[id];
-            if matches!(
-                decl.what,
-                DeclKind::Account | DeclKind::Entity | DeclKind::Asset
-            ) {
+            if matches!(decl.what, DeclKind::Account | DeclKind::Entity | DeclKind::Asset) {
                 owner_names.extend(owner_names_in(file, decl));
             }
             if decl.what != DeclKind::Entity {
@@ -706,12 +634,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let path = decl.name.0;
             if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
-                diags.push(duplicate_decl(
-                    "entity",
-                    path,
-                    file.loc(path),
-                    Some(first_file.loc(first.name.0)),
-                ));
+                diags.push(duplicate_decl("entity", path, file.loc(path), Some(first_file.loc(first.name.0))));
                 continue;
             }
             let doc = item.doc.map(|doc| names.intern(doc.0));
@@ -824,29 +747,17 @@ pub(crate) fn declare<'a, 's>(
     }
     for root in ["me", "?", "opening", "market"] {
         if !declared_entity_names.contains(root) {
-            entity_drafts.push(EntityDraft {
-                path: root,
-                home: Home::Builtin,
-            });
+            entity_drafts.push(EntityDraft { path: root, home: Home::Builtin });
         }
     }
     for path in implicit_paths {
         if explicit_entities.contains_key(path) || shadowed_suffixes.contains(path) {
             continue;
         }
-        entity_drafts.push(EntityDraft {
-            path,
-            home: Home::Builtin,
-        });
+        entity_drafts.push(EntityDraft { path, home: Home::Builtin });
     }
-    let entity_paths = entity_drafts
-        .iter()
-        .map(|draft| draft.path)
-        .collect::<Vec<_>>();
-    let entity_home_by_path: Map<&str, Home> = entity_drafts
-        .iter()
-        .map(|draft| (draft.path, draft.home))
-        .collect();
+    let entity_paths = entity_drafts.iter().map(|draft| draft.path).collect::<Vec<_>>();
+    let entity_home_by_path: Map<&str, Home> = entity_drafts.iter().map(|draft| (draft.path, draft.home)).collect();
     let (mut entities, entity_ids) = crate::paths::build(entity_paths.iter().copied(), |path| {
         let draft = explicit_entities.get(path);
         let (kind, purpose, doc, loc) = if let Some((home, file, decl, doc)) = draft {
@@ -863,28 +774,12 @@ pub(crate) fn declare<'a, 's>(
                 diags,
             );
             let purpose = decl.purpose.and_then(|name| {
-                resolve_purpose(
-                    name.0,
-                    file.loc(name.0),
-                    *home,
-                    &native_purposes,
-                    &names,
-                    &scopes,
-                    diags,
-                )
-                .map(|value| At {
-                    value,
-                    loc: file.loc(name.0),
-                })
+                resolve_purpose(name.0, file.loc(name.0), *home, &native_purposes, &names, &scopes, diags)
+                    .map(|value| At { value, loc: file.loc(name.0) })
             });
             (kind, purpose, *doc, Some(file.loc(decl.name.0)))
         } else {
-            (
-                native_kinds.roots.entity,
-                None,
-                None,
-                implicit_party_locs.get(path).copied(),
-            )
+            (native_kinds.roots.entity, None, None, implicit_party_locs.get(path).copied())
         };
         Entity {
             path: names.intern(path),
@@ -906,30 +801,18 @@ pub(crate) fn declare<'a, 's>(
             loc,
         }
     });
-    let me = *entity_ids
-        .get("me")
-        .expect("the book's owner entity is created");
+    let me = *entity_ids.get("me").expect("the book's owner entity is created");
     let unknown = *entity_ids.get("?").expect("the unknown entity is created");
-    let opening = *entity_ids
-        .get("opening")
-        .expect("the opening entity is created");
-    let market = *entity_ids
-        .get("market")
-        .expect("the market entity is created");
+    let opening = *entity_ids.get("opening").expect("the opening entity is created");
+    let market = *entity_ids.get("market").expect("the market entity is created");
     let mut entity_homes = vec![Home::Builtin; entities.len()];
     for (path, &id) in &entity_ids {
-        entity_homes[id.index()] = entity_home_by_path
-            .get(path)
-            .copied()
-            .unwrap_or(Home::Builtin);
+        entity_homes[id.index()] = entity_home_by_path.get(path).copied().unwrap_or(Home::Builtin);
     }
-    let entity_items: Vec<_> = entities
-        .iter()
-        .map(|(id, entity)| (id, names.name(entity.path), entity_homes[id.index()]))
-        .collect();
+    let entity_items: Vec<_> =
+        entities.iter().map(|(id, entity)| (id, names.name(entity.path), entity_homes[id.index()])).collect();
     let entity_index = Scoped::build(&mut names, entity_items);
-    let entity_by_name: Map<&str, Id<Entity>> =
-        entity_ids.iter().map(|(&path, &id)| (path, id)).collect();
+    let entity_by_name: Map<&str, Id<Entity>> = entity_ids.iter().map(|(&path, &id)| (path, id)).collect();
 
     // Ownership belongs to entities as well as accounts. Build it after every
     // entity id exists, preserving the declaration's source order.
@@ -946,16 +829,7 @@ pub(crate) fn declare<'a, 's>(
             let Some(&entity) = entity_ids.get(decl.name.0) else {
                 continue;
             };
-            let owners = resolve_owner_shares(
-                file,
-                decl,
-                site.home,
-                &entity_index,
-                &names,
-                &scopes,
-                me,
-                diags,
-            );
+            let owners = resolve_owner_shares(file, decl, site.home, &entity_index, &names, &scopes, me, diags);
             if let Some(share) = owners.first() {
                 entities[entity].owner = Some(share.entity);
                 entities[entity].owned_by = owners.into_boxed_slice();
@@ -1005,16 +879,7 @@ pub(crate) fn declare<'a, 's>(
                     Class::Asset
                 }
             };
-            let shares = resolve_owner_shares(
-                file,
-                decl,
-                site.home,
-                &entity_index,
-                &names,
-                &scopes,
-                me,
-                diags,
-            );
+            let shares = resolve_owner_shares(file, decl, site.home, &entity_index, &names, &scopes, me, diags);
             let owner = shares.first().map_or_else(
                 || {
                     first_name_prop(file, decl, "owner")
@@ -1075,12 +940,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let path = decl.name.0;
             if let Some(&first) = asset_names.get(path) {
-                diags.push(duplicate_decl(
-                    "asset",
-                    path,
-                    file.loc(path),
-                    Some(assets[first].loc),
-                ));
+                diags.push(duplicate_decl("asset", path, file.loc(path), Some(assets[first].loc)));
                 continue;
             }
             let kind = resolve_kind(
@@ -1109,16 +969,7 @@ pub(crate) fn declare<'a, 's>(
                 loc: Some(file.loc(path)),
             });
             commodity_by_name.entry(path).or_insert(unit);
-            let owners = resolve_owner_shares(
-                file,
-                decl,
-                site.home,
-                &entity_index,
-                &names,
-                &scopes,
-                me,
-                diags,
-            );
+            let owners = resolve_owner_shares(file, decl, site.home, &entity_index, &names, &scopes, me, diags);
             let owner = owners.first().map_or(me, |share| share.entity);
             let asset = assets.push(Asset {
                 name,
@@ -1147,25 +998,15 @@ pub(crate) fn declare<'a, 's>(
     let mut tab_keys = Set::default();
     let mut add_tab = |party: Id<Entity>, owner: Id<Entity>, class: Class, loc: Loc| {
         if party != owner && tab_keys.insert((party, owner, class)) {
-            tab_drafts.push(TabDraft {
-                party,
-                owner,
-                class,
-                loc,
-            });
+            tab_drafts.push(TabDraft { party, owner, class, loc });
         }
     };
     for mention in &survey.mentions {
         match *mention {
-            crate::lower::Mention::Claim {
-                subject,
-                creditor,
-                loc,
-            } => {
-                if let (Some(&subject), Some(&creditor)) = (
-                    entity_by_name.get(subject.0),
-                    entity_by_name.get(creditor.0),
-                ) {
+            crate::lower::Mention::Claim { subject, creditor, loc } => {
+                if let (Some(&subject), Some(&creditor)) =
+                    (entity_by_name.get(subject.0), entity_by_name.get(creditor.0))
+                {
                     let (party, owner, class) = if entity_owner[creditor.index()] {
                         (subject, creditor, Class::Asset)
                     } else if entity_owner[subject.index()] {
@@ -1176,16 +1017,9 @@ pub(crate) fn declare<'a, 's>(
                     add_tab(party, owner, class, loc);
                 }
             }
-            crate::lower::Mention::Promise {
-                party,
-                holding,
-                loc,
-                ..
-            } => {
+            crate::lower::Mention::Promise { party, holding, loc, .. } => {
                 if let Some(&party_id) = entity_by_name.get(party.0) {
-                    let owner = holding
-                        .and_then(|name| account_owner_by_path.get(name.0).copied())
-                        .unwrap_or(me);
+                    let owner = holding.and_then(|name| account_owner_by_path.get(name.0).copied()).unwrap_or(me);
                     add_tab(party_id, owner, Class::Asset, loc);
                     add_tab(party_id, owner, Class::Debt, loc);
                 }
@@ -1195,24 +1029,16 @@ pub(crate) fn declare<'a, 's>(
                     let owner = ends
                         .from
                         .and_then(|name| account_owner_by_path.get(name.0).copied())
-                        .or_else(|| {
-                            ends.to
-                                .and_then(|name| account_owner_by_path.get(name.0).copied())
-                        })
+                        .or_else(|| ends.to.and_then(|name| account_owner_by_path.get(name.0).copied()))
                         .unwrap_or(me);
                     add_tab(party, owner, Class::Asset, loc);
                     add_tab(party, owner, Class::Debt, loc);
                 }
             }
-            crate::lower::Mention::Due { ends, loc }
-            | crate::lower::Mention::Ends { ends, loc } => {
+            crate::lower::Mention::Due { ends, loc } | crate::lower::Mention::Ends { ends, loc } => {
                 if let (Some(from), Some(to)) = (ends.from, ends.to) {
-                    let (from_entity, to_entity) =
-                        (entity_by_name.get(from.0), entity_by_name.get(to.0));
-                    let (from_owner, to_owner) = (
-                        account_owner_by_path.get(from.0),
-                        account_owner_by_path.get(to.0),
-                    );
+                    let (from_entity, to_entity) = (entity_by_name.get(from.0), entity_by_name.get(to.0));
+                    let (from_owner, to_owner) = (account_owner_by_path.get(from.0), account_owner_by_path.get(to.0));
                     if let (Some(&party), Some(&owner)) = (from_entity, to_owner) {
                         add_tab(party, owner, Class::Asset, loc);
                     }
@@ -1246,14 +1072,8 @@ pub(crate) fn declare<'a, 's>(
         }
     }
     let mut paths: Vec<_> = path_keys.into_iter().collect();
-    paths.sort_unstable_by(|(ns_a, a), (ns_b, b)| {
-        ns_a.cmp(ns_b).then_with(|| path_key(a).cmp(path_key(b)))
-    });
-    let path_positions: Map<(u8, &str), usize> = paths
-        .iter()
-        .enumerate()
-        .map(|(at, &key)| (key, at))
-        .collect();
+    paths.sort_unstable_by(|(ns_a, a), (ns_b, b)| ns_a.cmp(ns_b).then_with(|| path_key(a).cmp(path_key(b))));
+    let path_positions: Map<(u8, &str), usize> = paths.iter().enumerate().map(|(at, &key)| (key, at)).collect();
 
     // `pays` is inherited after the place tree is frozen, so determine which
     // commodity endpoints are needed from the same first declarations that
@@ -1272,9 +1092,7 @@ pub(crate) fn declare<'a, 's>(
             }
             let kind = native_kinds.declarations[kind_declaration_at];
             kind_declaration_at += 1;
-            if seen_kind_declarations.insert(kind)
-                && native_kinds.tree[kind].sort == Sort::Commodity
-            {
+            if seen_kind_declarations.insert(kind) && native_kinds.tree[kind].sort == Sort::Commodity {
                 own_pays[kind.index()] = file[decl.props].iter().any(|prop| prop.name.0 == "pays");
             }
         }
@@ -1282,65 +1100,39 @@ pub(crate) fn declare<'a, 's>(
     let mut inherited_pays = vec![false; native_kinds.tree.len()];
     for (kind, _) in native_kinds.tree.iter() {
         inherited_pays[kind.index()] = own_pays[kind.index()]
-            || native_kinds
-                .tree
-                .parent(kind)
-                .is_some_and(|parent| inherited_pays[parent.index()]);
+            || native_kinds.tree.parent(kind).is_some_and(|parent| inherited_pays[parent.index()]);
     }
     let issuer_units: Vec<_> = commodities
         .iter()
         .filter_map(|(unit, commodity)| inherited_pays[commodity.kind.index()].then_some(unit))
         .collect();
 
-    let mut place_nodes = Vec::with_capacity(
-        paths.len() + account_drafts.len() + tab_drafts.len() + issuer_units.len(),
-    );
+    let mut place_nodes =
+        Vec::with_capacity(paths.len() + account_drafts.len() + tab_drafts.len() + issuer_units.len());
     let mut parents = Vec::with_capacity(place_nodes.capacity());
     let mut place_index = Map::default();
-    let account_by_path: Map<&str, &AccountDraft<'s>> = account_drafts
-        .iter()
-        .map(|draft| (draft.path, draft))
-        .collect();
+    let account_by_path: Map<&str, &AccountDraft<'s>> =
+        account_drafts.iter().map(|draft| (draft.path, draft)).collect();
     let asset_by_path: Map<&str, Id<Asset>> = asset_paths.iter().copied().collect();
-    let entity_by_path: Map<&str, Id<Entity>> =
-        entity_ids.iter().map(|(&path, &id)| (path, id)).collect();
+    let entity_by_path: Map<&str, Id<Entity>> = entity_ids.iter().map(|(&path, &id)| (path, id)).collect();
     for &(namespace, path) in &paths {
-        let explicit_account = if namespace == ACCOUNTS {
-            account_by_path.get(path).copied()
-        } else {
-            None
-        };
-        let explicit_asset = if namespace == ASSET_PLACES {
-            asset_by_path.get(path).copied()
-        } else {
-            None
-        };
-        let entity = if namespace == ENTITY_PLACES {
-            entity_by_path.get(path).copied()
-        } else {
-            None
-        };
+        let explicit_account = if namespace == ACCOUNTS { account_by_path.get(path).copied() } else { None };
+        let explicit_asset = if namespace == ASSET_PLACES { asset_by_path.get(path).copied() } else { None };
+        let entity = if namespace == ENTITY_PLACES { entity_by_path.get(path).copied() } else { None };
         let descendant_account = if namespace == ACCOUNTS {
-            account_drafts
-                .iter()
-                .find(|draft| is_path_child(path, draft.path))
+            account_drafts.iter().find(|draft| is_path_child(path, draft.path))
         } else {
             None
         };
         let descendant_asset = if namespace == ASSET_PLACES {
-            asset_paths
-                .iter()
-                .find(|(child, _)| is_path_child(path, child))
-                .map(|(_, asset)| &assets[*asset])
+            asset_paths.iter().find(|(child, _)| is_path_child(path, child)).map(|(_, asset)| &assets[*asset])
         } else {
             None
         };
         let (class, role, kind, owner, loc, indexed) = if let Some(account) = explicit_account {
             (
                 account.class,
-                Role::Account {
-                    institution: account.institution,
-                },
+                Role::Account { institution: account.institution },
                 account.kind,
                 account.owner,
                 Some(account.loc),
@@ -1348,59 +1140,23 @@ pub(crate) fn declare<'a, 's>(
             )
         } else if let Some(asset) = explicit_asset {
             let record = &assets[asset];
-            (
-                Class::Asset,
-                Role::Asset(asset),
-                record.kind,
-                record.owner,
-                Some(record.loc),
-                true,
-            )
+            (Class::Asset, Role::Asset(asset), record.kind, record.owner, Some(record.loc), true)
         } else if let Some(entity) = entity {
             let held = entity_owner[entity.index()];
             (
                 if held { Class::Asset } else { Class::Outside },
-                if held {
-                    Role::Holding(entity)
-                } else {
-                    Role::Outside(Some(entity))
-                },
-                if held {
-                    native_kinds.roots.asset
-                } else {
-                    native_kinds.roots.entity
-                },
+                if held { Role::Holding(entity) } else { Role::Outside(Some(entity)) },
+                if held { native_kinds.roots.asset } else { native_kinds.roots.entity },
                 if held { entity } else { me },
                 entities[entity].loc,
                 false,
             )
         } else if let Some(account) = descendant_account {
-            (
-                account.class,
-                Role::Account { institution: None },
-                account.kind,
-                account.owner,
-                None,
-                true,
-            )
+            (account.class, Role::Account { institution: None }, account.kind, account.owner, None, true)
         } else if let Some(asset) = descendant_asset {
-            (
-                Class::Asset,
-                Role::Account { institution: None },
-                asset.kind,
-                asset.owner,
-                None,
-                true,
-            )
+            (Class::Asset, Role::Account { institution: None }, asset.kind, asset.owner, None, true)
         } else {
-            (
-                Class::Asset,
-                Role::Account { institution: None },
-                native_kinds.roots.asset,
-                me,
-                None,
-                false,
-            )
+            (Class::Asset, Role::Account { institution: None }, native_kinds.roots.asset, me, None, false)
         };
         let node = Place {
             path: names.intern(path),
@@ -1417,11 +1173,7 @@ pub(crate) fn declare<'a, 's>(
             opened: None,
             closed: None,
             shares: explicit_account.map_or_else(
-                || {
-                    explicit_asset
-                        .and_then(|asset| asset_shares.get(&asset).cloned())
-                        .unwrap_or_default()
-                },
+                || explicit_asset.and_then(|asset| asset_shares.get(&asset).cloned()).unwrap_or_default(),
                 |account| account.shares.clone(),
             ),
             known_as: Box::default(),
@@ -1431,9 +1183,7 @@ pub(crate) fn declare<'a, 's>(
         };
         let at = place_nodes.len();
         place_nodes.push(node);
-        let parent = path
-            .rsplit_once('/')
-            .and_then(|(parent, _)| path_positions.get(&(namespace, parent)).copied());
+        let parent = path.rsplit_once('/').and_then(|(parent, _)| path_positions.get(&(namespace, parent)).copied());
         parents.push(parent);
         place_index.insert((namespace, path), (at, indexed));
     }
@@ -1476,11 +1226,7 @@ pub(crate) fn declare<'a, 's>(
                 path: entities[tab.party].path,
                 class: tab.class,
                 role: Role::Tab(tab.party),
-                kind: if tab.class == Class::Debt {
-                    native_kinds.roots.debt
-                } else {
-                    native_kinds.roots.asset
-                },
+                kind: if tab.class == Class::Debt { native_kinds.roots.debt } else { native_kinds.roots.asset },
                 owner: tab.owner,
                 holds: None,
                 select: None,
@@ -1500,13 +1246,9 @@ pub(crate) fn declare<'a, 's>(
             at
         })
         .collect();
-    let (places, remap) =
-        Tree::build(place_nodes, &parents).expect("place parents are prefixes without cycles");
+    let (places, remap) = Tree::build(place_nodes, &parents).expect("place parents are prefixes without cycles");
 
-    let issuer_places = issuer_node_indices
-        .into_iter()
-        .map(|(unit, old)| (unit, remap[old]))
-        .collect();
+    let issuer_places = issuer_node_indices.into_iter().map(|(unit, old)| (unit, remap[old])).collect();
 
     let mut place_names = Names::default();
     for (&(namespace, path), &(old, indexed)) in &place_index {
@@ -1530,30 +1272,15 @@ pub(crate) fn declare<'a, 's>(
     }
     let mut contract_endpoints = Map::default();
     for mention in &survey.mentions {
-        let crate::lower::Mention::Promise {
-            name,
-            party,
-            holding,
-            loan_party: Some(_),
-            ..
-        } = *mention
-        else {
+        let crate::lower::Mention::Promise { name, party, holding, loan_party: Some(_), .. } = *mention else {
             continue;
         };
         let Some(&party) = entity_by_name.get(party.0) else {
             continue;
         };
-        let owner = holding
-            .and_then(|name| account_owner_by_path.get(name.0).copied())
-            .unwrap_or(me);
+        let owner = holding.and_then(|name| account_owner_by_path.get(name.0).copied()).unwrap_or(me);
         if let Some(&place) = tabs.get(&(party, owner, Class::Debt)) {
-            contract_endpoints.insert(
-                names.intern(name.0),
-                End {
-                    place,
-                    entity: Some(party),
-                },
-            );
+            contract_endpoints.insert(names.intern(name.0), End { place, entity: Some(party) });
         }
     }
     let kind_index = native_kinds.index;
@@ -1578,14 +1305,8 @@ pub(crate) fn declare<'a, 's>(
     lookup.entities = entity_index;
     lookup.kinds = kind_index;
     lookup.purposes = purpose_index;
-    lookup.assets = asset_names
-        .into_iter()
-        .map(|(name, id)| (names.intern(name), id))
-        .collect();
-    lookup.commodities = commodity_by_name
-        .into_iter()
-        .map(|(name, id)| (names.intern(name), id))
-        .collect();
+    lookup.assets = asset_names.into_iter().map(|(name, id)| (names.intern(name), id)).collect();
+    lookup.commodities = commodity_by_name.into_iter().map(|(name, id)| (names.intern(name), id)).collect();
     let book = Book {
         names,
         text_values: Arena::new(),
@@ -1667,17 +1388,11 @@ fn strict_path_suffixes<'s>(paths: &[&'s str]) -> Set<&'s str> {
     let mut shadowed = Set::default();
     for &path in paths {
         let after_prefix = reversed.partition_point(|candidate| {
-            candidate
-                .bytes()
-                .rev()
-                .cmp(path.bytes().rev().chain(std::iter::once(b'/')))
-                .is_lt()
+            candidate.bytes().rev().cmp(path.bytes().rev().chain(std::iter::once(b'/'))).is_lt()
         });
         if let Some(&candidate) = reversed.get(after_prefix)
             && candidate != path
-            && candidate
-                .strip_suffix(path)
-                .is_some_and(|prefix| prefix.ends_with('/'))
+            && candidate.strip_suffix(path).is_some_and(|prefix| prefix.ends_with('/'))
         {
             shadowed.insert(path);
         }
@@ -1692,11 +1407,8 @@ fn is_path_child(parent: &str, child: &str) -> bool {
 }
 
 fn duplicate_decl(kind: &str, name: &str, again: Loc, first: Option<Loc>) -> Diagnostic {
-    let mut diagnostic = Diagnostic::error(
-        "duplicate-declaration",
-        format!("{kind} `{name}` is declared twice"),
-    )
-    .label(again, "declared again here");
+    let mut diagnostic = Diagnostic::error("duplicate-declaration", format!("{kind} `{name}` is declared twice"))
+        .label(again, "declared again here");
     if let Some(first) = first {
         diagnostic = diagnostic.context(first, "first declared here");
     }
@@ -1709,14 +1421,7 @@ mod tests {
 
     #[test]
     fn implicit_party_suffixes_are_found_without_prefix_collisions() {
-        let paths = [
-            "acme",
-            "vendors/acme",
-            "archive/vendors/acme",
-            "acme2",
-            "other/acme2",
-            "vendor/acme/branch",
-        ];
+        let paths = ["acme", "vendors/acme", "archive/vendors/acme", "acme2", "other/acme2", "vendor/acme/branch"];
         let shadowed = strict_path_suffixes(&paths);
 
         assert!(shadowed.contains("acme"));
@@ -1755,10 +1460,7 @@ fn resolve_kind<'s>(
             return fallback;
         }
         Err(crate::book::Miss::Ambiguous(ids)) => {
-            let candidates: Vec<_> = ids
-                .iter()
-                .map(|&id| names.name(kinds.tree[id].name))
-                .collect();
+            let candidates: Vec<_> = ids.iter().map(|&id| names.name(kinds.tree[id].name)).collect();
             diags.push(
                 Diagnostic::error("ambiguous-kind", format!("kind `{}` is ambiguous", word.0))
                     .label(loc, format!("could mean {}", candidates.join(" or "))),
@@ -1775,11 +1477,8 @@ fn resolve_kind<'s>(
         kind
     } else {
         diags.push(
-            Diagnostic::error(
-                "kind-sort",
-                format!("kind `{}` cannot classify this declaration", word.0),
-            )
-            .label(loc, format!("expected {expected:?}, found {found:?}")),
+            Diagnostic::error("kind-sort", format!("kind `{}` cannot classify this declaration", word.0))
+                .label(loc, format!("expected {expected:?}, found {found:?}")),
         );
         fallback
     }
@@ -1806,35 +1505,23 @@ fn resolve_purpose<'s>(
             None
         }
         Err(crate::book::Miss::Ambiguous(ids)) => {
-            let candidates: Vec<_> = ids
-                .iter()
-                .map(|&id| names.name(purposes.tree[id].name))
-                .collect();
+            let candidates: Vec<_> = ids.iter().map(|&id| names.name(purposes.tree[id].name)).collect();
             diags.push(
-                Diagnostic::error(
-                    "ambiguous-purpose",
-                    format!("purpose `{name}` is ambiguous"),
-                )
-                .label(loc, format!("could mean {}", candidates.join(" or "))),
+                Diagnostic::error("ambiguous-purpose", format!("purpose `{name}` is ambiguous"))
+                    .label(loc, format!("could mean {}", candidates.join(" or "))),
             );
             None
         }
     }
 }
 
-fn first_name_prop<'a, 's>(
-    file: &'a axiom_syntax::File<'s>,
-    decl: &Decl<'s>,
-    name: &str,
-) -> Option<&'s str> {
-    file[decl.props]
-        .iter()
-        .find(|prop| prop.name.0 == name)
-        .and_then(|prop| file[prop.args].first())
-        .and_then(|&arg| match file.exprs[arg].kind {
+fn first_name_prop<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>, name: &str) -> Option<&'s str> {
+    file[decl.props].iter().find(|prop| prop.name.0 == name).and_then(|prop| file[prop.args].first()).and_then(|&arg| {
+        match file.exprs[arg].kind {
             ExprKind::Name(name) => Some(name.0),
             _ => None,
-        })
+        }
+    })
 }
 
 fn owner_names_in<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>) -> Vec<&'s str> {
@@ -1870,27 +1557,13 @@ fn resolve_owner_shares<'a, 's>(
                 Ok(entity) => resolved.push((entity, None, expr.loc)),
                 Err(crate::book::Miss::Unknown { suggestion }) => {
                     let suggestion = suggestion.map(|sym| names.name(sym));
-                    diags.push(unknown(
-                        "unknown-owner",
-                        "owner",
-                        Word {
-                            text: name.0,
-                            loc: expr.loc,
-                        },
-                        suggestion,
-                    ));
+                    diags.push(unknown("unknown-owner", "owner", Word { text: name.0, loc: expr.loc }, suggestion));
                 }
                 Err(crate::book::Miss::Ambiguous(ids)) => {
-                    let candidates: Vec<_> = ids
-                        .iter()
-                        .map(|&id| format!("entity #{}", id.index()))
-                        .collect();
+                    let candidates: Vec<_> = ids.iter().map(|&id| format!("entity #{}", id.index())).collect();
                     diags.push(
-                        Diagnostic::error(
-                            "ambiguous-owner",
-                            format!("owner `{}` is ambiguous", name.0),
-                        )
-                        .label(expr.loc, format!("could mean {}", candidates.join(" or "))),
+                        Diagnostic::error("ambiguous-owner", format!("owner `{}` is ambiguous", name.0))
+                            .label(expr.loc, format!("could mean {}", candidates.join(" or "))),
                     );
                 }
             },
@@ -1920,47 +1593,26 @@ fn resolve_owner_shares<'a, 's>(
     if resolved.is_empty() {
         // The diagnostic above is tied to the offending expression; keeping a
         // deterministic default prevents an invalid declaration cascading.
-        return vec![Share {
-            rate: Ratio::ONE,
-            entity: fallback,
-            measure: None,
-            loc: line.loc,
-        }];
+        return vec![Share { rate: Ratio::ONE, entity: fallback, measure: None, loc: line.loc }];
     }
     let has_rate = resolved.iter().any(|(_, rate, _)| rate.is_some());
     let all_rate = resolved.iter().all(|(_, rate, _)| rate.is_some());
     if has_rate && !all_rate {
         diags.push(
-            Diagnostic::error(
-                "owner-share",
-                "every owner in a shared place needs a percentage",
-            )
-            .label(line.loc, "write a percentage for each owner"),
+            Diagnostic::error("owner-share", "every owner in a shared place needs a percentage")
+                .label(line.loc, "write a percentage for each owner"),
         );
     }
     let equal = Ratio::new(1, resolved.len() as i128).unwrap_or(Ratio::ZERO);
     let shares: Vec<_> = resolved
         .into_iter()
-        .map(|(entity, rate, loc)| Share {
-            rate: rate.unwrap_or(equal),
-            entity,
-            measure: None,
-            loc,
-        })
+        .map(|(entity, rate, loc)| Share { rate: rate.unwrap_or(equal), entity, measure: None, loc })
         .collect();
-    let total = shares
-        .iter()
-        .try_fold(Ratio::ZERO, |sum, share| sum.checked_add(share.rate));
+    let total = shares.iter().try_fold(Ratio::ZERO, |sum, share| sum.checked_add(share.rate));
     if shares.iter().any(|share| share.rate.is_negative()) || total != Some(Ratio::ONE) {
         diags.push(
-            Diagnostic::error(
-                "owner-share-total",
-                "owner shares must be nonnegative and add to 100%",
-            )
-            .label(
-                line.loc,
-                "adjust the percentages so they total exactly 100%",
-            ),
+            Diagnostic::error("owner-share-total", "owner shares must be nonnegative and add to 100%")
+                .label(line.loc, "adjust the percentages so they total exactly 100%"),
         );
     }
     shares
@@ -1973,9 +1625,7 @@ pub(crate) fn near_place<'a>(path: &str, declared: &[&'a str]) -> Option<&'a str
     declared
         .iter()
         .copied()
-        .filter(|other| {
-            other.len().abs_diff(path.len()) <= limit && other.split('/').next() == root
-        })
+        .filter(|other| other.len().abs_diff(path.len()) <= limit && other.split('/').next() == root)
         .map(|other| (axiom_core::diag::distance(path, other), other))
         .filter(|&(distance, _)| distance <= limit)
         .min()

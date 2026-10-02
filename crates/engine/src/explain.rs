@@ -15,8 +15,8 @@
 
 use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
-    RuntimeTxn, StepKind, Subject, System, TemplateProgram, Trigger, Value, Waive, Window,
+    Amount, Assert, BinOp, Book, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param,
+    Place, RuntimeTxn, StepKind, Subject, System, TemplateProgram, Trigger, Value, Waive, Window,
 };
 
 use crate::calc::Calc;
@@ -58,7 +58,8 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
     /// the first paragraph, and the paragraph that starts `To fix:`.
     fn doc(&self) -> (Option<String>, Option<String>) {
         let Some(doc) = self.law.doc else { return (None, None) };
-        let lines: Vec<&str> = self.book().name(doc).lines().map(|l| l.trim().trim_start_matches("///").trim()).collect();
+        let lines: Vec<&str> =
+            self.book().name(doc).lines().map(|l| l.trim().trim_start_matches("///").trim()).collect();
         let (mut what, mut fix) = (None, None);
         for paragraph in lines.split(|line| line.is_empty()).filter(|p| !p.is_empty()).map(|p| p.join(" ")) {
             match paragraph.strip_prefix("To fix:") {
@@ -146,7 +147,8 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
         let mut at = cond.index() + 1;
         while at > first {
             at -= 1;
-            if matches!(nodes[node_id(at)].op, Op::Var(_) | Op::Local(_) | Op::Field(..) | Op::Param(..) | Op::Call(..)) {
+            if matches!(nodes[node_id(at)].op, Op::Var(_) | Op::Local(_) | Op::Field(..) | Op::Param(..) | Op::Call(..))
+            {
                 atoms.push(at);
                 // Skip the atom's own subtree: a field's receiver, a call's arguments.
                 at = nodes[node_id(at)].first.index();
@@ -198,12 +200,12 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
                         self.law
                             .range(cond)
                             .filter_map(|at| match self.law.nodes[node_id(at)].op {
-                                Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => purpose.or_else(|| {
-                                    match self.law.owner {
+                                Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => {
+                                    purpose.or_else(|| match self.law.owner {
                                         axiom_model::Owner::Purpose(purpose) => Some(purpose),
                                         _ => None,
-                                    }
-                                }),
+                                    })
+                                }
                                 _ => None,
                             })
                             .collect(),
@@ -229,7 +231,10 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
                 let mut counted = Vec::with_capacity(3);
                 for (id, flow) in book.flows.iter() {
                     let before = current.map_or(flow.day <= ctx.day, |current| id < current);
-                    if !before || !flow.recognized.overlaps(read_days) || !self.plan.events.state(id, flow).is_real_on(ctx.day) {
+                    if !before
+                        || !flow.recognized.overlaps(read_days)
+                        || !self.plan.events.state(id, flow).is_real_on(ctx.day)
+                    {
                         continue;
                     }
                     let Some(actual) = flow.purpose.map(|purpose| purpose.purpose) else { continue };
@@ -238,19 +243,32 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
                     }
                     let owns = |place| {
                         let details = &book.places[place];
-                        details.class != Class::Outside && self.plan.owners_of(place).iter().any(|share| {
-                            share.owner == ctx.owner && !share.share.is_zero()
-                        })
+                        details.class != Class::Outside
+                            && self
+                                .plan
+                                .owners_of(place)
+                                .iter()
+                                .any(|share| share.owner == ctx.owner && !share.share.is_zero())
                     };
-                    let direction = crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
+                    let direction =
+                        crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
                     let Some(direction) = direction else { continue };
                     let amounts = self.plan.amounts.get(&id);
                     let (amount, place) = match direction {
-                        Dir::Out => (Amount::new(amounts.map_or(flow.out.qty, |amounts| amounts.out), flow.out.unit), flow.from),
-                        Dir::In => (Amount::new(amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive), flow.arrive.unit), flow.to),
+                        Dir::Out => {
+                            (Amount::new(amounts.map_or(flow.out.qty, |amounts| amounts.out), flow.out.unit), flow.from)
+                        }
+                        Dir::In => (
+                            Amount::new(amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive), flow.arrive.unit),
+                            flow.to,
+                        ),
                     };
                     let Ok(amount) = (Calc { book, day: flow.day }).convert(amount, book.base) else { continue };
-                    if !self.plan.allocate(place, amount.qty).any(|(owner, qty)| owner.owner == ctx.owner && !qty.is_zero()) {
+                    if !self
+                        .plan
+                        .allocate(place, amount.qty)
+                        .any(|(owner, qty)| owner.owner == ctx.owner && !qty.is_zero())
+                    {
                         continue;
                     }
                     let key = (flow.day, id);
@@ -318,7 +336,11 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
         }
         (Some(message), None) => message,
         (None, None) => what.clone().unwrap_or_else(|| {
-            format!("{} is not satisfied by {}", f.plan.book().name(f.law.name), show::subject(f.plan.book(), f.ctx.subject))
+            format!(
+                "{} is not satisfied by {}",
+                f.plan.book().name(f.law.name),
+                show::subject(f.plan.book(), f.ctx.subject)
+            )
         }),
     };
     let severity = if warn { Severity::Warning } else { Severity::Error };
@@ -333,10 +355,8 @@ fn fact(f: &Frame, bound: &Comparison, reads: Option<Reads>) -> String {
     let when = match reads {
         None => String::new(),
         Some(Reads::Total(_, Window::Ever)) => " in total".to_owned(),
-        Some(reads) => {
-            calendar::Window::exactly(reads.window(f.plan.book(), f.ctx))
-                .map_or(String::new(), |window| format!(" in {window}"))
-        }
+        Some(reads) => calendar::Window::exactly(reads.window(f.plan.book(), f.ctx))
+            .map_or(String::new(), |window| format!(" in {window}")),
     };
     let (bar, past) = if bound.upper { ("limit", "over") } else { ("minimum", "short") };
     let over = if bound.off.qty > Qty::ZERO { format!(", {past} by {}", f.money(bound.off)) } else { String::new() };
@@ -439,11 +459,8 @@ fn node_id(index: usize) -> NodeId {
 pub(crate) fn assertion_fault(book: &Book, assertion: &Assert, fault: Fault) -> Diagnostic {
     let (what, help) = show::fault(book, fault, assertion.day);
     let place = show::place(book, assertion.place);
-    let mut diagnostic = Diagnostic::error(
-        "assertion-expression",
-        format!("cannot check `{place}`: {what}"),
-    )
-    .label(assertion.loc, "this computed assertion amount could not be evaluated");
+    let mut diagnostic = Diagnostic::error("assertion-expression", format!("cannot check `{place}`: {what}"))
+        .label(assertion.loc, "this computed assertion amount could not be evaluated");
     if let Some(help) = help {
         diagnostic = diagnostic.help(help);
     }

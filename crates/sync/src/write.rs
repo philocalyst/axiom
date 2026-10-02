@@ -22,23 +22,14 @@ impl Context {
     /// What the path says: a folder or file named `YYYY`, and beneath it `MM`
     /// (a folder or `MM.ax`), or a file `YYYY-MM.ax`.
     pub fn of_path(path: &str) -> Context {
-        stamp(path).map_or(Context::default(), |stamp| Context {
-            year: Some(stamp.year),
-            month: stamp.month,
-        })
+        stamp(path).map_or(Context::default(), |stamp| Context { year: Some(stamp.year), month: stamp.month })
     }
 
     /// The context a heading line gives: a lone year (`2026`) or month (`2026-02`).
     fn heading(line: &str) -> Option<Context> {
         match named(line.split("//").next()?.trim())? {
-            Named::Year(year) => Some(Context {
-                year: Some(year),
-                month: None,
-            }),
-            Named::YearMonth(year, month) => Some(Context {
-                year: Some(year),
-                month: Some(month),
-            }),
+            Named::Year(year) => Some(Context { year: Some(year), month: None }),
+            Named::YearMonth(year, month) => Some(Context { year: Some(year), month: Some(month) }),
             Named::Month(_) => None,
         }
     }
@@ -46,11 +37,7 @@ impl Context {
     /// The day a written date means here, if it is one: `2026-01-15`, `01-15`
     /// where the year is known, `15` where the month is too.
     fn complete(self, token: &str) -> Option<Day> {
-        let number = |text: &str| {
-            text.parse::<u32>()
-                .ok()
-                .filter(|_| text.bytes().all(|byte| byte.is_ascii_digit()))
-        };
+        let number = |text: &str| text.parse::<u32>().ok().filter(|_| text.bytes().all(|byte| byte.is_ascii_digit()));
         match token.len() {
             10 => Day::parse(token.as_bytes()),
             5 => {
@@ -81,19 +68,13 @@ enum Named {
 }
 
 fn named(part: &str) -> Option<Named> {
-    let digits = |text: &str, length: usize| {
-        text.len() == length && text.bytes().all(|byte| byte.is_ascii_digit())
-    };
+    let digits = |text: &str, length: usize| text.len() == length && text.bytes().all(|byte| byte.is_ascii_digit());
     match part.split_once('-') {
         Some((year, month)) if digits(year, 4) && digits(month, 2) => {
             Some(Named::YearMonth(year.parse().ok()?, month.parse().ok()?))
         }
         None if digits(part, 4) => Some(Named::Year(part.parse().ok()?)),
-        None if digits(part, 2) => part
-            .parse()
-            .ok()
-            .filter(|month| (1..=12).contains(month))
-            .map(Named::Month),
+        None if digits(part, 2) => part.parse().ok().filter(|month| (1..=12).contains(month)).map(Named::Month),
         _ => None,
     }
 }
@@ -108,36 +89,15 @@ struct Stamp {
 }
 
 fn stamp(path: &str) -> Option<Stamp> {
-    let parts: Vec<&str> = path
-        .strip_suffix(".ax")
-        .unwrap_or(path)
-        .split('/')
-        .collect();
+    let parts: Vec<&str> = path.strip_suffix(".ax").unwrap_or(path).split('/').collect();
     let mut found = None;
     for (at, part) in parts.iter().enumerate() {
         found = match (named(part), found) {
-            (Some(Named::Year(year)), _) => Some(Stamp {
-                year,
-                month: None,
-                own: at + 1 == parts.len(),
-            }),
-            (Some(Named::YearMonth(year, month)), _) => Some(Stamp {
-                year,
-                month: Some(month),
-                own: true,
-            }),
-            (
-                Some(Named::Month(month)),
-                Some(Stamp {
-                    month: None,
-                    year,
-                    own,
-                }),
-            ) => Some(Stamp {
-                year,
-                month: Some(month),
-                own,
-            }),
+            (Some(Named::Year(year)), _) => Some(Stamp { year, month: None, own: at + 1 == parts.len() }),
+            (Some(Named::YearMonth(year, month)), _) => Some(Stamp { year, month: Some(month), own: true }),
+            (Some(Named::Month(month)), Some(Stamp { month: None, year, own })) => {
+                Some(Stamp { year, month: Some(month), own })
+            }
             (_, found) => found,
         };
     }
@@ -147,9 +107,7 @@ fn stamp(path: &str) -> Option<Stamp> {
 /// `path` with the parts that name a period naming `day`'s.
 fn restamp(path: &str, day: Day) -> String {
     let (year, month, _) = day.ymd();
-    let (stem, extension) = path
-        .strip_suffix(".ax")
-        .map_or((path, ""), |stem| (stem, ".ax"));
+    let (stem, extension) = path.strip_suffix(".ax").map_or((path, ""), |stem| (stem, ".ax"));
     let parts = stem.split('/').map(|part| match named(part) {
         Some(Named::Year(_)) => format!("{year:04}"),
         Some(Named::Month(_)) => format!("{month:02}"),
@@ -167,12 +125,8 @@ pub struct Layout {
 
 impl Layout {
     pub fn new<'a>(paths: impl IntoIterator<Item = &'a str>) -> Layout {
-        let stamped = paths
-            .into_iter()
-            .filter_map(|path| Some((stamp(path)?, path.to_string())));
-        let mut dated: Vec<_> = stamped
-            .filter(|(stamp, _)| stamp.month.is_some() || stamp.own)
-            .collect();
+        let stamped = paths.into_iter().filter_map(|path| Some((stamp(path)?, path.to_string())));
+        let mut dated: Vec<_> = stamped.filter(|(stamp, _)| stamp.month.is_some() || stamp.own).collect();
         dated.sort();
         Layout { dated }
     }
@@ -181,11 +135,7 @@ impl Layout {
     /// file's habit carried to this day; else `journal/YYYY/MM.ax`.
     pub fn file_for(&self, day: Day) -> String {
         let (year, month, _) = day.ymd();
-        let of = |month: Option<u32>| {
-            self.dated
-                .iter()
-                .find(|(stamp, _)| stamp.year == year && stamp.month == month)
-        };
+        let of = |month: Option<u32>| self.dated.iter().find(|(stamp, _)| stamp.year == year && stamp.month == month);
         match (of(Some(month)).or(of(None)), self.dated.last()) {
             (Some((_, path)), _) => path.to_string(),
             (None, Some((_, latest))) => restamp(latest, day),
@@ -224,22 +174,13 @@ pub fn scan(lines: &[&str], mut ctx: Context) -> (Vec<Item>, Context) {
         } else if !indented(line) {
             let head = at - 1;
             let mut end = at;
-            while let Some(next) = lines
-                .get(at)
-                .filter(|next| next.trim().is_empty() || indented(next))
-            {
+            while let Some(next) = lines.get(at).filter(|next| next.trim().is_empty() || indented(next)) {
                 at += 1;
                 if !next.trim().is_empty() {
                     end = at;
                 }
             }
-            items.push(Item {
-                day: date_of(line, ctx),
-                head,
-                start: comments.take().unwrap_or(head),
-                end,
-                ctx,
-            });
+            items.push(Item { day: date_of(line, ctx), head, start: comments.take().unwrap_or(head), end, ctx });
             at = end;
         }
     }
@@ -250,11 +191,7 @@ pub fn scan(lines: &[&str], mut ctx: Context) -> (Vec<Item>, Context) {
 fn date_of(line: &str, ctx: Context) -> Option<Day> {
     let mut words = line.split_whitespace();
     let first = words.next()?;
-    let token = if first == "opening" {
-        words.next()?
-    } else {
-        first
-    };
+    let token = if first == "opening" { words.next()? } else { first };
     ctx.complete(token.split("..").next()?)
 }
 
@@ -274,9 +211,7 @@ fn place(dated: &[&Item], day: Day, fallback: (usize, Context)) -> (usize, Conte
     let after = cut.checked_sub(1).map(|last| dated[last]);
     let before = dated.get(cut).copied();
     match (after, before) {
-        (Some(after), Some(before))
-            if before.ctx.shorten(day).len() < after.ctx.shorten(day).len() =>
-        {
+        (Some(after), Some(before)) if before.ctx.shorten(day).len() < after.ctx.shorten(day).len() => {
             (before.start, before.ctx)
         }
         (Some(after), _) => (after.end, after.ctx),
@@ -303,11 +238,7 @@ impl Additions {
     /// within a day, in the order they were added. A file's own line endings
     /// are kept.
     fn splice(mut self, lines: &[&str]) -> String {
-        let eol = if lines.first().is_some_and(|line| line.ends_with("\r\n")) {
-            "\r\n"
-        } else {
-            "\n"
-        };
+        let eol = if lines.first().is_some_and(|line| line.ends_with("\r\n")) { "\r\n" } else { "\n" };
         let mut text = String::new();
         for at in 0..=lines.len() {
             if let Some(mut group) = self.groups.remove(&at) {
@@ -356,10 +287,7 @@ fn format_item(path: &str, day: Day, date: String, body: &str) -> Result<String,
     let formatted = format(&source, &file);
     let formatted = formatted.trim_end_matches(['\r', '\n']);
     let Some(rest) = formatted.strip_prefix(&full_date) else {
-        return Err(vec![Diagnostic::error(
-            "sync-format",
-            "the formatter changed the generated item's full date",
-        )]);
+        return Err(vec![Diagnostic::error("sync-format", "the formatter changed the generated item's full date")]);
     };
     if !rest.starts_with(' ') {
         return Err(vec![Diagnostic::error(
@@ -443,10 +371,7 @@ pub fn row_key(row: &str) -> Option<(Day, String)> {
         date => Day::parse(date.as_bytes())?,
     };
     let is_name = |word: &&str| word.starts_with(|c: char| c.is_ascii_lowercase());
-    Some((
-        since,
-        words.take_while(is_name).collect::<Vec<_>>().join(" "),
-    ))
+    Some((since, words.take_while(is_name).collect::<Vec<_>>().join(" ")))
 }
 
 /// The rows under a `param NAME` line: one item each, and where the block ends.
@@ -459,22 +384,11 @@ struct Block<'t> {
 fn block<'t>(lines: &[&'t str], param: &str) -> Option<Block<'t>> {
     let declared = |line: &str| {
         let mut words = line.split_whitespace();
-        !line.starts_with([' ', '\t'])
-            && words.next() == Some("param")
-            && words.next() == Some(param)
+        !line.starts_with([' ', '\t']) && words.next() == Some("param") && words.next() == Some(param)
     };
     let header = lines.iter().position(|line| declared(line))?;
-    let mut block = Block {
-        rows: Vec::new(),
-        end: header + 1,
-        indent: "  ",
-    };
-    for (at, line) in lines
-        .iter()
-        .enumerate()
-        .skip(header + 1)
-        .filter(|(_, line)| !line.trim().is_empty())
-    {
+    let mut block = Block { rows: Vec::new(), end: header + 1, indent: "  " };
+    for (at, line) in lines.iter().enumerate().skip(header + 1).filter(|(_, line)| !line.trim().is_empty()) {
         if !line.starts_with([' ', '\t']) {
             break;
         }
@@ -484,13 +398,7 @@ fn block<'t>(lines: &[&'t str], param: &str) -> Option<Block<'t>> {
                 block.indent = &line[..line.len() - line.trim_start().len()];
             }
             let day = row_key(line).map(|(since, _)| since);
-            block.rows.push(Item {
-                day,
-                head: at,
-                start: at,
-                end: at + 1,
-                ctx: Context::default(),
-            });
+            block.rows.push(Item { day, head: at, start: at, end: at + 1, ctx: Context::default() });
         }
     }
     Some(block)
@@ -501,13 +409,7 @@ fn block<'t>(lines: &[&'t str], param: &str) -> Option<Block<'t>> {
 pub fn row_keys(text: &str, param: &str) -> Option<Vec<(Day, String)>> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let block = block(&lines, param)?;
-    Some(
-        block
-            .rows
-            .iter()
-            .filter_map(|row| row_key(lines[row.head]))
-            .collect(),
-    )
+    Some(block.rows.iter().filter_map(|row| row_key(lines[row.head])).collect())
 }
 
 /// Adds rows to the block of `param NAME`, each after the last row that is not
@@ -531,23 +433,13 @@ fn apply(text: &str, path: &str, inserts: &[&Insert]) -> Result<String, Vec<Diag
     for insert in inserts {
         match &insert.form {
             Form::Item(body) => items.push((insert.day, body.as_str())),
-            Form::Row { param, text } => rows
-                .entry(param.as_str())
-                .or_default()
-                .push((insert.day, text.as_str())),
+            Form::Row { param, text } => rows.entry(param.as_str()).or_default().push((insert.day, text.as_str())),
         }
     }
-    let mut text = if items.is_empty() {
-        text.to_string()
-    } else {
-        insert_items(text, path, &items)?
-    };
+    let mut text = if items.is_empty() { text.to_string() } else { insert_items(text, path, &items)? };
     for (param, rows) in rows {
         text = insert_rows(&text, param, &rows).ok_or_else(|| {
-            vec![Diagnostic::error(
-                "no-such-param",
-                format!("`param {param}` is not declared in {path}"),
-            )]
+            vec![Diagnostic::error("no-such-param", format!("`param {param}` is not declared in {path}"))]
         })?;
     }
     Ok(text)
@@ -581,10 +473,7 @@ pub(crate) fn preview<'a>(
     let update = |(path, inserts): (&str, Vec<&Insert>)| -> Result<Update, Vec<Diagnostic>> {
         let before = read(path);
         let after = apply(before.as_deref().unwrap_or(""), path, &inserts)?;
-        Ok(Update {
-            path: path.to_string(),
-            after,
-        })
+        Ok(Update { path: path.to_string(), after })
     };
     by_path.into_iter().map(update).collect()
 }
@@ -619,19 +508,11 @@ pub(crate) fn changes_at<'a>(
             }
         };
         match validate_text_at(path, &after, file) {
-            Ok(()) => changes.push(Change {
-                before: before.map(Cow::into_owned),
-                path: path.to_string(),
-                after,
-            }),
+            Ok(()) => changes.push(Change { before: before.map(Cow::into_owned), path: path.to_string(), after }),
             Err(bad) => problems.extend(bad),
         }
     }
-    if problems.is_empty() {
-        Ok(changes)
-    } else {
-        Err(problems)
-    }
+    if problems.is_empty() { Ok(changes) } else { Err(problems) }
 }
 
 pub(crate) fn validate_text_at(path: &str, text: &str, file: FileId) -> Result<(), Vec<Diagnostic>> {
@@ -673,11 +554,7 @@ mod tests {
     fn write(path: &str, text: &str, adds: &[(&str, &str)]) -> String {
         let inserts: Vec<Insert> = adds
             .iter()
-            .map(|&(date, body)| Insert {
-                path: path.into(),
-                day: day(date),
-                form: Form::Item(body.into()),
-            })
+            .map(|&(date, body)| Insert { path: path.into(), day: day(date), form: Form::Item(body.into()) })
             .collect();
         apply(text, path, &inserts.iter().collect::<Vec<_>>()).unwrap()
     }
@@ -693,23 +570,13 @@ mod tests {
         assert_eq!(write("2026.ax", "2026-03-05"), "03-05");
         assert_eq!(write("journal/2026/notes.ax", "2026-03-05"), "03-05");
         assert_eq!(write("journal.ax", "2026-03-05"), "2026-03-05");
-        assert_eq!(
-            write("03/2026.ax", "2026-03-05"),
-            "03-05",
-            "a month above the year says nothing"
-        );
+        assert_eq!(write("03/2026.ax", "2026-03-05"), "03-05", "a month above the year says nothing");
     }
 
     #[test]
     fn a_new_item_uses_the_house_formatter_and_parses_back() {
         let path = "journal/2026/03.ax";
-        let item = format_item(
-            path,
-            day("2026-03-05"),
-            "05".into(),
-            "checking -> store 12 USD \"memo\"",
-        )
-        .unwrap();
+        let item = format_item(path, day("2026-03-05"), "05".into(), "checking -> store 12 USD \"memo\"").unwrap();
         let source = format!("{item}\n");
         let (file, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
         assert!(problems.is_empty(), "{problems:?}");
@@ -718,37 +585,15 @@ mod tests {
 
     #[test]
     fn a_day_belongs_to_the_file_the_project_would_have_put_it_in() {
-        let files = [
-            "axiom.ax",
-            "journal/2026/01.ax",
-            "journal/2026/02.ax",
-            "prices/2025.ax",
-            "journal/2026/notes.ax",
-        ];
+        let files = ["axiom.ax", "journal/2026/01.ax", "journal/2026/02.ax", "prices/2025.ax", "journal/2026/notes.ax"];
         let layout = Layout::new(files);
         assert_eq!(layout.file_for(day("2026-02-14")), "journal/2026/02.ax");
-        assert_eq!(
-            layout.file_for(day("2026-03-01")),
-            "journal/2026/03.ax",
-            "the latest habit, carried on"
-        );
+        assert_eq!(layout.file_for(day("2026-03-01")), "journal/2026/03.ax", "the latest habit, carried on");
         assert_eq!(layout.file_for(day("2027-01-01")), "journal/2027/01.ax");
-        assert_eq!(
-            Layout::new(["2025.ax", "notes.ax"]).file_for(day("2026-03-01")),
-            "2026.ax"
-        );
-        assert_eq!(
-            Layout::new(["journal/2025-12.ax"]).file_for(day("2026-03-01")),
-            "journal/2026-03.ax"
-        );
-        assert_eq!(
-            Layout::new(["axiom.ax", "journal.ax"]).file_for(day("2026-03-01")),
-            "journal/2026/03.ax"
-        );
-        assert_eq!(
-            Layout::new(["2026.ax", "2026/01.ax"]).file_for(day("2026-01-09")),
-            "2026/01.ax"
-        );
+        assert_eq!(Layout::new(["2025.ax", "notes.ax"]).file_for(day("2026-03-01")), "2026.ax");
+        assert_eq!(Layout::new(["journal/2025-12.ax"]).file_for(day("2026-03-01")), "journal/2026-03.ax");
+        assert_eq!(Layout::new(["axiom.ax", "journal.ax"]).file_for(day("2026-03-01")), "journal/2026/03.ax");
+        assert_eq!(Layout::new(["2026.ax", "2026/01.ax"]).file_for(day("2026-01-09")), "2026/01.ax");
     }
 
     const MARCH: &str = "\
@@ -773,45 +618,21 @@ mod tests {
         let out = write(
             path,
             MARCH,
-            &[
-                ("2026-03-05", "visa -> a 1 USD"),
-                ("2026-03-07", "visa -> b 2 USD"),
-                ("2026-03-31", "visa -> c 3 USD"),
-            ],
+            &[("2026-03-05", "visa -> a 1 USD"), ("2026-03-07", "visa -> b 2 USD"), ("2026-03-31", "visa -> c 3 USD")],
         );
         let expected = MARCH
-            .replace(
-                "05 phone\n",
-                "05 phone\n05 visa -> a 1 USD\n07 visa -> b 2 USD\n",
-            )
-            .replace(
-                "31 checking = 8_828.87 USD\n",
-                "31 checking = 8_828.87 USD\n31 visa -> c 3 USD\n",
-            );
+            .replace("05 phone\n", "05 phone\n05 visa -> a 1 USD\n07 visa -> b 2 USD\n")
+            .replace("31 checking = 8_828.87 USD\n", "31 checking = 8_828.87 USD\n31 visa -> c 3 USD\n");
         assert_eq!(out, expected);
     }
 
     #[test]
     fn an_item_stays_whole_and_what_is_written_is_never_reformatted() {
-        let out = write(
-            "journal/2026/03.ax",
-            MARCH,
-            &[
-                ("2026-03-10", "visa -> a 1 USD"),
-                ("2026-03-02", "visa -> b 2 USD"),
-            ],
-        );
-        let without_new = out
-            .replace("10 visa -> a 1 USD\n", "")
-            .replace("02 visa -> b 2 USD\n", "");
-        assert_eq!(
-            without_new, MARCH,
-            "every line that was there is there, as it was"
-        );
-        assert!(
-            out.contains("  checking ...\n10 visa -> a 1 USD\n"),
-            "{out}"
-        );
+        let out =
+            write("journal/2026/03.ax", MARCH, &[("2026-03-10", "visa -> a 1 USD"), ("2026-03-02", "visa -> b 2 USD")]);
+        let without_new = out.replace("10 visa -> a 1 USD\n", "").replace("02 visa -> b 2 USD\n", "");
+        assert_eq!(without_new, MARCH, "every line that was there is there, as it was");
+        assert!(out.contains("  checking ...\n10 visa -> a 1 USD\n"), "{out}");
         assert!(out.contains("01 flat\n02 visa -> b 2 USD\n05 me"), "{out}");
     }
 
@@ -821,28 +642,14 @@ mod tests {
         let early = write("journal/2026/03.ax", "10 a\n", &[("2026-03-01", item)]);
         assert_eq!(early, "01 a -> b 1 USD\n10 a\n");
         let late = write("journal/2026/03.ax", "10 a", &[("2026-03-20", item)]);
+        assert_eq!(late, "10 a\n20 a -> b 1 USD\n", "a file without a last newline gets one");
         assert_eq!(
-            late, "10 a\n20 a -> b 1 USD\n",
-            "a file without a last newline gets one"
-        );
-        assert_eq!(
-            write(
-                "journal/2026/03.ax",
-                "",
-                &[("2026-03-20", item), ("2026-03-02", item)]
-            ),
+            write("journal/2026/03.ax", "", &[("2026-03-20", item), ("2026-03-02", item)]),
             "02 a -> b 1 USD\n20 a -> b 1 USD\n"
         );
+        assert_eq!(write("journal.ax", "entity a\n", &[("2026-03-20", item)]), "entity a\n2026-03-20 a -> b 1 USD\n");
         assert_eq!(
-            write("journal.ax", "entity a\n", &[("2026-03-20", item)]),
-            "entity a\n2026-03-20 a -> b 1 USD\n"
-        );
-        assert_eq!(
-            write(
-                "journal/2026/03.ax",
-                "10 a\r\n20 b\r\n",
-                &[("2026-03-15", item)]
-            ),
+            write("journal/2026/03.ax", "10 a\r\n20 b\r\n", &[("2026-03-15", item)]),
             "10 a\r\n15 a -> b 1 USD\r\n20 b\r\n"
         );
     }
@@ -880,41 +687,19 @@ mod tests {
     fn opening_and_ranges_start_with_their_day() {
         let text = "opening 01\n  checking 5 USD\n\n03-01..05-31 gym 10 USD\n";
         let out = write("journal/2026/03.ax", text, &[("2026-03-02", "a -> b 1 USD")]);
-        assert_eq!(
-            out,
-            "opening 01\n  checking 5 USD\n\n03-01..05-31 gym 10 USD\n02 a -> b 1 USD\n"
-        );
+        assert_eq!(out, "opening 01\n  checking 5 USD\n\n03-01..05-31 gym 10 USD\n02 a -> b 1 USD\n");
     }
 
     #[test]
     fn param_rows_join_their_block_in_order() {
         let text = "param cpi\n  2024 310.3\n  2026 320.9\n\nparam other\n  2025 1\n";
-        let rows = [
-            (day("2025-01-01"), "2025 315.6"),
-            (day("2027-01-01"), "2027 325.0"),
-        ];
+        let rows = [(day("2025-01-01"), "2025 315.6"), (day("2027-01-01"), "2027 325.0")];
         let out = insert_rows(text, "cpi", &rows).unwrap();
-        assert_eq!(
-            out,
-            "param cpi\n  2024 310.3\n  2025 315.6\n  2026 320.9\n  2027 325.0\n\nparam other\n  2025 1\n"
-        );
+        assert_eq!(out, "param cpi\n  2024 310.3\n  2025 315.6\n  2026 320.9\n  2027 325.0\n\nparam other\n  2025 1\n");
         assert_eq!(insert_rows(text, "missing", &rows), None);
-        assert_eq!(
-            insert_rows("param empty\n", "empty", &rows).unwrap(),
-            "param empty\n  2025 315.6\n  2027 325.0\n"
-        );
-        let keys = row_keys(
-            "param limit\n  2026 single 0 USD 10%\n  2026-07 joint 5\n",
-            "limit",
-        )
-        .unwrap();
-        assert_eq!(
-            keys,
-            [
-                (day("2026-01-01"), "single".to_string()),
-                (day("2026-07-01"), "joint".to_string())
-            ]
-        );
+        assert_eq!(insert_rows("param empty\n", "empty", &rows).unwrap(), "param empty\n  2025 315.6\n  2027 325.0\n");
+        let keys = row_keys("param limit\n  2026 single 0 USD 10%\n  2026-07 joint 5\n", "limit").unwrap();
+        assert_eq!(keys, [(day("2026-01-01"), "single".to_string()), (day("2026-07-01"), "joint".to_string())]);
     }
 
     #[test]
@@ -926,80 +711,41 @@ mod tests {
             text += &format!("{} visa -> shop 1 USD\n", first.add_days(at / 55));
         }
         let adds: Vec<(Day, String)> = (0..100_000)
-            .map(|at| {
-                (
-                    first.add_days((at * 7 % 3650) as i32),
-                    format!("visa -> new-{at} 2 USD"),
-                )
-            })
+            .map(|at| (first.add_days((at * 7 % 3650) as i32), format!("visa -> new-{at} 2 USD")))
             .collect();
         let inserts: Vec<Insert> = adds
             .iter()
-            .map(|(day, body)| Insert {
-                path: "journal.ax".into(),
-                day: *day,
-                form: Form::Item(body.clone()),
-            })
+            .map(|(day, body)| Insert { path: "journal.ax".into(), day: *day, form: Form::Item(body.clone()) })
             .collect();
         let started = std::time::Instant::now();
         let out = apply(&text, "journal.ax", &inserts.iter().collect::<Vec<_>>())
             .expect("the valid benchmark additions parse as Axiom");
         eprintln!("100,000 lines into 200,000 in {:?}", started.elapsed());
         assert_eq!(out.lines().count(), 300_000);
-        assert!(
-            started.elapsed().as_millis() < 1000,
-            "{:?}",
-            started.elapsed()
-        );
-        let dates: Vec<&str> = out
-            .lines()
-            .map(|line| line.split(' ').next().unwrap())
-            .collect();
-        assert!(
-            dates.windows(2).all(|pair| pair[0] <= pair[1]),
-            "the file is still in day order"
-        );
+        assert!(started.elapsed().as_millis() < 1000, "{:?}", started.elapsed());
+        let dates: Vec<&str> = out.lines().map(|line| line.split(' ').next().unwrap()).collect();
+        assert!(dates.windows(2).all(|pair| pair[0] <= pair[1]), "the file is still in day order");
     }
 
     #[test]
     fn changes_are_per_file_and_leave_untouched_files_out() {
         let inserts = [
-            Insert {
-                path: "b.ax".into(),
-                day: day("2026-01-02"),
-                form: Form::Item("a -> b 1 USD".into()),
-            },
-            Insert {
-                path: "a.ax".into(),
-                day: day("2026-01-02"),
-                form: Form::Item("a -> b 2 USD".into()),
-            },
+            Insert { path: "b.ax".into(), day: day("2026-01-02"), form: Form::Item("a -> b 1 USD".into()) },
+            Insert { path: "a.ax".into(), day: day("2026-01-02"), form: Form::Item("a -> b 2 USD".into()) },
         ];
         let mut paths = Vec::new();
         let mut read = |path: &str| {
             paths.push(path.to_string());
             (path == "a.ax").then(|| "2026-01-01 a -> b 1 USD\n".to_string())
         };
-        let made = changes_at(
-            &inserts,
-            FileId(17),
-            &mut |path| read(path).map(Cow::Owned),
-        )
-        .unwrap();
+        let made = changes_at(&inserts, FileId(17), &mut |path| read(path).map(Cow::Owned)).unwrap();
         drop(read);
         assert_eq!(paths, ["a.ax", "b.ax"]);
-        let shown: Vec<_> = made
-            .iter()
-            .map(|c| (c.path.as_str(), c.before.is_some(), c.after.as_str()))
-            .collect();
+        let shown: Vec<_> = made.iter().map(|c| (c.path.as_str(), c.before.is_some(), c.after.as_str())).collect();
         assert_eq!(
             shown,
             [
-                (
-                    "a.ax",
-                    true,
-                    "2026-01-01 a -> b 1 USD\n2026-01-02 a -> b 2 USD\n"
-                ),
+                ("a.ax", true, "2026-01-01 a -> b 1 USD\n2026-01-02 a -> b 2 USD\n"),
                 ("b.ax", false, "2026-01-02 a -> b 1 USD\n")
             ]
         );

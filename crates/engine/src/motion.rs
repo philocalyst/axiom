@@ -7,8 +7,8 @@
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
 use axiom_model::{
-    Amount, Assert, Book, Class, Detail, Entity, Flow, FlowCodes, FlowView, Mode, Place, Purposed,
-    RuntimeTxn, Select, Text, Waive,
+    Amount, Assert, Book, Class, Detail, Entity, Flow, FlowCodes, FlowView, Mode, Place, Purposed, RuntimeTxn, Select,
+    Text, Waive,
 };
 
 use crate::Cause;
@@ -23,10 +23,7 @@ pub(crate) struct Amounts {
 impl Amounts {
     /// The quantities as written (zero where the source said `?`).
     pub fn written(flow: &Flow) -> Amounts {
-        Amounts {
-            out: flow.out.qty,
-            arrive: flow.arrive.qty,
-        }
+        Amounts { out: flow.out.qty, arrive: flow.arrive.qty }
     }
 }
 
@@ -45,12 +42,7 @@ pub(crate) enum Moves {
 impl Moves {
     fn of(book: &Book, from: Id<Place>, to: Id<Place>) -> Moves {
         let market = book.entities[book.roots.market].place;
-        match (
-            book.places[from].class,
-            book.places[to].class,
-            Some(from) == market,
-            Some(to) == market,
-        ) {
+        match (book.places[from].class, book.places[to].class, Some(from) == market, Some(to) == market) {
             (Class::Outside, Class::Asset, true, _) => Moves::Growth,
             (Class::Asset, Class::Outside, _, true) => Moves::Loss,
             _ => Moves::Value,
@@ -98,15 +90,8 @@ pub(crate) struct Motion<'f> {
 }
 
 impl<'f> Motion<'f> {
-    pub fn new(
-        book: &'f Book,
-        flow: &'f Flow,
-        cause: Cause,
-        day: Day,
-        amounts: Amounts,
-    ) -> Motion<'f> {
-        let txn = RuntimeTxn::journal(flow.txn)
-            .expect("journal motion cannot use the template transaction sentinel");
+    pub fn new(book: &'f Book, flow: &'f Flow, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
+        let txn = RuntimeTxn::journal(flow.txn).expect("journal motion cannot use the template transaction sentinel");
         let flow_ordinal = match cause {
             Cause::Flow(id) => book
                 .txns
@@ -169,32 +154,16 @@ impl<'f> Motion<'f> {
     /// What an assertion posts to close a gap: `moved` arrives at the asserted
     /// place from `counter`, or, negative, leaves it for `counter`. The parcels
     /// belong to the transaction that last touched the place.
-    pub fn pad(
-        book: &'f Book,
-        assert: &Assert,
-        counter: Id<Place>,
-        moved: Qty,
-        waive: Option<Waive>,
-    ) -> Motion<'f> {
-        let (from, to) = if moved.is_negative() {
-            (assert.place, counter)
-        } else {
-            (counter, assert.place)
-        };
+    pub fn pad(book: &'f Book, assert: &Assert, counter: Id<Place>, moved: Qty, waive: Option<Waive>) -> Motion<'f> {
+        let (from, to) = if moved.is_negative() { (assert.place, counter) } else { (counter, assert.place) };
         let (source, target) = (&book.places[from], &book.places[to]);
         let amount = Amount::new(moved.abs(), assert.amount.unit);
         let touching = &book.touching[assert.place];
         let last = touching.partition_point(|&id| book.flows[id].day <= assert.day);
-        let txn = last.checked_sub(1).map_or(
-            RuntimeTxn::Adjustment {
-                place: assert.place,
-                day: assert.day,
-            },
-            |at| {
-                RuntimeTxn::journal(book.flows[touching[at]].txn)
-                    .expect("a Book flow cannot use the template transaction sentinel")
-            },
-        );
+        let txn = last.checked_sub(1).map_or(RuntimeTxn::Adjustment { place: assert.place, day: assert.day }, |at| {
+            RuntimeTxn::journal(book.flows[touching[at]].txn)
+                .expect("a Book flow cannot use the template transaction sentinel")
+        });
         Motion {
             cause: Cause::Time,
             day: assert.day,
@@ -229,16 +198,7 @@ impl<'f> Motion<'f> {
     pub fn reversed(&self) -> Motion<'f> {
         let (from, to) = (self.to, self.from);
         let (source, target) = (self.target, self.source);
-        Motion {
-            from,
-            to,
-            source,
-            target,
-            out: self.arrive,
-            arrive: self.out,
-            moves: self.moves.reversed(),
-            ..*self
-        }
+        Motion { from, to, source, target, out: self.arrive, arrive: self.out, moves: self.moves.reversed(), ..*self }
     }
 
     pub fn is_exchange(&self) -> bool {

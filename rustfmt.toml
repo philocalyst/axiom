@@ -1,0 +1,3 @@
+# The style core was written in. Every line count in docs/v5 is measured under this file.
+max_width = 120
+use_small_heuristics = "Max"

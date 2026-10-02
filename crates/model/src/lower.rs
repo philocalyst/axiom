@@ -38,17 +38,9 @@ pub(crate) enum Mention<'s> {
     /// A tab-relevant pair of ends, from a claim clause or contract promise.
     Ends { ends: Ends<'s>, loc: Loc },
     /// `PARTY owes OWNER AMOUNT`, or its reverse.
-    Claim {
-        subject: Name<'s>,
-        creditor: Name<'s>,
-        loc: Loc,
-    },
+    Claim { subject: Name<'s>, creditor: Name<'s>, loc: Loc },
     /// A party or owner named by `for` on a tab-relevant line.
-    For {
-        other: Name<'s>,
-        ends: Ends<'s>,
-        loc: Loc,
-    },
+    For { other: Name<'s>, ends: Ends<'s>, loc: Loc },
     /// A flow with an explicit deadline.
     Due { ends: Ends<'s>, loc: Loc },
     /// The contract's party and any holding/loan/deposit endpoints.
@@ -82,23 +74,11 @@ pub(crate) enum EndpointContext<'s> {
     ForParty,
     PurposeObject,
     SelectorEnd,
-    ContractParty {
-        contract: Name<'s>,
-    },
-    ContractHolding {
-        contract: Name<'s>,
-        direction: Direction,
-    },
-    ContractBody {
-        contract: Name<'s>,
-    },
-    ContractAlso {
-        contract: Name<'s>,
-    },
-    DeclarationAlso {
-        name: Name<'s>,
-        kind: ast::DeclKind,
-    },
+    ContractParty { contract: Name<'s> },
+    ContractHolding { contract: Name<'s>, direction: Direction },
+    ContractBody { contract: Name<'s> },
+    ContractAlso { contract: Name<'s> },
+    DeclarationAlso { name: Name<'s>, kind: ast::DeclKind },
 }
 
 /// Visits every endpoint candidate without allocating or interning it. The
@@ -112,16 +92,10 @@ pub(crate) fn visit_endpoints<'s>(
         let file = &site.source.file;
         for item in &file.items {
             match item.kind {
-                ItemKind::Txn(id) => visit_flow_ends(
-                    file,
-                    &file[id].flow,
-                    site.home,
-                    EndpointContext::Transaction,
-                    &mut visit,
-                ),
-                ItemKind::Statement(id) => {
-                    visit_statement_ends(file, &file[id], site.home, &mut visit)
+                ItemKind::Txn(id) => {
+                    visit_flow_ends(file, &file[id].flow, site.home, EndpointContext::Transaction, &mut visit)
                 }
+                ItemKind::Statement(id) => visit_statement_ends(file, &file[id], site.home, &mut visit),
                 ItemKind::Opening(id) => {
                     let opening = &file[id];
                     for leg in &file[opening.lines] {
@@ -152,9 +126,7 @@ pub(crate) fn visit_endpoints<'s>(
                             site.home,
                             party,
                             file.loc(party.0),
-                            EndpointContext::ContractParty {
-                                contract: contract.name,
-                            },
+                            EndpointContext::ContractParty { contract: contract.name },
                         );
                     }
                     for leg in &file[contract.body.legs] {
@@ -162,9 +134,7 @@ pub(crate) fn visit_endpoints<'s>(
                             site.home,
                             leg.end.name,
                             leg.loc,
-                            EndpointContext::ContractBody {
-                                contract: contract.name,
-                            },
+                            EndpointContext::ContractBody { contract: contract.name },
                         );
                         visit_tail_names(file, leg.tail, site.home, &mut visit);
                     }
@@ -177,14 +147,10 @@ pub(crate) fn visit_endpoints<'s>(
                                 file,
                                 flow,
                                 site.home,
-                                EndpointContext::ContractAlso {
-                                    contract: contract.name,
-                                },
+                                EndpointContext::ContractAlso { contract: contract.name },
                                 &mut visit,
                             ),
-                            ast::AlsoLine::Item(item) => {
-                                visit_tail_names(file, item.tail, site.home, &mut visit)
-                            }
+                            ast::AlsoLine::Item(item) => visit_tail_names(file, item.tail, site.home, &mut visit),
                         }
                     }
                     if let Some(deadline) = &contract.deadline
@@ -196,17 +162,11 @@ pub(crate) fn visit_endpoints<'s>(
                 ItemKind::Decl(id) => {
                     let declaration = &file[id];
                     for also in &file[declaration.alsos] {
-                        let context = EndpointContext::DeclarationAlso {
-                            name: declaration.name,
-                            kind: declaration.what,
-                        };
+                        let context =
+                            EndpointContext::DeclarationAlso { name: declaration.name, kind: declaration.what };
                         match &also.line {
-                            ast::AlsoLine::Flow(flow) => {
-                                visit_flow_ends(file, flow, site.home, context, &mut visit)
-                            }
-                            ast::AlsoLine::Item(item) => {
-                                visit_tail_names(file, item.tail, site.home, &mut visit)
-                            }
+                            ast::AlsoLine::Flow(flow) => visit_flow_ends(file, flow, site.home, context, &mut visit),
+                            ast::AlsoLine::Item(item) => visit_tail_names(file, item.tail, site.home, &mut visit),
                         }
                     }
                 }
@@ -231,12 +191,7 @@ fn visit_statement_ends<'s>(
         visit(home, name, file.loc(name.0), context);
     }
     if let ast::Verb::Owes { creditor, .. } = &statement.verb {
-        visit(
-            home,
-            *creditor,
-            file.loc(creditor.0),
-            EndpointContext::ClaimCreditor,
-        );
+        visit(home, *creditor, file.loc(creditor.0), EndpointContext::ClaimCreditor);
     }
     for leg in &file[statement.body.legs] {
         visit(home, leg.end.name, leg.loc, EndpointContext::Statement);
@@ -282,9 +237,7 @@ fn visit_tail_names<'s>(
     for clause in &file[clauses] {
         match clause.kind {
             ClauseKind::Via(name) => visit(home, name, clause.at, EndpointContext::Via),
-            ClauseKind::For(ast::For::Whom(name)) => {
-                visit(home, name, clause.at, EndpointContext::ForParty)
-            }
+            ClauseKind::For(ast::For::Whom(name)) => visit(home, name, clause.at, EndpointContext::ForParty),
             ClauseKind::Purpose(purpose) => {
                 if let Some(name) = purpose.of {
                     visit(home, name, clause.at, EndpointContext::PurposeObject);
@@ -309,10 +262,7 @@ pub(crate) fn survey<'s>(sites: &[Site<'_, 's>]) -> JournalSurvey<'s> {
                 ItemKind::Opening(id) => {
                     let opening = &file[id];
                     for leg in &file[opening.lines] {
-                        let ends = Ends {
-                            from: None,
-                            to: Some(leg.end.name),
-                        };
+                        let ends = Ends { from: None, to: Some(leg.end.name) };
                         scan_tail(file, leg.tail, ends, &mut survey);
                     }
                     for claim in &file[opening.claims] {
@@ -345,12 +295,9 @@ fn inputs<'s>(
         let args = &file[prop.args];
         if args.len() > 2 {
             diags.push(
-                Diagnostic::error(
-                    "contract-input",
-                    "an input takes a name and at most one unit",
-                )
-                .label(prop.loc, "extra input arguments are not used")
-                .help("write `input NAME` or `input NAME UNIT`"),
+                Diagnostic::error("contract-input", "an input takes a name and at most one unit")
+                    .label(prop.loc, "extra input arguments are not used")
+                    .help("write `input NAME` or `input NAME UNIT`"),
             );
             continue;
         }
@@ -371,13 +318,10 @@ fn inputs<'s>(
         let symbol = world.book.names.intern(name.0);
         if let Some(first) = seen.get(&symbol) {
             diags.push(
-                Diagnostic::error(
-                    "duplicate-input",
-                    format!("input `{}` is declared twice", name.0),
-                )
-                .label(prop.loc, "declared again here")
-                .context(*first, "first declared here")
-                .help("keep one declaration so every occurrence has one binding"),
+                Diagnostic::error("duplicate-input", format!("input `{}` is declared twice", name.0))
+                    .label(prop.loc, "declared again here")
+                    .context(*first, "first declared here")
+                    .help("keep one declaration so every occurrence has one binding"),
             );
             continue;
         }
@@ -399,19 +343,13 @@ fn inputs<'s>(
                     ExprKind::Unit(unit) | ExprKind::Name(unit) => unit,
                     _ => {
                         diags.push(
-                            Diagnostic::error(
-                                "contract-input-unit",
-                                "an input unit must name a commodity",
-                            )
-                            .label(expr.loc, "write a commodity such as `USD`"),
+                            Diagnostic::error("contract-input-unit", "an input unit must name a commodity")
+                                .label(expr.loc, "write a commodity such as `USD`"),
                         );
                         continue;
                     }
                 };
-                match world.commodity_of(Word {
-                    text: unit_name.0,
-                    loc: expr.loc,
-                }) {
+                match world.commodity_of(Word { text: unit_name.0, loc: expr.loc }) {
                     Ok(unit) => Some(unit),
                     Err(diagnostic) => {
                         diags.push(diagnostic);
@@ -421,11 +359,7 @@ fn inputs<'s>(
             }
         };
 
-        found.push(Input {
-            name: symbol,
-            unit,
-            loc: prop.loc,
-        });
+        found.push(Input { name: symbol, unit, loc: prop.loc });
     }
     found.into_boxed_slice()
 }
@@ -441,18 +375,10 @@ struct ContractRoots {
 fn contract_roots<'s>(file: &ast::File<'s>, contract: &ast::Contract<'s>) -> ContractRoots {
     let roots = |schedule: Option<ast::Schedule<'s>>| {
         schedule.map_or_else(Vec::new, |schedule| {
-            changed_term_roots(
-                file,
-                schedule.terms,
-                contract.body,
-                contract.deadline.as_ref(),
-            )
+            changed_term_roots(file, schedule.terms, contract.body, contract.deadline.as_ref())
         })
     };
-    ContractRoots {
-        regular: roots(contract.schedule),
-        standing: roots(contract.standing),
-    }
+    ContractRoots { regular: roots(contract.schedule), standing: roots(contract.standing) }
 }
 
 fn push_payment_roots<'s>(payment: Option<ast::Payment<'s>>, roots: &mut Vec<(ast::ExprId, Ty)>) {
@@ -481,22 +407,15 @@ fn changed_term_roots<'s>(
     roots
 }
 
-fn push_body_roots<'s>(
-    file: &ast::File<'s>,
-    body: ast::Body<'s>,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
-) {
+fn push_body_roots<'s>(file: &ast::File<'s>, body: ast::Body<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
     for leg in &file[body.legs] {
         match leg.amount {
             ast::Quantity::Amount(ast::Amount::Computed(expr))
                 if matches!(file.exprs[expr].kind, ast::ExprKind::Pct(_)) => {}
-            ast::Quantity::Amount(amount)
-            | ast::Quantity::Pending(amount)
-            | ast::Quantity::Target(amount) => push_amount_root(amount, roots),
-            ast::Quantity::Unknown(_)
-            | ast::Quantity::All(_)
-            | ast::Quantity::Rest
-            | ast::Quantity::Whole => {}
+            ast::Quantity::Amount(amount) | ast::Quantity::Pending(amount) | ast::Quantity::Target(amount) => {
+                push_amount_root(amount, roots)
+            }
+            ast::Quantity::Unknown(_) | ast::Quantity::All(_) | ast::Quantity::Rest | ast::Quantity::Whole => {}
         }
     }
     for item in &file[body.items] {
@@ -522,39 +441,22 @@ fn compile_roots<'s>(
     inputs: &[Input],
     roots: &[(ast::ExprId, Ty)],
     diags: &mut Vec<Diagnostic>,
-) -> Option<(
-    crate::book::TemplateProgram,
-    Map<ast::ExprId, crate::law::NodeId>,
-)> {
+) -> Option<(crate::book::TemplateProgram, Map<ast::ExprId, crate::law::NodeId>)> {
     if roots.is_empty() {
         return Some((crate::book::TemplateProgram::default(), Map::default()));
     }
-    let (program, nodes) =
-        crate::laws::compile_template(world, diags, file, home, subject, name, inputs, roots)?;
-    let by_expr = roots
-        .iter()
-        .zip(nodes.iter())
-        .map(|(&(expr, _), &node)| (expr, node))
-        .collect();
+    let (program, nodes) = crate::laws::compile_template(world, diags, file, home, subject, name, inputs, roots)?;
+    let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
     Some((program, by_expr))
 }
 
-fn scan_contract<'s>(
-    file: &ast::File<'s>,
-    contract: &ast::Contract<'s>,
-    loc: Loc,
-    survey: &mut JournalSurvey<'s>,
-) {
+fn scan_contract<'s>(file: &ast::File<'s>, contract: &ast::Contract<'s>, loc: Loc, survey: &mut JournalSurvey<'s>) {
     let party = contract.party.unwrap_or(contract.name);
     let primary = contract.schedule.or(contract.standing);
     let holding = primary.and_then(|schedule| schedule.terms.holding.map(|holding| holding.name));
-    let has_loan = file[contract.props]
-        .iter()
-        .any(|prop| prop.name.0 == "loan");
-    let deposit = file[contract.props]
-        .iter()
-        .find(|prop| prop.name.0 == "deposit")
-        .and_then(|prop| last_name(file, prop.args));
+    let has_loan = file[contract.props].iter().any(|prop| prop.name.0 == "loan");
+    let deposit =
+        file[contract.props].iter().find(|prop| prop.name.0 == "deposit").and_then(|prop| last_name(file, prop.args));
 
     survey.mentions.push(Mention::Promise {
         name: contract.name,
@@ -567,24 +469,12 @@ fn scan_contract<'s>(
 
     let mut template_ends = None;
     if let Some(schedule) = contract.schedule {
-        let ends = schedule_ends(
-            party,
-            schedule
-                .terms
-                .holding
-                .map(|holding| (holding.direction, holding.name)),
-        );
+        let ends = schedule_ends(party, schedule.terms.holding.map(|holding| (holding.direction, holding.name)));
         mention_ends(ends, schedule.at, survey);
         template_ends = Some(ends);
     }
     if let Some(schedule) = contract.standing {
-        let ends = schedule_ends(
-            party,
-            schedule
-                .terms
-                .holding
-                .map(|holding| (holding.direction, holding.name)),
-        );
+        let ends = schedule_ends(party, schedule.terms.holding.map(|holding| (holding.direction, holding.name)));
         mention_ends(ends, schedule.at, survey);
         template_ends.get_or_insert(ends);
     }
@@ -612,29 +502,17 @@ fn scan_contract<'s>(
 }
 
 fn last_name<'s>(file: &ast::File<'s>, expressions: ast::Many<ast::ExprId>) -> Option<Name<'s>> {
-    file[expressions]
-        .iter()
-        .rev()
-        .find_map(|&id| match file.exprs[id].kind {
-            ExprKind::Name(name) if name.0 != "into" => Some(name),
-            _ => None,
-        })
+    file[expressions].iter().rev().find_map(|&id| match file.exprs[id].kind {
+        ExprKind::Name(name) if name.0 != "into" => Some(name),
+        _ => None,
+    })
 }
 
 fn schedule_ends<'s>(party: Name<'s>, holding: Option<(Direction, Name<'s>)>) -> Ends<'s> {
     match holding {
-        Some((Direction::From, holding)) => Ends {
-            from: Some(holding),
-            to: Some(party),
-        },
-        Some((Direction::Into, holding)) => Ends {
-            from: Some(party),
-            to: Some(holding),
-        },
-        None => Ends {
-            from: Some(party),
-            to: None,
-        },
+        Some((Direction::From, holding)) => Ends { from: Some(holding), to: Some(party) },
+        Some((Direction::Into, holding)) => Ends { from: Some(party), to: Some(holding) },
+        None => Ends { from: Some(party), to: None },
     }
 }
 
@@ -658,12 +536,7 @@ fn scan_flow<'s>(file: &ast::File<'s>, flow: &ast::Flow<'s>, survey: &mut Journa
     }
 }
 
-fn scan_body<'s>(
-    file: &ast::File<'s>,
-    body: ast::Body<'s>,
-    header: Ends<'s>,
-    survey: &mut JournalSurvey<'s>,
-) {
+fn scan_body<'s>(file: &ast::File<'s>, body: ast::Body<'s>, header: Ends<'s>, survey: &mut JournalSurvey<'s>) {
     for leg in &file[body.legs] {
         let ends = leg_ends(header, leg.end);
         scan_tail(file, leg.tail, ends, survey);
@@ -673,35 +546,18 @@ fn scan_body<'s>(
     }
 }
 
-fn scan_item<'s>(
-    file: &ast::File<'s>,
-    item: &ast::LineItem<'s>,
-    ends: Ends<'s>,
-    survey: &mut JournalSurvey<'s>,
-) {
+fn scan_item<'s>(file: &ast::File<'s>, item: &ast::LineItem<'s>, ends: Ends<'s>, survey: &mut JournalSurvey<'s>) {
     scan_tail(file, item.tail, ends, survey);
 }
 
-fn scan_statement<'s>(
-    file: &ast::File<'s>,
-    statement: &ast::Statement<'s>,
-    loc: Loc,
-    survey: &mut JournalSurvey<'s>,
-) {
+fn scan_statement<'s>(file: &ast::File<'s>, statement: &ast::Statement<'s>, loc: Loc, survey: &mut JournalSurvey<'s>) {
     let subject = match statement.subject {
         Subject::Name(name) => Some(name),
         _ => None,
     };
     if let (Some(subject), Verb::Owes { creditor, .. }) = (subject, &statement.verb) {
-        survey.mentions.push(Mention::Claim {
-            subject,
-            creditor: *creditor,
-            loc,
-        });
-        let ends = Ends {
-            from: Some(subject),
-            to: Some(*creditor),
-        };
+        survey.mentions.push(Mention::Claim { subject, creditor: *creditor, loc });
+        let ends = Ends { from: Some(subject), to: Some(*creditor) };
         scan_tail(file, statement.tail, ends, survey);
         for item in &file[statement.body.items] {
             scan_tail(file, item.tail, ends, survey);
@@ -716,18 +572,11 @@ fn scan_statement<'s>(
     let ends = match (&statement.subject, &statement.verb) {
         (Subject::Name(contract), Verb::Now(ast::Change::Terms(id))) => {
             let terms = &file[*id];
-            terms.holding.map_or(
-                Ends {
-                    from: Some(*contract),
-                    to: None,
-                },
-                |holding| schedule_ends(*contract, Some((holding.direction, holding.name))),
-            )
+            terms.holding.map_or(Ends { from: Some(*contract), to: None }, |holding| {
+                schedule_ends(*contract, Some((holding.direction, holding.name)))
+            })
         }
-        _ => Ends {
-            from: subject,
-            to: None,
-        },
+        _ => Ends { from: subject, to: None },
     };
     if matches!(statement.verb, Verb::Now(ast::Change::Terms(_))) {
         mention_ends(ends, loc, survey);
@@ -763,18 +612,11 @@ fn scan_tail<'s>(
         match clause.kind {
             ClauseKind::For(ast::For::Whom(other)) => {
                 mention_ends(ends, clause.at, survey);
-                survey.mentions.push(Mention::For {
-                    other,
-                    ends,
-                    loc: clause.at,
-                });
+                survey.mentions.push(Mention::For { other, ends, loc: clause.at });
             }
             ClauseKind::Due(_) => {
                 mention_ends(ends, clause.at, survey);
-                survey.mentions.push(Mention::Due {
-                    ends,
-                    loc: clause.at,
-                });
+                survey.mentions.push(Mention::Due { ends, loc: clause.at });
             }
             _ => {}
         }
@@ -789,14 +631,8 @@ fn mention_ends<'s>(ends: Ends<'s>, loc: Loc, survey: &mut JournalSurvey<'s>) {
 
 fn leg_ends<'s>(header: Ends<'s>, leg: End<'s>) -> Ends<'s> {
     match (header.from, header.to) {
-        (Some(from), None) => Ends {
-            from: Some(from),
-            to: Some(leg.name),
-        },
-        (None, Some(to)) => Ends {
-            from: Some(leg.name),
-            to: Some(to),
-        },
+        (Some(from), None) => Ends { from: Some(from), to: Some(leg.name) },
+        (None, Some(to)) => Ends { from: Some(leg.name), to: Some(to) },
         _ => header,
     }
 }
@@ -839,15 +675,8 @@ opening 2026-01-01
 ";
         let (file, diagnostics) = parse(FileId(0), source_text, Folder::of(path));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let source = Source {
-            path,
-            file,
-            embedded: false,
-        };
-        let site = Site {
-            source: &source,
-            home: Home::Project,
-        };
+        let source = Source { path, file, embedded: false };
+        let site = Site { source: &source, home: Home::Project };
         let survey = survey(&[site]);
 
         assert!(survey.mentions.iter().any(|mention| matches!(
@@ -896,30 +725,21 @@ opening 2026-01-01
 ";
         let (file, diagnostics) = parse(FileId(0), source_text, Folder::of(path));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let source = Source {
-            path,
-            file,
-            embedded: false,
-        };
-        let site = Site {
-            source: &source,
-            home: Home::Project,
-        };
+        let source = Source { path, file, embedded: false };
+        let site = Site { source: &source, home: Home::Project };
         let mut seen = Vec::new();
         visit_endpoints(&[site], |home, name, loc, context| {
             assert_eq!(home, Home::Project);
             assert!(loc.start <= loc.end);
             assert_eq!(loc.file, FileId(0));
-            assert!(
-                source_text[loc.range()].contains(name.0),
-                "{name:?} at {loc:?}"
-            );
+            assert!(source_text[loc.range()].contains(name.0), "{name:?} at {loc:?}");
             seen.push((name.0, context, loc));
         });
 
-        assert!(seen.iter().any(|(name, context, _)| {
-            *name == "borrower" && matches!(context, EndpointContext::ClaimSubject)
-        }));
+        assert!(
+            seen.iter()
+                .any(|(name, context, _)| { *name == "borrower" && matches!(context, EndpointContext::ClaimSubject) })
+        );
         assert_eq!(
             seen.iter()
                 .filter(|(name, context, _)| {
@@ -929,15 +749,14 @@ opening 2026-01-01
             2,
             "the dated claim and opening claim are both visited"
         );
-        assert!(seen.iter().any(|(name, context, _)| {
-            *name == "lender" && matches!(context, EndpointContext::ClaimCreditor)
-        }));
-        assert!(seen.iter().any(|(name, context, _)| {
-            *name == "holder" && matches!(context, EndpointContext::ForParty)
-        }));
-        assert!(seen.iter().any(|(name, context, _)| {
-            *name == "bank" && matches!(context, EndpointContext::Via)
-        }));
+        assert!(
+            seen.iter()
+                .any(|(name, context, _)| { *name == "lender" && matches!(context, EndpointContext::ClaimCreditor) })
+        );
+        assert!(
+            seen.iter().any(|(name, context, _)| { *name == "holder" && matches!(context, EndpointContext::ForParty) })
+        );
+        assert!(seen.iter().any(|(name, context, _)| { *name == "bank" && matches!(context, EndpointContext::Via) }));
         assert!(seen.iter().any(|(name, context, _)| {
             *name == "issuer"
                 && matches!(context, EndpointContext::DeclarationAlso { name: decl, kind: ast::DeclKind::Entity } if decl.0 == "fund")
@@ -947,12 +766,12 @@ opening 2026-01-01
                 && matches!(context, EndpointContext::DeclarationAlso { name: decl, kind: ast::DeclKind::Entity } if decl.0 == "fund")
         }));
         assert!(seen.iter().any(|(name, context, _)| {
-            *name == "escrow"
-                && matches!(context, EndpointContext::ContractAlso { contract } if contract.0 == "lease")
+            *name == "escrow" && matches!(context, EndpointContext::ContractAlso { contract } if contract.0 == "lease")
         }));
-        assert!(seen.iter().any(|(name, context, _)| {
-            *name == "recipient" && matches!(context, EndpointContext::ForParty)
-        }));
+        assert!(
+            seen.iter()
+                .any(|(name, context, _)| { *name == "recipient" && matches!(context, EndpointContext::ForParty) })
+        );
     }
 
     #[test]
@@ -967,19 +786,11 @@ contract flat with greystar
 ";
         let (file, diagnostics) = parse(FileId(0), source_text, Folder::of(path));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let ItemKind::Contract(id) = file.items[0].kind else {
-            panic!("contract expected")
-        };
+        let ItemKind::Contract(id) = file.items[0].kind else { panic!("contract expected") };
         let roots = contract_roots(&file, &file[id]);
         assert_eq!(roots.regular.len(), 2);
-        assert!(matches!(
-            file.exprs[roots.regular[0].0].kind,
-            ExprKind::Of(_, _)
-        ));
-        assert!(matches!(
-            file.exprs[roots.regular[1].0].kind,
-            ExprKind::Pct(_)
-        ));
+        assert!(matches!(file.exprs[roots.regular[0].0].kind, ExprKind::Of(_, _)));
+        assert!(matches!(file.exprs[roots.regular[1].0].kind, ExprKind::Pct(_)));
     }
 
     #[test]
@@ -996,30 +807,18 @@ contract c with p
 ";
         let (file, diagnostics) = parse(FileId(0), source_text, Folder::of("contracts.ax"));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let ItemKind::Contract(contract_id) = file.items[0].kind else {
-            panic!("contract expected")
-        };
+        let ItemKind::Contract(contract_id) = file.items[0].kind else { panic!("contract expected") };
         let contract = &file[contract_id];
         assert!(contract.schedule.is_some() && contract.standing.is_some());
         let roots = contract_roots(&file, contract);
         assert_eq!(roots.regular.len(), 3);
         assert_eq!(roots.standing.len(), 3);
-        assert!(matches!(
-            file.exprs[roots.regular[0].0].kind,
-            ExprKind::Of(_, _)
-        ));
-        assert!(matches!(
-            file.exprs[roots.standing[0].0].kind,
-            ExprKind::Of(_, _)
-        ));
+        assert!(matches!(file.exprs[roots.regular[0].0].kind, ExprKind::Of(_, _)));
+        assert!(matches!(file.exprs[roots.standing[0].0].kind, ExprKind::Of(_, _)));
 
-        let ItemKind::Statement(statement_id) = file.items[1].kind else {
-            panic!("statement expected")
-        };
+        let ItemKind::Statement(statement_id) = file.items[1].kind else { panic!("statement expected") };
         let statement = &file[statement_id];
-        let Verb::Now(ast::Change::Terms(terms_id)) = statement.verb else {
-            panic!("terms change expected")
-        };
+        let Verb::Now(ast::Change::Terms(terms_id)) = statement.verb else { panic!("terms change expected") };
         let changed = changed_term_roots(&file, file[terms_id], statement.body, None);
         assert_eq!(changed.len(), 2);
     }

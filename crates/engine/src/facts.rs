@@ -13,8 +13,8 @@ use axiom_model::{
 };
 
 use crate::Bound;
-use crate::eval::Occasion;
 use crate::budget;
+use crate::eval::Occasion;
 
 /// Everything static about one law.
 pub(crate) struct LawFacts {

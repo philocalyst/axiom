@@ -42,9 +42,7 @@ pub(crate) fn fits(wanted: Ty, found: Ty) -> bool {
     wanted == found
         || matches!(
             (wanted, found),
-            (Ty::Amount(Dim::Any), Ty::Amount(_))
-                | (Ty::Amount(_), Ty::Empty)
-                | (Ty::Empty, Ty::Amount(_))
+            (Ty::Amount(Dim::Any), Ty::Amount(_)) | (Ty::Amount(_), Ty::Empty) | (Ty::Empty, Ty::Amount(_))
         )
 }
 
@@ -73,12 +71,7 @@ fn out_of_range(what: &str, loc: Loc) -> Diagnostic {
 impl<'s> World<'s> {
     /// The value and type of `expr` if it is a literal: a number, an amount, a
     /// date, text, a unit, a code. Other expressions are for the caller.
-    pub fn literal(
-        &mut self,
-        home: Home,
-        file: &File<'s>,
-        expr: &Expr<'s>,
-    ) -> Result<Option<(Value, Ty)>, Diagnostic> {
+    pub fn literal(&mut self, home: Home, file: &File<'s>, expr: &Expr<'s>) -> Result<Option<(Value, Ty)>, Diagnostic> {
         Ok(Some(match expr.kind {
             ExprKind::Num(dec) => {
                 (Value::Num(dec.to_ratio().ok_or_else(|| out_of_range("number", expr.loc))?), Ty::Num)
@@ -109,10 +102,9 @@ impl<'s> World<'s> {
             ExprKind::Unit(symbol) => {
                 (Value::Unit(self.commodity_of(Word { text: symbol.0, loc: expr.loc })?), Ty::Unit)
             }
-            ExprKind::Purpose(name) => (
-                Value::Purpose(self.purpose(home, Word { text: name.0, loc: expr.loc })?, None),
-                Ty::Purpose,
-            ),
+            ExprKind::Purpose(name) => {
+                (Value::Purpose(self.purpose(home, Word { text: name.0, loc: expr.loc })?, None), Ty::Purpose)
+            }
             ExprKind::Code(code) => {
                 let sym = self.book.names.intern(code.name());
                 match axiom_core::glob::is_pattern(code.name()) {
@@ -187,10 +179,7 @@ impl<'s> World<'s> {
     fn missing_asset(&self, word: Word<'_>) -> Diagnostic {
         let suggestion = axiom_core::diag::closest(
             word.text,
-            self.book
-                .assets
-                .iter()
-                .map(|(_, asset)| self.book.names.name(asset.name)),
+            self.book.assets.iter().map(|(_, asset)| self.book.names.name(asset.name)),
         );
         crate::errors::unknown("unknown-asset", "asset", word, suggestion)
     }

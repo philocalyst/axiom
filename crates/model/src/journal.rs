@@ -5,8 +5,8 @@ use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, Place,
-    Policy, Purpose, ScheduleKind, Sign, System, TemplateAmount, TemplateItemParent, TemplateProgram, Text,
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, Place, Policy, Purpose, ScheduleKind,
+    Sign, System, TemplateAmount, TemplateItemParent, TemplateProgram, Text,
 };
 use crate::law::{Law, NodeId, Subject};
 
@@ -69,7 +69,6 @@ impl Flow {
     pub fn code_runs(&self) -> FlowCodes {
         FlowCodes { header: self.header_codes, local: self.codes }
     }
-
 }
 
 /// Two ranges in the book-wide code arena: transaction header first, then the
@@ -112,12 +111,14 @@ pub struct RuntimeFlow {
 
 impl RuntimeFlow {
     pub fn source(flow: Flow) -> RuntimeFlow {
-        let txn = RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
+        let txn =
+            RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
         RuntimeFlow { txn, flow, detail: None, ordinal: 0 }
     }
 
     pub fn source_at(flow: Flow, ordinal: u32) -> RuntimeFlow {
-        let txn = RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
+        let txn =
+            RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
         RuntimeFlow { txn, flow, detail: None, ordinal }
     }
 }
@@ -172,13 +173,7 @@ impl RuntimeTxn {
         ordinal: u32,
         source: Option<Id<Txn>>,
     ) -> RuntimeTxn {
-        RuntimeTxn::ContractOccurrence {
-            contract,
-            schedule,
-            day,
-            ordinal,
-            source: source.and_then(JournalTxn::new),
-        }
+        RuntimeTxn::ContractOccurrence { contract, schedule, day, ordinal, source: source.and_then(JournalTxn::new) }
     }
 
     /// The actual Book transaction that supplies source location/codes, if
@@ -239,13 +234,7 @@ mod runtime_txn_tests {
 
     #[test]
     fn contract_identity_is_stable_when_a_journal_transaction_keeps_it() {
-        let key = |source| RuntimeTxn::contract_occurrence(
-            Id::new(2),
-            ScheduleKind::Standing,
-            Day(42),
-            3,
-            source,
-        );
+        let key = |source| RuntimeTxn::contract_occurrence(Id::new(2), ScheduleKind::Standing, Day(42), 3, source);
         assert_eq!(key(None), key(Some(Id::new(9))));
         assert_eq!(key(None).source_txn(), None);
         assert_eq!(key(Some(Id::new(9))).source_txn(), Some(Id::new(9)));
@@ -253,23 +242,10 @@ mod runtime_txn_tests {
 
     #[test]
     fn occurrence_keys_include_schedule_and_ordinal_but_not_source_provenance() {
-        let occurrence = |schedule, ordinal| {
-            RuntimeTxn::contract_occurrence(
-                Id::new(2),
-                schedule,
-                Day(42),
-                ordinal,
-                None,
-            )
-        };
+        let occurrence =
+            |schedule, ordinal| RuntimeTxn::contract_occurrence(Id::new(2), schedule, Day(42), ordinal, None);
         let base = occurrence(ScheduleKind::Regular, 3);
-        let kept = RuntimeTxn::contract_occurrence(
-            Id::new(2),
-            ScheduleKind::Regular,
-            Day(42),
-            3,
-            Some(Id::new(9)),
-        );
+        let kept = RuntimeTxn::contract_occurrence(Id::new(2), ScheduleKind::Regular, Day(42), 3, Some(Id::new(9)));
         let standing = occurrence(ScheduleKind::Standing, 3);
         let next = occurrence(ScheduleKind::Regular, 4);
         assert_eq!(base, kept);
@@ -286,14 +262,8 @@ mod runtime_txn_tests {
         assert_eq!(RuntimeTxn::Adjustment { place: Id::new(4), day: Day(42) }.source_txn(), None);
         assert!(JournalTxn::new(TEMPLATE_TXN).is_none());
         assert_eq!(
-            RuntimeTxn::contract_occurrence(
-                Id::new(2),
-                ScheduleKind::Regular,
-                Day(42),
-                3,
-                Some(TEMPLATE_TXN),
-            )
-            .source_txn(),
+            RuntimeTxn::contract_occurrence(Id::new(2), ScheduleKind::Regular, Day(42), 3, Some(TEMPLATE_TXN),)
+                .source_txn(),
             None
         );
     }
@@ -648,11 +618,7 @@ impl Txn {
 
     /// The contract whose principal is disbursed on its loan date.
     pub fn loan_origin(&self) -> Option<Id<Contract>> {
-        if self.kind == TxnKind::LoanOrigin {
-            self.contract
-        } else {
-            None
-        }
+        if self.kind == TxnKind::LoanOrigin { self.contract } else { None }
     }
 }
 

@@ -8,8 +8,8 @@ use std::borrow::Cow;
 use memchr::memchr;
 
 use crate::Span;
-use crate::csv::Broken;
 use crate::cell::{ABSENT, Cell};
+use crate::csv::Broken;
 
 /// A tag, and the text after it up to the next tag.
 struct Tag<'t> {
@@ -143,21 +143,14 @@ fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
             let close = close_rel;
             from = close + 1;
             let raw = text[open + 1..close].trim();
-            let (closing, raw) = raw
-                .strip_prefix('/')
-                .map_or((false, raw), |name| (true, name));
-            let (empty, raw) = raw
-                .strip_suffix('/')
-                .map_or((false, raw), |name| (true, name));
+            let (closing, raw) = raw.strip_prefix('/').map_or((false, raw), |name| (true, name));
+            let (empty, raw) = raw.strip_suffix('/').map_or((false, raw), |name| (true, name));
             let name = raw.split_whitespace().next().unwrap_or("");
             return Some(Ok(Tag {
                 name,
                 closing,
                 empty,
-                at: Span {
-                    start: open,
-                    end: close + 1,
-                },
+                at: Span { start: open, end: close + 1 },
                 value: "",
                 span: Span { start: close + 1, end: close + 1 },
                 cdata: false,
@@ -228,15 +221,18 @@ fn decode(text: &str) -> Result<Cow<'_, str>, &'static str> {
         };
         let entity = &text[open + 1..end];
         let value = match entity {
-            "lt" => '<', "gt" => '>', "quot" => '"', "apos" => '\'', "amp" => '&',
+            "lt" => '<',
+            "gt" => '>',
+            "quot" => '"',
+            "apos" => '\'',
+            "amp" => '&',
             name if name.starts_with("#x") || name.starts_with("#X") => {
-                let code = u32::from_str_radix(&name[2..], 16)
-                    .map_err(|_| "a numeric XML character reference is invalid")?;
+                let code =
+                    u32::from_str_radix(&name[2..], 16).map_err(|_| "a numeric XML character reference is invalid")?;
                 char::from_u32(code).ok_or("a numeric XML character reference is invalid")?
             }
             name if name.starts_with('#') => {
-                let code = name[1..].parse::<u32>()
-                    .map_err(|_| "a numeric XML character reference is invalid")?;
+                let code = name[1..].parse::<u32>().map_err(|_| "a numeric XML character reference is invalid")?;
                 char::from_u32(code).ok_or("a numeric XML character reference is invalid")?
             }
             _ => return Err("the export uses an unknown entity reference"),
@@ -252,10 +248,7 @@ fn decode(text: &str) -> Result<Cow<'_, str>, &'static str> {
 /// any case.
 fn ends_with(open: &[&str], wanted: &[&str]) -> bool {
     open.len() >= wanted.len()
-        && open[open.len() - wanted.len()..]
-            .iter()
-            .zip(wanted)
-            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        && open[open.len() - wanted.len()..].iter().zip(wanted).all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Append one text node to the first value found at an element path. XML text
@@ -276,10 +269,8 @@ fn append_text<'t>(
     }
     let leading_bytes = raw.len() - raw.trim_start().len();
     let trailing_bytes = raw.len() - raw.trim_end().len();
-    let part_span = Span {
-        start: span.start.saturating_add(leading_bytes),
-        end: span.end.saturating_sub(trailing_bytes),
-    };
+    let part_span =
+        Span { start: span.start.saturating_add(leading_bytes), end: span.end.saturating_sub(trailing_bytes) };
 
     if cell.span == ABSENT {
         let value = decoded.as_ref();
@@ -335,12 +326,7 @@ pub(crate) fn scan<'t>(
 ) {
     let wanted: Vec<Vec<&str>> = paths.iter().map(|path| path.split('/').collect()).collect();
     let (mut count, mut seen) = (0, false);
-    let mut cells: Vec<Cell<'t>> = (0..paths.len())
-        .map(|_| Cell {
-            text: Cow::Borrowed(""),
-            span: ABSENT,
-        })
-        .collect();
+    let mut cells: Vec<Cell<'t>> = (0..paths.len()).map(|_| Cell { text: Cow::Borrowed(""), span: ABSENT }).collect();
     let mut capturing = vec![false; paths.len()];
     let mut trailing_space = vec![false; paths.len()];
     let mut stack: Vec<&str> = Vec::new();
@@ -359,29 +345,17 @@ pub(crate) fn scan<'t>(
         if tag.name.is_empty() {
             if record_start.is_some() {
                 for (slot, path) in wanted.iter().enumerate() {
-                    if ends_with(&stack, path)
-                        && (cells[slot].span == ABSENT || capturing[slot])
-                    {
-                        if let Err(what) = append_text(
-                            &mut cells[slot],
-                            &mut trailing_space[slot],
-                            tag.value,
-                            tag.span,
-                            tag.cdata,
-                        ) {
-                            each(Err(Broken {
-                                row: count,
-                                span: tag.span,
-                                what,
-                            }));
+                    if ends_with(&stack, path) && (cells[slot].span == ABSENT || capturing[slot]) {
+                        if let Err(what) =
+                            append_text(&mut cells[slot], &mut trailing_space[slot], tag.value, tag.span, tag.cdata)
+                        {
+                            each(Err(Broken { row: count, span: tag.span, what }));
                             return;
                         }
                         capturing[slot] = true;
                     }
                 }
-                if !tag.value.trim().is_empty()
-                    && wanted.iter().any(|path| ends_with(&stack, path))
-                {
+                if !tag.value.trim().is_empty() && wanted.iter().any(|path| ends_with(&stack, path)) {
                     leaf = stack.last().copied();
                 }
             }
@@ -393,10 +367,7 @@ pub(crate) fn scan<'t>(
                 count += 1;
                 record_start = Some(tag.at);
                 for cell in &mut cells {
-                    *cell = Cell {
-                        text: Cow::Borrowed(""),
-                        span: ABSENT,
-                    };
+                    *cell = Cell { text: Cow::Borrowed(""), span: ABSENT };
                 }
                 capturing.fill(false);
                 trailing_space.fill(false);
@@ -410,11 +381,7 @@ pub(crate) fn scan<'t>(
             if tag.name.eq_ignore_ascii_case(records) {
                 let whole = Span { start: begin.start, end: tag.at.end };
                 record_start = None;
-                if !each(Ok(Found {
-                    number: count,
-                    whole,
-                    cells: &cells,
-                })) {
+                if !each(Ok(Found { number: count, whole, cells: &cells })) {
                     return;
                 }
                 stack.clear();
@@ -432,10 +399,7 @@ pub(crate) fn scan<'t>(
                 }
             } else {
                 // Also closes what an unclosed empty element (SGML) left open inside it.
-                if let Some(depth) = stack
-                    .iter()
-                    .rposition(|name| name.eq_ignore_ascii_case(tag.name))
-                {
+                if let Some(depth) = stack.iter().rposition(|name| name.eq_ignore_ascii_case(tag.name)) {
                     for (slot, path) in wanted.iter().enumerate() {
                         if ends_with(&stack, path) {
                             capturing[slot] = false;
@@ -464,20 +428,9 @@ pub(crate) fn scan<'t>(
         }
     }
     if let Some(begin) = record_start {
-        each(Err(Broken {
-            row: count,
-            span: begin,
-            what: "the record is never closed",
-        }));
+        each(Err(Broken { row: count, span: begin, what: "the record is never closed" }));
     } else if !seen {
-        each(Err(Broken {
-            row: 0,
-            span: Span {
-                start: 0,
-                end: text.len().min(1),
-            },
-            what: "there are no tags in it",
-        }));
+        each(Err(Broken { row: 0, span: Span { start: 0, end: text.len().min(1) }, what: "there are no tags in it" }));
     }
 }
 
@@ -494,13 +447,7 @@ mod tests {
                     found
                         .cells
                         .iter()
-                        .map(|cell| {
-                            if cell.span == ABSENT {
-                                "-".into()
-                            } else {
-                                cell.text.to_string()
-                            }
-                        })
+                        .map(|cell| if cell.span == ABSENT { "-".into() } else { cell.text.to_string() })
                         .collect(),
                 ),
                 Err(broken) => all.push(vec![format!("broken: {}", broken.what)]),
@@ -515,15 +462,8 @@ mod tests {
         let text = "OFXHEADER:100\n\n<OFX>\n<STMTTRN>\n<TRNTYPE>DEBIT\n<DTPOSTED>20260105120000[-5:EST]\n<TRNAMT>-84.20\n\
                     <NAME>TRADER JOE'S\n<MEMO>\n</STMTTRN>\n<STMTTRN><DTPOSTED>20260106<TRNAMT>-1.00<NAME>B &amp; C</STMTTRN></OFX>";
         assert_eq!(
-            read(
-                text,
-                "STMTTRN",
-                &["DTPOSTED", "TRNAMT", "NAME", "MEMO", "CHECKNUM"]
-            ),
-            [
-                ["20260105120000[-5:EST]", "-84.20", "TRADER JOE'S", "-", "-"],
-                ["20260106", "-1.00", "B & C", "-", "-"],
-            ],
+            read(text, "STMTTRN", &["DTPOSTED", "TRNAMT", "NAME", "MEMO", "CHECKNUM"]),
+            [["20260105120000[-5:EST]", "-84.20", "TRADER JOE'S", "-", "-"], ["20260106", "-1.00", "B & C", "-", "-"],],
             "an empty MEMO is nothing, and does not swallow the closing tag of its record"
         );
     }
@@ -535,18 +475,7 @@ mod tests {
                     <NtryDtls><TxDtls><Amt>99.00</Amt><RmtInf><Ustrd>one</Ustrd><Ustrd>two</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>\
                     <Ntry><Amt>5.00</Amt><Nil/><BookgDt><Dt>2026-01-06</Dt></BookgDt></Ntry></Stmt></Document>";
         assert_eq!(
-            read(
-                text,
-                "ntry",
-                &[
-                    "Amt",
-                    "cdtdbtind",
-                    "BookgDt/Dt",
-                    "Dt",
-                    "RmtInf/Ustrd",
-                    "Nope/Amt"
-                ]
-            ),
+            read(text, "ntry", &["Amt", "cdtdbtind", "BookgDt/Dt", "Dt", "RmtInf/Ustrd", "Nope/Amt"]),
             [
                 ["100.00", "CRDT", "2026-01-05", "2026-01-05", "one", "-"],
                 ["5.00", "-", "2026-01-06", "2026-01-06", "-", "-"],
@@ -602,52 +531,26 @@ mod tests {
 
     #[test]
     fn records_that_cannot_be_read_are_said_so() {
-        assert_eq!(
-            read("<A><R><x>1</x></A>", "R", &["x"]),
-            [["broken: the record is never closed"]]
-        );
-        assert_eq!(
-            read("a plain text file", "R", &["x"]),
-            [["broken: there are no tags in it"]]
-        );
-        assert!(
-            read("<A></A>", "R", &["x"]).is_empty(),
-            "no records is an empty statement, not a broken one"
-        );
+        assert_eq!(read("<A><R><x>1</x></A>", "R", &["x"]), [["broken: the record is never closed"]]);
+        assert_eq!(read("a plain text file", "R", &["x"]), [["broken: there are no tags in it"]]);
+        assert!(read("<A></A>", "R", &["x"]).is_empty(), "no records is an empty statement, not a broken one");
         assert_eq!(read("<R><x>1</x></R><R><x>2</x></R>", "R", &["x"]).len(), 2);
     }
 
     #[test]
     fn the_reader_stops_when_asked() {
         let mut count = 0;
-        scan(
-            "<R/><R><x>1</x></R><R><x>2</x></R><R><x>3</x></R>",
-            "R",
-            &["x"],
-            |_| {
-                count += 1;
-                count < 2
-            },
-        );
+        scan("<R/><R><x>1</x></R><R><x>2</x></R><R><x>3</x></R>", "R", &["x"], |_| {
+            count += 1;
+            count < 2
+        });
         assert_eq!(count, 2);
     }
 
     #[test]
     fn garbage_never_panics() {
-        for text in [
-            "",
-            "<",
-            ">",
-            "<>",
-            "</>",
-            "<R>",
-            "</R>",
-            "<R><",
-            "<!--",
-            "<R><a>1</R>",
-            "<R></a></R>",
-            "<\u{ff}>",
-        ] {
+        for text in ["", "<", ">", "<>", "</>", "<R>", "</R>", "<R><", "<!--", "<R><a>1</R>", "<R></a></R>", "<\u{ff}>"]
+        {
             let _ = read(text, "R", &["a", "a/b"]);
         }
     }
@@ -665,15 +568,10 @@ mod tests {
         }
         let started = std::time::Instant::now();
         let (mut count, mut tags) = (0, 0);
-        scan(
-            &text,
-            "STMTTRN",
-            &["DTPOSTED", "TRNAMT", "NAME", "MEMO"],
-            |_| {
-                count += 1;
-                true
-            },
-        );
+        scan(&text, "STMTTRN", &["DTPOSTED", "TRNAMT", "NAME", "MEMO"], |_| {
+            count += 1;
+            true
+        });
         tags += super::tags(&text).count();
         eprintln!(
             "found {count} records ({} MB, {tags} tags) in {:?}, tags alone included",

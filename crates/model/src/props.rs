@@ -12,13 +12,13 @@
 
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
 use axiom_syntax::{
-    BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, ItemKind, Policy,
-    Prop as Line, Rates, Setting, Subject, Verb,
+    BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, ItemKind, Policy, Prop as Line, Rates,
+    Setting, Subject, Verb,
 };
 
 use crate::book::{
-    Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy,
-    Residence, Role, Share, Sort, Take,
+    Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy, Residence, Role, Share,
+    Sort, Take,
 };
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
@@ -116,32 +116,16 @@ type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
 const BUILTINS: [(&str, &[Target], Reader); 25] = [
-    ("holds", &[Target::Place], |a| {
-        Ok(Assign::Holds(a.holds()?, a.line.loc))
-    }),
-    ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| {
-        a.policy().map(Assign::Select)
-    }),
-    ("opened", &[Target::Place], |a| {
-        Ok(Assign::Opened(a.day()?, a.line.loc))
-    }),
-    ("closed", &[Target::Place], |a| {
-        Ok(Assign::Closed(a.day()?, a.line.loc))
-    }),
-    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], |a| {
-        a.span().map(Assign::Liquidity)
-    }),
+    ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?, a.line.loc))),
+    ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| a.policy().map(Assign::Select)),
+    ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?, a.line.loc))),
+    ("closed", &[Target::Place], |a| Ok(Assign::Closed(a.day()?, a.line.loc))),
+    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], |a| a.span().map(Assign::Liquidity)),
     ("via", &[Target::Entity], |a| a.place().map(Assign::Via)),
     ("lives", &[Target::Entity], |a| a.residence()),
-    ("member", &[Target::Entity], |a| {
-        Ok(Assign::Member(a.entity()?, a.line.loc))
-    }),
-    ("currency", &[Target::Entity], |a| {
-        a.currency().map(Assign::Currency)
-    }),
-    ("citizen", &[Target::Entity], |a| {
-        a.citizens().map(Assign::Citizen)
-    }),
+    ("member", &[Target::Entity], |a| Ok(Assign::Member(a.entity()?, a.line.loc))),
+    ("currency", &[Target::Entity], |a| a.currency().map(Assign::Currency)),
+    ("citizen", &[Target::Entity], |a| a.citizens().map(Assign::Citizen)),
     ("books", &[Target::Entity], |a| a.books().map(Assign::Books)),
     ("purpose", &[Target::Kind, Target::Entity], |a| a.purpose().map(Assign::Purpose)),
     ("pays", &[Target::Kind], |a| a.purpose().map(Assign::Pays)),
@@ -149,9 +133,7 @@ const BUILTINS: [(&str, &[Target], Reader); 25] = [
     ("sales-tax", &[Target::Kind], |a| a.percent().map(Assign::SalesTax)),
     ("share", &[Target::Kind], |a| a.share().map(Assign::Share)),
     ("part", &[Target::Asset], |a| a.part_of().map(Assign::PartOf)),
-    ("precision", &[Target::Commodity], |a| {
-        a.count(MAX_SCALE).map(Assign::Precision)
-    }),
+    ("precision", &[Target::Commodity], |a| a.count(MAX_SCALE).map(Assign::Precision)),
     ("name", &[Target::Commodity], |a| {
         let title = a.text()?;
         Ok(Assign::Title(a.world.book.names.intern(title)))
@@ -164,11 +146,7 @@ const BUILTINS: [(&str, &[Target], Reader); 25] = [
     ("restricted", &[Target::Kind], |_| Ok(Assign::Restricted)),
     ("deferred", &[Target::Kind], |_| Ok(Assign::Deferred)),
     ("basis", &[Target::Kind], |a| {
-        Ok(Assign::Basis(if a.word(&["zero", "cost"])? == "zero" {
-            Basis::Zero
-        } else {
-            Basis::Cost
-        }))
+        Ok(Assign::Basis(if a.word(&["zero", "cost"])? == "zero" { Basis::Zero } else { Basis::Cost }))
     }),
     ("claim", &[Target::Kind], |_| Ok(Assign::Claim)),
     ("has", &[Target::Kind], |a| a.has()),
@@ -176,16 +154,10 @@ const BUILTINS: [(&str, &[Target], Reader); 25] = [
 
 /// Words that read a value off a thing in a law (`self.balance`), so a
 /// declared property may not take them.
-const FIELD_WORDS: [&str; 8] = [
-    "balance", "basis", "owner", "kind", "age", "unit", "year", "month",
-];
+const FIELD_WORDS: [&str; 8] = ["balance", "basis", "owner", "kind", "age", "unit", "year", "month"];
 
-const POLICIES: [(&str, Policy); 4] = [
-    ("fifo", Policy::Fifo),
-    ("lifo", Policy::Lifo),
-    ("hifo", Policy::Hifo),
-    ("prorata", Policy::Prorata),
-];
+const POLICIES: [(&str, Policy); 4] =
+    [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
 
 const TYPES: [(&str, Ty); 14] = [
     ("date", Ty::Day),
@@ -230,10 +202,7 @@ impl PropTable {
 
     /// The declared property names of one family.
     pub fn names(&self, family: Ty) -> impl Iterator<Item = Sym> {
-        self.declared
-            .keys()
-            .filter(move |key| key.0 == family)
-            .map(|key| key.1)
+        self.declared.keys().filter(move |key| key.0 == family).map(|key| key.1)
     }
 }
 
@@ -315,20 +284,12 @@ struct Defaults {
 
 impl Defaults {
     fn empty(kinds: usize) -> Defaults {
-        Defaults {
-            by_kind: vec![Vec::new(); kinds],
-        }
+        Defaults { by_kind: vec![Vec::new(); kinds] }
     }
 
     /// Applies defaults from the oldest ancestor through `kind`, reusing one
     /// caller-owned path buffer across every instance of the same target.
-    fn apply(
-        &self,
-        kinds: &Tree<Kind>,
-        kind: Id<Kind>,
-        path: &mut Vec<Id<Kind>>,
-        mut apply: impl FnMut(&Assign),
-    ) {
+    fn apply(&self, kinds: &Tree<Kind>, kind: Id<Kind>, path: &mut Vec<Id<Kind>>, mut apply: impl FnMut(&Assign)) {
         path.clear();
         path.extend(kinds.lineage(kind));
         path.reverse();
@@ -359,9 +320,7 @@ impl Entity {
         match assign {
             Assign::Purpose(purpose) => self.purpose = Some(*purpose),
             Assign::Via(place) => self.place = Some(*place),
-            Assign::Lives(residence) => {
-                self.lives = self.lives.iter().copied().chain([*residence]).collect()
-            }
+            Assign::Lives(residence) => self.lives = self.lives.iter().copied().chain([*residence]).collect(),
             Assign::Member(entity, _) => self.member = Some(*entity),
             Assign::Currency(currency) => self.currency = *currency,
             Assign::Citizen(citizen) => self.citizen = citizen.clone(),
@@ -414,30 +373,20 @@ impl<'a, 's> Args<'_, 'a, 's> {
     /// The next argument, which the property needs to be `wanted`.
     fn next_id(&mut self, wanted: &str) -> Result<ExprId, Diagnostic> {
         let Some(&id) = self.ids.get(self.next) else {
-            return Err(Diagnostic::error(
-                "property-argument",
-                format!("`{}` needs {wanted}", self.line.name.0),
-            )
-            .label(self.line.loc, format!("{wanted} should follow here")));
+            return Err(Diagnostic::error("property-argument", format!("`{}` needs {wanted}", self.line.name.0))
+                .label(self.line.loc, format!("{wanted} should follow here")));
         };
         self.next += 1;
         Ok(id)
     }
 
     fn wrong(&self, expr: &Expr, wanted: &str) -> Diagnostic {
-        Diagnostic::error(
-            "property-type",
-            format!("`{}` needs {wanted}", self.line.name.0),
-        )
-        .label(expr.loc, format!("this is {}", describe(&expr.kind)))
+        Diagnostic::error("property-type", format!("`{}` needs {wanted}", self.line.name.0))
+            .label(expr.loc, format!("this is {}", describe(&expr.kind)))
     }
 
     /// The next argument, as `pick` reads it out of the expression.
-    fn arg<T>(
-        &mut self,
-        wanted: &str,
-        pick: impl FnOnce(&Expr<'s>) -> Option<T>,
-    ) -> Result<T, Diagnostic> {
+    fn arg<T>(&mut self, wanted: &str, pick: impl FnOnce(&Expr<'s>) -> Option<T>) -> Result<T, Diagnostic> {
         let expr = &self.file.exprs[self.next_id(wanted)?];
         pick(expr).ok_or_else(|| self.wrong(expr, wanted))
     }
@@ -446,27 +395,18 @@ impl<'a, 's> Args<'_, 'a, 's> {
         let Some(extra) = self.peek() else {
             return Ok(());
         };
-        Err(Diagnostic::error(
-            "property-argument",
-            format!("`{}` takes no more arguments here", self.line.name.0),
-        )
-        .label(extra.loc, "unexpected"))
+        Err(Diagnostic::error("property-argument", format!("`{}` takes no more arguments here", self.line.name.0))
+            .label(extra.loc, "unexpected"))
     }
 
     /// One of the `allowed` words.
     fn word(&mut self, allowed: &[&str]) -> Result<&'s str, Diagnostic> {
-        let wanted = if allowed.len() == 1 {
-            format!("`{}`", allowed[0])
-        } else {
-            format!("one of {}", list(allowed))
-        };
+        let wanted = if allowed.len() == 1 { format!("`{}`", allowed[0]) } else { format!("one of {}", list(allowed)) };
         let expr = &self.file.exprs[self.next_id(&wanted)?];
         match expr.kind {
             ExprKind::Name(name) if allowed.contains(&name.0) => Ok(name.0),
             ExprKind::Name(name) => {
-                let error = self
-                    .wrong(expr, &wanted)
-                    .label(expr.loc, format!("`{}` is not one of them", name.0));
+                let error = self.wrong(expr, &wanted).label(expr.loc, format!("`{}` is not one of them", name.0));
                 Err(suggest(error, expr.loc, name.0, allowed.iter().copied()))
             }
             _ => Err(self.wrong(expr, &wanted)),
@@ -475,57 +415,34 @@ impl<'a, 's> Args<'_, 'a, 's> {
 
     fn name(&mut self, wanted: &str) -> Result<Word<'s>, Diagnostic> {
         let name = |expr: &Expr<'s>| match expr.kind {
-            ExprKind::Name(name) => Some(Word {
-                text: name.0,
-                loc: expr.loc,
-            }),
+            ExprKind::Name(name) => Some(Word { text: name.0, loc: expr.loc }),
             _ => None,
         };
         self.arg(wanted, name)
     }
 
     fn day(&mut self) -> Result<Day, Diagnostic> {
-        self.arg("a date", |expr| {
-            if let ExprKind::Date(day) = expr.kind {
-                Some(day)
-            } else {
-                None
-            }
-        })
+        self.arg("a date", |expr| if let ExprKind::Date(day) = expr.kind { Some(day) } else { None })
     }
 
     fn span(&mut self) -> Result<Span, Diagnostic> {
         let span = |expr: &Expr| {
-            if let ExprKind::Span(span) = expr.kind {
-                Some(span)
-            } else {
-                None
-            }
+            if let ExprKind::Span(span) = expr.kind { Some(span) } else { None }
         };
         self.arg("a span such as `5d` or `1y6m`", span)
     }
 
     fn text(&mut self) -> Result<&'s str, Diagnostic> {
-        self.arg("text in quotes", |expr| {
-            if let ExprKind::Str(text) = expr.kind {
-                Some(text.0)
-            } else {
-                None
-            }
-        })
+        self.arg("text in quotes", |expr| if let ExprKind::Str(text) = expr.kind { Some(text.0) } else { None })
     }
 
     /// A whole number from zero to `max`.
     fn count(&mut self, max: u8) -> Result<u8, Diagnostic> {
-        self.arg(&format!("a whole number up to {max}"), |expr| {
-            match expr.kind {
-                ExprKind::Num(number) => number
-                    .to_qty(0)
-                    .ok()
-                    .and_then(|qty| u8::try_from(qty.0).ok())
-                    .filter(|&n| n <= max),
-                _ => None,
+        self.arg(&format!("a whole number up to {max}"), |expr| match expr.kind {
+            ExprKind::Num(number) => {
+                number.to_qty(0).ok().and_then(|qty| u8::try_from(qty.0).ok()).filter(|&n| n <= max)
             }
+            _ => None,
         })
     }
 
@@ -559,10 +476,8 @@ impl<'a, 's> Args<'_, 'a, 's> {
             systems.push(self.world.system(word)?);
         }
         if systems.is_empty() {
-            Err(
-                Diagnostic::error("property-argument", "`citizen` needs a system")
-                    .label(self.line.loc, "name a system here"),
-            )
+            Err(Diagnostic::error("property-argument", "`citizen` needs a system")
+                .label(self.line.loc, "name a system here"))
         } else {
             Ok(systems.into_boxed_slice())
         }
@@ -577,23 +492,14 @@ impl<'a, 's> Args<'_, 'a, 's> {
 
     fn purpose(&mut self) -> Result<At<Id<Purpose>>, Diagnostic> {
         let word = self.name("a purpose")?;
-        Ok(At {
-            value: self.world.purpose(self.home, word)?,
-            loc: word.loc,
-        })
+        Ok(At { value: self.world.purpose(self.home, word)?, loc: word.loc })
     }
 
     fn takes(&mut self) -> Result<At<Take>, Diagnostic> {
         let to = self.purpose()?;
         self.word(&["from"])?;
         let from = self.purpose()?;
-        Ok(At {
-            value: Take {
-                to: to.value,
-                from: from.value,
-            },
-            loc: self.line.loc,
-        })
+        Ok(At { value: Take { to: to.value, from: from.value }, loc: self.line.loc })
     }
 
     fn share(&mut self) -> Result<Share, Diagnostic> {
@@ -611,12 +517,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
         self.word(&["for"])?;
         let word = self.name("an entity")?;
         let entity = self.world.entity(self.home, word)?;
-        Ok(Share {
-            rate,
-            entity,
-            measure: None,
-            loc: self.line.loc,
-        })
+        Ok(Share { rate, entity, measure: None, loc: self.line.loc })
     }
 
     fn part_of(&mut self) -> Result<At<Id<Asset>>, Diagnostic> {
@@ -627,32 +528,20 @@ impl<'a, 's> Args<'_, 'a, 's> {
                 word.text,
                 self.world.book.assets.iter().map(|(_, asset)| self.world.book.name(asset.name)),
             );
-            return Err(crate::errors::unknown(
-                "unknown-asset",
-                "asset",
-                word,
-                suggestion,
-            ));
+            return Err(crate::errors::unknown("unknown-asset", "asset", word, suggestion));
         };
-        Ok(At {
-            value: asset,
-            loc: word.loc,
-        })
+        Ok(At { value: asset, loc: word.loc })
     }
 
     fn policy(&mut self) -> Result<Policy, Diagnostic> {
         let words: Vec<&str> = POLICIES.iter().map(|policy| policy.0).collect();
         let word = self.word(&words)?;
-        Ok(POLICIES
-            .iter()
-            .find(|policy| policy.0 == word)
-            .map_or(Policy::Fifo, |policy| policy.1))
+        Ok(POLICIES.iter().find(|policy| policy.0 == word).map_or(Policy::Fifo, |policy| policy.1))
     }
 
     /// `holds USD, VTI`, or `holds any`.
     fn holds(&mut self) -> Result<Option<Box<[Id<Commodity>]>>, Diagnostic> {
-        if matches!(self.peek().map(|expr| &expr.kind), Some(ExprKind::Name(name)) if name.0 == "any")
-        {
+        if matches!(self.peek().map(|expr| &expr.kind), Some(ExprKind::Name(name)) if name.0 == "any") {
             self.word(&["any"])?;
             return Ok(None);
         }
@@ -662,17 +551,11 @@ impl<'a, 's> Args<'_, 'a, 's> {
                 return Err(self.wrong(expr, "commodities such as `USD`, or `any`"));
             };
             self.next += 1;
-            units.push(self.world.commodity_of(Word {
-                text: symbol.0,
-                loc: expr.loc,
-            })?);
+            units.push(self.world.commodity_of(Word { text: symbol.0, loc: expr.loc })?);
         }
         match units.is_empty() {
-            true => Err(Diagnostic::error(
-                "property-argument",
-                "`holds` needs commodities or `any`",
-            )
-            .label(self.line.loc, "name what it holds")),
+            true => Err(Diagnostic::error("property-argument", "`holds` needs commodities or `any`")
+                .label(self.line.loc, "name what it holds")),
             false => Ok(Some(units.into())),
         }
     }
@@ -689,12 +572,9 @@ impl<'a, 's> Args<'_, 'a, 's> {
             }
         }
         let Some(days) = Days::new(from, until) else {
-            return Err(Diagnostic::error(
-                "residence-order",
-                "this residence ends before it begins",
-            )
-            .label(self.line.loc, "`until` is earlier than `from`")
-            .help("swap the two dates"));
+            return Err(Diagnostic::error("residence-order", "this residence ends before it begins")
+                .label(self.line.loc, "`until` is earlier than `from`")
+                .help("swap the two dates"));
         };
         Ok(Assign::Lives(Residence { days, system }))
     }
@@ -708,46 +588,27 @@ impl<'a, 's> Args<'_, 'a, 's> {
         };
         let wanted = format!("a type: {}", list(&TYPES.map(|ty| ty.0)));
         let ty = self.arg(&wanted, ty)?;
-        if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text)
-        {
-            return Err(Diagnostic::error(
-                "reserved-property",
-                format!("`{}` is a built-in property", name.text),
-            )
-            .label(name.loc, "choose another name")
-            .note(
-                "built-in properties keep their meaning everywhere, so a kind cannot redefine them",
-            ));
+        if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text) {
+            return Err(Diagnostic::error("reserved-property", format!("`{}` is a built-in property", name.text))
+                .label(name.loc, "choose another name")
+                .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them"));
         }
-        Ok(Assign::Has(Has {
-            name: self.world.book.names.intern(name.text),
-            ty,
-            loc: Some(name.loc),
-        }))
+        Ok(Assign::Has(Has { name: self.world.book.names.intern(name.text), ty, loc: Some(name.loc) }))
     }
 
     /// The value of a property a kind declared.
     fn declared(&mut self, has: Has) -> Result<Assign, Diagnostic> {
         let id = self.next_id("a value")?;
-        let (value, _) = self
-            .world
-            .constant(self.home, self.file, id, Some(has.ty))?;
+        let (value, _) = self.world.constant(self.home, self.file, id, Some(has.ty))?;
         // v3 bridge: a property holds from the beginning; statements that change one come with the v4 model.
-        Ok(Assign::Prop(Prop {
-            name: has.name,
-            value,
-            since: Day::MIN,
-            loc: Some(self.line.loc),
-        }))
+        Ok(Assign::Prop(Prop { name: has.name, value, since: Day::MIN, loc: Some(self.line.loc) }))
     }
 }
 
 fn validate_share_rate(rate: Ratio, loc: Loc) -> Result<(), Diagnostic> {
     if rate.is_negative() || rate.num() > rate.den() {
-        return Err(
-            Diagnostic::error("share-rate-range", "a share must be between 0% and 100%")
-                .label(loc, "this share is outside the allowed range"),
-        );
+        return Err(Diagnostic::error("share-rate-range", "a share must be between 0% and 100%")
+            .label(loc, "this share is outside the allowed range"));
     }
     Ok(())
 }
@@ -761,11 +622,7 @@ struct Lines<'a, 's> {
 
 impl<'a, 's> Lines<'a, 's> {
     fn from_native(written: NativeDecl<'a, 's>) -> Lines<'a, 's> {
-        Lines {
-            home: written.home,
-            file: written.file,
-            lines: &written.file[written.decl.props],
-        }
+        Lines { home: written.home, file: written.file, lines: &written.file[written.decl.props] }
     }
 }
 
@@ -780,37 +637,16 @@ fn read_line<'s>(
     kind: Id<Kind>,
 ) -> Result<Assign, Diagnostic> {
     let word = line.name.0;
-    let builtin = BUILTINS
-        .iter()
-        .find(|entry| entry.0 == word && targets.iter().any(|t| entry.1.contains(t)));
-    let declared = world
-        .book
-        .names
-        .get(word)
-        .and_then(|sym| has.iter().find(|has| has.name == sym))
-        .copied();
+    let builtin = BUILTINS.iter().find(|entry| entry.0 == word && targets.iter().any(|t| entry.1.contains(t)));
+    let declared = world.book.names.get(word).and_then(|sym| has.iter().find(|has| has.name == sym)).copied();
     let read = match (builtin, declared) {
         (Some(entry), _) => Ok(entry.2),
         (None, Some(has)) => Err(has),
         (None, None) => {
-            return Err(unknown_property(
-                world,
-                at.file.loc(word),
-                targets[0],
-                kind,
-                has,
-                word,
-            ));
+            return Err(unknown_property(world, at.file.loc(word), targets[0], kind, has, word));
         }
     };
-    let mut args = Args {
-        world,
-        file: at.file,
-        ids: &at.file[line.args],
-        line,
-        home: at.home,
-        next: 0,
-    };
+    let mut args = Args { world, file: at.file, ids: &at.file[line.args], line, home: at.home, next: 0 };
     let assign = match read {
         Ok(read) => read(&mut args)?,
         Err(has) => args.declared(has)?,
@@ -820,43 +656,21 @@ fn read_line<'s>(
 }
 
 /// `benificiary` is not a property of an account of kind `529`.
-fn unknown_property(
-    world: &World,
-    loc: Loc,
-    target: Target,
-    kind: Id<Kind>,
-    has: &[Has],
-    word: &str,
-) -> Diagnostic {
+fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, has: &[Has], word: &str) -> Diagnostic {
     let kind_name = world.book.name(world.book.kinds[kind].name);
-    let mut valid: Vec<&str> = BUILTINS
-        .iter()
-        .filter(|entry| entry.1.contains(&target))
-        .map(|entry| entry.0)
-        .collect();
+    let mut valid: Vec<&str> = BUILTINS.iter().filter(|entry| entry.1.contains(&target)).map(|entry| entry.0).collect();
     valid.extend(has.iter().map(|has| world.book.name(has.name)));
     let of = match target {
         Target::Kind => format!("kind `{kind_name}`"),
         target => format!("{} of kind `{kind_name}`", article(target.noun())),
     };
-    let error = Diagnostic::error(
-        "unknown-property",
-        format!("`{word}` is not a property of {of}"),
-    )
-    .label(loc, "no such property");
+    let error = Diagnostic::error("unknown-property", format!("`{word}` is not a property of {of}"))
+        .label(loc, "no such property");
     let error = suggest(error, loc, word, valid.iter().copied());
     match BUILTINS.iter().find(|entry| entry.0 == word) {
         Some(entry) => {
-            let owners: Vec<String> = entry
-                .1
-                .iter()
-                .map(|owner| format!("{}s", owner.noun()))
-                .collect();
-            error.note(format!(
-                "`{word}` describes {}, not {}",
-                owners.join(" and "),
-                article(target.noun())
-            ))
+            let owners: Vec<String> = entry.1.iter().map(|owner| format!("{}s", owner.noun())).collect();
+            error.note(format!("`{word}` describes {}, not {}", owners.join(" and "), article(target.noun())))
         }
         None => error,
     }
@@ -943,18 +757,10 @@ pub(crate) fn declare<'a, 's>(
                 continue;
             };
             let decl = &file[id];
-            let native = NativeDecl {
-                home: site.home,
-                file,
-                decl,
-                loc: item.loc,
-            };
+            let native = NativeDecl { home: site.home, file, decl, loc: item.loc };
             decls.push(native);
             if decl.what == DeclKind::Kind {
-                let word = Word {
-                    text: decl.name.0,
-                    loc: item.loc,
-                };
+                let word = Word { text: decl.name.0, loc: item.loc };
                 if let Ok(kind) = world.kind(site.home, word) {
                     kind_decls.entry(kind).or_insert(native);
                 }
@@ -978,9 +784,7 @@ pub(crate) fn declare<'a, 's>(
             .parent(kind)
             .map(|parent| world.book.kinds[parent].has.iter().copied().collect())
             .unwrap_or_default();
-        let inherited = inherited
-            .iter()
-            .filter(|above| !own.iter().any(|child| child.name == above.name));
+        let inherited = inherited.iter().filter(|above| !own.iter().any(|child| child.name == above.name));
         world.book.kinds[kind].has = own.iter().chain(inherited).copied().collect();
     }
 
@@ -1003,20 +807,14 @@ pub(crate) fn declare<'a, 's>(
                 diags.push(unknown_native_property(world, target, line));
                 continue;
             };
-            let Some(value) = property_value(world, written.home, written.file, line, has, diags)
-            else {
+            let Some(value) = property_value(world, written.home, written.file, line, has, diags) else {
                 continue;
             };
             stage_unique(
                 world,
                 &mut seen,
                 target.target,
-                Prop {
-                    name: has.name,
-                    value,
-                    since: Day::MIN,
-                    loc: Some(line.loc),
-                },
+                Prop { name: has.name, value, since: Day::MIN, loc: Some(line.loc) },
                 diags,
             );
         }
@@ -1038,14 +836,9 @@ pub(crate) fn declare<'a, 's>(
                 continue;
             }
             let property_name = world.book.names.intern(line.name.0);
-            let Some(target) = native_statement_target(
-                world,
-                site.home,
-                statement.subject,
-                property_name,
-                item.loc,
-                diags,
-            ) else {
+            let Some(target) =
+                native_statement_target(world, site.home, statement.subject, property_name, item.loc, diags)
+            else {
                 // The statement pass owns unresolved subjects. This pass only
                 // consumes a custom property after its target kind is known.
                 continue;
@@ -1057,32 +850,24 @@ pub(crate) fn declare<'a, 's>(
             let Some(value) = property_value(world, site.home, file, line, has, diags) else {
                 continue;
             };
-            let until = file[statement.tail]
-                .iter()
-                .find_map(|clause| match clause.kind {
-                    ClauseKind::Until(day) => Some(day),
-                    _ => None,
-                });
+            let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
+                ClauseKind::Until(day) => Some(day),
+                _ => None,
+            });
             if until.is_some_and(|day| day < statement.date) {
                 diags.push(
-                    Diagnostic::error(
-                        "property-until-order",
-                        "this property change ends before it begins",
-                    )
-                    .label(line.loc, "`until` is earlier than the change")
-                    .help("move the end date to the change date or later"),
+                    Diagnostic::error("property-until-order", "this property change ends before it begins")
+                        .label(line.loc, "`until` is earlier than the change")
+                        .help("move the end date to the change date or later"),
                 );
                 continue;
             }
             let key = (target_key(target.target), has.name, statement.date);
             if let Some(first) = seen.get(&key).copied() {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-property-change",
-                        "this property changes twice on the same day",
-                    )
-                    .label(line.loc, "change written again here")
-                    .context(first, "first change written here"),
+                    Diagnostic::error("duplicate-property-change", "this property changes twice on the same day")
+                        .label(line.loc, "change written again here")
+                        .context(first, "first change written here"),
                 );
                 continue;
             }
@@ -1124,20 +909,11 @@ fn native_builtins<'a, 's>(
             let decl = &file[id];
             if !matches!(
                 decl.what,
-                DeclKind::Kind
-                    | DeclKind::Entity
-                    | DeclKind::Commodity
-                    | DeclKind::Account
-                    | DeclKind::Asset
+                DeclKind::Kind | DeclKind::Entity | DeclKind::Commodity | DeclKind::Account | DeclKind::Asset
             ) {
                 continue;
             }
-            let written = NativeDecl {
-                home: site.home,
-                file,
-                decl,
-                loc: item.loc,
-            };
+            let written = NativeDecl { home: site.home, file, decl, loc: item.loc };
             let Some(target) = native_target(world, written) else {
                 continue;
             };
@@ -1162,27 +938,18 @@ fn native_builtins<'a, 's>(
     }
 
     for target in [Target::Commodity, Target::Entity, Target::Place, Target::Asset] {
-        let kind_ids: Vec<Id<Kind>> = world
-            .book
-            .kinds
-            .ids()
-            .filter(|&id| Target::of(world.book.kinds[id].sort) == target)
-            .collect();
+        let kind_ids: Vec<Id<Kind>> =
+            world.book.kinds.ids().filter(|&id| Target::of(world.book.kinds[id].sort) == target).collect();
         let mut defaults = Defaults::empty(world.book.kinds.len());
         for kind in kind_ids {
             if world.book.kinds.parent(kind).is_some() {
-                let (above, child) = world
-                    .book
-                    .kinds
-                    .with_parent_mut(kind)
-                    .expect("kind parent exists");
+                let (above, child) = world.book.kinds.with_parent_mut(kind).expect("kind parent exists");
                 child.inherit(above);
             }
             let has = world.book.kinds[kind].has.clone();
             if let Some(written) = kinds_written.get(&kind).copied() {
                 let at = Lines::from_native(written);
-                let assigns =
-                    read_builtin_lines(world, &at, &[Target::Kind, target], &has, kind, diags);
+                let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], &has, kind, diags);
                 for assign in &assigns {
                     world.book.kinds[kind].set(assign);
                     if assign.is_default() {
@@ -1198,22 +965,11 @@ fn native_builtins<'a, 's>(
                 let mut path = Vec::new();
                 for id in ids {
                     let kind = world.book.commodities[id].kind;
-                    let own =
-                        commodities_written
-                            .get(&id)
-                            .copied()
-                            .map_or_else(Vec::new, |written| {
-                                let at = Lines::from_native(written);
-                                let has = world.book.kinds[kind].has.clone();
-                                read_builtin_lines(
-                                    world,
-                                    &at,
-                                    &[Target::Commodity],
-                                    &has,
-                                    kind,
-                                    diags,
-                                )
-                            });
+                    let own = commodities_written.get(&id).copied().map_or_else(Vec::new, |written| {
+                        let at = Lines::from_native(written);
+                        let has = world.book.kinds[kind].has.clone();
+                        read_builtin_lines(world, &at, &[Target::Commodity], &has, kind, diags)
+                    });
                     let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
                     defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
                     for assign in &own {
@@ -1228,14 +984,11 @@ fn native_builtins<'a, 's>(
                 let mut currency_set = vec![false; world.book.entities.len()];
                 for id in ids {
                     let kind = world.book.entities[id].kind;
-                    let own = entities_written
-                        .get(&id)
-                        .copied()
-                        .map_or_else(Vec::new, |written| {
-                            let at = Lines::from_native(written);
-                            let has = world.book.kinds[kind].has.clone();
-                            read_builtin_lines(world, &at, &[Target::Entity], &has, kind, diags)
-                        });
+                    let own = entities_written.get(&id).copied().map_or_else(Vec::new, |written| {
+                        let at = Lines::from_native(written);
+                        let has = world.book.kinds[kind].has.clone();
+                        read_builtin_lines(world, &at, &[Target::Entity], &has, kind, diags)
+                    });
                     let (kinds, entities) = (&world.book.kinds, &mut world.book.entities);
                     let entity = &mut entities[id];
                     defaults.apply(kinds, kind, &mut path, |assign| {
@@ -1262,8 +1015,7 @@ fn native_builtins<'a, 's>(
                             .lives
                             .iter()
                             .find_map(|residence| world.book.systems[residence.system].currency);
-                        world.book.entities[id].currency =
-                            residence_currency.unwrap_or(world.book.base);
+                        world.book.entities[id].currency = residence_currency.unwrap_or(world.book.base);
                     }
                 }
             }
@@ -1272,14 +1024,11 @@ fn native_builtins<'a, 's>(
                 let mut path = Vec::new();
                 for id in ids {
                     let kind = world.book.places[id].kind;
-                    let own = places_written
-                        .get(&id)
-                        .copied()
-                        .map_or_else(Vec::new, |written| {
-                            let at = Lines::from_native(written);
-                            let has = world.book.kinds[kind].has.clone();
-                            read_builtin_lines(world, &at, &[Target::Place], &has, kind, diags)
-                        });
+                    let own = places_written.get(&id).copied().map_or_else(Vec::new, |written| {
+                        let at = Lines::from_native(written);
+                        let has = world.book.kinds[kind].has.clone();
+                        read_builtin_lines(world, &at, &[Target::Place], &has, kind, diags)
+                    });
                     let (kinds, places) = (&world.book.kinds, &mut world.book.places);
                     defaults.apply(kinds, kind, &mut path, |assign| places[id].set(assign));
                     for assign in &own {
@@ -1293,14 +1042,11 @@ fn native_builtins<'a, 's>(
                 let mut path = Vec::new();
                 for id in ids {
                     let kind = world.book.assets[id].kind;
-                    let own = assets_written
-                        .get(&id)
-                        .copied()
-                        .map_or_else(Vec::new, |written| {
-                            let at = Lines::from_native(written);
-                            let has = world.book.kinds[kind].has.clone();
-                            read_builtin_lines(world, &at, &[Target::Asset], &has, kind, diags)
-                        });
+                    let own = assets_written.get(&id).copied().map_or_else(Vec::new, |written| {
+                        let at = Lines::from_native(written);
+                        let has = world.book.kinds[kind].has.clone();
+                        read_builtin_lines(world, &at, &[Target::Asset], &has, kind, diags)
+                    });
                     let (kinds, assets) = (&world.book.kinds, &mut world.book.assets);
                     let (places, assets) = (&mut world.book.places, assets);
                     let asset = &mut assets[id];
@@ -1326,11 +1072,7 @@ fn native_builtins<'a, 's>(
 
 fn inherit_place_traits(place: &mut Place, kind: &Kind) {
     place.deferred = kind.deferred;
-    place.basis = kind.basis.unwrap_or(if kind.deferred {
-        Basis::Zero
-    } else {
-        Basis::Cost
-    });
+    place.basis = kind.basis.unwrap_or(if kind.deferred { Basis::Zero } else { Basis::Cost });
     // Claim tabs keep separate parcels even though their synthetic root kinds
     // do not declare the `claim` trait themselves.
     place.claim = kind.claim || matches!(place.role, Role::Tab(_));
@@ -1350,9 +1092,7 @@ fn read_builtin_lines<'s>(
             continue;
         }
         if line.name.0 == "owner" {
-            if targets.len() != 1
-                || !matches!(targets[0], Target::Entity | Target::Place | Target::Asset)
-            {
+            if targets.len() != 1 || !matches!(targets[0], Target::Entity | Target::Place | Target::Asset) {
                 diags.push(
                     Diagnostic::error("unknown-property", "`owner` is not a property of this kind")
                         .label(line.loc, "owner is set on an entity, account, or asset"),
@@ -1363,7 +1103,8 @@ fn read_builtin_lines<'s>(
         if !BUILTINS.iter().any(|(name, _, _)| *name == line.name.0) {
             continue;
         }
-        if targets.contains(&Target::Kind) && targets.iter().any(|target| *target == Target::Asset)
+        if targets.contains(&Target::Kind)
+            && targets.iter().any(|target| *target == Target::Asset)
             && line.name.0 == "part"
         {
             diags.push(
@@ -1409,12 +1150,10 @@ fn diagnose_asset_cycles(
                         .collect::<Vec<_>>();
                     let edge = *path.last().expect("a cycle has a preceding edge");
                     let part = assets[edge].part_of.take();
-                    let mut diagnostic = Diagnostic::error(
-                        "asset-part-cycle",
-                        format!("asset `{}` is part of itself", route[0]),
-                    )
-                    .note(format!("the chain is {}", route.join(" -> ")))
-                    .help("make one asset a whole, outside this part-of chain");
+                    let mut diagnostic =
+                        Diagnostic::error("asset-part-cycle", format!("asset `{}` is part of itself", route[0]))
+                            .note(format!("the chain is {}", route.join(" -> ")))
+                            .help("make one asset a whole, outside this part-of chain");
                     if let Some(part) = part {
                         diagnostic = diagnostic.label(part.loc, "this part-of relationship closes the cycle");
                     }
@@ -1450,19 +1189,13 @@ fn native_system_currencies<'a, 's>(
             };
             if let Some(first) = seen.insert(system, item.loc) {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-system-currency",
-                        "this system sets its currency twice",
-                    )
-                    .label(item.loc, "currency set again here")
-                    .context(first, "first set here"),
+                    Diagnostic::error("duplicate-system-currency", "this system sets its currency twice")
+                        .label(item.loc, "currency set again here")
+                        .context(first, "first set here"),
                 );
                 continue;
             }
-            let word = Word {
-                text: unit.0,
-                loc: file.loc(unit.0),
-            };
+            let word = Word { text: unit.0, loc: file.loc(unit.0) };
             match world.commodity_of(word) {
                 Ok(currency) => world.book.systems[system].currency = Some(currency),
                 Err(problem) => diags.push(problem),
@@ -1493,22 +1226,16 @@ pub(crate) fn system_rates<'a, 's>(
             };
             if let Some(first) = seen.insert(system, item.loc) {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-system-rates",
-                        "this system sets its rate policy twice",
-                    )
-                    .label(item.loc, "rate policy set again here")
-                    .context(first, "first set here"),
+                    Diagnostic::error("duplicate-system-rates", "this system sets its rate policy twice")
+                        .label(item.loc, "rate policy set again here")
+                        .context(first, "first set here"),
                 );
                 continue;
             }
             let policy = match policy {
                 Rates::Spot => Some(RatePolicy::Spot),
                 Rates::Param(name) => {
-                    let word = Word {
-                        text: name.0,
-                        loc: file.loc(name.0),
-                    };
+                    let word = Word { text: name.0, loc: file.loc(name.0) };
                     match world.seek_param(site.home, word) {
                         Ok(Some(param)) => Some(RatePolicy::Param(param)),
                         Ok(None) => {
@@ -1545,28 +1272,22 @@ fn read_has_lines<'s>(
                 continue;
             }
         };
-        if is_builtin_line(world.book.name(has.name))
-            || FIELD_WORDS.contains(&world.book.name(has.name))
-        {
+        if is_builtin_line(world.book.name(has.name)) || FIELD_WORDS.contains(&world.book.name(has.name)) {
             diags.push(
-                    Diagnostic::error("reserved-property", format!("`{}` is a built-in property", world.book.name(has.name)))
-                        .label(has.loc.unwrap_or(line.loc), "choose another name")
-                        .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them"),
-                );
+                Diagnostic::error(
+                    "reserved-property",
+                    format!("`{}` is a built-in property", world.book.name(has.name)),
+                )
+                .label(has.loc.unwrap_or(line.loc), "choose another name")
+                .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them"),
+            );
             continue;
         }
         if own.iter().any(|earlier: &Has| earlier.name == has.name) {
-            let earlier = own
-                .iter()
-                .find(|earlier| earlier.name == has.name)
-                .copied()
-                .unwrap();
+            let earlier = own.iter().find(|earlier| earlier.name == has.name).copied().unwrap();
             let mut diagnostic = Diagnostic::error(
                 "duplicate-property-declaration",
-                format!(
-                    "property `{}` is declared twice on this kind",
-                    world.book.name(has.name)
-                ),
+                format!("property `{}` is declared twice on this kind", world.book.name(has.name)),
             );
             if let Some(loc) = has.loc {
                 diagnostic = diagnostic.label(loc, "declared again here");
@@ -1582,41 +1303,26 @@ fn read_has_lines<'s>(
     own
 }
 
-fn parse_has<'s>(
-    world: &mut World<'s>,
-    file: &File<'s>,
-    line: &Line<'s>,
-) -> Result<Has, Diagnostic> {
+fn parse_has<'s>(world: &mut World<'s>, file: &File<'s>, line: &Line<'s>) -> Result<Has, Diagnostic> {
     let args = &file[line.args];
     if args.len() != 2 {
-        return Err(
-            Diagnostic::error("has-type", "`has` needs a property name and a type")
-                .label(line.loc, "write `has name type` or `has name UNIT`"),
-        );
+        return Err(Diagnostic::error("has-type", "`has` needs a property name and a type")
+            .label(line.loc, "write `has name type` or `has name UNIT`"));
     }
     let name_expr = &file.exprs[args[0]];
     let ExprKind::Name(name) = name_expr.kind else {
-        return Err(
-            Diagnostic::error("has-name", "a custom property needs a name")
-                .label(name_expr.loc, "write a lower-case property name"),
-        );
+        return Err(Diagnostic::error("has-name", "a custom property needs a name")
+            .label(name_expr.loc, "write a lower-case property name"));
     };
     let type_expr = &file.exprs[args[1]];
     let ty = match type_expr.kind {
-        ExprKind::Name(type_name) => match TYPES
-            .iter()
-            .find(|(name, _)| *name == type_name.0)
-            .map(|(_, ty)| *ty)
-        {
+        ExprKind::Name(type_name) => match TYPES.iter().find(|(name, _)| *name == type_name.0).map(|(_, ty)| *ty) {
             Some(ty) => ty,
             None => {
                 let valid: Vec<&str> = TYPES.iter().map(|(name, _)| *name).collect();
                 return Err(suggest(
-                    Diagnostic::error(
-                        "has-type",
-                        format!("`{}` is not a property type", type_name.0),
-                    )
-                    .label(type_expr.loc, "unknown type"),
+                    Diagnostic::error("has-type", format!("`{}` is not a property type", type_name.0))
+                        .label(type_expr.loc, "unknown type"),
                     type_expr.loc,
                     type_name.0,
                     valid,
@@ -1624,10 +1330,7 @@ fn parse_has<'s>(
             }
         },
         ExprKind::Unit(unit) => {
-            let commodity = world.commodity_of(Word {
-                text: unit.0,
-                loc: type_expr.loc,
-            })?;
+            let commodity = world.commodity_of(Word { text: unit.0, loc: type_expr.loc })?;
             Ty::Amount(Dim::Of(commodity))
         }
         ExprKind::Binary(BinOp::Div, top, bottom) => {
@@ -1636,45 +1339,27 @@ fn parse_has<'s>(
             match numerator.div(denominator) {
                 Some(dim) if dim != Dim::Number && dim != Dim::Any => Ty::Amount(dim),
                 _ => {
-                    return Err(Diagnostic::error(
-                        "has-unit",
-                        "this is not a supported amount unit",
-                    )
-                    .label(
-                        type_expr.loc,
-                        "write one commodity or a rate such as `USD/MI`",
-                    ));
+                    return Err(Diagnostic::error("has-unit", "this is not a supported amount unit")
+                        .label(type_expr.loc, "write one commodity or a rate such as `USD/MI`"));
                 }
             }
         }
         _ => {
-            return Err(
-                Diagnostic::error("has-type", "a property type must be a name or a unit")
-                    .label(type_expr.loc, "write a built-in type or a commodity unit"),
-            );
+            return Err(Diagnostic::error("has-type", "a property type must be a name or a unit")
+                .label(type_expr.loc, "write a built-in type or a commodity unit"));
         }
     };
     let name = world.book.names.intern(name.0);
-    Ok(Has {
-        name,
-        ty,
-        loc: Some(name_expr.loc),
-    })
+    Ok(Has { name, ty, loc: Some(name_expr.loc) })
 }
 
-fn unit_type<'s>(
-    world: &World<'s>,
-    file: &File<'s>,
-    id: ExprId,
-) -> Result<Dim<Id<Commodity>>, Diagnostic> {
+fn unit_type<'s>(world: &World<'s>, file: &File<'s>, id: ExprId) -> Result<Dim<Id<Commodity>>, Diagnostic> {
     let expr = &file.exprs[id];
     let (text, loc) = match expr.kind {
         ExprKind::Unit(name) | ExprKind::Name(name) => (name.0, expr.loc),
         _ => {
-            return Err(
-                Diagnostic::error("has-unit", "this is not a commodity unit")
-                    .label(expr.loc, "write a declared unit such as `USD`"),
-            );
+            return Err(Diagnostic::error("has-unit", "this is not a commodity unit")
+                .label(expr.loc, "write a declared unit such as `USD`"));
         }
     };
     world.commodity_of(Word { text, loc }).map(Dim::Of)
@@ -1691,21 +1376,15 @@ fn property_value<'s>(
     let args = &file[line.args];
     if args.len() != 1 {
         diags.push(
-            Diagnostic::error(
-                "property-value",
-                format!("`{}` needs one value", line.name.0),
-            )
-            .label(line.loc, "write one value here"),
+            Diagnostic::error("property-value", format!("`{}` needs one value", line.name.0))
+                .label(line.loc, "write one value here"),
         );
         return None;
     }
     if !file[line.lines].is_empty() {
         diags.push(
-            Diagnostic::error(
-                "property-nested-lines",
-                "a custom property value cannot have nested lines",
-            )
-            .label(line.loc, "remove the nested lines"),
+            Diagnostic::error("property-nested-lines", "a custom property value cannot have nested lines")
+                .label(line.loc, "remove the nested lines"),
         );
         return None;
     }
@@ -1728,11 +1407,8 @@ fn property_value<'s>(
             ty => article(ty.word()),
         };
         diags.push(
-            Diagnostic::error(
-                "property-type",
-                format!("`{}` needs {expected}", line.name.0),
-            )
-            .label(expr.loc, format!("this is {}", describe(&expr.kind))),
+            Diagnostic::error("property-type", format!("`{}` needs {expected}", line.name.0))
+                .label(expr.loc, format!("this is {}", describe(&expr.kind))),
         );
         return None;
     }
@@ -1753,12 +1429,7 @@ fn property_value_fits(expected: Ty, value: Value, found: Ty) -> bool {
 }
 
 fn dimension_name(world: &World<'_>, dim: Dim<Id<Commodity>>) -> String {
-    let unit = |unit: Id<Commodity>| {
-        world
-            .book
-            .name(world.book.commodities[unit].symbol)
-            .to_owned()
-    };
+    let unit = |unit: Id<Commodity>| world.book.name(world.book.commodities[unit].symbol).to_owned();
     match dim {
         Dim::Number => "a number".to_owned(),
         Dim::Of(id) => unit(id),
@@ -1769,24 +1440,18 @@ fn dimension_name(world: &World<'_>, dim: Dim<Id<Commodity>>) -> String {
 }
 
 fn native_target(world: &World<'_>, written: NativeDecl<'_, '_>) -> Option<NativeTarget> {
-    let word = Word {
-        text: written.decl.name.0,
-        loc: written.loc,
-    };
+    let word = Word { text: written.decl.name.0, loc: written.loc };
     let found = match written.decl.what {
         DeclKind::Account => world.place(word).ok().map(|id| NativeTarget {
             target: PropTarget::Place(id),
             kind: world.book.places[id].kind,
             sort: world.book.kinds[world.book.places[id].kind].sort,
         }),
-        DeclKind::Entity => world
-            .entity(written.home, word)
-            .ok()
-            .map(|id| NativeTarget {
-                target: PropTarget::Entity(id),
-                kind: world.book.entities[id].kind,
-                sort: world.book.kinds[world.book.entities[id].kind].sort,
-            }),
+        DeclKind::Entity => world.entity(written.home, word).ok().map(|id| NativeTarget {
+            target: PropTarget::Entity(id),
+            kind: world.book.entities[id].kind,
+            sort: world.book.kinds[world.book.entities[id].kind].sort,
+        }),
         DeclKind::Commodity => world.commodity_of(word).ok().map(|id| NativeTarget {
             target: PropTarget::Commodity(id),
             kind: world.book.commodities[id].kind,
@@ -1828,16 +1493,8 @@ fn native_statement_target(
             }
         }
         Subject::Name(subject) => {
-            let place_word = Word {
-                text: subject.0,
-                loc,
-            };
-            match world
-                .book
-                .lookup
-                .places
-                .find(&world.book.names, subject.0, |_| true)
-            {
+            let place_word = Word { text: subject.0, loc };
+            match world.book.lookup.places.find(&world.book.names, subject.0, |_| true) {
                 crate::names::Found::One(id) => {
                     let kind = world.book.places[id].kind;
                     candidates.push(NativeTarget {
@@ -1848,19 +1505,11 @@ fn native_statement_target(
                 }
                 crate::names::Found::Several(ids) => candidates.extend(ids.into_iter().map(|id| {
                     let kind = world.book.places[id].kind;
-                    NativeTarget {
-                        target: PropTarget::Place(id),
-                        kind,
-                        sort: world.book.kinds[kind].sort,
-                    }
+                    NativeTarget { target: PropTarget::Place(id), kind, sort: world.book.kinds[kind].sort }
                 })),
                 crate::names::Found::Nothing => {}
             }
-            match world.book.lookup.entities.find(
-                &world.book.names,
-                world.scopes.of(home),
-                subject.0,
-            ) {
+            match world.book.lookup.entities.find(&world.book.names, world.scopes.of(home), subject.0) {
                 crate::names::Found::One(id) => {
                     let kind = world.book.entities[id].kind;
                     candidates.push(NativeTarget {
@@ -1871,11 +1520,7 @@ fn native_statement_target(
                 }
                 crate::names::Found::Several(ids) => candidates.extend(ids.into_iter().map(|id| {
                     let kind = world.book.entities[id].kind;
-                    NativeTarget {
-                        target: PropTarget::Entity(id),
-                        kind,
-                        sort: world.book.kinds[kind].sort,
-                    }
+                    NativeTarget { target: PropTarget::Entity(id), kind, sort: world.book.kinds[kind].sort }
                 })),
                 crate::names::Found::Nothing => {}
             }
@@ -1897,18 +1542,13 @@ fn native_statement_target(
         }
         Subject::Code(_) | Subject::Purpose(_) => {}
     }
-    let mut matches = candidates
-        .iter()
-        .copied()
-        .filter(|target| has_named(world, target.kind, world.book.name(name)).is_some());
+    let mut matches =
+        candidates.iter().copied().filter(|target| has_named(world, target.kind, world.book.name(name)).is_some());
     if let Some(first) = matches.next() {
         if matches.next().is_some() {
             diags.push(
-                Diagnostic::error(
-                    "ambiguous-property-target",
-                    "this property applies to more than one named thing",
-                )
-                .label(loc, "qualify the target so the intended thing is clear"),
+                Diagnostic::error("ambiguous-property-target", "this property applies to more than one named thing")
+                    .label(loc, "qualify the target so the intended thing is clear"),
             );
             return None;
         }
@@ -1919,11 +1559,7 @@ fn native_statement_target(
 
 fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Has> {
     let name = world.book.names.get(name)?;
-    world.book.kinds[kind]
-        .has
-        .iter()
-        .find(|has| has.name == name)
-        .copied()
+    world.book.kinds[kind].has.iter().find(|has| has.name == name).copied()
 }
 
 fn is_builtin_line(name: &str) -> bool {
@@ -1969,29 +1605,16 @@ fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<
     };
     let mut valid: Vec<&str> = BUILTINS
         .iter()
-        .filter(|builtin| {
-            match (
-                builtin.1.contains(&Target::Kind),
-                target.sort,
-                target.target,
-            ) {
-                (true, _, PropTarget::Kind(_)) => true,
-                (false, Sort::Place(_), PropTarget::Place(_)) => builtin.1.contains(&Target::Place),
-                (false, Sort::Entity, PropTarget::Entity(_)) => builtin.1.contains(&Target::Entity),
-                (false, Sort::Commodity, PropTarget::Commodity(_)) => {
-                    builtin.1.contains(&Target::Commodity)
-                }
-                _ => false,
-            }
+        .filter(|builtin| match (builtin.1.contains(&Target::Kind), target.sort, target.target) {
+            (true, _, PropTarget::Kind(_)) => true,
+            (false, Sort::Place(_), PropTarget::Place(_)) => builtin.1.contains(&Target::Place),
+            (false, Sort::Entity, PropTarget::Entity(_)) => builtin.1.contains(&Target::Entity),
+            (false, Sort::Commodity, PropTarget::Commodity(_)) => builtin.1.contains(&Target::Commodity),
+            _ => false,
         })
         .map(|builtin| builtin.0)
         .collect();
-    valid.extend(
-        world.book.kinds[target.kind]
-            .has
-            .iter()
-            .map(|has| world.book.name(has.name)),
-    );
+    valid.extend(world.book.kinds[target.kind].has.iter().map(|has| world.book.name(has.name)));
     if matches!(target.target, PropTarget::Asset(_)) {
         valid.extend(["owner", "known-as", "share", "at", "part", "also"]);
     }
@@ -2002,11 +1625,8 @@ fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<
         PropTarget::Kind(_) => format!("kind `{kind_name}`"),
         _ => format!("{} of kind `{kind_name}`", article(noun)),
     };
-    let error = Diagnostic::error(
-        "unknown-property",
-        format!("`{text}` is not a property of {owner}"),
-    )
-    .label(line.loc, "no such property");
+    let error = Diagnostic::error("unknown-property", format!("`{text}` is not a property of {owner}"))
+        .label(line.loc, "no such property");
     let error = suggest(error, line.loc, text, valid.iter().copied());
     error.note(format!("its properties are {}", list(&valid)))
 }
@@ -2032,10 +1652,7 @@ fn stage_unique(
     if let Some(first) = seen.get(&key).copied() {
         let mut diagnostic = Diagnostic::error(
             "duplicate-property-value",
-            format!(
-                "property `{}` is assigned twice on the same day",
-                world.book.name(prop.name)
-            ),
+            format!("property `{}` is assigned twice on the same day", world.book.name(prop.name)),
         );
         if let Some(loc) = prop.loc {
             diagnostic = diagnostic.label(loc, "assigned again here");
@@ -2047,17 +1664,10 @@ fn stage_unique(
     world.set_prop(target, prop);
 }
 
-fn stage_changes(
-    world: &mut World<'_>,
-    mut updates: Vec<PropertyChange>,
-    _diags: &mut Vec<Diagnostic>,
-) {
+fn stage_changes(world: &mut World<'_>, mut updates: Vec<PropertyChange>, _diags: &mut Vec<Diagnostic>) {
     let mut groups: Map<((u8, u32), Sym), Vec<PropertyChange>> = Map::default();
     for update in updates.drain(..) {
-        groups
-            .entry((target_key(update.target), update.name))
-            .or_default()
-            .push(update);
+        groups.entry((target_key(update.target), update.name)).or_default().push(update);
     }
     for ((_target_key, name), mut changes) in groups {
         changes.sort_by_key(|change| (change.since, change.order));
@@ -2065,18 +1675,11 @@ fn stage_changes(
         let base = world
             .prop_writes
             .iter()
-            .find(|(candidate, prop)| {
-                *candidate == target && prop.name == name && prop.since == Day::MIN
-            })
+            .find(|(candidate, prop)| *candidate == target && prop.name == name && prop.since == Day::MIN)
             .map(|(_, prop)| prop.value)
             .unwrap_or(Value::Empty);
         for (day, value, loc) in property_timeline(base, &changes) {
-            let prop = Prop {
-                name,
-                value,
-                since: day,
-                loc: Some(loc),
-            };
+            let prop = Prop { name, value, since: day, loc: Some(loc) };
             world.set_prop(target, prop);
         }
     }
@@ -2103,10 +1706,7 @@ fn property_timeline(base: Value, changes: &[PropertyChange]) -> Vec<(Day, Value
             .filter(|change| change.since <= day && change.until.is_none_or(|until| day <= until))
             .fold(None, |best: Option<&PropertyChange>, change| match best {
                 None => Some(change),
-                Some(old)
-                    if change.since > old.since
-                        || (change.since == old.since && change.order < old.order) =>
-                {
+                Some(old) if change.since > old.since || (change.since == old.since && change.order < old.order) => {
                     Some(change)
                 }
                 Some(old) => Some(old),
@@ -2187,13 +1787,7 @@ mod native_property_tests {
         assert!(!account.claim);
     }
 
-    fn update(
-        name: Sym,
-        since: Day,
-        until: Option<Day>,
-        value: bool,
-        order: usize,
-    ) -> PropertyChange {
+    fn update(name: Sym, since: Day, until: Option<Day>, value: bool, order: usize) -> PropertyChange {
         PropertyChange {
             target: PropTarget::Kind(Id::new(0)),
             name,
@@ -2237,10 +1831,7 @@ mod native_property_tests {
         let changes = [update(name, start, Some(day(2026, 3, 7)), true, 0)];
         assert_eq!(
             property_timeline(Value::Empty, &changes),
-            [
-                (start, Value::Bool(true), Loc::default()),
-                (restore, Value::Empty, Loc::default()),
-            ]
+            [(start, Value::Bool(true), Loc::default()), (restore, Value::Empty, Loc::default()),]
         );
     }
 

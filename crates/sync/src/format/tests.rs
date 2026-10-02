@@ -1,32 +1,18 @@
 use super::*;
 use axiom_core::{FileId, Loc, Qty, calendar::DateLayout};
-use axiom_syntax::Folder;
 use axiom_model::sync::{Column, Fetch, Field, Format, Rule, Shape, Sink, Source, Spec};
+use axiom_syntax::Folder;
 
-const USD: Unit<'static> = Unit {
-    name: "USD",
-    scale: 2,
-};
+const USD: Unit<'static> = Unit { name: "USD", scale: 2 };
 
 fn spec(field: Field, places: impl Into<Box<[Column]>>) -> Spec {
-    Spec {
-        field,
-        places: places.into(),
-        layout: None,
-        rule: Rule::None,
-        loc: Loc::default(),
-    }
+    Spec { field, places: places.into(), layout: None, rule: Rule::None, loc: Loc::default() }
 }
 
 fn book() -> axiom_model::Book<'static> {
-    let (file, diagnostics) =
-        axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+    let (file, diagnostics) = axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
     assert!(diagnostics.is_empty(), "axiom.ax: {diagnostics:?}");
-    let sources = [axiom_model::Source {
-        path: "axiom.ax",
-        file,
-        embedded: false,
-    }];
+    let sources = [axiom_model::Source { path: "axiom.ax", file, embedded: false }];
     let (book, diagnostics) = axiom_model::build(&sources);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     book
@@ -35,9 +21,7 @@ fn book() -> axiom_model::Book<'static> {
 #[test]
 fn typed_rows_read_amount_sign_memo_and_balance() {
     let mut book = book();
-    let header = |book: &mut axiom_model::Book<'static>, text| {
-        Column::Header(book.intern_text(text))
-    };
+    let header = |book: &mut axiom_model::Book<'static>, text| Column::Header(book.intern_text(text));
     let date = header(&mut book, "Posting Date");
     let amount = header(&mut book, "Amount");
     let sign_column = header(&mut book, "Direction");
@@ -47,32 +31,20 @@ fn typed_rows_read_amount_sign_memo_and_balance() {
     let mut date_spec = spec(Field::Date, [date]);
     date_spec.layout = Some(DateLayout::parse("MM/DD/YYYY").unwrap());
     let mut amount_spec = spec(Field::Amount, [amount]);
-    amount_spec.rule = Rule::Sign {
-        place: sign_column,
-        into,
-    };
+    amount_spec.rule = Rule::Sign { place: sign_column, into };
     let format = Format {
         name: book.names.intern("bank"),
         shape: Shape::Rows,
-        specs: vec![
-            date_spec,
-            amount_spec,
-            spec(Field::Memo, [memo]),
-            spec(Field::Balance, [balance]),
-        ]
-        .into_boxed_slice(),
+        specs: vec![date_spec, amount_spec, spec(Field::Memo, [memo]), spec(Field::Balance, [balance])]
+            .into_boxed_slice(),
         categories: Box::default(),
         loc: Loc::default(),
     };
-    let source =
-        "Posting Date,Amount,Direction,Description,Balance\n03/04/2026,12.50,CRDT,Shop,100.00\n";
+    let source = "Posting Date,Amount,Direction,Description,Balance\n03/04/2026,12.50,CRDT,Shop,100.00\n";
     let (records, problems) = read(&book, &format, source, FileId(0), USD, &[USD]);
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(records.len(), 1);
-    assert_eq!(
-        records[0].day,
-        axiom_core::Day::from_ymd(2026, 3, 4).unwrap()
-    );
+    assert_eq!(records[0].day, axiom_core::Day::from_ymd(2026, 3, 4).unwrap());
     assert_eq!(records[0].qty, Qty(1250));
     assert_eq!(records[0].memo, "Shop");
     assert_eq!(records[0].balance, Some(Qty(10_000)));
@@ -89,19 +61,11 @@ fn typed_tagged_paths_read_camt_style_records() {
     let remittance = Column::Path(book.intern_text("RmtInf/Ustrd"));
     let crdt = book.intern_text("CRDT");
     let mut amount_spec = spec(Field::Amount, [amount]);
-    amount_spec.rule = Rule::Sign {
-        place: sign,
-        into: crdt,
-    };
+    amount_spec.rule = Rule::Sign { place: sign, into: crdt };
     let format = Format {
         name: book.names.intern("camt053"),
         shape: Shape::Tagged { records },
-        specs: vec![
-            spec(Field::Date, [date]),
-            amount_spec,
-            spec(Field::Memo, [memo, remittance]),
-        ]
-        .into_boxed_slice(),
+        specs: vec![spec(Field::Date, [date]), amount_spec, spec(Field::Memo, [memo, remittance])].into_boxed_slice(),
         categories: Box::default(),
         loc: Loc::default(),
     };
@@ -147,13 +111,9 @@ fn check_can_read_memos_from_local_sources_without_reconciling_rows() {
         doc: None,
         loc: Loc::default(),
     };
-    let memos = read_memos(
-        &book,
-        &source,
-        "Description,Extra\nTRADER JOE'S #10,Card\nAmazon 2K4LM,Monthly\n",
-        FileId(7),
-    )
-    .unwrap();
+    let memos =
+        read_memos(&book, &source, "Description,Extra\nTRADER JOE'S #10,Card\nAmazon 2K4LM,Monthly\n", FileId(7))
+            .unwrap();
     assert_eq!(memos, ["TRADER JOE'S #10 Card", "Amazon 2K4LM Monthly"]);
 }
 
@@ -191,12 +151,8 @@ fn malformed_amounts_are_diagnosed_at_the_source_cell() {
     let format = Format {
         name: book.names.intern("bank"),
         shape: Shape::Rows,
-        specs: vec![
-            spec(Field::Date, [date]),
-            spec(Field::Amount, [amount]),
-            spec(Field::Memo, [memo]),
-        ]
-        .into_boxed_slice(),
+        specs: vec![spec(Field::Date, [date]), spec(Field::Amount, [amount]), spec(Field::Memo, [memo])]
+            .into_boxed_slice(),
         categories: Box::default(),
         loc: Loc::default(),
     };

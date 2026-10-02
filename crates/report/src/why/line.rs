@@ -29,9 +29,7 @@ pub fn line<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Loc) -> Report<'s> {
     for id in flows {
         consequences(lens, run, id, &mut caused);
     }
-    Report::new("Why this line")
-        .with(written)
-        .with(caused.headed("Consequences"))
+    Report::new("Why this line").with(written).with(caused.headed("Consequences"))
 }
 
 fn overlaps(a: Loc, b: Loc) -> bool {
@@ -44,9 +42,7 @@ fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
     let direct: Vec<Id<Flow>> = book
         .flows
         .iter()
-        .filter(|(_, flow)| {
-            overlaps(flow.loc, at) && lens.owns(crate::flow::movement_place(lens, flow))
-        })
+        .filter(|(_, flow)| overlaps(flow.loc, at) && lens.owns(crate::flow::movement_place(lens, flow)))
         .map(|(id, _)| id)
         .collect();
     if !direct.is_empty() {
@@ -60,28 +56,16 @@ fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
 }
 
 /// Everything whose source overlaps the line, described in a sentence.
-fn items(
-    book: &Book,
-    run: &Run,
-    lens: Lens<'_, '_, '_, '_>,
-    at: Loc,
-    flows: &[Id<Flow>],
-) -> Vec<(String, Loc)> {
+fn items(book: &Book, run: &Run, lens: Lens<'_, '_, '_, '_>, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Loc)> {
     let mut items = Vec::new();
     let visible_codes = scoped_codes(book, lens);
     for &id in flows {
         let posting = Posting::at(book, run, id);
         let flow = posting.flow;
         let out = posting.out();
-        let out = Amount::new(
-            crate::flow::scoped_movement_qty(lens, flow, out.qty),
-            out.unit,
-        );
+        let out = Amount::new(crate::flow::scoped_movement_qty(lens, flow, out.qty), out.unit);
         let arrive = posting.arrive();
-        let arrive = Amount::new(
-            crate::flow::scoped_movement_qty(lens, flow, arrive.qty),
-            arrive.unit,
-        );
+        let arrive = Amount::new(crate::flow::scoped_movement_qty(lens, flow, arrive.qty), arrive.unit);
         let amounts = if flow.is_exchange() {
             format!("{} for {}", book.show(out), book.show(arrive))
         } else {
@@ -108,20 +92,10 @@ fn items(
                 }
                 Provenance::Derived => "derived".to_string(),
             };
-            format!(
-                " for #{}{object} ({source})",
-                book.name(book.purposes[purposed.purpose].name)
-            )
+            format!(" for #{}{object} ({source})", book.name(book.purposes[purposed.purpose].name))
         });
-        let codes = book
-            .flow_view(flow)
-            .codes()
-            .map(|code| format!(" ^{}", book.name(code)))
-            .collect::<String>();
-        items.push((
-            format!("flow: {}, {amounts}{purpose}{codes}", route(book, flow)),
-            flow.loc,
-        ));
+        let codes = book.flow_view(flow).codes().map(|code| format!(" ^{}", book.name(code))).collect::<String>();
+        items.push((format!("flow: {}, {amounts}{purpose}{codes}", route(book, flow)), flow.loc));
     }
     for (index, assertion) in book
         .asserts
@@ -129,46 +103,26 @@ fn items(
         .enumerate()
         .filter(|(_, assertion)| overlaps(assertion.loc, at) && lens.owns(assertion.place))
     {
-        let gap = run
-            .pads
-            .iter()
-            .find(|pad| pad.assert as usize == index)
-            .map(|pad| gap_words(book, pad));
+        let gap = run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
         let gap = gap.map_or(String::new(), |words| format!(", {words}"));
         items.push((
             format!(
                 "assertion: {} = {}{gap}",
                 path(book, assertion.place),
-                book.show(Amount::new(
-                    lens.place_qty(assertion.place, assertion.amount.qty),
-                    assertion.amount.unit,
-                ))
+                book.show(Amount::new(lens.place_qty(assertion.place, assertion.amount.qty), assertion.amount.unit,))
             ),
             assertion.loc,
         ));
     }
-    for event in book.events.iter().filter(|event| {
-        overlaps(event.loc, at) && (lens.whose.is_everyone() || visible_codes.contains(&event.code))
-    }) {
-        items.push((
-            format!(
-                "event: ^{} {}",
-                book.name(event.code),
-                event_words(event.state)
-            ),
-            event.loc,
-        ));
-    }
-    for quote in book
-        .prices
-        .quotes()
+    for event in book
+        .events
         .iter()
-        .filter(|quote| overlaps(quote.loc, at))
+        .filter(|event| overlaps(event.loc, at) && (lens.whose.is_everyone() || visible_codes.contains(&event.code)))
     {
-        let (unit, priced_in) = (
-            &book.commodities[quote.unit],
-            &book.commodities[quote.quote],
-        );
+        items.push((format!("event: ^{} {}", book.name(event.code), event_words(event.state)), event.loc));
+    }
+    for quote in book.prices.quotes().iter().filter(|quote| overlaps(quote.loc, at)) {
+        let (unit, priced_in) = (&book.commodities[quote.unit], &book.commodities[quote.quote]);
         let text = format!(
             "price: 1 {} = {} {} on {}",
             book.name(unit.symbol),
@@ -203,47 +157,30 @@ fn items(
                 let purpose = measure.purpose.map_or_else(String::new, |purpose| {
                     format!(" for #{}", book.name(book.purposes[purpose.purpose].name))
                 });
-                (
-                    format!(
-                        "measure: {subject} {action} {}{purpose}",
-                        book.show(measure.quantity)
-                    ),
-                    measure.loc,
-                )
+                (format!("measure: {subject} {action} {}{purpose}", book.show(measure.quantity)), measure.loc)
             }),
     );
-    items.extend(
-        book.filed
-            .iter()
-            .filter(|filed| overlaps(filed.loc, at) && lens.owns_entity(filed.owner))
-            .map(|filed| {
-                (
-                    format!(
-                        "filed: {} for {} by {}",
-                        filed.year,
-                        book.name(book.systems[filed.system].path),
-                        book.name(book.entities[filed.owner].path)
-                    ),
-                    filed.loc,
-                )
-            }),
-    );
+    items.extend(book.filed.iter().filter(|filed| overlaps(filed.loc, at) && lens.owns_entity(filed.owner)).map(
+        |filed| {
+            (
+                format!(
+                    "filed: {} for {} by {}",
+                    filed.year,
+                    book.name(book.systems[filed.system].path),
+                    book.name(book.entities[filed.owner].path)
+                ),
+                filed.loc,
+            )
+        },
+    ));
     items.extend(
         book.readings
             .iter()
             .filter(|reading| {
-                overlaps(reading.loc, at)
-                    && (lens.whose.is_everyone() || visible_codes.contains(&reading.code))
+                overlaps(reading.loc, at) && (lens.whose.is_everyone() || visible_codes.contains(&reading.code))
             })
             .map(|reading| {
-                (
-                    format!(
-                        "reading: ^{} = {}",
-                        book.name(reading.code),
-                        book.show(reading.amount)
-                    ),
-                    reading.loc,
-                )
+                (format!("reading: ^{} = {}", book.name(reading.code), book.show(reading.amount)), reading.loc)
             }),
     );
     items.extend(declarations(book, at));
@@ -255,30 +192,14 @@ fn items(
 /// when a visible flow, measure or contract refers to their code.
 pub(super) fn scoped_codes(book: &Book, lens: Lens<'_, '_, '_, '_>) -> BTreeSet<axiom_core::Sym> {
     let mut codes = BTreeSet::new();
-    for (_, flow) in book
-        .flows
-        .iter()
-        .filter(|(_, flow)| lens.owns(crate::flow::movement_place(lens, flow)))
-    {
+    for (_, flow) in book.flows.iter().filter(|(_, flow)| lens.owns(crate::flow::movement_place(lens, flow))) {
         codes.extend(book.flow_view(flow).codes());
     }
-    for (_, measure) in book
-        .measures
-        .iter()
-        .filter(|(_, measure)| lens.owns_entity(measure.owner))
-    {
+    for (_, measure) in book.measures.iter().filter(|(_, measure)| lens.owns_entity(measure.owner)) {
         codes.extend(measure.codes.iter().copied());
     }
-    for (_, contract) in book
-        .contracts
-        .iter()
-        .filter(|(_, contract)| lens.owns_entity(contract.owner))
-    {
-        for (_, terms) in contract
-            .terms
-            .iter()
-            .flat_map(|terms| terms.within(contract.days))
-        {
+    for (_, contract) in book.contracts.iter().filter(|(_, contract)| lens.owns_entity(contract.owner)) {
+        for (_, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
             add_terms_codes(book, terms, &mut codes);
         }
         if let Some(standing) = &contract.standing {
@@ -308,30 +229,12 @@ fn add_template_codes(book: &Book, template: &TemplateFlow, codes: &mut BTreeSet
 
 /// Places, entities and commodities declared on the line.
 fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
-    let places = book
-        .places
-        .values()
-        .map(|place| ("place", place.path, place.loc));
-    let entities = book
-        .entities
-        .values()
-        .map(|entity| ("entity", entity.path, entity.loc));
-    let commodities = book
-        .commodities
-        .values()
-        .map(|commodity| ("commodity", commodity.symbol, commodity.loc));
-    let purposes = book
-        .purposes
-        .values()
-        .map(|purpose| ("purpose", purpose.name, purpose.loc));
-    let contracts = book
-        .contracts
-        .values()
-        .map(|contract| ("contract", contract.name, Some(contract.loc)));
-    let assets = book
-        .assets
-        .values()
-        .map(|asset| ("asset", asset.name, Some(asset.loc)));
+    let places = book.places.values().map(|place| ("place", place.path, place.loc));
+    let entities = book.entities.values().map(|entity| ("entity", entity.path, entity.loc));
+    let commodities = book.commodities.values().map(|commodity| ("commodity", commodity.symbol, commodity.loc));
+    let purposes = book.purposes.values().map(|purpose| ("purpose", purpose.name, purpose.loc));
+    let contracts = book.contracts.values().map(|contract| ("contract", contract.name, Some(contract.loc)));
+    let assets = book.assets.values().map(|asset| ("asset", asset.name, Some(asset.loc)));
     places
         .chain(entities)
         .chain(commodities)
@@ -348,25 +251,12 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
 }
 
 /// What one flow did downstream: gains, obligations, tallies, violations.
-fn consequences<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    id: Id<Flow>,
-    section: &mut Section<'s>,
-) {
+fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, section: &mut Section<'s>) {
     let book = lens.book();
     let cause = Cause::Flow(id);
-    for gain in run
-        .gains
-        .iter()
-        .filter(|gain| gain.cause == cause && lens.owns(gain.from))
-    {
+    for gain in run.gains.iter().filter(|gain| gain.cause == cause && lens.owns(gain.from)) {
         let realized = lens.place_qty(gain.from, gain.gain());
-        let ambiguity = if gain.ambiguous {
-            " (no lot policy: FIFO assumed)"
-        } else {
-            ""
-        };
+        let ambiguity = if gain.ambiguous { " (no lot policy: FIFO assumed)" } else { "" };
         let text = format!(
             "realized a gain of {} selling {} from {}{ambiguity}",
             book.show(Amount::new(realized, book.base)),
@@ -375,44 +265,20 @@ fn consequences<'s>(
         );
         section.push(Row::new([Cell::text(text), Cell::Blank]));
     }
-    for effect in run
-        .effects
-        .iter()
-        .filter(|effect| effect.cause == cause && lens.owns_entity(effect.owner))
-    {
+    for effect in run.effects.iter().filter(|effect| effect.cause == cause && lens.owns_entity(effect.owner)) {
         let name = book.name(effect.name);
         let text = match effect.owed() {
-            Some(owed) => format!(
-                "owes {} to {}: {name}",
-                book.show(effect.amount),
-                creditor(book, owed)
-            ),
+            Some(owed) => format!("owes {} to {}: {name}", book.show(effect.amount), creditor(book, owed)),
             None => format!("counts {} as {name}", book.show(effect.amount)),
         };
-        section.push(Row::new([
-            Cell::text(text),
-            Cell::text(book.name(book.laws[effect.law].name)),
-        ]));
+        section.push(Row::new([Cell::text(text), Cell::text(book.name(book.laws[effect.law].name))]));
     }
-    for violation in run
-        .violations
-        .iter()
-        .filter(|violation| violation.cause == cause && lens.governs(violation.subject))
+    for violation in
+        run.violations.iter().filter(|violation| violation.cause == cause && lens.governs(violation.subject))
     {
-        let message = run.diagnostics[violation.diagnostic as usize]
-            .message
-            .clone();
-        let style = if violation.verdict.is_waived() {
-            Style::Muted
-        } else {
-            Style::Alert
-        };
-        section.push(
-            Row::new([
-                Cell::text(message),
-                Cell::text(book.name(book.laws[violation.law].name)),
-            ])
-            .style(style),
-        );
+        let message = run.diagnostics[violation.diagnostic as usize].message.clone();
+        let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
+        section
+            .push(Row::new([Cell::text(message), Cell::text(book.name(book.laws[violation.law].name))]).style(style));
     }
 }

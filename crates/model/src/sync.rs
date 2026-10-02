@@ -8,8 +8,8 @@
 
 use axiom_core::{DateLayout, Id, Loc, Sym};
 
-use crate::book::{Param, Place, Purpose, System};
 pub use crate::book::Text;
+use crate::book::{Param, Place, Purpose, System};
 
 /// `sync NAME`: a place facts come from, and where what it recognizes goes.
 #[derive(Clone, Debug)]
@@ -63,7 +63,9 @@ pub struct Format {
 pub enum Shape {
     Rows,
     /// OFX, ISO 20022: named records, fields by path (`BookgDt/Dt`).
-    Tagged { records: Sym },
+    Tagged {
+        records: Sym,
+    },
 }
 
 /// One format declaration line: what the field is, where it is, and how to
@@ -94,7 +96,10 @@ pub enum Rule {
     None,
     Flipped,
     /// The exact marker in `place` means money into the account.
-    Sign { place: Column, into: Text },
+    Sign {
+        place: Column,
+        into: Text,
+    },
     Is(Text),
 }
 

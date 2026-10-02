@@ -151,12 +151,8 @@ impl<'s> World<'s> {
 
     fn ambiguous_purpose(&self, word: Word, ids: &[Id<Purpose>]) -> Diagnostic {
         let purposes = &self.book.purposes;
-        let candidates = self.candidates(
-            &self.book.lookup.purposes.names,
-            ids,
-            |id| purposes[id].name,
-            |id| purposes[id].loc,
-        );
+        let candidates =
+            self.candidates(&self.book.lookup.purposes.names, ids, |id| purposes[id].name, |id| purposes[id].loc);
         ambiguous("ambiguous-purpose", "purposes", word, &candidates)
     }
 
@@ -169,12 +165,7 @@ impl<'s> World<'s> {
         let mut diagnostic = unknown("unknown-purpose", "purpose", word, suggestion.map(|sym| names.name(sym)));
         for &hidden in lookup.names.candidates(names, word.text) {
             if let Home::System(system) = lookup.home(hidden) {
-                diagnostic = not_used(
-                    diagnostic,
-                    "purpose",
-                    word.text,
-                    self.book.name(self.book.systems[system].path),
-                );
+                diagnostic = not_used(diagnostic, "purpose", word.text, self.book.name(self.book.systems[system].path));
             }
         }
         diagnostic
@@ -222,32 +213,22 @@ impl<'s> World<'s> {
         }
         if let Some(contract) = self.book.contract(word.text) {
             if let Some(loan) = self.book.contracts[contract].loan {
-                return Ok(End {
-                    place: loan.debt,
-                    entity: Some(self.book.contracts[contract].party),
-                });
+                return Ok(End { place: loan.debt, entity: Some(self.book.contracts[contract].party) });
             }
             if let Some(entity) = self.seek_entity(home, word)? {
                 return self.entity_end(entity, word);
             }
-            return Err(
-                Diagnostic::error(
-                    "contract-endpoint",
-                    format!("contract `{}` is not a flow endpoint", word.text),
-                )
-                .label(word.loc, "name its party or holding account instead")
-                .help("loan contracts name their debt tab; other contracts are not places"),
-            );
+            return Err(Diagnostic::error(
+                "contract-endpoint",
+                format!("contract `{}` is not a flow endpoint", word.text),
+            )
+            .label(word.loc, "name its party or holding account instead")
+            .help("loan contracts name their debt tab; other contracts are not places"));
         }
         if self.book.asset(word.text).is_some() {
-            return Err(
-                Diagnostic::error(
-                    "asset-endpoint",
-                    format!("asset `{}` is not a flow endpoint", word.text),
-                )
+            return Err(Diagnostic::error("asset-endpoint", format!("asset `{}` is not a flow endpoint", word.text))
                 .label(word.loc, "this names the asset itself")
-                .help(format!("use `#purchase of {}` to acquire the asset", word.text)),
-            );
+                .help(format!("use `#purchase of {}` to acquire the asset", word.text)));
         }
 
         let place_candidates = self.book.lookup.places.candidates(&self.book.names, word.text);
@@ -283,11 +264,9 @@ impl<'s> World<'s> {
         if let Some(&place) = place_candidates.first() {
             if let Role::Asset(asset) = self.book.places[place].role {
                 let name = self.book.name(self.book.assets[asset].name);
-                return Err(
-                    Diagnostic::error("asset-endpoint", format!("asset `{name}` is not a flow endpoint"))
-                        .label(word.loc, "this names the asset itself")
-                        .help(format!("use `#purchase of {name}` to acquire the asset")),
-                );
+                return Err(Diagnostic::error("asset-endpoint", format!("asset `{name}` is not a flow endpoint"))
+                    .label(word.loc, "this names the asset itself")
+                    .help(format!("use `#purchase of {name}` to acquire the asset")));
             }
             return Ok(End { place, entity: None });
         }
@@ -295,14 +274,12 @@ impl<'s> World<'s> {
             if let Some(place) = self.book.issuer_place(unit) {
                 return Ok(End { place, entity: None });
             }
-            return Err(
-                Diagnostic::error(
-                    "commodity-endpoint",
-                    format!("commodity `{}` has no issuer endpoint", word.text),
-                )
-                .label(word.loc, "this commodity's kind chain declares no `pays` purpose")
-                .help("write `pays PURPOSE` on its commodity kind before using it as a party"),
-            );
+            return Err(Diagnostic::error(
+                "commodity-endpoint",
+                format!("commodity `{}` has no issuer endpoint", word.text),
+            )
+            .label(word.loc, "this commodity's kind chain declares no `pays` purpose")
+            .help("write `pays PURPOSE` on its commodity kind before using it as a party"));
         }
         let entity = self.entity(home, word)?;
         self.entity_end(entity, word)
@@ -324,11 +301,8 @@ impl<'s> World<'s> {
         }
         candidates.sort_by_key(|(loc, _)| *loc);
         let choices = candidates.iter().map(|(_, label)| label.as_str()).collect::<Vec<_>>().join(" or ");
-        let mut diagnostic = Diagnostic::error(
-            "ambiguous-end",
-            format!("`{}` could mean {choices}", word.text),
-        )
-        .label(word.loc, "qualify the path to make the endpoint clear");
+        let mut diagnostic = Diagnostic::error("ambiguous-end", format!("`{}` could mean {choices}", word.text))
+            .label(word.loc, "qualify the path to make the endpoint clear");
         for (loc, label) in candidates {
             if let Some(loc) = loc {
                 diagnostic = diagnostic.context(loc, format!("{label} declared here"));
@@ -338,14 +312,11 @@ impl<'s> World<'s> {
     }
 
     fn entity_end(&self, entity: Id<Entity>, word: Word) -> Result<End, Diagnostic> {
-        self.book.entities[entity]
-            .place
-            .map(|place| End { place, entity: Some(entity) })
-            .ok_or_else(|| {
-                Diagnostic::error("entity-no-place", format!("entity `{}` has no flow endpoint", word.text))
-                    .label(word.loc, "this entity has no holding or outside place")
-                    .help("give the entity an account or resolve its `via` location")
-            })
+        self.book.entities[entity].place.map(|place| End { place, entity: Some(entity) }).ok_or_else(|| {
+            Diagnostic::error("entity-no-place", format!("entity `{}` has no flow endpoint", word.text))
+                .label(word.loc, "this entity has no holding or outside place")
+                .help("give the entity an account or resolve its `via` location")
+        })
     }
 
     fn explain_unknown_place(&self, word: Word) -> Diagnostic {
@@ -372,10 +343,8 @@ impl<'s> World<'s> {
             return diagnostic;
         }
         if closest.is_none() {
-            diagnostic = diagnostic.help(format!(
-                "to open a new account, declare its full path and kind: `account {}`",
-                word.text
-            ));
+            diagnostic = diagnostic
+                .help(format!("to open a new account, declare its full path and kind: `account {}`", word.text));
         }
         diagnostic
     }

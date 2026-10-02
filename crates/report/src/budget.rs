@@ -8,12 +8,7 @@ use crate::calendar::Periods;
 use crate::lens::Lens;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    at: Option<Day>,
-    by: Period,
-) -> Report<'s> {
+pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Option<Day>, by: Period) -> Report<'s> {
     let at = at.unwrap_or(run.today);
     purpose_budgets(lens.on(at), run, at, by)
 }
@@ -30,11 +25,7 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
     );
     if !book.budgets.is_empty() && query.first() > end {
         table.note("The requested budget window is beyond the run horizon.");
-        return Report::new(format!(
-            "Budgets for {}",
-            Periods::covering(by, at, at).title(0)
-        ))
-        .with(table);
+        return Report::new(format!("Budgets for {}", Periods::covering(by, at, at).title(0))).with(table);
     }
     let mut unpriced = 0;
 
@@ -49,24 +40,13 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
         let owners = budget_owners(lens, run, budget);
 
         if terms.period == Period::Year {
-            let window = Periods::covering(Period::Year, at.max(budget.starts), end)
-                .window(0)
-                .days();
+            let window = Periods::covering(Period::Year, at.max(budget.starts), end).window(0).days();
             for owner in owners.iter().copied() {
                 let reading = matching_reading(run, budget, owner, window);
                 let Some((spent, limit)) = values(&terms.limit, reading) else {
                     continue;
                 };
-                push_row(
-                    book,
-                    &mut table,
-                    name,
-                    owner_name(book, owner),
-                    window_label(window),
-                    spent,
-                    limit,
-                    0,
-                );
+                push_row(book, &mut table, name, owner_name(book, owner), window_label(window), spent, limit, 0);
             }
             continue;
         }
@@ -94,43 +74,16 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
 
             if by == Period::Year {
                 if let Some((spent, limit)) = sum_periods(lens, &month_rows) {
-                    push_row(
-                        book,
-                        &mut table,
-                        name,
-                        owner_name(book, owner),
-                        window_label(query),
-                        spent,
-                        limit,
-                        0,
-                    );
+                    push_row(book, &mut table, name, owner_name(book, owner), window_label(query), spent, limit, 0);
                 } else {
                     unpriced += 1;
                 }
                 for (window, spent, limit, _) in month_rows {
-                    push_row(
-                        book,
-                        &mut table,
-                        "",
-                        "",
-                        window_label(window),
-                        spent,
-                        limit,
-                        1,
-                    );
+                    push_row(book, &mut table, "", "", window_label(window), spent, limit, 1);
                 }
             } else {
                 for (window, spent, limit, _) in month_rows {
-                    push_row(
-                        book,
-                        &mut table,
-                        name,
-                        owner_name(book, owner),
-                        window_label(window),
-                        spent,
-                        limit,
-                        0,
-                    );
+                    push_row(book, &mut table, name, owner_name(book, owner), window_label(window), spent, limit, 0);
                 }
             }
         }
@@ -144,20 +97,12 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
         });
     }
     table.unpriced(unpriced, "budget total");
-    Report::new(format!(
-        "Budgets for {}",
-        Periods::covering(by, at, at).title(0)
-    ))
-    .with(table)
+    Report::new(format!("Budgets for {}", Periods::covering(by, at, at).title(0))).with(table)
 }
 
 /// Preserve owners recorded by the engine, but still show a wholly unused
 /// typed budget when it has not needed an owner-specific comparison yet.
-fn budget_owners(
-    lens: Lens<'_, '_, '_, '_>,
-    run: &Run,
-    budget: &Budget,
-) -> Vec<Option<Id<axiom_model::Entity>>> {
+fn budget_owners(lens: Lens<'_, '_, '_, '_>, run: &Run, budget: &Budget) -> Vec<Option<Id<axiom_model::Entity>>> {
     let mut owners: Vec<_> = run
         .headroom
         .iter()
@@ -185,9 +130,7 @@ fn matching_reading<'a>(
     run.headroom
         .iter()
         .filter(|reading| {
-            reading.law == budget.law
-                && owner.is_none_or(|owner| reading.owner == owner)
-                && reading.days.overlaps(days)
+            reading.law == budget.law && owner.is_none_or(|owner| reading.owner == owner) && reading.days.overlaps(days)
         })
         .max_by_key(|reading| reading.day)
 }
@@ -202,20 +145,13 @@ fn values(limit: &Limit, reading: Option<&Headroom>) -> Option<(Amount, Amount)>
     Some((Amount::zero(limit.unit), limit))
 }
 
-fn sum_periods(
-    lens: Lens<'_, '_, '_, '_>,
-    rows: &[(Days, Amount, Amount, bool)],
-) -> Option<(Amount, Amount)> {
+fn sum_periods(lens: Lens<'_, '_, '_, '_>, rows: &[(Days, Amount, Amount, bool)]) -> Option<(Amount, Amount)> {
     if rows.iter().any(|row| row.3) {
         let last = rows.last().copied().expect("a nonempty month series");
         return Some((last.1, last.2));
     }
-    let spent = rows
-        .iter()
-        .try_fold(Qty::ZERO, |sum, row| Some(sum + lens.value(row.1)?))?;
-    let limit = rows
-        .iter()
-        .try_fold(Qty::ZERO, |sum, row| Some(sum + lens.value(row.2)?))?;
+    let spent = rows.iter().try_fold(Qty::ZERO, |sum, row| Some(sum + lens.value(row.1)?))?;
+    let limit = rows.iter().try_fold(Qty::ZERO, |sum, row| Some(sum + lens.value(row.2)?))?;
     let unit = lens.book().base;
     Some((Amount::new(spent, unit), Amount::new(limit, unit)))
 }
@@ -243,11 +179,7 @@ fn push_row<'s>(
 ) {
     let left = Amount::new(room_amount(limit, spent), limit.unit);
     let ratio = used_amount(spent, limit);
-    let purpose = if purpose.is_empty() {
-        Cell::Blank
-    } else {
-        Cell::Purpose(purpose)
-    };
+    let purpose = if purpose.is_empty() { Cell::Blank } else { Cell::Purpose(purpose) };
     let row = Row::new([
         purpose,
         Cell::Name(owner),
@@ -261,11 +193,7 @@ fn push_row<'s>(
     .style(if left.qty.is_negative() {
         Style::Alert
     } else {
-        if depth == 0 {
-            Style::Normal
-        } else {
-            Style::Muted
-        }
+        if depth == 0 { Style::Normal } else { Style::Muted }
     });
     table.push(row);
 }
@@ -275,7 +203,5 @@ fn room_amount(limit: Amount, spent: Amount) -> Qty {
 }
 
 fn used_amount(spent: Amount, limit: Amount) -> Option<Ratio> {
-    (spent.unit == limit.unit)
-        .then(|| Ratio::new(spent.qty.0.into(), limit.qty.0.into()))
-        .flatten()
+    (spent.unit == limit.unit).then(|| Ratio::new(spent.qty.0.into(), limit.qty.0.into())).flatten()
 }

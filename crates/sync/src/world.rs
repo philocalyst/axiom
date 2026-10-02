@@ -6,8 +6,8 @@ use std::fmt::Write;
 
 use axiom_core::num::POW10;
 use axiom_core::{Day, Diagnostic, FileId, Map, Qty};
-use axiom_model::sync::Format;
 use axiom_model::Book;
+use axiom_model::sync::Format;
 
 use crate::amount::amount;
 use crate::date::iso_day;
@@ -38,11 +38,7 @@ impl Account<'_> {
     /// The day a source of this account should start from: the day after its
     /// latest flow, or `first` if it has none.
     pub fn since(&self, first: Day) -> Day {
-        self.flows
-            .iter()
-            .map(|flow| flow.day)
-            .max()
-            .map_or(first, |last| last.add_days(1))
+        self.flows.iter().map(|flow| flow.day).max().map_or(first, |last| last.add_days(1))
     }
 }
 
@@ -79,11 +75,7 @@ struct Line<'s> {
 
 impl<'s> Line<'s> {
     fn statement(day: Day, body: String) -> Line<'s> {
-        Line {
-            day,
-            body,
-            moved: Vec::new(),
-        }
+        Line { day, body, moved: Vec::new() }
     }
 }
 
@@ -126,14 +118,7 @@ impl<'b, 's> World<'b, 's> {
         text: &str,
         file: FileId,
     ) -> Result<(Vec<Insert>, FeedDelta<'s>), Vec<Diagnostic>> {
-        let (records, problems) = crate::format::read(
-            self.book,
-            feed.format,
-            text,
-            file,
-            feed.unit,
-            &self.units,
-        );
+        let (records, problems) = crate::format::read(self.book, feed.format, text, file, feed.unit, &self.units);
         if !problems.is_empty() {
             return Err(problems);
         }
@@ -142,17 +127,11 @@ impl<'b, 's> World<'b, 's> {
             planned.push((account, self.plan(account, feed, records)?));
         }
         let mut inserts = Vec::new();
-        let mut delta = FeedDelta {
-            flows: Vec::new(),
-            asserted: Vec::new(),
-        };
+        let mut delta = FeedDelta { flows: Vec::new(), asserted: Vec::new() };
         for (account, (lines, asserted)) in planned {
             for line in &lines {
                 for &(name, unit, qty) in &line.moved {
-                    let flow = Existing {
-                        unit,
-                        ..Existing::new(line.day, qty)
-                    };
+                    let flow = Existing { unit, ..Existing::new(line.day, qty) };
                     delta.flows.push((name, flow));
                 }
             }
@@ -187,10 +166,7 @@ impl<'b, 's> World<'b, 's> {
                 continue;
             };
             for (name, unit, qty) in self.moved_by(body) {
-                let flow = Existing {
-                    unit: Some(unit),
-                    ..Existing::new(insert.day, qty)
-                };
+                let flow = Existing { unit: Some(unit), ..Existing::new(insert.day, qty) };
                 self.accounts.entry(name).or_default().flows.push(flow);
             }
         }
@@ -215,19 +191,13 @@ impl<'b, 's> World<'b, 's> {
         for item in lines {
             let words: Vec<&str> = item.split_whitespace().collect();
             match words.as_slice() {
-                ["+", number, name, ..] if *name == unit.name => {
-                    net += parse(number).unwrap_or_default()
-                }
-                ["-", number, name, ..] if *name == unit.name => {
-                    net -= parse(number).unwrap_or_default()
-                }
+                ["+", number, name, ..] if *name == unit.name => net += parse(number).unwrap_or_default(),
+                ["-", number, name, ..] if *name == unit.name => net -= parse(number).unwrap_or_default(),
                 _ => {}
             }
         }
         let ends = [(*from, -net), (*to, net)];
-        ends.iter()
-            .filter_map(|&(name, qty)| Some((self.recognizer.account(name)?, unit.name, qty)))
-            .collect()
+        ends.iter().filter_map(|&(name, qty)| Some((self.recognizer.account(name)?, unit.name, qty))).collect()
     }
 
     /// The records of each account they belong to: the feed's, unless a record's
@@ -237,19 +207,13 @@ impl<'b, 's> World<'b, 's> {
         feed: &Feed<'b, 's>,
         records: Vec<Record<'t>>,
     ) -> Result<Vec<(&'s str, Vec<Record<'t>>)>, Vec<Diagnostic>> {
-        let (mut groups, mut problems): (Vec<(&'s str, Vec<Record<'t>>)>, Vec<Diagnostic>) =
-            (Vec::new(), Vec::new());
+        let (mut groups, mut problems): (Vec<(&'s str, Vec<Record<'t>>)>, Vec<Diagnostic>) = (Vec::new(), Vec::new());
         let mut scratch = Scratch::default();
         for record in records {
             let account = match record.facts().route.as_deref() {
                 None => feed.account,
                 Some(route) => {
-                    let named = self
-                        .recognizer
-                        .read(route, &mut scratch)
-                        .who
-                        .ok()
-                        .and_then(|found| found.who);
+                    let named = self.recognizer.read(route, &mut scratch).who.ok().and_then(|found| found.who);
                     match named.filter(|who| who.account) {
                         Some(who) => who.name,
                         None => {
@@ -267,21 +231,13 @@ impl<'b, 's> World<'b, 's> {
                 None => groups.push((account, vec![record])),
             }
         }
-        if problems.is_empty() {
-            Ok(groups)
-        } else {
-            Err(problems)
-        }
+        if problems.is_empty() { Ok(groups) } else { Err(problems) }
     }
 
     /// The unit a record is counted in.
     fn unit_of(&self, feed: &Feed<'b, 's>, record: &Record) -> Unit<'s> {
         let named = record.facts().currency.as_deref();
-        let found = named.and_then(|name| {
-            self.units
-                .iter()
-                .find(|unit| unit.name.eq_ignore_ascii_case(name))
-        });
+        let found = named.and_then(|name| self.units.iter().find(|unit| unit.name.eq_ignore_ascii_case(name)));
         found.copied().unwrap_or(feed.unit)
     }
 
@@ -305,38 +261,24 @@ impl<'b, 's> World<'b, 's> {
         let matched = reconcile_paired(&paired, flows, feed.unit.name);
         let told = self.told(&paired, &matched)?;
         let others: Vec<Option<Other<'s>>> = (0..paired.len())
-            .map(|at| {
-                told[at]
-                    .as_ref()
-                    .map(|told| self.other(feed, account, &paired[at].0, told))
-            })
+            .map(|at| told[at].as_ref().map(|told| self.other(feed, account, &paired[at].0, told)))
             .collect();
         // Only a record that is neither written nor pending can keep a promise.
         let parties: Vec<Option<&str>> = (0..paired.len())
             .map(|at| {
                 let record = &paired[at].0;
-                let who = others[at]
-                    .as_ref()
-                    .filter(|_| !record.pending)
-                    .and_then(|other| other.who);
+                let who = others[at].as_ref().filter(|_| !record.pending).and_then(|other| other.who);
                 who.filter(|who| !who.account).map(|who| who.name)
             })
             .collect();
-        let dues: Vec<Due> = self
-            .dues
-            .iter()
-            .filter(|due| due.account == account)
-            .cloned()
-            .collect();
+        let dues: Vec<Due> = self.dues.iter().filter(|due| due.account == account).cloned().collect();
         let kept = keep_paired(&paired, &parties, &dues);
 
         // Pending flows carry a code of their own, for the record that posts
         // them to settle. It counts on from the flows the account has that day.
         let mut per_day: Map<Day, usize> = Map::default();
         if paired.iter().any(|(record, _)| record.pending) {
-            flows
-                .iter()
-                .for_each(|flow| *per_day.entry(flow.day).or_default() += 1);
+            flows.iter().for_each(|flow| *per_day.entry(flow.day).or_default() += 1);
         }
         let mut pending_code = |day: Day| {
             let number = per_day.entry(day).or_default();
@@ -345,27 +287,16 @@ impl<'b, 's> World<'b, 's> {
         };
         let exchanges = self.exchanges(&paired, &others, &kept);
         let mut lines = Vec::new();
-        for (at, (record, _)) in paired
-            .iter()
-            .enumerate()
-            .filter(|(_, (record, _))| !record.qty.is_zero())
-        {
+        for (at, (record, _)) in paired.iter().enumerate().filter(|(_, (record, _))| !record.qty.is_zero()) {
             let line = match (matched[at], kept[at], &others[at]) {
                 (Some(flow), _, _) => {
                     let settles = flows[flow].settle.filter(|_| !record.pending);
                     settles.map(|code| Line::statement(record.day, format!("^{code} settled")))
                 }
-                (None, Some(due), _) => Some(occurrence(
-                    &dues[due],
-                    record,
-                    account,
-                    self.unit_of(feed, record),
-                )),
+                (None, Some(due), _) => Some(occurrence(&dues[due], record, account, self.unit_of(feed, record))),
                 (None, None, Some(other)) => match exchanges[at] {
                     Exchange::Second => None,
-                    Exchange::First(with) => {
-                        Some(self.exchange(account, feed, record, &paired[with].0, other))
-                    }
+                    Exchange::First(with) => Some(self.exchange(account, feed, record, &paired[with].0, other)),
                     Exchange::No => {
                         let code = record.pending.then(|| pending_code(record.day));
                         Some(self.new_flow(account, feed, record, other, code.as_deref()))
@@ -375,8 +306,8 @@ impl<'b, 's> World<'b, 's> {
             };
             lines.extend(line);
         }
-        let closing = closing_of_paired(&paired)
-            .filter(|(day, _)| existing.is_none_or(|acct| !acct.asserted.contains(day)));
+        let closing =
+            closing_of_paired(&paired).filter(|(day, _)| existing.is_none_or(|acct| !acct.asserted.contains(day)));
         if let Some((day, balance)) = closing {
             let shown = match balance.is_negative() {
                 true => format!("-{}", money(balance.abs(), feed.unit)),
@@ -389,11 +320,7 @@ impl<'b, 's> World<'b, 's> {
 
     /// Gives a record the amount and the day its memo says of itself, when a
     /// pattern captured them: the record is matched by them, and written with them.
-    fn adopt<'t>(
-        &self,
-        feed: &Feed<'b, 's>,
-        records: &mut [(Record<'t>, Reading<'s>)],
-    ) -> Result<(), Vec<Diagnostic>> {
+    fn adopt<'t>(&self, feed: &Feed<'b, 's>, records: &mut [(Record<'t>, Reading<'s>)]) -> Result<(), Vec<Diagnostic>> {
         let mut problems = Vec::new();
         for (record, reading) in records {
             let unit = self.unit_of(feed, record);
@@ -404,18 +331,13 @@ impl<'b, 's> World<'b, 's> {
             if let Some(text) = reading.amount.as_ref().and_then(|span| record.memo.get(span.clone())) {
                 match amount(&text.replace('_', ""), unit.scale) {
                     Ok(Some(qty)) if !qty.is_zero() => {
-                        record.qty = if record.qty.is_negative() {
-                            -qty.abs()
-                        } else {
-                            qty.abs()
-                        }
+                        record.qty = if record.qty.is_negative() { -qty.abs() } else { qty.abs() }
                     }
                     _ => problems.push(bad("amount", text, record)),
                 }
             }
             if let Some(text) = reading.date.as_ref().and_then(|span| record.memo.get(span.clone())) {
-                match crate::format::date_layout(feed.format)
-                    .map_or_else(|| iso_day(text), |layout| layout.read(text))
+                match crate::format::date_layout(feed.format).map_or_else(|| iso_day(text), |layout| layout.read(text))
                 {
                     Some(day) => record.day = day,
                     None => problems.push(bad("day", text, record)),
@@ -426,11 +348,7 @@ impl<'b, 's> World<'b, 's> {
                     Some(mut original) => {
                         // The memo may omit a sign because the statement's
                         // amount supplies the direction of the converted leg.
-                        original.qty = if record.qty.is_negative() {
-                            -original.qty.abs()
-                        } else {
-                            original.qty.abs()
-                        };
+                        original.qty = if record.qty.is_negative() { -original.qty.abs() } else { original.qty.abs() };
                         record.facts.get_or_insert_with(Default::default).original = Some(original);
                     }
                     None => {
@@ -440,11 +358,7 @@ impl<'b, 's> World<'b, 's> {
                 }
             }
         }
-        if problems.is_empty() {
-            Ok(())
-        } else {
-            Err(problems)
-        }
+        if problems.is_empty() { Ok(()) } else { Err(problems) }
     }
 
     /// What the memo, and the export's own `party` and `via`, say of each record
@@ -463,8 +377,7 @@ impl<'b, 's> World<'b, 's> {
                 continue;
             }
             let mut read = |text: &Option<std::borrow::Cow<str>>| {
-                text.as_deref()
-                    .map(|text| self.recognizer.read(text, &mut scratch))
+                text.as_deref().map(|text| self.recognizer.read(text, &mut scratch))
             };
             let (party, via) = (read(&record.facts().party), read(&record.facts().via));
             for read in [party.as_ref(), via.as_ref()].into_iter().flatten() {
@@ -472,19 +385,10 @@ impl<'b, 's> World<'b, 's> {
                     problems.push(tie_error(self.book, record, tie));
                 }
             }
-            let has_structured_party = party
-                .as_ref()
-                .and_then(|read| read.who.as_ref().ok())
-                .is_some_and(|who| who.who.is_some())
-                || via
-                    .as_ref()
-                    .and_then(|read| read.who.as_ref().ok())
-                    .is_some_and(|who| who.who.is_some());
-            let has_claim_code = record
-                .facts()
-                .code
-                .as_deref()
-                .is_some_and(|code| self.claims.contains_key(code));
+            let has_structured_party =
+                party.as_ref().and_then(|read| read.who.as_ref().ok()).is_some_and(|who| who.who.is_some())
+                    || via.as_ref().and_then(|read| read.who.as_ref().ok()).is_some_and(|who| who.who.is_some());
+            let has_claim_code = record.facts().code.as_deref().is_some_and(|code| self.claims.contains_key(code));
             if !has_structured_party && !has_claim_code {
                 if let Err(tie) = &memo.who {
                     problems.push(tie_error(self.book, record, tie));
@@ -492,11 +396,7 @@ impl<'b, 's> World<'b, 's> {
             }
             told.push(Some(Told { memo, party, via }));
         }
-        if problems.is_empty() {
-            Ok(told)
-        } else {
-            Err(problems)
-        }
+        if problems.is_empty() { Ok(told) } else { Err(problems) }
     }
 
     /// Who a record was with. What the export says of it beats what patterns
@@ -504,19 +404,10 @@ impl<'b, 's> World<'b, 's> {
     /// then its `party`, then its `via`, and last the memo. Whoever the export
     /// names, the memo's party is the go-between. Only the codes of the claims
     /// of that party are carried, and the record's own code.
-    fn other<'t>(
-        &self,
-        feed: &Feed<'b, 's>,
-        account: &str,
-        record: &Record<'t>,
-        told: &Told<'_, 's>,
-    ) -> Other<'s> {
-        let recognized =
-            |reading: &Reading<'s>| reading.who.as_ref().ok().copied().unwrap_or_default();
+    fn other<'t>(&self, feed: &Feed<'b, 's>, account: &str, record: &Record<'t>, told: &Told<'_, 's>) -> Other<'s> {
+        let recognized = |reading: &Reading<'s>| reading.who.as_ref().ok().copied().unwrap_or_default();
         let memo = recognized(told.memo);
-        let named = |reading: &Option<Reading<'s>>| {
-            reading.as_ref().and_then(|reading| recognized(reading).who)
-        };
+        let named = |reading: &Option<Reading<'s>>| reading.as_ref().and_then(|reading| recognized(reading).who);
         let facts = record.facts();
         let own_claim = facts
             .code
@@ -528,9 +419,7 @@ impl<'b, 's> World<'b, 's> {
         (other.who, other.via) = match structured {
             Some(who) => (
                 Some(who),
-                memo.who
-                    .filter(|go_between| !go_between.account && go_between.name != who.name)
-                    .map(|w| w.name),
+                memo.who.filter(|go_between| !go_between.account && go_between.name != who.name).map(|w| w.name),
             ),
             None => (memo.who, memo.via),
         };
@@ -538,34 +427,22 @@ impl<'b, 's> World<'b, 's> {
         if other.who.is_some_and(|who| who.name == account) {
             (other.who, other.via) = (None, None);
         }
-        let memo_codes = told
-            .memo
-            .codes
-            .iter()
-            .filter_map(|span| record.memo.get(span.clone()));
+        let memo_codes = told.memo.codes.iter().filter_map(|span| record.memo.get(span.clone()));
         for code in memo_codes.chain(facts.code.as_deref()) {
             let Some((&claim, &party)) = self.claims.get_key_value(code) else {
                 continue;
             };
             match other.who {
-                None => {
-                    other.who = self.recognizer.who_named(party)
-                }
+                None => other.who = self.recognizer.who_named(party),
                 Some(who) if who.name != party => continue,
                 Some(_) => {}
             }
             other.codes.push(claim);
         }
-        let purpose = facts
-            .category
-            .as_deref()
-            .and_then(|category| crate::format::category(feed.format, self.book, category));
-        other.purpose = purpose.map(|purpose| {
-            (
-                self.book.purposes[purpose].name,
-                facts.object.as_deref().map(str::to_string),
-            )
-        });
+        let purpose =
+            facts.category.as_deref().and_then(|category| crate::format::category(feed.format, self.book, category));
+        other.purpose =
+            purpose.map(|purpose| (self.book.purposes[purpose].name, facts.object.as_deref().map(str::to_string)));
         other
     }
 
@@ -579,10 +456,7 @@ impl<'b, 's> World<'b, 's> {
     ) -> Vec<Exchange> {
         let mut by_id: Map<&str, Vec<usize>> = Map::default();
         for (at, (record, _)) in records.iter().enumerate() {
-            let free = others[at].is_some()
-                && kept[at].is_none()
-                && !record.pending
-                && !record.qty.is_zero();
+            let free = others[at].is_some() && kept[at].is_none() && !record.pending && !record.qty.is_zero();
             if let Some(id) = record.facts().id.as_deref().filter(|_| free) {
                 by_id.entry(id).or_default().push(at);
             }
@@ -596,11 +470,7 @@ impl<'b, 's> World<'b, 's> {
             );
             if units.0 != units.1 && signs.0.is_negative() != signs.1.is_negative() {
                 // The side that leaves is the first of the two, so the line says out then in.
-                let (out, into) = if signs.0.is_negative() {
-                    (a, b)
-                } else {
-                    (b, a)
-                };
+                let (out, into) = if signs.0.is_negative() { (a, b) } else { (b, a) };
                 (exchanges[out], exchanges[into]) = (Exchange::First(into), Exchange::Second);
             }
         }
@@ -617,21 +487,10 @@ impl<'b, 's> World<'b, 's> {
         other: &Other<'s>,
     ) -> Line<'s> {
         let (unit_out, unit_in) = (self.unit_of(feed, out), self.unit_of(feed, into));
-        let mut body = format!(
-            "{account} {} -> {}",
-            money(out.qty.abs(), unit_out),
-            money(into.qty.abs(), unit_in)
-        );
+        let mut body = format!("{account} {} -> {}", money(out.qty.abs(), unit_out), money(into.qty.abs(), unit_in));
         tail(self.book, &mut body, other, Some(out), out.facts());
-        let moved = vec![
-            (account, Some(unit_out.name), out.qty),
-            (account, Some(unit_in.name), into.qty),
-        ];
-        Line {
-            day: out.day.min(into.day),
-            body,
-            moved,
-        }
+        let moved = vec![(account, Some(unit_out.name), out.qty), (account, Some(unit_in.name), into.qty)];
+        Line { day: out.day.min(into.day), body, moved }
     }
 
     /// `checking -> trader-joes 84.20 USD`: the flow a record is, with the other
@@ -647,32 +506,13 @@ impl<'b, 's> World<'b, 's> {
     ) -> Line<'s> {
         let unit = self.unit_of(feed, record);
         let end = other.who.map_or("?", |who| who.name);
-        let (from, to) = if record.qty.is_negative() {
-            (account, end)
-        } else {
-            (end, account)
-        };
+        let (from, to) = if record.qty.is_negative() { (account, end) } else { (end, account) };
         let facts = record.facts();
         let fee = facts.fee.filter(|fee| !fee.is_zero());
-        let header = fee.map_or(record.qty.abs(), |fee| {
-            facts.gross.unwrap_or(record.qty.abs() + fee)
-        });
+        let header = fee.map_or(record.qty.abs(), |fee| facts.gross.unwrap_or(record.qty.abs() + fee));
         let amount = money(header, unit);
-        let mut body = format!(
-            "{from} -> {to} {}",
-            if record.pending {
-                format!("({amount})")
-            } else {
-                amount
-            }
-        );
-        tail(
-            self.book,
-            &mut body,
-            other,
-            Some(record).filter(|_| other.who.is_none()),
-            record.facts(),
-        );
+        let mut body = format!("{from} -> {to} {}", if record.pending { format!("({amount})") } else { amount });
+        tail(self.book, &mut body, other, Some(record).filter(|_| other.who.is_none()), record.facts());
         if let Some(code) = pending {
             let _ = write!(body, " ^{code}");
         }
@@ -684,19 +524,9 @@ impl<'b, 's> World<'b, 's> {
             let _ = write!(body, "\n  {sign} {} #fees via {account}", money(fee, unit));
         }
         // What arrives at the other end, if that is an account of the book too.
-        let transfer = other
-            .who
-            .filter(|who| who.account)
-            .map(|who| (who.name, Some(unit.name), -record.qty));
-        let moved = [Some((account, Some(unit.name), record.qty)), transfer]
-            .into_iter()
-            .flatten()
-            .collect();
-        Line {
-            day: record.day,
-            body,
-            moved,
-        }
+        let transfer = other.who.filter(|who| who.account).map(|who| (who.name, Some(unit.name), -record.qty));
+        let moved = [Some((account, Some(unit.name), record.qty)), transfer].into_iter().flatten().collect();
+        Line { day: record.day, body, moved }
     }
 }
 
@@ -711,10 +541,7 @@ fn original_capture<'t>(
         std::borrow::Cow::Borrowed(text) => original(text.get(span)?, units),
         std::borrow::Cow::Owned(text) => {
             let parsed = original(text.get(span)?, units)?;
-            Some(crate::Original {
-                qty: parsed.qty,
-                unit: std::borrow::Cow::Owned(parsed.unit.into_owned()),
-            })
+            Some(crate::Original { qty: parsed.qty, unit: std::borrow::Cow::Owned(parsed.unit.into_owned()) })
         }
     }
 }
@@ -723,14 +550,9 @@ fn original<'t>(text: &'t str, units: &[Unit<'_>]) -> Option<crate::Original<'t>
     let text = text.trim();
     let split = text.find(char::is_whitespace)?;
     let (unit, amount_text) = text.split_at(split);
-    let unit_spec = units
-        .iter()
-        .find(|known| known.name.eq_ignore_ascii_case(unit))?;
+    let unit_spec = units.iter().find(|known| known.name.eq_ignore_ascii_case(unit))?;
     let qty = amount(amount_text.trim(), unit_spec.scale).ok().flatten()?;
-    Some(crate::Original {
-        qty,
-        unit: std::borrow::Cow::Borrowed(unit),
-    })
+    Some(crate::Original { qty, unit: std::borrow::Cow::Borrowed(unit) })
 }
 
 #[cfg(test)]
@@ -739,17 +561,10 @@ mod original_tests {
 
     #[test]
     fn original_capture_is_typed_and_borrows_the_currency_from_the_memo() {
-        let units = [Unit {
-            name: "CHF",
-            scale: 2,
-        }];
+        let units = [Unit { name: "CHF", scale: 2 }];
         let text = "CHF 3,290.00";
-        let parsed = original_capture(
-            &std::borrow::Cow::Borrowed(text),
-            0..text.len(),
-            &units,
-        )
-        .expect("known unit and valid amount");
+        let parsed = original_capture(&std::borrow::Cow::Borrowed(text), 0..text.len(), &units)
+            .expect("known unit and valid amount");
         assert_eq!(parsed.qty, Qty(329_000));
         assert_eq!(parsed.unit.as_ref(), "CHF");
         assert!(matches!(parsed.unit, std::borrow::Cow::Borrowed("CHF")));
@@ -771,13 +586,7 @@ enum Exchange {
 /// The tail of a written line, in the order of the language: `#purpose of
 /// THING`, `"description"`, `^codes`. A description is what the memo says, when
 /// nobody is known to say it for.
-fn tail(
-    book: &Book<'_>,
-    body: &mut String,
-    other: &Other,
-    describe: Option<&Record>,
-    facts: &Facts<'_>,
-) {
+fn tail(book: &Book<'_>, body: &mut String, other: &Other, describe: Option<&Record>, facts: &Facts<'_>) {
     if let Some((purpose, object)) = &other.purpose {
         let _ = write!(body, " #{}", book.name(*purpose));
         if let Some(object) = object {
@@ -786,44 +595,26 @@ fn tail(
     }
     if let Some(record) = describe {
         let memo = record.memo.split_whitespace().collect::<Vec<_>>().join(" ");
-        let _ = write!(
-            body,
-            " \"{}\"",
-            memo.replace('\\', "\\\\").replace('"', "\\\"")
-        );
+        let _ = write!(body, " \"{}\"", memo.replace('\\', "\\\\").replace('"', "\\\""));
     }
     for &code in &other.codes {
         let _ = write!(body, " ^{code}");
     }
-    if let Some(code) = facts
-        .code
-        .as_deref()
-        .filter(|code| !other.codes.contains(code))
-    {
+    if let Some(code) = facts.code.as_deref().filter(|code| !other.codes.contains(code)) {
         let _ = write!(body, " ^{code}");
     }
 }
 
 fn tie_error(book: &Book<'_>, record: &Record, tie: &Tie) -> Diagnostic {
     let (first, second) = (&tie.first, &tie.second);
-    let headline = format!(
-        "`{}` is known as both {} and {}",
-        record.memo.trim(),
-        first.name,
-        second.name
-    );
+    let headline = format!("`{}` is known as both {} and {}", record.memo.trim(), first.name, second.name);
     let mut diagnostic = Diagnostic::error("ambiguous-memo", headline)
         .label(record.at, "this memo")
         .help("make one of the two more specific: the one that matches more of the memo wins");
-    for (id, name) in [
-        (tie.first_pattern, first.name),
-        (tie.second_pattern, second.name),
-    ] {
+    for (id, name) in [(tie.first_pattern, first.name), (tie.second_pattern, second.name)] {
         if let Some(id) = id {
-            diagnostic = diagnostic.context(
-                book.patterns[id].loc,
-                format!("this known-as pattern for `{name}` also matches"),
-            );
+            diagnostic =
+                diagnostic.context(book.patterns[id].loc, format!("this known-as pattern for `{name}` also matches"));
         }
     }
     diagnostic
@@ -836,11 +627,7 @@ fn occurrence<'a>(due: &Due, record: &Record, account: &'a str, unit: Unit<'a>) 
         false => format!(" {}", money(record.qty.abs(), unit)),
     };
     let moved = vec![(account, Some(unit.name), record.qty)];
-    Line {
-        day: record.day,
-        body: format!("{}{amount}", due.contract),
-        moved,
-    }
+    Line { day: record.day, body: format!("{}{amount}", due.contract), moved }
 }
 
 /// `2_900 USD`, `84.20 USD`: a whole amount without decimals, any other to the
@@ -861,13 +648,7 @@ pub fn money(qty: Qty, unit: Unit) -> String {
 /// the account's own balance.
 fn closing_of_paired<'t, 's>(records: &[(Record<'t>, Reading<'s>)]) -> Option<(Day, Qty)> {
     let own = |record: &&(Record<'t>, Reading<'s>)| !record.0.pending && record.0.facts().currency.is_none();
-    let day = records
-        .iter()
-        .rev()
-        .filter(own)
-        .find(|record| record.0.balance.is_some())?
-        .0
-        .day;
+    let day = records.iter().rev().filter(own).find(|record| record.0.balance.is_some())?.0.day;
     let today: Vec<(Qty, Qty)> = records
         .iter()
         .filter(own)
@@ -890,20 +671,15 @@ fn closing_of_paired<'t, 's>(records: &[(Record<'t>, Reading<'s>)]) -> Option<(D
 mod output_tests {
     use super::*;
     use axiom_core::FileId;
-    use axiom_syntax::Folder;
     use axiom_model::Source;
+    use axiom_syntax::Folder;
     use std::borrow::Cow;
 
     #[test]
     fn a_structured_code_is_written_even_when_a_party_suppresses_the_memo() {
-        let (file, problems) =
-            axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+        let (file, problems) = axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
         assert!(problems.is_empty(), "axiom.ax: {problems:?}");
-        let sources = [Source {
-            path: "axiom.ax",
-            file,
-            embedded: false,
-        }];
+        let sources = [Source { path: "axiom.ax", file, embedded: false }];
         let (book, problems) = axiom_model::build(&sources);
         assert!(problems.is_empty(), "{problems:?}");
         let other = Other {
@@ -914,10 +690,7 @@ mod output_tests {
             }),
             ..Other::default()
         };
-        let facts = Facts {
-            code: Some(Cow::Borrowed("statement-37")),
-            ..Facts::default()
-        };
+        let facts = Facts { code: Some(Cow::Borrowed("statement-37")), ..Facts::default() };
         let mut body = String::new();
         tail(&book, &mut body, &other, None, &facts);
         assert_eq!(body, " ^statement-37");

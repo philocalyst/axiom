@@ -28,10 +28,7 @@ pub(crate) struct Shape {
 
 impl Shape {
     pub fn of(row: &ParamRow) -> Shape {
-        Shape {
-            timed: row.since.is_some(),
-            names: row.names.len(),
-        }
+        Shape { timed: row.since.is_some(), names: row.names.len() }
     }
 
     pub fn keys(self) -> usize {
@@ -40,11 +37,7 @@ impl Shape {
 }
 
 /// Declare native S5 params directly from their arranged source sites.
-pub(crate) fn declare<'s>(
-    world: &mut World<'s>,
-    sites: &[Site<'_, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -53,28 +46,12 @@ pub(crate) fn declare<'s>(
             };
             let written = &file[id];
             let home = site.home;
-            let system = if let Home::System(system) = home {
-                Some(system)
-            } else {
-                None
-            };
+            let system = if let Home::System(system) = home { Some(system) } else { None };
             let name = written.name.0;
             let sym = world.book.names.intern(name);
-            let earlier = world
-                .book
-                .params
-                .iter()
-                .find(|(_, param)| param.name == sym && param.system == system);
+            let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
             if let Some((_, first)) = earlier {
-                diags.push(duplicate(
-                    "param",
-                    Word {
-                        text: name,
-                        loc: file.loc(name),
-                    },
-                    Some(first.loc),
-                    None,
-                ));
+                diags.push(duplicate("param", Word { text: name, loc: file.loc(name) }, Some(first.loc), None));
                 continue;
             }
 
@@ -87,13 +64,7 @@ pub(crate) fn declare<'s>(
             };
             let rows = rows(world, home, file, written, unit, diags);
             if !rows.is_empty() {
-                world.book.params.push(Param {
-                    name: sym,
-                    unit,
-                    system,
-                    rows: rows.into(),
-                    loc: file.loc(name),
-                });
+                world.book.params.push(Param { name: sym, unit, system, rows: rows.into(), loc: file.loc(name) });
             }
         }
     }
@@ -102,13 +73,7 @@ pub(crate) fn declare<'s>(
         .book
         .params
         .iter()
-        .map(|(id, param)| {
-            (
-                id,
-                world.book.names.name(param.name),
-                param.system.map_or(Home::Project, Home::System),
-            )
-        })
+        .map(|(id, param)| (id, world.book.names.name(param.name), param.system.map_or(Home::Project, Home::System)))
         .collect();
     world.book.lookup.params = Scoped::build(&mut world.book.names, things);
 }
@@ -132,15 +97,10 @@ fn parse_unit<'s>(
     loc: axiom_core::Loc,
 ) -> Result<Dim<axiom_core::Id<crate::book::Commodity>>, Diagnostic> {
     let (top, bottom) = match text.split_once('/') {
-        Some((top, bottom)) if !top.is_empty() && !bottom.is_empty() && !bottom.contains('/') => {
-            (top, Some(bottom))
-        }
+        Some((top, bottom)) if !top.is_empty() && !bottom.is_empty() && !bottom.contains('/') => (top, Some(bottom)),
         Some(_) => {
-            return Err(Diagnostic::error(
-                "param-unit",
-                "a param unit is one commodity or a rate between two",
-            )
-            .label(loc, "write `USD` or `USD/MI`"));
+            return Err(Diagnostic::error("param-unit", "a param unit is one commodity or a rate between two")
+                .label(loc, "write `USD` or `USD/MI`"));
         }
         None => (text, None),
     };
@@ -168,14 +128,9 @@ fn rows<'s>(
     for row in &file[param.rows] {
         match one_row(world, home, file, row, unit) {
             Ok(parsed) => {
-                let shape_error = rows
-                    .first()
-                    .and_then(|first| check_shape(first, &parsed).err());
-                let type_anchor = rows
-                    .iter()
-                    .find(|first| !matches!(first.value, Value::Empty));
-                let type_error =
-                    type_anchor.and_then(|first| check_like(world, first, &parsed, unit).err());
+                let shape_error = rows.first().and_then(|first| check_shape(first, &parsed).err());
+                let type_anchor = rows.iter().find(|first| !matches!(first.value, Value::Empty));
+                let type_error = type_anchor.and_then(|first| check_like(world, first, &parsed, unit).err());
                 if let Some(error) = shape_error.or(type_error) {
                     diags.push(error);
                 } else {
@@ -215,9 +170,7 @@ impl Param {
     pub fn row_at(&self, names: &[Sym], when: Day) -> Option<&ParamRow> {
         self.rows
             .iter()
-            .filter(|row| {
-                row.names.as_ref() == names && row.since.is_none_or(|since| since <= when)
-            })
+            .filter(|row| row.names.as_ref() == names && row.since.is_none_or(|since| since <= when))
             .max_by_key(|row| row.since)
     }
 }
@@ -241,23 +194,17 @@ fn one_row<'s>(
             Key::Date(day, loc) => (Some(day), loc),
         };
         if at > 0 {
-            return Err(
-                Diagnostic::error("param-key-order", "the year or date comes first")
-                    .label(loc, "move it before the names"),
-            );
+            return Err(Diagnostic::error("param-key-order", "the year or date comes first")
+                .label(loc, "move it before the names"));
         }
-        since = Some(day.ok_or_else(|| {
-            Diagnostic::error("param-key", "this year does not exist").label(loc, "out of range")
-        })?);
+        since =
+            Some(day.ok_or_else(|| {
+                Diagnostic::error("param-key", "this year does not exist").label(loc, "out of range")
+            })?);
     }
     let value = row_value(world, home, file, row, unit)?;
     validate_unit(world, value, unit, row.loc)?;
-    Ok(ParamRow {
-        since,
-        names: names.into(),
-        value,
-        loc: row.loc,
-    })
+    Ok(ParamRow { since, names: names.into(), value, loc: row.loc })
 }
 
 /// Preserve literal values. A compound amount such as `0.70 USD/MI` has no
@@ -279,8 +226,7 @@ fn row_value<'s>(
                     return Err(unit_mismatch(world, unit.unwrap(), found, expr.loc));
                 }
                 let ratio = amount.num().to_ratio().ok_or_else(|| {
-                    Diagnostic::error("number-range", "this param value is too large")
-                        .label(expr.loc, "out of range")
+                    Diagnostic::error("number-range", "this param value is too large").label(expr.loc, "out of range")
                 })?;
                 return Ok(Value::Num(ratio));
             }
@@ -305,12 +251,9 @@ fn validate_unit<'s>(
     if valid {
         Ok(())
     } else {
-        Err(Diagnostic::error(
-            "param-unit",
-            "this value does not have the param's declared unit",
-        )
-        .label(loc, format!("expected {}", dimension_name(world, unit)))
-        .help("write a value in the declared unit, or remove the unit from the param"))
+        Err(Diagnostic::error("param-unit", "this value does not have the param's declared unit")
+            .label(loc, format!("expected {}", dimension_name(world, unit)))
+            .help("write a value in the declared unit, or remove the unit from the param"))
     }
 }
 
@@ -331,13 +274,8 @@ fn unit_matches(
     }
 }
 
-fn dimension_name(
-    world: &crate::declare::World<'_>,
-    dim: Dim<axiom_core::Id<crate::book::Commodity>>,
-) -> String {
-    let name = |unit: axiom_core::Id<crate::book::Commodity>| {
-        world.book.name(world.book.commodities[unit].symbol)
-    };
+fn dimension_name(world: &crate::declare::World<'_>, dim: Dim<axiom_core::Id<crate::book::Commodity>>) -> String {
+    let name = |unit: axiom_core::Id<crate::book::Commodity>| world.book.name(world.book.commodities[unit].symbol);
     match dim {
         Dim::Of(unit) => name(unit).to_owned(),
         Dim::Per(top, bottom) => format!("{}/{}", name(top), name(bottom)),
@@ -353,18 +291,8 @@ fn unit_mismatch<'s>(
     found: Dim<axiom_core::Id<crate::book::Commodity>>,
     loc: axiom_core::Loc,
 ) -> Diagnostic {
-    Diagnostic::error(
-        "param-unit",
-        "this value does not have the param's declared unit",
-    )
-    .label(
-        loc,
-        format!(
-            "expected {}, found {}",
-            dimension_name(world, expected),
-            dimension_name(world, found)
-        ),
-    )
+    Diagnostic::error("param-unit", "this value does not have the param's declared unit")
+        .label(loc, format!("expected {}, found {}", dimension_name(world, expected), dimension_name(world, found)))
 }
 
 /// A row must have the first row's key shape.
@@ -373,11 +301,7 @@ fn check_shape(first: &ParamRow, row: &ParamRow) -> Result<(), Diagnostic> {
     if shape != found {
         return Err(Diagnostic::error(
             "param-shape",
-            format!(
-                "this row has {} keys, but the first has {}",
-                found.keys(),
-                shape.keys()
-            ),
+            format!("this row has {} keys, but the first has {}", found.keys(), shape.keys()),
         )
         .label(row.loc, "a different shape")
         .context(first.loc, "the first row")
@@ -396,9 +320,7 @@ fn check_like<'s>(
 ) -> Result<(), Diagnostic> {
     let same_storage_unit = match (first.value, row.value) {
         (Value::Amount(a), Value::Amount(b)) => a.unit == b.unit,
-        (Value::Schedule(a), Value::Schedule(b)) => {
-            world.book.schedules[a].unit == world.book.schedules[b].unit
-        }
+        (Value::Schedule(a), Value::Schedule(b)) => world.book.schedules[a].unit == world.book.schedules[b].unit,
         _ => true,
     };
     let (want, got) = value_types(first.value, row.value, unit);
@@ -407,21 +329,13 @@ fn check_like<'s>(
     }
     Err(Diagnostic::error(
         "param-type",
-        format!(
-            "this row's value is {}, but the first row's is {}",
-            article(got.word()),
-            article(want.word())
-        ),
+        format!("this row's value is {}, but the first row's is {}", article(got.word()), article(want.word())),
     )
     .label(row.loc, format!("{} here", got.word()))
     .context(first.loc, format!("{} here", want.word())))
 }
 
-fn value_types(
-    first: Value,
-    row: Value,
-    unit: Option<Dim<axiom_core::Id<crate::book::Commodity>>>,
-) -> (Ty, Ty) {
+fn value_types(first: Value, row: Value, unit: Option<Dim<axiom_core::Id<crate::book::Commodity>>>) -> (Ty, Ty) {
     let one = |value| match (unit, value) {
         (Some(_), Value::Schedule(_)) => Ty::Schedule,
         (Some(unit), _) => Ty::Amount(unit),
@@ -470,18 +384,9 @@ mod tests {
             .into(),
             loc: Loc::default(),
         };
-        assert_eq!(
-            param.row_at(&[a], day(2025, 12, 31)).unwrap().since,
-            Some(day(2024, 1, 1))
-        );
-        assert_eq!(
-            param.row_at(&[a], day(2026, 6, 1)).unwrap().since,
-            Some(day(2026, 1, 1))
-        );
-        assert_eq!(
-            param.row_at(&[b], day(2026, 6, 1)).unwrap().since,
-            Some(day(2025, 1, 1))
-        );
+        assert_eq!(param.row_at(&[a], day(2025, 12, 31)).unwrap().since, Some(day(2024, 1, 1)));
+        assert_eq!(param.row_at(&[a], day(2026, 6, 1)).unwrap().since, Some(day(2026, 1, 1)));
+        assert_eq!(param.row_at(&[b], day(2026, 6, 1)).unwrap().since, Some(day(2025, 1, 1)));
         assert!(param.row_at(&[b, a], day(2026, 6, 1)).is_none());
     }
 
@@ -520,15 +425,10 @@ mod tests {
         let mut diags = Vec::new();
         sort_rows(&mut rows, &mut diags);
         assert_eq!(
-            rows.iter()
-                .map(|row| (row.names[0], row.since.unwrap().year()))
-                .collect::<Vec<_>>(),
+            rows.iter().map(|row| (row.names[0], row.since.unwrap().year())).collect::<Vec<_>>(),
             [(a, 2025), (a, 2025), (a, 2026), (b, 2025)]
         );
-        assert_eq!(
-            diags.iter().map(|diag| &*diag.code).collect::<Vec<_>>(),
-            ["duplicate-row"]
-        );
+        assert_eq!(diags.iter().map(|diag| &*diag.code).collect::<Vec<_>>(), ["duplicate-row"]);
     }
 
     #[test]
@@ -556,18 +456,8 @@ mod tests {
         let mut interner = Interner::default();
         let a = interner.intern("a");
         let day = Day::from_ymd(2026, 1, 1).unwrap();
-        let timed = ParamRow {
-            since: Some(day),
-            names: Box::new([a]),
-            value: Value::Empty,
-            loc: Loc::default(),
-        };
-        let names_only = ParamRow {
-            since: None,
-            names: Box::new([a]),
-            value: Value::Empty,
-            loc: Loc::default(),
-        };
+        let timed = ParamRow { since: Some(day), names: Box::new([a]), value: Value::Empty, loc: Loc::default() };
+        let names_only = ParamRow { since: None, names: Box::new([a]), value: Value::Empty, loc: Loc::default() };
         assert!(check_shape(&timed, &names_only).is_err());
         assert_eq!(Shape::of(&timed).keys(), 2);
         assert_eq!(Shape::of(&names_only).keys(), 1);

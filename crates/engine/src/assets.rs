@@ -116,11 +116,7 @@ pub struct AssetState {
 
 impl AssetState {
     fn new(asset: Id<Asset>) -> AssetState {
-        AssetState {
-            asset,
-            parts: Vec::new(),
-            disposed: None,
-        }
+        AssetState { asset, parts: Vec::new(), disposed: None }
     }
 
     /// Parts in source/ledger order, borrowed without allocating.
@@ -153,31 +149,20 @@ impl AssetState {
     }
 
     fn measure(&self, id: PartId, value: impl Fn(&Part) -> Qty) -> Result<Qty, AssetError> {
-        self.parts
-            .iter()
-            .find(|part| part.id == id)
-            .map(value)
-            .ok_or(AssetError::UnknownPart)
+        self.parts.iter().find(|part| part.id == id).map(value).ok_or(AssetError::UnknownPart)
     }
 
     fn total(&self, value: impl Fn(&Part) -> Qty) -> Result<Qty, AssetError> {
-        self.parts.iter().try_fold(Qty::ZERO, |sum, part| {
-            sum.0
-                .checked_add(value(part).0)
-                .map(Qty)
-                .ok_or(AssetError::Overflow)
-        })
+        self.parts
+            .iter()
+            .try_fold(Qty::ZERO, |sum, part| sum.0.checked_add(value(part).0).map(Qty).ok_or(AssetError::Overflow))
     }
 
     /// The service date for a part. The original unit uses its effective
     /// asset-level `in-service` property when present; each improvement starts
     /// service on its own acquisition day.
     pub fn in_service(&self, id: PartId, asset_property: Option<Day>) -> Result<Day, AssetError> {
-        let part = self
-            .parts
-            .iter()
-            .find(|part| part.id == id)
-            .ok_or(AssetError::UnknownPart)?;
+        let part = self.parts.iter().find(|part| part.id == id).ok_or(AssetError::UnknownPart)?;
         Ok(match part.kind {
             PartKind::Acquisition => asset_property.unwrap_or(part.day),
             PartKind::Improvement => part.day,
@@ -187,27 +172,15 @@ impl AssetState {
     /// Declared asset properties apply to the original part by default. A
     /// compiler/runtime-supplied explicit attribution to an improvement takes
     /// precedence over that default.
-    pub fn property_applies(
-        &self,
-        id: PartId,
-        explicitly_attributed: bool,
-    ) -> Result<bool, AssetError> {
-        let part = self
-            .parts
-            .iter()
-            .find(|part| part.id == id)
-            .ok_or(AssetError::UnknownPart)?;
+    pub fn property_applies(&self, id: PartId, explicitly_attributed: bool) -> Result<bool, AssetError> {
+        let part = self.parts.iter().find(|part| part.id == id).ok_or(AssetError::UnknownPart)?;
         Ok(explicitly_attributed || part.kind == PartKind::Acquisition)
     }
 
     /// Whether the asset still belongs to its owner at this exact event.
     pub fn held_at(&self, event: EventKey) -> bool {
-        self.parts
-            .first()
-            .is_some_and(|acquisition| acquisition.recorded <= event)
-            && self
-                .disposed
-                .is_none_or(|disposal| disposal.boundary.includes(event))
+        self.parts.first().is_some_and(|acquisition| acquisition.recorded <= event)
+            && self.disposed.is_none_or(|disposal| disposal.boundary.includes(event))
     }
 }
 
@@ -237,9 +210,7 @@ impl Assets {
     /// One empty state slot per model asset id.
     pub fn new(count: usize) -> Assets {
         Assets {
-            states: (0..count)
-                .map(|index| AssetState::new(Id::new(index as u32)))
-                .collect(),
+            states: (0..count).map(|index| AssetState::new(Id::new(index as u32))).collect(),
             part_index: axiom_core::Map::default(),
             pending_carries: Vec::new(),
         }
@@ -250,9 +221,7 @@ impl Assets {
     }
 
     pub fn asset(&self, id: Id<Asset>) -> Option<&AssetState> {
-        self.states
-            .get(id.index())
-            .filter(|state| state.asset == id)
+        self.states.get(id.index()).filter(|state| state.asset == id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &AssetState> {
@@ -272,14 +241,11 @@ impl Assets {
     }
 
     pub(crate) fn expire_carries_through(&mut self, day: Day) {
-        self.pending_carries.retain(|carry| {
-            shift(carry.sold, carry.within).is_none_or(|expires| expires > day)
-        });
+        self.pending_carries.retain(|carry| shift(carry.sold, carry.within).is_none_or(|expires| expires > day));
     }
 
     pub(crate) fn within_carry_window(left: Day, right: Day, within: Span) -> bool {
-        shift(left, within).is_none_or(|last| right <= last)
-            && shift(right, within).is_none_or(|last| left <= last)
+        shift(left, within).is_none_or(|last| right <= last) && shift(right, within).is_none_or(|last| left <= last)
     }
 
     pub(crate) fn enqueue_carry(&mut self, carry: PendingCarry) -> Result<(), AssetError> {
@@ -301,18 +267,8 @@ impl Assets {
         }) {
             // Preflight both arithmetic operations before changing either
             // field. An overflow must not leave a half-merged request behind.
-            let quantity = existing
-                .quantity
-                .0
-                .checked_add(carry.quantity.0)
-                .map(Qty)
-                .ok_or(AssetError::Overflow)?;
-            let amount = existing
-                .amount
-                .0
-                .checked_add(carry.amount.0)
-                .map(Qty)
-                .ok_or(AssetError::Overflow)?;
+            let quantity = existing.quantity.0.checked_add(carry.quantity.0).map(Qty).ok_or(AssetError::Overflow)?;
+            let amount = existing.amount.0.checked_add(carry.amount.0).map(Qty).ok_or(AssetError::Overflow)?;
             existing.quantity = quantity;
             existing.amount = amount;
         } else {
@@ -325,12 +281,7 @@ impl Assets {
         self.pending_carries.get(index).copied()
     }
 
-    pub(crate) fn update_pending_carry(
-        &mut self,
-        index: usize,
-        quantity: Qty,
-        amount: Qty,
-    ) -> Result<(), AssetError> {
+    pub(crate) fn update_pending_carry(&mut self, index: usize, quantity: Qty, amount: Qty) -> Result<(), AssetError> {
         if index >= self.pending_carries.len() {
             return Err(AssetError::UnknownPart);
         }
@@ -373,11 +324,8 @@ impl Assets {
         if self.part_index.contains_key(&part.id) {
             return Err(AssetError::DuplicatePart);
         }
-        let state = self
-            .states
-            .get(asset.index())
-            .filter(|state| state.asset == asset)
-            .ok_or(AssetError::UnknownAsset)?;
+        let state =
+            self.states.get(asset.index()).filter(|state| state.asset == asset).ok_or(AssetError::UnknownAsset)?;
         if state.disposed.is_some() {
             return Err(AssetError::Disposed);
         }
@@ -387,11 +335,7 @@ impl Assets {
             (None, PartKind::Improvement) => return Err(AssetError::MissingAcquisition),
             (Some(_), PartKind::Acquisition) => return Err(AssetError::DuplicateAcquisition),
         }
-        if state
-            .parts
-            .last()
-            .is_some_and(|last| last.recorded > part.recorded)
-        {
+        if state.parts.last().is_some_and(|last| last.recorded > part.recorded) {
             return Err(AssetError::OutOfOrder);
         }
         Ok(())
@@ -406,29 +350,18 @@ impl Assets {
         flow: Option<Id<Flow>>,
         boundary: DisposalBoundary,
     ) -> Result<(), AssetError> {
-        let state = self
-            .states
-            .get_mut(asset.index())
-            .filter(|state| state.asset == asset)
-            .ok_or(AssetError::UnknownAsset)?;
+        let state =
+            self.states.get_mut(asset.index()).filter(|state| state.asset == asset).ok_or(AssetError::UnknownAsset)?;
         if state.parts.is_empty() {
             return Err(AssetError::MissingAcquisition);
         }
         if state.disposed.is_some() {
             return Err(AssetError::AlreadyDisposed);
         }
-        if state
-            .parts
-            .iter()
-            .any(|part| !boundary.includes(part.recorded))
-        {
+        if state.parts.iter().any(|part| !boundary.includes(part.recorded)) {
             return Err(AssetError::NotHeldAtBoundary);
         }
-        state.disposed = Some(Disposal {
-            txn,
-            flow,
-            boundary,
-        });
+        state.disposed = Some(Disposal { txn, flow, boundary });
         Ok(())
     }
 
@@ -443,12 +376,7 @@ impl Assets {
     /// Lowers one part's basis. Over-consumption is represented as `excess`
     /// for the caller's typed diagnostic; the stored basis never goes below
     /// zero and no other part changes.
-    pub fn consume(
-        &mut self,
-        asset: Id<Asset>,
-        part_id: PartId,
-        requested: Qty,
-    ) -> Result<Consumption, AssetError> {
+    pub fn consume(&mut self, asset: Id<Asset>, part_id: PartId, requested: Qty) -> Result<Consumption, AssetError> {
         Ok(self.prepare_consumption(asset, part_id, requested)?.apply())
     }
 
@@ -464,11 +392,8 @@ impl Assets {
         if requested.is_negative() {
             return Err(AssetError::NegativeAmount);
         }
-        let state = self
-            .states
-            .get_mut(asset.index())
-            .filter(|state| state.asset == asset)
-            .ok_or(AssetError::UnknownAsset)?;
+        let state =
+            self.states.get_mut(asset.index()).filter(|state| state.asset == asset).ok_or(AssetError::UnknownAsset)?;
         if state.disposed.is_some() {
             return Err(AssetError::Disposed);
         }
@@ -479,21 +404,11 @@ impl Assets {
         let part = state.parts.get_mut(index).ok_or(AssetError::UnknownPart)?;
         let before = part.basis;
         let applied = Qty(requested.0.min(part.basis.0));
-        let basis = Qty(part
-            .basis
-            .0
-            .checked_sub(applied.0)
-            .ok_or(AssetError::Overflow)?);
+        let basis = Qty(part.basis.0.checked_sub(applied.0).ok_or(AssetError::Overflow)?);
         Ok(ConsumptionGuard {
             part,
             before,
-            result: Consumption {
-                asset,
-                part: part_id,
-                requested,
-                applied,
-                excess: Qty(requested.0 - applied.0),
-            },
+            result: Consumption { asset, part: part_id, requested, applied, excess: Qty(requested.0 - applied.0) },
             basis,
         })
     }
@@ -538,23 +453,12 @@ impl Assets {
             }
             let part = state.parts.get_mut(index).ok_or(AssetError::UnknownPart)?;
             let before = part.basis;
-            let basis = Qty(part
-                .basis
-                .0
-                .checked_add(amount.0)
-                .ok_or(AssetError::Overflow)?);
+            let basis = Qty(part.basis.0.checked_add(amount.0).ok_or(AssetError::Overflow)?);
             Some((part, before, basis))
         } else {
             None
         };
-        Ok(CarryGuard {
-            result: CarryUpdate {
-                from,
-                to: to.map(|(_, part)| part),
-                amount,
-            },
-            target,
-        })
+        Ok(CarryGuard { result: CarryUpdate { from, to: to.map(|(_, part)| part), amount }, target })
     }
 
     /// Prepares a positive basis addition to one declared asset part. The
@@ -575,11 +479,8 @@ impl Assets {
             if changes.iter().any(|change: &AssetBasisChange| change.part_id == part_id) {
                 return Err(AssetError::DuplicatePart);
             }
-            let state = self
-                .states
-                .get(asset.index())
-                .filter(|state| state.asset == asset)
-                .ok_or(AssetError::UnknownAsset)?;
+            let state =
+                self.states.get(asset.index()).filter(|state| state.asset == asset).ok_or(AssetError::UnknownAsset)?;
             if state.disposed.is_some() {
                 return Err(AssetError::Disposed);
             }
@@ -612,18 +513,9 @@ impl Assets {
             return Err(AssetError::NegativeSpan);
         }
         let candidates = book.assets.iter().filter_map(|(asset_id, asset)| {
-            self.asset(asset_id)
-                .map(|state| (asset_id, asset.owner, asset.unit, state))
+            self.asset(asset_id).map(|state| (asset_id, asset.owner, asset.unit, state))
         });
-        nearest_from(
-            candidates,
-            owner,
-            unit,
-            sale_day,
-            within,
-            exclude,
-            &mut is_live,
-        )
+        nearest_from(candidates, owner, unit, sale_day, within, exclude, &mut is_live)
     }
 }
 
@@ -645,10 +537,7 @@ fn nearest_from<'a>(
             continue;
         }
         for part in &state.parts {
-            if part.kind != PartKind::Acquisition
-                || Some(part.id) == exclude
-                || !is_live(asset_id, part.id)
-            {
+            if part.kind != PartKind::Acquisition || Some(part.id) == exclude || !is_live(asset_id, part.id) {
                 continue;
             }
             let in_window = if part.day <= sale_day {
@@ -663,8 +552,7 @@ fn nearest_from<'a>(
             let candidate = (days, part.day, asset_id, part.id);
             if best.is_none_or(|current| {
                 candidate.0 < current.0
-                    || (candidate.0 == current.0
-                        && (candidate.1, candidate.2.index()) < (current.1, current.2.index()))
+                    || (candidate.0 == current.0 && (candidate.1, candidate.2.index()) < (current.1, current.2.index()))
             }) {
                 best = Some(candidate);
             }
@@ -678,15 +566,11 @@ fn nearest_from<'a>(
 /// civil-date domain, so valid candidate dates remain inside the window.
 fn shift(day: Day, span: Span) -> Option<Day> {
     let (year, month, of_month) = day.ymd();
-    let months = (year as i64)
-        .checked_mul(12)?
-        .checked_add(month as i64 - 1)?
-        .checked_add(span.months as i64)?;
+    let months = (year as i64).checked_mul(12)?.checked_add(month as i64 - 1)?.checked_add(span.months as i64)?;
     let target_year = i32::try_from(months.div_euclid(12)).ok()?;
     let target_month = u32::try_from(months.rem_euclid(12) + 1).ok()?;
-    let target_day = (1..=of_month)
-        .rev()
-        .find(|&candidate| Day::from_ymd(target_year, target_month, candidate).is_some())?;
+    let target_day =
+        (1..=of_month).rev().find(|&candidate| Day::from_ymd(target_year, target_month, candidate).is_some())?;
     let month_day = Day::from_ymd(target_year, target_month, target_day)?;
     Some(Day(month_day.0.checked_add(span.days)?))
 }
@@ -797,29 +681,12 @@ mod tests {
     use axiom_core::Span;
     use axiom_model::{Commodity, Entity};
 
-    fn part(
-        origin: u32,
-        ordinal: u32,
-        kind: PartKind,
-        day: i32,
-        sequence: u64,
-        cost: i64,
-        basis: i64,
-    ) -> Part {
+    fn part(origin: u32, ordinal: u32, kind: PartKind, day: i32, sequence: u64, cost: i64, basis: i64) -> Part {
         Part {
-            id: PartId {
-                origin: RuntimeTxn::Adjustment {
-                    place: Id::new(origin),
-                    day: Day(day),
-                },
-                ordinal,
-            },
+            id: PartId { origin: RuntimeTxn::Adjustment { place: Id::new(origin), day: Day(day) }, ordinal },
             flow: None,
             kind,
-            recorded: EventKey {
-                day: Day(day),
-                sequence,
-            },
+            recorded: EventKey { day: Day(day), sequence },
             day: Day(day),
             cost: Qty(cost),
             basis: Qty(basis),
@@ -833,12 +700,7 @@ mod tests {
         let original = part(1, 0, PartKind::Acquisition, 10, 1, 40_000, 38_000);
         let original_id = original.id;
         assets.add_part(asset, original).unwrap();
-        assets
-            .add_part(
-                asset,
-                part(2, 1, PartKind::Improvement, 20, 2, 5_000, 5_000),
-            )
-            .unwrap();
+        assets.add_part(asset, part(2, 1, PartKind::Improvement, 20, 2, 5_000, 5_000)).unwrap();
         let state = assets.asset(asset).unwrap();
         assert_eq!(state.total_cost(), Ok(Qty(45_000)));
         assert_eq!(state.total_basis(), Ok(Qty(43_000)));
@@ -846,10 +708,7 @@ mod tests {
         assert_eq!(state.basis(original_id), Ok(Qty(38_000)));
         assert_eq!(state.part_count(), 2);
         assert_eq!(state.in_service(original_id, Some(Day(5))), Ok(Day(5)));
-        assert_eq!(
-            state.in_service(state.parts()[1].id, Some(Day(5))),
-            Ok(Day(20))
-        );
+        assert_eq!(state.in_service(state.parts()[1].id, Some(Day(5))), Ok(Day(20)));
         assert!(state.property_applies(original_id, false).unwrap());
         assert!(!state.property_applies(state.parts()[1].id, false).unwrap());
         assert!(state.property_applies(state.parts()[1].id, true).unwrap());
@@ -861,22 +720,11 @@ mod tests {
         let original = part(1, 0, PartKind::Acquisition, 10, 1, 40_000, 3_000);
         let original_id = original.id;
         assets.add_part(Id::new(0), original).unwrap();
-        assets
-            .add_part(
-                Id::new(0),
-                part(2, 1, PartKind::Improvement, 20, 2, 5_000, 5_000),
-            )
-            .unwrap();
+        assets.add_part(Id::new(0), part(2, 1, PartKind::Improvement, 20, 2, 5_000, 5_000)).unwrap();
         let result = assets.consume(Id::new(0), original_id, Qty(4_000)).unwrap();
         assert_eq!((result.applied, result.excess), (Qty(3_000), Qty(1_000)));
-        assert_eq!(
-            assets.asset(Id::new(0)).unwrap().basis(original_id),
-            Ok(Qty::ZERO)
-        );
-        assert_eq!(
-            assets.asset(Id::new(0)).unwrap().total_basis(),
-            Ok(Qty(5_000))
-        );
+        assert_eq!(assets.asset(Id::new(0)).unwrap().basis(original_id), Ok(Qty::ZERO));
+        assert_eq!(assets.asset(Id::new(0)).unwrap().total_basis(), Ok(Qty(5_000)));
     }
 
     #[test]
@@ -890,21 +738,11 @@ mod tests {
         assets.add_part(Id::new(1), target).unwrap();
         assert_eq!(
             assets.carry(source_id, Some((Id::new(1), target_id)), Qty(2_500)),
-            Ok(CarryUpdate {
-                from: source_id,
-                to: Some(target_id),
-                amount: Qty(2_500)
-            })
+            Ok(CarryUpdate { from: source_id, to: Some(target_id), amount: Qty(2_500) })
         );
-        assert_eq!(
-            assets.asset(Id::new(1)).unwrap().basis(target_id),
-            Ok(Qty(13_500))
-        );
+        assert_eq!(assets.asset(Id::new(1)).unwrap().basis(target_id), Ok(Qty(13_500)));
         assert_eq!(assets.carry(source_id, None, Qty(1_000)).unwrap().to, None);
-        assert_eq!(
-            assets.asset(Id::new(0)).unwrap().basis(source_id),
-            Ok(Qty(10_000))
-        );
+        assert_eq!(assets.asset(Id::new(0)).unwrap().basis(source_id), Ok(Qty(10_000)));
     }
 
     #[test]
@@ -921,54 +759,24 @@ mod tests {
         let after = part(2, 0, PartKind::Acquisition, 110, 2, 100, 100);
         let after_id = after.id;
         after_state.parts.push(after);
-        wrong_owner_state
-            .parts
-            .push(part(3, 0, PartKind::Acquisition, 101, 3, 100, 100));
-        wrong_unit_state
-            .parts
-            .push(part(4, 0, PartKind::Acquisition, 99, 4, 100, 100));
+        wrong_owner_state.parts.push(part(3, 0, PartKind::Acquisition, 101, 3, 100, 100));
+        wrong_unit_state.parts.push(part(4, 0, PartKind::Acquisition, 99, 4, 100, 100));
         let candidates = [
             (Id::new(0), owner, unit, &before_state),
             (Id::new(1), owner, unit, &after_state),
             (Id::new(2), other_owner, unit, &wrong_owner_state),
             (Id::new(3), owner, other_unit, &wrong_unit_state),
         ];
-        let nearest = nearest_from(
-            candidates,
-            owner,
-            unit,
-            Day(100),
-            Span::days(20),
-            None,
-            &mut |_, _| true,
-        )
-        .unwrap();
+        let nearest = nearest_from(candidates, owner, unit, Day(100), Span::days(20), None, &mut |_, _| true).unwrap();
         assert_eq!(
             nearest,
             Some((Id::new(0), before_id)),
             "equal distances prefer the earlier acquisition after unit/owner filters"
         );
-        let tied = nearest_from(
-            candidates,
-            owner,
-            unit,
-            Day(100),
-            Span::days(10),
-            Some(before_id),
-            &mut |_, _| true,
-        )
-        .unwrap();
+        let tied =
+            nearest_from(candidates, owner, unit, Day(100), Span::days(10), Some(before_id), &mut |_, _| true).unwrap();
         assert_eq!(tied, Some((Id::new(1), after_id)));
-        let none = nearest_from(
-            candidates,
-            owner,
-            unit,
-            Day(100),
-            Span::days(5),
-            None,
-            &mut |_, _| true,
-        )
-        .unwrap();
+        let none = nearest_from(candidates, owner, unit, Day(100), Span::days(5), None, &mut |_, _| true).unwrap();
         assert_eq!(none, None);
     }
 
@@ -983,16 +791,7 @@ mod tests {
         acquisition.day = acquired;
         state.parts.push(acquisition);
         let candidates = [(Id::new(0), owner, unit, &state)];
-        let within_days = nearest_from(
-            candidates,
-            owner,
-            unit,
-            sale,
-            Span::days(31),
-            None,
-            &mut |_, _| true,
-        )
-        .unwrap();
+        let within_days = nearest_from(candidates, owner, unit, sale, Span::days(31), None, &mut |_, _| true).unwrap();
         assert_eq!(within_days, Some((Id::new(0), acquisition.id)));
 
         let january = Day::parse(b"2024-01-31").unwrap();
@@ -1006,41 +805,20 @@ mod tests {
         let asset = Id::new(0);
         let mut assets = Assets::new(1);
         let improvement = part(1, 0, PartKind::Improvement, 10, 1, 100, 100);
-        assert_eq!(
-            assets.add_part(asset, improvement),
-            Err(AssetError::MissingAcquisition)
-        );
+        assert_eq!(assets.add_part(asset, improvement), Err(AssetError::MissingAcquisition));
 
         let original = part(2, 0, PartKind::Acquisition, 10, 1, i64::MAX, i64::MAX);
         let original_id = original.id;
         assets.add_part(asset, original).unwrap();
-        assert_eq!(
-            assets.add_part(asset, original),
-            Err(AssetError::DuplicatePart)
-        );
-        assert_eq!(
-            assets.asset(asset).unwrap().cost(original_id),
-            Ok(Qty(i64::MAX))
-        );
+        assert_eq!(assets.add_part(asset, original), Err(AssetError::DuplicatePart));
+        assert_eq!(assets.asset(asset).unwrap().cost(original_id), Ok(Qty(i64::MAX)));
 
         let improvement = part(3, 1, PartKind::Improvement, 12, 2, 1, 1);
         assets.add_part(asset, improvement).unwrap();
-        assert_eq!(
-            assets.asset(asset).unwrap().total_cost(),
-            Err(AssetError::Overflow)
-        );
-        assert_eq!(
-            assets.carry(original_id, Some((asset, original_id)), Qty(1)),
-            Err(AssetError::Overflow)
-        );
-        assert_eq!(
-            assets.asset(asset).unwrap().basis(original_id),
-            Ok(Qty(i64::MAX))
-        );
-        assert_eq!(
-            assets.asset(asset).unwrap().cost(original_id),
-            Ok(Qty(i64::MAX))
-        );
+        assert_eq!(assets.asset(asset).unwrap().total_cost(), Err(AssetError::Overflow));
+        assert_eq!(assets.carry(original_id, Some((asset, original_id)), Qty(1)), Err(AssetError::Overflow));
+        assert_eq!(assets.asset(asset).unwrap().basis(original_id), Ok(Qty(i64::MAX)));
+        assert_eq!(assets.asset(asset).unwrap().cost(original_id), Ok(Qty(i64::MAX)));
     }
 
     #[test]
@@ -1049,40 +827,23 @@ mod tests {
         let original = part(1, 0, PartKind::Acquisition, 10, 1, 100, 100);
         let original_id = original.id;
         assets.add_part(Id::new(0), original).unwrap();
-        assert!(!assets.asset(Id::new(0)).unwrap().held_at(EventKey {
-            day: Day(9),
-            sequence: u64::MAX,
-        }));
+        assert!(!assets.asset(Id::new(0)).unwrap().held_at(EventKey { day: Day(9), sequence: u64::MAX }));
         assets
             .dispose(
                 Id::new(0),
                 original_id.origin,
                 None,
-                DisposalBoundary::After(EventKey {
-                    day: Day(10),
-                    sequence: 1,
-                }),
+                DisposalBoundary::After(EventKey { day: Day(10), sequence: 1 }),
             )
             .unwrap();
-        assert!(assets.asset(Id::new(0)).unwrap().held_at(EventKey {
-            day: Day(10),
-            sequence: 1
-        }));
-        assert!(!assets.asset(Id::new(0)).unwrap().held_at(EventKey {
-            day: Day(10),
-            sequence: 2
-        }));
+        assert!(assets.asset(Id::new(0)).unwrap().held_at(EventKey { day: Day(10), sequence: 1 }));
+        assert!(!assets.asset(Id::new(0)).unwrap().held_at(EventKey { day: Day(10), sequence: 2 }));
         assert_eq!(
             assets.add_part(Id::new(0), part(2, 0, PartKind::Improvement, 11, 2, 10, 10)),
             Err(AssetError::Disposed)
         );
         assert_eq!(
-            assets.dispose(
-                Id::new(0),
-                original_id.origin,
-                None,
-                DisposalBoundary::Close(Day(12))
-            ),
+            assets.dispose(Id::new(0), original_id.origin, None, DisposalBoundary::Close(Day(12))),
             Err(AssetError::AlreadyDisposed)
         );
     }
@@ -1096,34 +857,15 @@ mod tests {
         let improvement = part(2, 0, PartKind::Improvement, 11, 2, 25, 25);
         assets.add_part(asset, improvement).unwrap();
 
-        let before_improvement = DisposalBoundary::After(EventKey {
-            day: Day(10),
-            sequence: 1,
-        });
+        let before_improvement = DisposalBoundary::After(EventKey { day: Day(10), sequence: 1 });
         assert_eq!(
             assets.dispose(asset, acquisition.id.origin, None, before_improvement),
             Err(AssetError::NotHeldAtBoundary),
             "a sale boundary must include every part already present in the ledger"
         );
-        assert!(assets.asset(asset).unwrap().held_at(EventKey {
-            day: Day(11),
-            sequence: 2,
-        }));
-        assets
-            .dispose(
-                asset,
-                acquisition.id.origin,
-                None,
-                DisposalBoundary::Close(Day(11)),
-            )
-            .unwrap();
-        assert!(assets.asset(asset).unwrap().held_at(EventKey {
-            day: Day(11),
-            sequence: 2,
-        }));
-        assert!(!assets.asset(asset).unwrap().held_at(EventKey {
-            day: Day(12),
-            sequence: 0,
-        }));
+        assert!(assets.asset(asset).unwrap().held_at(EventKey { day: Day(11), sequence: 2 }));
+        assets.dispose(asset, acquisition.id.origin, None, DisposalBoundary::Close(Day(11))).unwrap();
+        assert!(assets.asset(asset).unwrap().held_at(EventKey { day: Day(11), sequence: 2 }));
+        assert!(!assets.asset(asset).unwrap().held_at(EventKey { day: Day(12), sequence: 0 }));
     }
 }

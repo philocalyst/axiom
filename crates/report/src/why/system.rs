@@ -14,27 +14,15 @@ use super::trigger_words;
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, system: Id<System>) -> Report<'s> {
     let book = lens.book();
-    let columns = [
-        Column::left("Law"),
-        Column::left("When"),
-        Column::left("Counted for residents"),
-        Column::left("Written"),
-    ];
+    let columns =
+        [Column::left("Law"), Column::left("When"), Column::left("Counted for residents"), Column::left("Written")];
     let mut laws = Section::new(columns).headed("Laws");
-    let declared = book.laws.iter().filter(|(_, law)| {
-        law.system
-            .is_some_and(|declared| book.systems.covers(system, declared))
-    });
+    let declared =
+        book.laws.iter().filter(|(_, law)| law.system.is_some_and(|declared| book.systems.covers(system, declared)));
     for (id, law) in declared {
         let mut totals: BTreeMap<(Sym, bool, Id<Commodity>), Qty> = BTreeMap::new();
-        for effect in run
-            .effects
-            .iter()
-            .filter(|effect| effect.law == id && lens.owns_entity(effect.owner))
-        {
-            *totals
-                .entry((effect.name, effect.owed().is_some(), effect.amount.unit))
-                .or_default() += effect.amount.qty;
+        for effect in run.effects.iter().filter(|effect| effect.law == id && lens.owns_entity(effect.owner)) {
+            *totals.entry((effect.name, effect.owed().is_some(), effect.amount.unit)).or_default() += effect.amount.qty;
         }
         let did: Vec<String> = totals
             .into_iter()
@@ -56,22 +44,13 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, system: Id<System>) -> 
         ];
         laws.push(Row::new(cells));
         if !doc.is_empty() {
-            laws.push(
-                Row::padded([Cell::text(doc)], 4)
-                    .depth(1)
-                    .style(crate::Style::Muted),
-            );
+            laws.push(Row::padded([Cell::text(doc)], 4).depth(1).style(crate::Style::Muted));
         }
     }
     let residents: Vec<&str> = book
         .entities
         .values()
-        .filter(|entity| {
-            entity
-                .lives
-                .iter()
-                .any(|home| book.systems.covers(system, home.system))
-        })
+        .filter(|entity| entity.lives.iter().any(|home| book.systems.covers(system, home.system)))
         .map(|entity| book.name(entity.path))
         .collect();
     let mut who = Section::new([]);
@@ -80,7 +59,5 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, system: Id<System>) -> 
     } else {
         format!("Lives here: {}.", residents.join(", "))
     });
-    Report::new(format!("Why {}", book.name(book.systems[system].path)))
-        .with(who)
-        .with(laws)
+    Report::new(format!("Why {}", book.name(book.systems[system].path))).with(who).with(laws)
 }

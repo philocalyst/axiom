@@ -8,8 +8,7 @@ use std::collections::BTreeMap;
 use axiom_core::{Day, Diagnostic, Id, Qty};
 use axiom_engine::{Pad, Run, State};
 use axiom_model::{
-    Amount, Asset, Book, Commodity, Contract, Derivation, Entity, Object, Origin, Place, Role,
-    Subject, TermsState,
+    Amount, Asset, Book, Commodity, Contract, Derivation, Entity, Object, Origin, Place, Role, Subject, TermsState,
 };
 
 use crate::history::{Change, Posting, pad_ends, postings};
@@ -37,9 +36,7 @@ pub(crate) fn view_with_lens<'s>(
         return Ok(asset_register(lens, run, asset, from, to));
     }
     if let Some(entity) = place.strip_prefix("entity:") {
-        let entity = book
-            .entity(entity)
-            .map_err(|miss| resolve::entity_miss(book, entity, miss))?;
+        let entity = book.entity(entity).map_err(|miss| resolve::entity_miss(book, entity, miss))?;
         let target = book.name(book.entities[entity].path);
         return Ok(entity_view(lens, run, entity, target, from, to));
     }
@@ -81,9 +78,7 @@ fn entity_view<'s>(
 ) -> Report<'s> {
     let book = lens.book();
     let cutoff = to.unwrap_or(run.today);
-    let is_owner = book.entities[entity]
-        .place
-        .is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)));
+    let is_owner = book.entities[entity].place.is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)));
     if is_owner && !lens.owns_entity(entity) {
         return Report::new(format!("Register: {target}")).with(Section::note_only(format!(
             "{} is outside this owner's scope.",
@@ -115,14 +110,9 @@ fn entity_view<'s>(
                 || place_owned_by(lens, crate::flow::movement_place(lens, flow), entity))
     }) {
         let flow = posting.flow;
-        let purpose = flow.purpose.map_or(Cell::Blank, |purpose| {
-            Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
-        });
-        let mut note = book
-            .flow_view(flow)
-            .codes()
-            .map(|code| Cell::Code(book.name(code)))
-            .collect::<Vec<_>>();
+        let purpose =
+            flow.purpose.map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)));
+        let mut note = book.flow_view(flow).codes().map(|code| Cell::Code(book.name(code))).collect::<Vec<_>>();
         if let Some(description) = flow.description {
             note.push(Cell::text(book.text(description)));
         }
@@ -154,10 +144,7 @@ fn entity_view<'s>(
     // revaluations and unexplained `?` balances visible from the other end.
     let entity_place = book.entities[entity].place;
     for pad in &run.pads {
-        if entity_place != Some(pad.counter)
-            || !lens.owns(pad.place)
-            || !in_window(pad.day, from, cutoff)
-        {
+        if entity_place != Some(pad.counter) || !lens.owns(pad.place) || !in_window(pad.day, from, cutoff) {
             continue;
         }
         let qty = lens.place_qty(pad.place, pad.amount.qty).0.checked_abs();
@@ -222,9 +209,8 @@ fn asset_register<'s>(
             Origin::Occurrence(_) => ("contract occurrence", Style::Muted),
             Origin::Written => ("flow", Style::Normal),
         };
-        let purpose = flow.purpose.map_or(Cell::Blank, |purpose| {
-            Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
-        });
+        let purpose =
+            flow.purpose.map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)));
         rows.push((
             flow.day,
             Row::new([
@@ -289,18 +275,12 @@ fn contract_register<'s>(
     }
     let cutoff = to.unwrap_or(run.today);
     let mut rows = Vec::new();
-    for (days, terms) in contract
-        .terms
-        .iter()
-        .flat_map(|terms| terms.within(contract.days))
-    {
+    for (days, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
         let day = days.first();
         if !in_window(day, from, cutoff) {
             continue;
         }
-        let statement = terms.change.map_or(Cell::Source(contract.loc), |change| {
-            Cell::Source(change.loc)
-        });
+        let statement = terms.change.map_or(Cell::Source(contract.loc), |change| Cell::Source(change.loc));
         let activity = match terms.state {
             TermsState::Active => Cell::Word("terms active"),
             TermsState::Waived => Cell::Word("terms waived"),
@@ -317,9 +297,7 @@ fn contract_register<'s>(
         ));
     }
     for promise in run.promises.iter().filter(|promise| {
-        promise.contract == contract_id
-            && lens.owns_entity(contract.owner)
-            && in_window(promise.due, from, cutoff)
+        promise.contract == contract_id && lens.owns_entity(contract.owner) && in_window(promise.due, from, cutoff)
     }) {
         let kept = promise.kept.map(|(day, _)| day);
         let late = promise.late(cutoff);
@@ -351,9 +329,8 @@ fn contract_register<'s>(
             Origin::Derived(_) => "derived",
             Origin::Written => "flow",
         };
-        let purpose = flow.purpose.map_or(Cell::Blank, |purpose| {
-            Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
-        });
+        let purpose =
+            flow.purpose.map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)));
         rows.push((
             flow.day,
             Row::new([
@@ -363,10 +340,7 @@ fn contract_register<'s>(
                 Cell::text(crate::places::route(book, flow)),
                 Cell::list(
                     " ",
-                    [
-                        Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())),
-                        Cell::Source(flow.loc),
-                    ],
+                    [Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())), Cell::Source(flow.loc)],
                 ),
             ]),
         ));
@@ -404,22 +378,12 @@ fn in_window(day: Day, from: Option<Day>, cutoff: Day) -> bool {
     day <= cutoff && from.is_none_or(|from| day >= from)
 }
 
-fn scoped_flow_amount<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    flow: &axiom_model::Flow,
-    amount: Amount,
-) -> Amount {
-    Amount::new(
-        crate::flow::scoped_movement_qty(lens, flow, amount.qty),
-        amount.unit,
-    )
+fn scoped_flow_amount<'s>(lens: Lens<'s, '_, '_, '_>, flow: &axiom_model::Flow, amount: Amount) -> Amount {
+    Amount::new(crate::flow::scoped_movement_qty(lens, flow, amount.qty), amount.unit)
 }
 
 fn place_owned_by(lens: Lens<'_, '_, '_, '_>, place: Id<Place>, entity: Id<Entity>) -> bool {
-    lens.plan()
-        .owners_of(place)
-        .iter()
-        .any(|owner| owner.owner == entity && !owner.share.is_zero())
+    lens.plan().owners_of(place).iter().any(|owner| owner.owner == entity && !owner.share.is_zero())
 }
 
 /// Builds a register for a place within an owner's view.
@@ -444,8 +408,7 @@ fn section_with_sign<'s>(
     let book = lens.book();
     let steps = steps(lens, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
-    let shown =
-        |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
+    let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
 
     let columns = [
         Column::left("Date"),
@@ -462,10 +425,8 @@ fn section_with_sign<'s>(
             *raw_running.entry(moved.unit).or_default() += step.counted();
         }
     }
-    let mut running = raw_running
-        .iter()
-        .map(|(&unit, &qty)| (unit, lens.place_qty(place, qty)))
-        .collect::<BTreeMap<_, _>>();
+    let mut running =
+        raw_running.iter().map(|(&unit, &qty)| (unit, lens.place_qty(place, qty))).collect::<BTreeMap<_, _>>();
     if let Some(from) = from {
         for (&unit, &qty) in running.iter().filter(|(_, qty)| !qty.is_zero()) {
             let cells = [
@@ -500,25 +461,16 @@ fn section_with_sign<'s>(
         let cells = [
             Cell::Day(step.day),
             Cell::text(path(book, step.with)),
-            payee.map_or(Cell::Blank, |entity| {
-                Cell::text(book.name(book.entities[entity].path))
-            }),
+            payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
             note(book, step).unwrap_or(Cell::Blank),
             amount,
             balance,
         ];
-        section.push(Row::new(cells).style(if step.counts {
-            Style::Normal
-        } else {
-            Style::Muted
-        }));
+        section.push(Row::new(cells).style(if step.counts { Style::Normal } else { Style::Muted }));
     }
 
     if section.rows.is_empty() {
-        section.note(format!(
-            "Nothing touches {} in this window.",
-            path(book, place)
-        ));
+        section.note(format!("Nothing touches {} in this window.", path(book, place)));
     }
     if section.rows.iter().any(|row| row.style == Style::Muted) {
         section.note("Muted lines are pending, void or returned: they do not move the balance.");
@@ -566,37 +518,23 @@ impl Step<'_> {
 
 /// Every step touching `place` up to `cutoff`, in order. A pad, made at the
 /// end of its day, follows that day's flows.
-fn steps<'a>(
-    lens: Lens<'a, '_, '_, '_>,
-    run: &'a Run,
-    place: Id<Place>,
-    cutoff: Day,
-) -> Vec<Step<'a>> {
+fn steps<'a>(lens: Lens<'a, '_, '_, '_>, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec<Step<'a>> {
     let book = lens.book();
     let flows = book.touching[place].iter().flat_map(|&id| {
         let posting = Posting::at(book, run, id);
         let in_scope = lens.owns(place);
-        posting
-            .changes_at(place)
-            .filter(move |_| in_scope)
-            .map(move |change| Step {
-                day: posting.flow.day,
-                change,
-                counts: posting.is_real_on(cutoff),
-                with: posting.counterparty(place),
-                source: Source::Flow(posting),
-            })
+        posting.changes_at(place).filter(move |_| in_scope).map(move |change| Step {
+            day: posting.flow.day,
+            change,
+            counts: posting.is_real_on(cutoff),
+            with: posting.counterparty(place),
+            source: Source::Flow(posting),
+        })
     });
     let pads = run.pads.iter().flat_map(|pad| {
         let in_scope = lens.owns(place) && lens.governs(Subject::Place(pad.place));
-        let with = if pad.place == place {
-            pad.counter
-        } else {
-            pad.place
-        };
-        let here = pad_ends(pad)
-            .into_iter()
-            .filter(move |&(at, _)| at == place && in_scope);
+        let with = if pad.place == place { pad.counter } else { pad.place };
+        let here = pad_ends(pad).into_iter().filter(move |&(at, _)| at == place && in_scope);
         here.map(move |(_, moved)| Step {
             day: pad.day,
             change: Change::Moved(moved),
@@ -605,10 +543,7 @@ fn steps<'a>(
             source: Source::Gap(pad),
         })
     });
-    let mut steps: Vec<Step> = flows
-        .chain(pads)
-        .filter(|step| step.day <= cutoff)
-        .collect();
+    let mut steps: Vec<Step> = flows.chain(pads).filter(|step| step.day <= cutoff).collect();
     steps.sort_by_key(|step| step.day);
     steps
 }
@@ -622,9 +557,7 @@ fn note<'s>(book: &'s Book<'_>, step: &Step<'_>) -> Option<Cell<'s>> {
                 State::Actual | State::Planned => None,
                 State::Pending => Some(Cell::Word("pending")),
                 State::Void => Some(Cell::Word("void")),
-                State::Settled(on) if !step.counts => {
-                    Some(Cell::text(format!("pending until {on}")))
-                }
+                State::Settled(on) if !step.counts => Some(Cell::text(format!("pending until {on}"))),
                 State::Settled(on) => Some(Cell::text(format!("settled {on}"))),
                 State::Returned(on) => Some(Cell::text(format!("returned {on}"))),
             };

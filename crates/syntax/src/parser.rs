@@ -377,9 +377,10 @@ impl<'s> Parser<'s> {
         match token.tok {
             Tok::Eol => Ok(()),
             Tok::Punct(closer @ (Punct::RParen | Punct::RBracket)) => {
-                let diag = Diagnostic::error("unbalanced-delimiter", format!("this `{}` closes nothing", closer.spelling()))
-                    .label(token.loc, "nothing is open here")
-                    .fix("remove it", token.loc, "");
+                let diag =
+                    Diagnostic::error("unbalanced-delimiter", format!("this `{}` closes nothing", closer.spelling()))
+                        .label(token.loc, "nothing is open here")
+                        .fix("remove it", token.loc, "");
                 Err(self.report(diag))
             }
             _ => Err(self.expected("expected-end-of-line", "the end of the line")),

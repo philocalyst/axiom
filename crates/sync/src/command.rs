@@ -23,10 +23,7 @@ pub struct Failed {
 
 impl Failed {
     fn new(summary: impl Into<String>) -> Failed {
-        Failed {
-            summary: summary.into(),
-            stderr: String::new(),
-        }
+        Failed { summary: summary.into(), stderr: String::new() }
     }
 }
 
@@ -68,9 +65,7 @@ fn run(command: &str, root: &Path, timeout: Duration) -> Result<String, Failed> 
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(error) => {
-                return Err(Failed::new(format!(
-                    "could not wait for the command: {error}"
-                )));
+                return Err(Failed::new(format!("could not wait for the command: {error}")));
             }
         }
         if started.elapsed() >= timeout {
@@ -81,20 +76,13 @@ fn run(command: &str, root: &Path, timeout: Duration) -> Result<String, Failed> 
                 0 => format!("{} milliseconds", timeout.as_millis()),
                 seconds => format!("{seconds} seconds"),
             };
-            return Err(Failed::new(format!(
-                "the command took more than {limit} to finish"
-            )));
+            return Err(Failed::new(format!("the command took more than {limit} to finish")));
         }
         thread::sleep(POLL);
     };
     if !status.success() {
-        let stderr = String::from_utf8_lossy(&fs::read(&scratch.stderr).unwrap_or_default())
-            .trim()
-            .to_string();
-        return Err(Failed {
-            summary: format!("the command failed ({status})"),
-            stderr,
-        });
+        let stderr = String::from_utf8_lossy(&fs::read(&scratch.stderr).unwrap_or_default()).trim().to_string();
+        return Err(Failed { summary: format!("the command failed ({status})"), stderr });
     }
     fs::read_to_string(&scratch.stdout)
         .map_err(|_| Failed::new("the command printed something that is not text (UTF-8)"))
@@ -110,16 +98,9 @@ struct Scratch {
 impl Scratch {
     fn new() -> Scratch {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let name = format!(
-            "axiom-sync-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
+        let name = format!("axiom-sync-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
         let folder = std::env::temp_dir();
-        Scratch {
-            stdout: folder.join(format!("{name}.out")),
-            stderr: folder.join(format!("{name}.err")),
-        }
+        Scratch { stdout: folder.join(format!("{name}.out")), stderr: folder.join(format!("{name}.err")) }
     }
 }
 
@@ -137,31 +118,16 @@ mod tests {
     const LONG: Duration = Duration::from_secs(60);
 
     fn run_one(command: &str, root: &Path, timeout: Duration) -> Result<String, Failed> {
-        run_all(&[command.to_string()], root, timeout)
-            .pop()
-            .expect("one result")
+        run_all(&[command.to_string()], root, timeout).pop().expect("one result")
     }
 
     #[test]
     fn placeholders_are_filled_in() {
-        let (since, today) = (
-            Day::parse(b"2026-03-01").unwrap(),
-            Day::parse(b"2026-03-31").unwrap(),
-        );
-        let command = substitute(
-            "quotes {units} --since {since} --until {today} {since}",
-            since,
-            today,
-            &["VTI", "VXUS"],
-        );
-        assert_eq!(
-            command,
-            "quotes VTI VXUS --since 2026-03-01 --until 2026-03-31 2026-03-01"
-        );
-        assert_eq!(
-            substitute("echo {a,b} {year} {years}", since, today, &[]),
-            "echo {a,b} 2026 {years}"
-        );
+        let (since, today) = (Day::parse(b"2026-03-01").unwrap(), Day::parse(b"2026-03-31").unwrap());
+        let command =
+            substitute("quotes {units} --since {since} --until {today} {since}", since, today, &["VTI", "VXUS"]);
+        assert_eq!(command, "quotes VTI VXUS --since 2026-03-01 --until 2026-03-31 2026-03-01");
+        assert_eq!(substitute("echo {a,b} {year} {years}", since, today, &[]), "echo {a,b} 2026 {years}");
     }
 
     #[test]
@@ -170,18 +136,14 @@ mod tests {
         let output = run_one("pwd; printf 'two\\nlines\\n'", &root, LONG).unwrap();
         let mut lines = output.lines();
         let printed = lines.next().unwrap();
-        assert_eq!(
-            fs::canonicalize(printed).unwrap(),
-            fs::canonicalize(&root).unwrap()
-        );
+        assert_eq!(fs::canonicalize(printed).unwrap(), fs::canonicalize(&root).unwrap());
         assert_eq!(lines.collect::<Vec<_>>(), ["two", "lines"]);
     }
 
     #[test]
     fn a_failing_command_shows_what_it_said_and_a_lot_of_output_does_not_stall_it() {
         let root = std::env::temp_dir();
-        let failed =
-            run_one("echo partial; echo 'no network' >&2; exit 3", &root, LONG).unwrap_err();
+        let failed = run_one("echo partial; echo 'no network' >&2; exit 3", &root, LONG).unwrap_err();
         assert_eq!(
             (failed.summary.as_str(), failed.stderr.as_str()),
             ("the command failed (exit status: 3)", "no network")
@@ -189,11 +151,7 @@ mod tests {
         let big = run_one("head -c 5000000 /dev/zero | tr '\\0' x", &root, LONG).unwrap();
         assert_eq!(big.len(), 5_000_000);
         let unreadable = run_one("printf '\\377\\376'", &root, LONG).unwrap_err();
-        assert!(
-            unreadable.summary.contains("not text"),
-            "{}",
-            unreadable.summary
-        );
+        assert!(unreadable.summary.contains("not text"), "{}", unreadable.summary);
     }
 
     #[test]
@@ -201,10 +159,7 @@ mod tests {
         let root = std::env::temp_dir();
         let started = Instant::now();
         let hung = run_one("sleep 30", &root, Duration::from_millis(200)).unwrap_err();
-        assert_eq!(
-            hung.summary,
-            "the command took more than 200 milliseconds to finish"
-        );
+        assert_eq!(hung.summary, "the command took more than 200 milliseconds to finish");
         assert!(started.elapsed() < Duration::from_secs(10));
         let commands: Vec<String> = (0..4).map(|n| format!("sleep 0.4; echo {n}")).collect();
         let started = Instant::now();
@@ -213,10 +168,6 @@ mod tests {
         assert_eq!(printed, ["0\n", "1\n", "2\n", "3\n"]);
         let cores = thread::available_parallelism().map_or(1, |n| n.get());
         let waves = 4usize.div_ceil(cores.min(4)) as f32;
-        assert!(
-            started.elapsed().as_secs_f32() < 0.4 * waves + 1.0,
-            "{:?}",
-            started.elapsed()
-        );
+        assert!(started.elapsed().as_secs_f32() < 0.4 * waves + 1.0, "{:?}", started.elapsed());
     }
 }

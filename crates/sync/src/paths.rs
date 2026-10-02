@@ -3,44 +3,33 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use axiom_core::glob::{glob, is_pattern};
 use axiom_core::Diagnostic;
+use axiom_core::glob::{glob, is_pattern};
 
 /// Whether a path names a file beneath the project root on any host platform.
 pub(crate) fn is_project_path(path: &str) -> bool {
     use std::path::Component;
 
-    let drive_prefix = path.as_bytes().get(..2).is_some_and(|head| {
-        head[0].is_ascii_alphabetic() && head[1] == b':'
-    });
+    let drive_prefix = path.as_bytes().get(..2).is_some_and(|head| head[0].is_ascii_alphabetic() && head[1] == b':');
     if path.is_empty() || path.starts_with('/') || path.contains('\\') || drive_prefix {
         return false;
     }
     if path.split('/').any(|part| part.is_empty() || matches!(part, "." | "..")) {
         return false;
     }
-    Path::new(path)
-        .components()
-        .all(|part| matches!(part, Component::Normal(_)))
+    Path::new(path).components().all(|part| matches!(part, Component::Normal(_)))
 }
 
 /// Matching local files for a declared `read` pattern, in sorted project path
 /// order. This does not read contents or run commands.
 pub fn matching_paths(root: &Path, pattern: &str) -> Result<Vec<String>, Diagnostic> {
     if !is_project_path(pattern) {
-        return Err(Diagnostic::error(
-            "sync-read-path",
-            format!("`{pattern}` is not a project-relative path"),
-        ));
+        return Err(Diagnostic::error("sync-read-path", format!("`{pattern}` is not a project-relative path")));
     }
-    let root = fs::canonicalize(root).map_err(|error| {
-        Diagnostic::error("sync-project-root", format!("could not resolve project root: {error}"))
-    })?;
+    let root = fs::canonicalize(root)
+        .map_err(|error| Diagnostic::error("sync-project-root", format!("could not resolve project root: {error}")))?;
     if !root.is_dir() {
-        return Err(Diagnostic::error(
-            "sync-project-root",
-            "the project root is not a directory",
-        ));
+        return Err(Diagnostic::error("sync-project-root", "the project root is not a directory"));
     }
 
     let mut found = vec![String::new()];
@@ -48,11 +37,7 @@ pub fn matching_paths(root: &Path, pattern: &str) -> Result<Vec<String>, Diagnos
         let mut next = Vec::new();
         for folder in &found {
             let joined = |entry: &str| {
-                if folder.is_empty() {
-                    entry.to_string()
-                } else {
-                    format!("{folder}/{entry}")
-                }
+                if folder.is_empty() { entry.to_string() } else { format!("{folder}/{entry}") }
             };
             if !is_pattern(part) {
                 next.push(joined(part));
@@ -91,17 +76,11 @@ pub fn matching_paths(root: &Path, pattern: &str) -> Result<Vec<String>, Diagnos
             Ok(path) => path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => {
-                return Err(Diagnostic::error(
-                    "sync-read-path",
-                    format!("could not resolve `{path}`: {error}"),
-                ));
+                return Err(Diagnostic::error("sync-read-path", format!("could not resolve `{path}`: {error}")));
             }
         };
         if !canonical.starts_with(&root) {
-            return Err(Diagnostic::error(
-                "sync-read-path",
-                format!("`{path}` leaves the project through a symlink"),
-            ));
+            return Err(Diagnostic::error("sync-read-path", format!("`{path}` leaves the project through a symlink")));
         }
         if canonical.is_file() {
             files.push(path);
@@ -125,10 +104,7 @@ fn confined(root: &Path, path: &Path) -> Result<PathBuf, Diagnostic> {
     if canonical.starts_with(root) {
         Ok(canonical)
     } else {
-        Err(Diagnostic::error(
-            "sync-read-path",
-            format!("`{}` leaves the project through a symlink", path.display()),
-        ))
+        Err(Diagnostic::error("sync-read-path", format!("`{}` leaves the project through a symlink", path.display())))
     }
 }
 
@@ -157,10 +133,7 @@ mod tests {
         fs::write(folder.join("b.csv"), "b").unwrap();
         fs::write(folder.join("a.csv"), "a").unwrap();
         fs::write(folder.join(".secret.csv"), "hidden").unwrap();
-        assert_eq!(
-            matching_paths(&root, "imports/*.csv").unwrap(),
-            ["imports/a.csv", "imports/b.csv"]
-        );
+        assert_eq!(matching_paths(&root, "imports/*.csv").unwrap(), ["imports/a.csv", "imports/b.csv"]);
         fs::remove_dir_all(root).unwrap();
     }
 

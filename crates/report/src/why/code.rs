@@ -13,11 +13,7 @@ use crate::resolve;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// `pattern` may be a glob: `check-*`.
-pub fn report<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    pattern: &str,
-) -> Result<Report<'s>, Diagnostic> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Result<Report<'s>, Diagnostic> {
     let book = lens.book();
     let marked = |code: Sym| glob(pattern, book.name(code));
     let flows: Vec<_> = postings(book, run)
@@ -29,39 +25,16 @@ pub fn report<'s>(
         .collect();
     let visible_codes = super::line::scoped_codes(book, lens);
     let event_visible = |code| lens.whose.is_everyone() || visible_codes.contains(&code);
-    let mut happened = Section::new([
-        Column::left("Date"),
-        Column::left("Event"),
-        Column::left("From"),
-    ])
-    .headed("Events");
-    for event in book
-        .events
-        .iter()
-        .filter(|event| event_visible(event.code) && marked(event.code))
-    {
-        happened.push(Row::new([
-            Cell::Day(event.day),
-            Cell::text(event_words(event.state)),
-            Cell::Source(event.loc),
-        ]));
+    let mut happened =
+        Section::new([Column::left("Date"), Column::left("Event"), Column::left("From")]).headed("Events");
+    for event in book.events.iter().filter(|event| event_visible(event.code) && marked(event.code)) {
+        happened.push(Row::new([Cell::Day(event.day), Cell::text(event_words(event.state)), Cell::Source(event.loc)]));
     }
 
     if flows.is_empty() && happened.rows.is_empty() {
-        let events = book
-            .events
-            .iter()
-            .filter(|event| event_visible(event.code))
-            .map(|event| event.code);
-        let known: BTreeSet<&str> = visible_codes
-            .iter()
-            .copied()
-            .chain(events)
-            .map(|code| book.name(code))
-            .collect();
+        let events = book.events.iter().filter(|event| event_visible(event.code)).map(|event| event.code);
+        let known: BTreeSet<&str> = visible_codes.iter().copied().chain(events).map(|code| book.name(code)).collect();
         return Err(resolve::nothing_named("code", pattern, known));
     }
-    Ok(Report::new(format!("Why ^{pattern}"))
-        .with(flows_table(lens, run, &flows, "Flows"))
-        .with(happened))
+    Ok(Report::new(format!("Why ^{pattern}")).with(flows_table(lens, run, &flows, "Flows")).with(happened))
 }

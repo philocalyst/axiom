@@ -7,11 +7,7 @@ use crate::lens::Lens;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    contract_id: axiom_core::Id<Contract>,
-) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core::Id<Contract>) -> Report<'s> {
     let book = lens.book();
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
@@ -29,24 +25,15 @@ pub fn report<'s>(
         Column::left("Statement"),
     ])
     .headed("Terms over time");
-    for (days, value) in contract
-        .terms
-        .iter()
-        .flat_map(|terms| terms.within(contract.days))
-    {
+    for (days, value) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
         let active_days = days.intersect(contract.days).unwrap_or(days);
-        let templates = value
-            .template
-            .iter()
-            .map(|flow| crate::contracts::template_flow_cell(lens, flow))
-            .collect::<Vec<_>>();
+        let templates =
+            value.template.iter().map(|flow| crate::contracts::template_flow_cell(lens, flow)).collect::<Vec<_>>();
         let state = match value.state {
             TermsState::Active => Cell::Word("active"),
             TermsState::Waived => Cell::Word("waived"),
         };
-        let change = value
-            .change
-            .map_or(Cell::Blank, |change| Cell::Source(change.loc));
+        let change = value.change.map_or(Cell::Blank, |change| Cell::Source(change.loc));
         terms.push(Row::new([
             Cell::Day(active_days.first()),
             Cell::Day(active_days.last()),
@@ -69,18 +56,14 @@ pub fn report<'s>(
     .headed("Occurrences");
     let mut kept = 0usize;
     let mut late = 0usize;
-    for promise in run
-        .promises
-        .iter()
-        .filter(|promise| promise.contract == contract_id)
-    {
+    for promise in run.promises.iter().filter(|promise| promise.contract == contract_id) {
         let late_by = promise.late(run.today);
         kept += usize::from(promise.kept.is_some());
         late += usize::from(late_by > 0);
         let txn = promise.kept.map(|(_, txn)| &book.txns[txn]);
-        let description = txn.and_then(|txn| txn.doc).map_or(Cell::Blank, |doc| {
-            Cell::text(crate::table::doc_headline(book, Some(doc)).unwrap_or_default())
-        });
+        let description = txn
+            .and_then(|txn| txn.doc)
+            .map_or(Cell::Blank, |doc| Cell::text(crate::table::doc_headline(book, Some(doc)).unwrap_or_default()));
         promises.push(
             Row::new([
                 Cell::Day(promise.due),
@@ -93,17 +76,9 @@ pub fn report<'s>(
                 } else {
                     "missing"
                 }),
-                if late_by > 0 {
-                    Cell::text(format!("{late_by} days"))
-                } else {
-                    Cell::Blank
-                },
+                if late_by > 0 { Cell::text(format!("{late_by} days")) } else { Cell::Blank },
             ])
-            .style(if late_by > 0 {
-                Style::Alert
-            } else {
-                Style::Normal
-            }),
+            .style(if late_by > 0 { Style::Alert } else { Style::Normal }),
         );
     }
     if promises.rows.is_empty() {
@@ -152,25 +127,15 @@ pub fn report<'s>(
         derived.note("No flow from this contract appears in the book.");
     }
 
-    let purpose = contract.purpose.map_or(Cell::Blank, |purpose| {
-        Cell::Purpose(book.name(book.purposes[purpose.value.purpose].name))
-    });
-    let mut about = Section::new([
-        Column::left("Party"),
-        Column::left("Purpose"),
-        Column::left("Description"),
-    ])
-    .headed("Contract");
+    let purpose = contract
+        .purpose
+        .map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.value.purpose].name)));
+    let mut about =
+        Section::new([Column::left("Party"), Column::left("Purpose"), Column::left("Description")]).headed("Contract");
     about.push(Row::new([
         Cell::Name(book.name(book.entities[contract.party].path)),
         purpose,
-        contract
-            .description
-            .map_or(Cell::Blank, |text| Cell::text(book.text(text))),
+        contract.description.map_or(Cell::Blank, |text| Cell::text(book.text(text))),
     ]));
-    Report::new(format!("Why {name}"))
-        .with(about)
-        .with(terms)
-        .with(promises)
-        .with(derived)
+    Report::new(format!("Why {name}")).with(about).with(terms).with(promises).with(derived)
 }

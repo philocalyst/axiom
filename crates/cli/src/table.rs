@@ -18,9 +18,7 @@ use std::fmt::{self, Write as _};
 use axiom_core::calendar::Window;
 use axiom_core::{Days, Qty, Ratio};
 use axiom_model::{Closing, Period, Trigger};
-use axiom_report::{
-    Align, Cell, Column, Report, ReportRenderer, Row, Section, SourceProvider, Style, percent,
-};
+use axiom_report::{Align, Cell, Column, Report, ReportRenderer, Row, Section, SourceProvider, Style, percent};
 
 use crate::style::{Ink, Line, Terminal};
 use crate::text::wrap;
@@ -38,13 +36,7 @@ const MIN_NOTE_WIDTH: usize = 20;
 pub fn render(report: &Report<'_>, terminal: Terminal, sources: &dyn SourceProvider) -> String {
     let mut output = String::new();
     let mut title = Line::new();
-    write_cell(
-        &mut StyledLine::new(&mut title, Ink::BOLD),
-        &report.title,
-        sources,
-        Ink::BOLD,
-        0,
-    );
+    write_cell(&mut StyledLine::new(&mut title, Ink::BOLD), &report.title, sources, Ink::BOLD, 0);
     terminal.painter.paint_line(&mut output, &title);
     for section in &report.sections {
         terminal.painter.paint_line(&mut output, &Line::new());
@@ -66,30 +58,16 @@ impl ReportRenderer for TableRenderer {
     }
 }
 
-fn write_section(
-    output: &mut String,
-    section: &Section<'_>,
-    terminal: Terminal,
-    sources: &dyn SourceProvider,
-) {
+fn write_section(output: &mut String, section: &Section<'_>, terminal: Terminal, sources: &dyn SourceProvider) {
     if let Some(heading) = &section.heading {
         let mut line = Line::new();
-        write_cell(
-            &mut StyledLine::new(&mut line, Ink::BOLD),
-            heading,
-            sources,
-            Ink::BOLD,
-            0,
-        );
+        write_cell(&mut StyledLine::new(&mut line, Ink::BOLD), heading, sources, Ink::BOLD, 0);
         terminal.painter.paint_line(output, &line);
     }
     if !section.columns.is_empty() {
         write_table(output, section, terminal, sources);
     }
-    let room = terminal
-        .width
-        .saturating_sub(INDENT + 2)
-        .max(MIN_NOTE_WIDTH);
+    let room = terminal.width.saturating_sub(INDENT + 2).max(MIN_NOTE_WIDTH);
     for note in &section.notes {
         let text = cell_string(note, sources);
         for (at, part) in wrap(&text, room).iter().enumerate() {
@@ -104,23 +82,14 @@ fn write_section(
 }
 
 /// The column titles, a rule, and the rows, with a rule above each total.
-fn write_table(
-    output: &mut String,
-    section: &Section<'_>,
-    terminal: Terminal,
-    sources: &dyn SourceProvider,
-) {
+fn write_table(output: &mut String, section: &Section<'_>, terminal: Terminal, sources: &dyn SourceProvider) {
     let units = unit_widths(section);
     let widths: Vec<usize> = (0..section.columns.len())
         .map(|at| {
             let title = measure_cell(&section.columns[at].title, sources, 0);
             section.rows.iter().fold(title, |width, row| {
                 let cell = row.cells.get(at).unwrap_or(&Cell::Blank);
-                let depth = if at == 0 {
-                    DEPTH * usize::from(row.depth)
-                } else {
-                    0
-                };
+                let depth = if at == 0 { DEPTH * usize::from(row.depth) } else { 0 };
                 width.max(measure_cell(cell, sources, units[at]) + depth)
             })
         })
@@ -135,20 +104,11 @@ fn write_table(
         // A total without a label of its own continues the one above it (the
         // same total in another commodity), so it shares that total's rule.
         let continues = matches!(row.cells.first(), None | Some(Cell::Blank))
-            && at
-                .checked_sub(1)
-                .is_some_and(|before| section.rows[before].style == Style::Total);
+            && at.checked_sub(1).is_some_and(|before| section.rows[before].style == Style::Total);
         if row.style == Style::Total && at > 0 && !continues {
             write_rule(output, terminal, table_width);
         }
-        table_row(
-            &mut line,
-            Some(row),
-            &section.columns,
-            &widths,
-            &units,
-            sources,
-        );
+        table_row(&mut line, Some(row), &section.columns, &widths, &units, sources);
         terminal.painter.paint_line(output, &line);
     }
 }
@@ -180,26 +140,12 @@ fn table_row(
     line.clear();
     line.push_repeat(' ', INDENT, Ink::PLAIN);
     for (at, (column, &width)) in columns.iter().zip(widths).enumerate() {
-        let cell = if let Some(row) = row {
-            row.cells.get(at).unwrap_or(&Cell::Blank)
-        } else {
-            &column.title
-        };
+        let cell = if let Some(row) = row { row.cells.get(at).unwrap_or(&Cell::Blank) } else { &column.title };
         let cell_ink = if row.is_none() { Ink::DIM } else { ink };
         let column_start = line.width();
-        let depth = if at == 0 {
-            row.map_or(0, |row| DEPTH * usize::from(row.depth))
-        } else {
-            0
-        };
+        let depth = if at == 0 { row.map_or(0, |row| DEPTH * usize::from(row.depth)) } else { 0 };
         line.push_repeat(' ', depth, Ink::PLAIN);
-        write_cell(
-            &mut StyledLine::new(line, cell_ink),
-            cell,
-            sources,
-            cell_ink,
-            units[at],
-        );
+        write_cell(&mut StyledLine::new(line, cell_ink), cell, sources, cell_ink, units[at]);
         let used = line.width() - column_start;
         let padding = width.saturating_sub(used);
         if column.align == Align::Right {
@@ -219,14 +165,7 @@ fn unit_widths(section: &Section<'_>) -> Vec<usize> {
         _ => 0,
     };
     (0..section.columns.len())
-        .map(|at| {
-            section
-                .rows
-                .iter()
-                .map(|row| unit(row.cells.get(at)))
-                .max()
-                .unwrap_or(0)
-        })
+        .map(|at| section.rows.iter().map(|row| unit(row.cells.get(at))).max().unwrap_or(0))
         .collect()
 }
 
@@ -278,10 +217,7 @@ struct Width(usize);
 
 impl fmt::Write for Width {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        self.0 += text
-            .chars()
-            .map(|ch| if ch == '\t' { 4 } else { 1 })
-            .sum::<usize>();
+        self.0 += text.chars().map(|ch| if ch == '\t' { 4 } else { 1 }).sum::<usize>();
         Ok(())
     }
 }
@@ -358,12 +294,7 @@ fn write_cell<W: CellSink>(
             if noun.is_empty() {
                 let _ = write!(out, "{}", Qty(*count as i64).show(0));
             } else {
-                let _ = write!(
-                    out,
-                    "{} {noun}{}",
-                    Qty(*count as i64).show(0),
-                    if *count == 1 { "" } else { "s" }
-                );
+                let _ = write!(out, "{} {noun}{}", Qty(*count as i64).show(0), if *count == 1 { "" } else { "s" });
             }
             true
         }
@@ -415,9 +346,7 @@ fn cell_visible(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
         Cell::Word(text) => !text.is_empty(),
         Cell::Name(text) => !text.is_empty(),
         Cell::Purpose(text) => !text.is_empty(),
-        Cell::Source(loc) => {
-            SourceProvider::describe(sources, *loc).is_some_and(|p| !p.path.is_empty())
-        }
+        Cell::Source(loc) => SourceProvider::describe(sources, *loc).is_some_and(|p| !p.path.is_empty()),
         Cell::Join(_, parts) => parts.iter().any(|part| cell_visible(part, sources)),
         _ => true,
     }
@@ -429,9 +358,7 @@ fn starts_with_punctuation(cell: &Cell<'_>, sources: &dyn SourceProvider) -> boo
         Cell::Word(text) => text.chars().next(),
         Cell::Name(text) => text.chars().next(),
         Cell::Purpose(text) => text.chars().next().or(Some('#')),
-        Cell::Source(loc) => {
-            SourceProvider::describe(sources, *loc).and_then(|p| p.path.chars().next())
-        }
+        Cell::Source(loc) => SourceProvider::describe(sources, *loc).and_then(|p| p.path.chars().next()),
         Cell::Join(_, parts) => {
             return parts
                 .iter()
@@ -494,10 +421,7 @@ struct StackText {
 
 impl StackText {
     fn new() -> StackText {
-        StackText {
-            bytes: [0; 64],
-            len: 0,
-        }
+        StackText { bytes: [0; 64], len: 0 }
     }
 
     fn as_str(&self) -> &str {
@@ -507,11 +431,7 @@ impl StackText {
 
 impl fmt::Write for StackText {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        let Some(end) = self
-            .len
-            .checked_add(text.len())
-            .filter(|&end| end <= self.bytes.len())
-        else {
+        let Some(end) = self.len.checked_add(text.len()).filter(|&end| end <= self.bytes.len()) else {
             return Err(fmt::Error);
         };
         self.bytes[self.len..end].copy_from_slice(text.as_bytes());
@@ -530,26 +450,15 @@ mod tests {
     use crate::project::Sources;
 
     fn column(title: &'static str, align: Align) -> Column<'static> {
-        Column {
-            title: Cell::Word(title),
-            align,
-        }
+        Column { title: Cell::Word(title), align }
     }
 
     fn row<'s>(depth: u8, style: Style, cells: Vec<Cell<'s>>) -> Row<'s> {
-        Row {
-            depth,
-            style,
-            cells,
-        }
+        Row { depth, style, cells }
     }
 
     fn amount(qty: i64, unit: &str) -> Cell<'_> {
-        Cell::Amount {
-            qty: Qty(qty),
-            scale: 2,
-            unit,
-        }
+        Cell::Amount { qty: Qty(qty), scale: 2, unit }
     }
 
     fn text(text: &'static str) -> Cell<'static> {
@@ -560,60 +469,27 @@ mod tests {
     fn a_balance_sheet() {
         let section = Section {
             heading: Some(Cell::Word("Assets")),
-            columns: vec![
-                column("Place", Align::Left),
-                column("Balance", Align::Right),
-                column("Since", Align::Left),
-            ],
+            columns: vec![column("Place", Align::Left), column("Balance", Align::Right), column("Since", Align::Left)],
             rows: vec![
-                row(
-                    0,
-                    Style::Normal,
-                    vec![text("assets/bank"), Cell::Blank, Cell::Blank],
-                ),
+                row(0, Style::Normal, vec![text("assets/bank"), Cell::Blank, Cell::Blank]),
                 row(
                     1,
                     Style::Normal,
-                    vec![
-                        text("checking"),
-                        amount(792_130, "USD"),
-                        Cell::Day(Day::from_ymd(2026, 1, 15).unwrap()),
-                    ],
+                    vec![text("checking"), amount(792_130, "USD"), Cell::Day(Day::from_ymd(2026, 1, 15).unwrap())],
                 ),
-                row(
-                    1,
-                    Style::Normal,
-                    vec![text("brokerage"), amount(1_400, "VTI"), Cell::Blank],
-                ),
-                row(
-                    1,
-                    Style::Alert,
-                    vec![text("visa"), amount(-12_345_600, "USD"), Cell::Blank],
-                ),
-                row(
-                    0,
-                    Style::Total,
-                    vec![text("Total"), amount(793_530, "USD"), Cell::Blank],
-                ),
+                row(1, Style::Normal, vec![text("brokerage"), amount(1_400, "VTI"), Cell::Blank]),
+                row(1, Style::Alert, vec![text("visa"), amount(-12_345_600, "USD"), Cell::Blank]),
+                row(0, Style::Total, vec![text("Total"), amount(793_530, "USD"), Cell::Blank]),
                 row(
                     0,
                     Style::Muted,
-                    vec![
-                        text("≈ gains"),
-                        amount(0, "USD"),
-                        Cell::Percent(Ratio::percent(35, 1).unwrap()),
-                    ],
+                    vec![text("≈ gains"), amount(0, "USD"), Cell::Percent(Ratio::percent(35, 1).unwrap())],
                 ),
             ],
-            notes: vec![Cell::text(
-                "VTI is not priced, so it is left out of the total.",
-            )],
+            notes: vec![Cell::text("VTI is not priced, so it is left out of the total.")],
             facts: Vec::new(),
         };
-        let report = Report {
-            title: Cell::Word("Balances at 2026-03-31"),
-            sections: vec![section],
-        };
+        let report = Report { title: Cell::Word("Balances at 2026-03-31"), sections: vec![section] };
         assert_eq!(
             render(&report, Terminal::plain(80), &Sources::default()),
             "\
@@ -642,41 +518,22 @@ Assets
                 Cell::Word("Income"),
                 Cell::Join(
                     " ",
-                    vec![
-                        Cell::Amount {
-                            qty: Qty(1_200),
-                            scale: 2,
-                            unit: "USD",
-                        },
-                        Cell::Said(Cow::Borrowed(",")),
-                    ],
+                    vec![Cell::Amount { qty: Qty(1_200), scale: 2, unit: "USD" }, Cell::Said(Cow::Borrowed(","))],
                 ),
                 Cell::Blank,
                 Cell::Word("today"),
             ],
         );
-        let report = Report {
-            title: sentence,
-            sections: Vec::new(),
-        };
+        let report = Report { title: sentence, sections: Vec::new() };
 
-        assert_eq!(
-            render(&report, Terminal::plain(80), &Sources::default()),
-            "Income 12.00 USD, today\n"
-        );
+        assert_eq!(render(&report, Terminal::plain(80), &Sources::default()), "Income 12.00 USD, today\n");
     }
 
     #[test]
     fn percents_drop_trailing_zeros() {
         let percent_of = |mantissa, scale| percent(Ratio::percent(mantissa, scale).unwrap());
         assert_eq!(
-            [
-                percent_of(10, 0),
-                percent_of(35, 1),
-                percent_of(25, 2),
-                percent_of(0, 0),
-                percent_of(1000, 0)
-            ],
+            [percent_of(10, 0), percent_of(35, 1), percent_of(25, 2), percent_of(0, 0), percent_of(1000, 0)],
             ["10%", "3.5%", "0.25%", "0%", "1,000%"]
         );
     }

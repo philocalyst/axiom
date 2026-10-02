@@ -456,7 +456,10 @@ fn a_realistic_file_parses_into_the_expected_shapes() {
 /// The properties of a contract, each as its name and the text of its arguments.
 fn properties(file: &File, contract: &Contract, src: &str) -> Vec<(String, Vec<String>)> {
     let text = |arg: &ExprId| src[file.exprs[*arg].loc.range()].to_string();
-    file[contract.props].iter().map(|prop| (prop.name.0.to_string(), file[prop.args].iter().map(text).collect())).collect()
+    file[contract.props]
+        .iter()
+        .map(|prop| (prop.name.0.to_string(), file[prop.args].iter().map(text).collect()))
+        .collect()
 }
 
 #[test]
@@ -465,7 +468,8 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
     let contracts: Vec<&Contract> = file.iter().collect();
     assert_eq!(contracts.len(), 7);
     let props = |contract: usize| properties(&file, contracts[contract], EXAMPLE);
-    let line = |name: &str, args: &[&str]| (name.to_string(), args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
+    let line =
+        |name: &str, args: &[&str]| (name.to_string(), args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
 
     // The job: a payment, two days a month, a purpose and a description, a template and a match.
     let job = contracts[0];
@@ -476,15 +480,23 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
     assert_eq!((terms.cadence, &file[terms.on]), (Cadence::TwiceMonthly, &[On::MonthDay(15), On::Last][..]));
     let holding = terms.holding.unwrap();
     assert_eq!((holding.direction, holding.name.0), (Direction::Into, "checking"));
-    assert_eq!((job.purpose.map(|purpose| purpose.name.0), job.description.map(|text| text.0)), (Some("wages"), Some("gross")));
+    assert_eq!(
+        (job.purpose.map(|purpose| purpose.name.0), job.description.map(|text| text.0)),
+        (Some("wages"), Some("gross"))
+    );
     let legs = &file[job.body.legs];
-    assert!(matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 }))));
+    assert!(
+        matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 })))
+    );
     assert_eq!(legs.len(), 2);
     assert_eq!(legs[0].doc.unwrap().lines().collect::<Vec<_>>(), ["Six percent of the gross is deferred."]);
     // The match is an `also` flow, whose amount is an expression over the flow.
     let alsos = &file[job.alsos];
     let (AlsoLine::Flow(flow), None) = (&alsos[0].line, alsos[0].when) else { panic!("a flow that always comes") };
-    assert!(flow.from.end.is_some_and(|end| end.name.0 == "lumen") && flow.to.end.is_some_and(|end| end.name.0 == "retirement"));
+    assert!(
+        flow.from.end.is_some_and(|end| end.name.0 == "lumen")
+            && flow.to.end.is_some_and(|end| end.name.0 == "retirement")
+    );
     let Some(Quantity::Amount(Amount::Computed(root))) = flow.to.amount else { panic!("a computed amount") };
     assert!(matches!(file.exprs[root].kind, ExprKind::Binary(BinOp::UpTo, ..)));
     assert!(props(0).is_empty() && alsos.len() == 1);
@@ -493,7 +505,8 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
     assert_eq!(props(1), [line("share", &["12%", "for", "studio"]), line("until", &["2026-08-31"])]);
     let deadline = contracts[1].deadline.as_ref().unwrap();
     assert_eq!(deadline.span, Span::days(5));
-    assert!(deadline.otherwise.as_ref().is_some_and(|item| item.sign == Sign::Add && matches!(item.amount, Amount::Computed(root) if matches!(file.exprs[root].kind, ExprKind::Pct(_)))));
+    assert!(deadline.otherwise.as_ref().is_some_and(|item| item.sign == Sign::Add
+        && matches!(item.amount, Amount::Computed(root) if matches!(file.exprs[root].kind, ExprKind::Pct(_)))));
     assert!(contracts[2].schedule.is_some_and(|schedule| schedule.terms.payment.is_none()));
     let loan = ["320_000 USD", "on", "2024-02-20", "at", "5.875%", "over", "30y", "for", "condo"];
     assert_eq!(props(2), [line("loan", &loan)]);
@@ -507,7 +520,10 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
 
     // A lease: a deposit into a holding, two properties on one line, a purpose with an object, and a law.
     let lease = contracts[3];
-    assert_eq!(props(3), [line("deposit", &["2_350 USD", "into", "deposits"]), line("from", &["2025-07-01", "until", "2026-06-30"])]);
+    assert_eq!(
+        props(3),
+        [line("deposit", &["2_350 USD", "into", "deposits"]), line("from", &["2025-07-01", "until", "2026-06-30"])]
+    );
     let rent = lease.purpose.unwrap();
     assert_eq!((rent.name.0, rent.of.map(|of| of.0)), ("rent", Some("condo")));
     assert_eq!(file[lease.laws].len(), 1);
@@ -517,7 +533,9 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
     assert_eq!(file[insurance.schedule.unwrap().terms.on], [On::YearDay { month: 3, day: 1 }]);
     assert_eq!(props(4), [line("covers", &["the", "year"])]);
     let buy = contracts[5].standing.unwrap().terms;
-    assert!(matches!(buy.payment, Some(Payment::Buy { unit: Name("VTI"), spend: Amount::Literal(spend) }) if spend.0 == "500 USD"));
+    assert!(
+        matches!(buy.payment, Some(Payment::Buy { unit: Name("VTI"), spend: Amount::Literal(spend) }) if spend.0 == "500 USD")
+    );
     assert!(contracts[5].schedule.is_none());
     let gym = contracts[6].schedule.unwrap().terms;
     assert_eq!((gym.cadence, &file[gym.on]), (Cadence::Every(Span::days(14)), &[On::Weekday(4)][..]));
@@ -531,7 +549,9 @@ fn a_contracts_lines_come_in_any_order() {
     let contract: &Contract = file.iter().next().unwrap();
     assert!(contract.schedule.is_some() && contract.body.legs.len() == 1 && contract.props.len() == 2);
     // A short date in a property is completed as anywhere else.
-    assert!(matches!(file.exprs[file[file[contract.props][1].args][0]].kind, ExprKind::Date(d) if d == day(2026, 7, 1)));
+    assert!(
+        matches!(file.exprs[file[file[contract.props][1].args][0]].kind, ExprKind::Date(d) if d == day(2026, 7, 1))
+    );
 }
 
 #[test]
@@ -568,10 +588,9 @@ fn a_contract_keeps_its_good_lines_and_says_what_is_wrong_with_the_bad() {
     one("  5 USD monthly from x for 2025\n", "expected-end-of-line");
     one("  5 USD every from x\n", "expected-span");
     one("  5 USD twice from x\n", "expected-keyword");
-    for (written, code, replaced, fix) in [
-        ("montly", "unknown-cadence", "montly", "monthly"),
-        ("monthly on mondey", "unknown-day", "mondey", "monday"),
-    ] {
+    for (written, code, replaced, fix) in
+        [("montly", "unknown-cadence", "montly", "monthly"), ("monthly on mondey", "unknown-day", "mondey", "monday")]
+    {
         let src = contract_with(&format!("  5 USD {written} from x\n"));
         assert_eq!(first_fix(&src, &only_error(&src, code)), (replaced, fix));
     }
@@ -609,7 +628,9 @@ fn a_chart_account_is_rejected_and_not_kept() {
 
 #[test]
 fn a_plan_is_a_contract_now() {
-    for src in ["every month on 1 checking -> landlord 2_400 USD\n", "plan paycheck every 2w acme -> 5_200 USD\n  a ...\n"] {
+    for src in
+        ["every month on 1 checking -> landlord 2_400 USD\n", "plan paycheck every 2w acme -> 5_200 USD\n  a ...\n"]
+    {
         let error = only_error(src, "plan-is-a-contract");
         assert!(error.help[0].text.contains("contract NAME with PARTY"));
     }
@@ -621,7 +642,8 @@ fn comments_docs_and_raw_text() {
     assert_eq!(file.items[0].doc.unwrap().lines().collect::<Vec<_>>(), ["One.", "Two."]);
 
     // A command is raw text up to a comment, which a blank must precede.
-    let file = parse_clean("sync prices // daily\n  run curl -s https://example.com/a // b\r\n  into prices/{year}.ax\n");
+    let file =
+        parse_clean("sync prices // daily\n  run curl -s https://example.com/a // b\r\n  into prices/{year}.ax\n");
     let ItemKind::Sync(id) = file.items[0].kind else { panic!("a sync") };
     let sync = &file[id];
     assert_eq!((sync.name.0, sync.run.map(|run| run.0)), ("prices", Some("curl -s https://example.com/a")));
@@ -719,7 +741,10 @@ fn a_flow_says_why_with_a_purpose_a_description_and_codes() {
     assert!(matches!(kinds[0], ClauseKind::Purpose(Purpose { name: Name("groceries"), of: None })));
     // A string after `!` is the waiver's reason, not a description.
     let file = parse_clean("2026-02-02 a -> b 5 USD ! \"ok\"\n");
-    assert!(matches!(clauses(&file, txns(&file)[0].flow.tail)[..], [ClauseKind::Waive(Waive { reason: Some(Text("ok")), .. })]));
+    assert!(matches!(
+        clauses(&file, txns(&file)[0].flow.tail)[..],
+        [ClauseKind::Waive(Waive { reason: Some(Text("ok")), .. })]
+    ));
 
     only_error("2026-02-02 a -> b 5 USD #a #b\n", "duplicate-clause");
     only_error("2026-02-02 a -> b 5 USD \"x\" \"y\"\n", "duplicate-clause");
@@ -728,11 +753,16 @@ fn a_flow_says_why_with_a_purpose_a_description_and_codes() {
 
 #[test]
 fn ends_may_be_commodities_and_an_exchange_may_name_only_its_source() {
-    let file = parse_clean("2026-02-03 VTI -> fidelity 198.12 USD\n2026-02-05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD\n");
+    let file =
+        parse_clean("2026-02-03 VTI -> fidelity 198.12 USD\n2026-02-05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD\n");
     let flows = txns(&file);
     assert_eq!(flows[0].flow.from.end.map(|end| end.name.0), Some("VTI"));
     let exchange = &flows[1].flow;
-    assert!(exchange.to.end.is_none() && matches!(exchange.to.amount, Some(Quantity::Amount(_))) && exchange.body.legs.is_empty());
+    assert!(
+        exchange.to.end.is_none()
+            && matches!(exchange.to.amount, Some(Quantity::Amount(_)))
+            && exchange.body.legs.is_empty()
+    );
     // A commodity first is a party for a flow, and the subject of a price when `=` follows it.
     let file = parse_clean("2026-02-03 VTI = 280.14 USD\n");
     assert!(matches!(statements(&file)[0].verb, Verb::Value(Amount::Literal(price)) if price.0 == "280.14 USD"));
@@ -752,7 +782,9 @@ fn a_leg_may_be_a_share_of_the_header_and_an_opening_line_an_asset() {
     let file = parse_clean("2026-01-31 lumen -> 4_600 USD\n  retirement 6%\n  checking ...\n");
     let legs = &file[txns(&file)[0].flow.body.legs];
     // A share alone is a node of the arena: the percent, of what the header says.
-    assert!(matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 }))));
+    assert!(
+        matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 })))
+    );
     only_error("2026-01-31 lumen -> 6%\n", "expected-end-of-line");
 
     let file = parse_clean("opening 2026-01-01\n  condo basis 402_000 USD since 2024-02-20\n  checking 5 USD\n");
@@ -774,7 +806,9 @@ fn a_code_settles_by_being_on_the_flow_not_after_for() {
 
 #[test]
 fn a_basis_is_no_end_any_more() {
-    for src in ["2026-09-15 checking -> house.basis 14_200 USD\n", "2026-09-16 checking -> house[^roof].basis 1_000 USD\n"] {
+    for src in
+        ["2026-09-15 checking -> house.basis 14_200 USD\n", "2026-09-16 checking -> house[^roof].basis 1_000 USD\n"]
+    {
         let error = only_error(src, "basis-end");
         assert_eq!(&src[error.anchor().unwrap().range()], ".basis");
         assert!(error.help.iter().any(|help| help.text.contains("#improvement of ASSET")));
@@ -796,7 +830,9 @@ fn a_header_may_state_both_amounts_while_naming_one_end() {
 fn basis_is_an_asset_arriving_when_an_amount_follows_and_a_kinds_property_when_not() {
     let file = parse_clean("2026-05-01 car basis 12_000 USD since 2019-03-01\n2026-05-01 401k now basis zero\n");
     let said = statements(&file);
-    assert!(matches!(said[0].verb, Verb::Basis { amount: Amount::Literal(amount), since: Some(_) } if amount.0 == "12_000 USD"));
+    assert!(
+        matches!(said[0].verb, Verb::Basis { amount: Amount::Literal(amount), since: Some(_) } if amount.0 == "12_000 USD")
+    );
     assert!(matches!(&said[1].verb, Verb::Now(Change::Property(prop)) if prop.name.0 == "basis"));
     // A property is restated with `now`; without it the word after the subject is a verb that takes an amount.
     only_error("2026-05-01 401k basis zero\n", "expected-amount");
@@ -832,7 +868,8 @@ fn a_dated_name_is_an_occurrence_unless_it_says_something_else() {
 #[test]
 fn a_claim_says_who_owes_whom_and_is_flow_shaped() {
     let file = parse_clean(EXAMPLE);
-    let claims: Vec<&Statement> = file.iter::<Statement>().filter(|said| matches!(said.verb, Verb::Owes { .. })).collect();
+    let claims: Vec<&Statement> =
+        file.iter::<Statement>().filter(|said| matches!(said.verb, Verb::Owes { .. })).collect();
     assert_eq!(claims.len(), 3, "two dated claims, and the one an opening states");
     fn owes<'a>(said: &Statement<'a>) -> (&'a str, &'a str) {
         match &said.verb {
@@ -844,12 +881,17 @@ fn a_claim_says_who_owes_whom_and_is_flow_shaped() {
     assert!(matches!(invoice.subject, Subject::Name(Name("halcyon"))));
     assert_eq!(owes(invoice), ("studio", "3_800 USD"));
     let kinds = clauses(&file, invoice.tail);
-    assert!(matches!(kinds[0], ClauseKind::Due(Due::After(_))) && matches!(kinds[1], ClauseKind::Code(code) if code.name() == "inv-2026-01"));
+    assert!(
+        matches!(kinds[0], ClauseKind::Due(Due::After(_)))
+            && matches!(kinds[1], ClauseKind::Code(code) if code.name() == "inv-2026-01")
+    );
     assert!(matches!(kinds[2], ClauseKind::Purpose(purpose) if purpose.name.0 == "design"));
     let bill = claims[1];
     assert!(matches!(bill.subject, Subject::Name(Name("me"))) && owes(bill).0 == "pge");
     let kinds = clauses(&file, bill.tail);
-    assert!(matches!(kinds[0], ClauseKind::Due(Due::On(_))) && matches!(kinds[1], ClauseKind::Description(Text("a bill"))));
+    assert!(
+        matches!(kinds[0], ClauseKind::Due(Due::On(_))) && matches!(kinds[1], ClauseKind::Description(Text("a bill")))
+    );
     let open = claims[2];
     assert!(matches!(open.subject, Subject::Name(Name("jo"))) && open.date == day(2024, 12, 31));
 
@@ -863,7 +905,9 @@ fn a_claim_says_who_owes_whom_and_is_flow_shaped() {
     let claim = statements(&file)[0];
     assert!(matches!(claim.verb, Verb::Owes { amount: None, .. }) && claim.body.items.len() == 2);
     // The amount may be a share of what a code names: a third of a bill, a late fee on an invoice.
-    let file = parse_clean("2026-03-05 jo owes me 1/3 of ^pge-jan\n2026-03-15 halcyon owes studio 1.5% of ^inv-12 #late-fee\n");
+    let file = parse_clean(
+        "2026-03-05 jo owes me 1/3 of ^pge-jan\n2026-03-15 halcyon owes studio 1.5% of ^inv-12 #late-fee\n",
+    );
     for said in statements(&file) {
         assert!(matches!(said.verb, Verb::Owes { amount: Some(Amount::Computed(_)), .. }), "{said:?}");
     }
@@ -882,7 +926,11 @@ fn values_may_be_negative_and_may_say_where_a_gap_goes() {
     assert!(matches!(clauses(&file, said[2].tail)[..], [ClauseKind::Waive(Waive { reason: Some(Text("x")), .. })]));
     // A named measure and a reading are values too, of a code.
     let file = parse_clean("2026-01-01 ^bldg-water = 155.00 USD \"the water\"\n2026-01-31 ^odometer = 48_210 MI\n");
-    assert!(statements(&file).iter().all(|said| matches!(said.subject, Subject::Code(_)) && matches!(said.verb, Verb::Value(_))));
+    assert!(
+        statements(&file)
+            .iter()
+            .all(|said| matches!(said.subject, Subject::Code(_)) && matches!(said.verb, Verb::Value(_)))
+    );
     let file = parse_clean("2026-01-31 checking = 1/2 of ^income\n");
     assert!(matches!(statements(&file)[0].verb, Verb::Value(Amount::Computed(_))));
     let file = parse_clean("2026-01-31 checking = -50% of 100 USD\n");
@@ -935,7 +983,10 @@ fn every_verb_says_one_thing_about_its_subject() {
     let mut seen: Vec<&str> = said.iter().map(|said| verb(&said.verb)).collect();
     seen.sort();
     seen.dedup();
-    assert_eq!(seen, ["basis", "ends", "event", "filed", "now", "occurrence", "owes", "split", "used", "value", "waived", "worked"]);
+    assert_eq!(
+        seen,
+        ["basis", "ends", "event", "filed", "now", "occurrence", "owes", "split", "used", "value", "waived", "worked"]
+    );
 
     // What a value is about: an account, a commodity, a code.
     assert!(matches!(said[4].subject, Subject::Unit(Name("VTI"))));
@@ -944,9 +995,16 @@ fn every_verb_says_one_thing_about_its_subject() {
     let Verb::Worked(hours) = said[7].verb else { panic!("work") };
     assert_eq!((hours.num(), hours.unit().map(|unit| unit.0)), (Dec { mantissa: 65, scale: 1 }, Some("HR")));
     let kinds = clauses(&file, said[8].tail);
-    assert!(matches!(kinds[..], [ClauseKind::Purpose(Purpose { name: Name("business-travel"), .. }), ClauseKind::For(For::Whom(Name("studio")))]));
+    assert!(matches!(
+        kinds[..],
+        [
+            ClauseKind::Purpose(Purpose { name: Name("business-travel"), .. }),
+            ClauseKind::For(For::Whom(Name("studio")))
+        ]
+    ));
     // Settlement states are one verb carrying the state.
-    let states: Vec<EventState> = said.iter().filter_map(|said| if let Verb::Event(state) = said.verb { Some(state) } else { None }).collect();
+    let states: Vec<EventState> =
+        said.iter().filter_map(|said| if let Verb::Event(state) = said.verb { Some(state) } else { None }).collect();
     assert_eq!(states, [EventState::Settled, EventState::Void, EventState::Returned]);
     // A return lists tallies as legs.
     let filed = said.iter().find(|said| matches!(said.verb, Verb::Filed(2025))).unwrap();
@@ -983,7 +1041,9 @@ fn a_change_restates_part_of_a_declaration() {
     ));
     // Any property, with expression arguments; a change's own span is a property too.
     let property = |index: usize| match &said[index].verb {
-        Verb::Now(Change::Property(prop)) => (prop.name.0, file[prop.args].iter().map(|&arg| show(&file, arg, STATEMENTS)).collect::<Vec<_>>()),
+        Verb::Now(Change::Property(prop)) => {
+            (prop.name.0, file[prop.args].iter().map(|&arg| show(&file, arg, STATEMENTS)).collect::<Vec<_>>())
+        }
         other => panic!("a property, not {other:?}"),
     };
     assert_eq!(property(11), ("until", vec!["08-31".to_string()]));
@@ -993,7 +1053,10 @@ fn a_change_restates_part_of_a_declaration() {
     // A budget is restated with its window, and `until` ends it.
     let Verb::Now(Change::Budget(id)) = said[15].verb else { panic!("a budget") };
     let budget = &file[id];
-    assert!(matches!(budget.limit, Limit::Amount(Amount::Literal(amount)) if amount.0 == "1_200 USD") && budget.per == Period::Month);
+    assert!(
+        matches!(budget.limit, Limit::Amount(Amount::Literal(amount)) if amount.0 == "1_200 USD")
+            && budget.per == Period::Month
+    );
     assert!(matches!(clauses(&file, said[15].tail)[0], ClauseKind::Until(until) if *until == day(2026, 12, 31)));
     // Items under a change with no terms amend a claim, as a credit note does.
     assert!(matches!(said[17].verb, Verb::Now(Change::Amendment)) && said[17].body.items.len() == 2);
@@ -1053,7 +1116,9 @@ fn a_verb_takes_only_the_clauses_that_mean_something_to_it() {
     refused("2026-01-01 me worked 5 HR due 30d\n", "due 30d");
     refused("2026-01-01 flat 5 USD until 02-01\n", "until 02-01");
     // A description and a code go with any of them.
-    parse_clean("2026-01-01 checking = 5 USD \"why\" ^c\n2026-01-01 flat ends \"gone\" ^c\n2026-01-02 me worked 5 HR ^c \"why\"\n");
+    parse_clean(
+        "2026-01-01 checking = 5 USD \"why\" ^c\n2026-01-01 flat ends \"gone\" ^c\n2026-01-02 me worked 5 HR ^c \"why\"\n",
+    );
     // A leg is a leg of an occurrence or of terms and of nothing else.
     only_error("2026-01-01 checking = 5 USD\n  a 1 USD\n", "unexpected-indent");
     only_error("2026-01-01 flat waived\n  checking ...\n", "takes-items");
@@ -1082,7 +1147,9 @@ fn shown_amounts(src: &str) -> Vec<String> {
         match item.kind {
             ItemKind::Statement(id) => {
                 match &file[id].verb {
-                    Verb::Occurrence(Some(amount)) | Verb::Value(amount) | Verb::Owes { amount: Some(amount), .. } => show_amount(amount),
+                    Verb::Occurrence(Some(amount)) | Verb::Value(amount) | Verb::Owes { amount: Some(amount), .. } => {
+                        show_amount(amount)
+                    }
                     _ => {}
                 }
                 file[file[id].body.items].iter().for_each(|item| show_amount(&item.amount));
@@ -1113,7 +1180,10 @@ fn amounts_are_written_as_the_book_computes_them() {
     // A reference narrowed by selectors, the parts of one purpose, and priced.
     assert_eq!(items("8.625% of ^inv-12[#design]"), ["(8.625% of ^inv-12[#design])"]);
     assert_eq!(items("^inv-12[HR] @ 150 USD/HR"), ["(^inv-12[HR] @ 150 USD/HR)"]);
-    assert_eq!(items("^inv-12[2026-01, #design, ^x, retirement, fifo]"), ["^inv-12[2026-01, #design, ^x, retirement, fifo]"]);
+    assert_eq!(
+        items("^inv-12[2026-01, #design, ^x, retirement, fifo]"),
+        ["^inv-12[2026-01, #design, ^x, retirement, fifo]"]
+    );
     assert_eq!(items("^pge-jan"), ["^pge-jan"]);
     // `up to` is the smaller of two, and looser than a share.
     assert_eq!(items("100 USD up to ^cap"), ["(100 USD up to ^cap)"]);
@@ -1143,7 +1213,10 @@ fn amounts_are_written_as_the_book_computes_them() {
     let contract: &Contract = file.iter().next().unwrap();
     let AlsoLine::Flow(flow) = &file[contract.alsos][0].line else { panic!("a flow") };
     let Some(Quantity::Amount(Amount::Computed(root))) = flow.to.amount else { panic!("a computed amount") };
-    assert_eq!(show(&file, root, "contract c\n  5 USD monthly from x\n  also -> y 2 * amount / 3 #z when amount > 20 USD\n"), "((2 * amount) / 3)");
+    assert_eq!(
+        show(&file, root, "contract c\n  5 USD monthly from x\n  also -> y 2 * amount / 3 #z when amount > 20 USD\n"),
+        "((2 * amount) / 3)"
+    );
     only_error("budget food 900\n", "expected-commodity");
 }
 
@@ -1244,14 +1317,19 @@ law wash-sale overrides flat-rate
     let StepKind::Require { otherwise, warn, .. } = steps[4].kind else { panic!("a warn") };
     assert!(warn && otherwise.is_empty());
 
-    only_error("law l\n  on in\n  require a\n    else owe 1 USD to x \"m\"\n    else owe 2 USD to y\n", "else-after-message");
+    only_error(
+        "law l\n  on in\n  require a\n    else owe 1 USD to x \"m\"\n    else owe 2 USD to y\n",
+        "else-after-message",
+    );
     only_error("law l\n  on in\n  require a\n    owe 1 USD to x\n", "expected-else");
     only_error("law l\n  on in\n  warn a\n    else owe 1 USD to x\n", "unexpected-indent");
     only_error("law l\n  on in\n  require a else\n", "expected-effect");
     only_error("law l overrides\n  on in\n", "expected-name");
     only_error("law l\n  on in\n  unless\n", "expected-expression");
     // A law in a purpose needs no trigger, and a top-level one does.
-    let file = parse_clean("purpose wages\n  law count-wages\n    count amount as wages\n  law by-hand\n    on in\n    count amount as x\n");
+    let file = parse_clean(
+        "purpose wages\n  law count-wages\n    count amount as wages\n  law by-hand\n    on in\n    count amount as x\n",
+    );
     let decl: &Decl = file.iter().next().unwrap();
     let laws = &file[decl.laws];
     assert_eq!((laws[0].trigger, laws[1].trigger), (Trigger::Flow, Trigger::In));
@@ -1329,7 +1407,9 @@ contract flat with greystar
     assert!(file[contract.alsos][0].when.is_some());
 
     // An entity, a kind or a purpose says what every event of it implies, and a flow with no date is a flow.
-    let file = parse_clean("entity acme : employer\n  also + 2% of amount #fee\n  also acme -> me 5 USD #bonus when amount > 100 USD\n");
+    let file = parse_clean(
+        "entity acme : employer\n  also + 2% of amount #fee\n  also acme -> me 5 USD #bonus when amount > 100 USD\n",
+    );
     let decl: &Decl = file.iter().next().unwrap();
     let alsos = &file[decl.alsos];
     assert!(matches!(alsos[0].line, AlsoLine::Item(_)) && alsos[0].when.is_none());
@@ -1343,7 +1423,10 @@ contract flat with greystar
     let file = parse_clean("contract vti with fidelity\n  buy VTI for 500 USD monthly on 20 from checking\n");
     let contract: &Contract = file.iter().next().unwrap();
     assert!(contract.schedule.is_none() && contract.standing.is_some() && !contract.damaged);
-    only_error("contract c\n  buy VTI for 5 USD monthly from x\n  buy VTI for 6 USD monthly from x\n", "duplicate-clause");
+    only_error(
+        "contract c\n  buy VTI for 5 USD monthly from x\n  buy VTI for 6 USD monthly from x\n",
+        "duplicate-clause",
+    );
     only_error("contract c\n  buy VTI 5 USD monthly from x\n", "expected-keyword");
 }
 
@@ -1398,11 +1481,15 @@ fn a_line_that_names_no_end_is_an_item_of_the_flow_above_it() {
     let items = &file[flow.body.items];
     let kinds: Vec<(Sign, &Amount)> = items.iter().map(|item| (item.sign, &item.amount)).collect();
     assert!(matches!(kinds[0], (Sign::Carve, Amount::Literal(amount)) if amount.0 == "32.10 USD"));
-    assert!(matches!(kinds[2], (Sign::Add, Amount::Computed(root)) if matches!(file.exprs[*root].kind, ExprKind::Of(..))));
+    assert!(
+        matches!(kinds[2], (Sign::Add, Amount::Computed(root)) if matches!(file.exprs[*root].kind, ExprKind::Of(..)))
+    );
     let Amount::Computed(root) = items[2].amount else { panic!("a share of an amount") };
     assert_eq!(&src[file.exprs[root].loc.range()], "5% of 100.00 USD");
     assert!(matches!(kinds[3], (Sign::Less, Amount::Literal(_))));
-    assert!(matches!(kinds[4], (Sign::Carve, Amount::Computed(root)) if matches!(file.exprs[*root].kind, ExprKind::Pct(percent) if percent.mantissa == 10)));
+    assert!(
+        matches!(kinds[4], (Sign::Carve, Amount::Computed(root)) if matches!(file.exprs[*root].kind, ExprKind::Pct(percent) if percent.mantissa == 10))
+    );
     let tail = clauses(&file, items[1].tail);
     assert!(matches!(tail[..], [ClauseKind::Purpose(_), ClauseKind::Description(Text("for jo's birthday"))]));
     assert!(flow.body.legs.is_empty());
@@ -1459,9 +1546,17 @@ fn a_v3_party_after_a_slash_says_how_it_is_written_now() {
     // An asset is bought, not paid through: the second fix says so.
     let src = "2026-03-24 visa 1_739.13 USD -> laptop / best-buy\n";
     let error = only_error(src, "v3-party");
-    let fixes: Vec<(&str, &str)> = error.help.iter().filter_map(|help| help.edit.as_ref()).map(|(loc, text)| (&src[loc.range()], &**text)).collect();
+    let fixes: Vec<(&str, &str)> = error
+        .help
+        .iter()
+        .filter_map(|help| help.edit.as_ref())
+        .map(|(loc, text)| (&src[loc.range()], &**text))
+        .collect();
     assert_eq!(fixes[0], ("laptop / best-buy", "best-buy via laptop"));
-    assert_eq!(fixes[1], ("visa 1_739.13 USD -> laptop / best-buy", "visa -> best-buy 1_739.13 USD #purchase of laptop"));
+    assert_eq!(
+        fixes[1],
+        ("visa 1_739.13 USD -> laptop / best-buy", "visa -> best-buy 1_739.13 USD #purchase of laptop")
+    );
     assert!(error.help[1].text.contains("if `laptop` is an asset"));
     // The same when the amount is on the target.
     let src = "2026-03-24 visa -> laptop 1_739.13 USD / best-buy\n";
@@ -1469,7 +1564,11 @@ fn a_v3_party_after_a_slash_says_how_it_is_written_now() {
     assert_eq!(first_fix(src, &error).1, "best-buy 1_739.13 USD via laptop");
 
     // Where there is nothing to swap, or the slash is late, it is explained without an edit.
-    for src in ["2026-03-24 visa 5 USD -> ? / x\n", "2026-03-24 a -> b 5 USD ^c / x\n", "2026-03-24 a -> 5 USD\n  b 1 USD / x\n"] {
+    for src in [
+        "2026-03-24 visa 5 USD -> ? / x\n",
+        "2026-03-24 a -> b 5 USD ^c / x\n",
+        "2026-03-24 a -> 5 USD\n  b 1 USD / x\n",
+    ] {
         let error = only_error(src, "v3-party");
         assert!(error.help.iter().all(|help| help.edit.is_none()) || src.contains("? /"), "{src}");
     }
@@ -1478,7 +1577,9 @@ fn a_v3_party_after_a_slash_says_how_it_is_written_now() {
 
 #[test]
 fn contracts_may_leave_out_their_party_and_declarations_take_the_new_lines() {
-    let file = parse_clean("contract netflix\n  15 USD monthly on 22 from visa\ncontract flat with greystar\n  about 2_900 USD monthly on 1 from checking #rent\n");
+    let file = parse_clean(
+        "contract netflix\n  15 USD monthly on 22 from visa\ncontract flat with greystar\n  about 2_900 USD monthly on 1 from checking #rent\n",
+    );
     let contracts: Vec<&Contract> = file.iter().collect();
     assert_eq!((contracts[0].name.0, contracts[0].party), ("netflix", None));
     assert_eq!(contracts[1].party.map(|party| party.0), Some("greystar"));
@@ -1496,10 +1597,17 @@ fn contracts_may_leave_out_their_party_and_declarations_take_the_new_lines() {
     only_error("account a : bank #groceries\n", "expected-end-of-line");
 
     // A budget's limit is an amount or a share of another purpose's total, and it may carry.
-    let file = parse_clean("budget food 900 USD monthly\nbudget fun 10% of #income monthly carries\nbudget travel 3_000 USD yearly carries\n");
+    let file = parse_clean(
+        "budget food 900 USD monthly\nbudget fun 10% of #income monthly carries\nbudget travel 3_000 USD yearly carries\n",
+    );
     let budgets: Vec<&Budget> = file.iter().collect();
-    assert!(matches!(budgets[1].allowance.limit, Limit::Share { percent, of: Name("income") } if percent.mantissa == 10));
-    assert_eq!(budgets.iter().map(|budget| budget.allowance.carries).collect::<Vec<_>>(), [None, Some(true), Some(true)]);
+    assert!(
+        matches!(budgets[1].allowance.limit, Limit::Share { percent, of: Name("income") } if percent.mantissa == 10)
+    );
+    assert_eq!(
+        budgets.iter().map(|budget| budget.allowance.carries).collect::<Vec<_>>(),
+        [None, Some(true), Some(true)]
+    );
     assert_eq!(budgets[2].allowance.per, Period::Year);
     only_error("budget fun 10% monthly\n", "expected-of");
     only_error("budget fun 10% of income monthly\n", "expected-purpose");
@@ -1517,7 +1625,10 @@ fn a_sync_names_its_source_and_says_where_its_records_are() {
     assert_eq!(format.name.0, "csv");
     let lines = &file[format.lines];
     assert_eq!(lines.iter().map(|line| line.key.0).collect::<Vec<_>>(), ["date", "amount", "memo"]);
-    assert!(matches!(file[lines[0].args][..], [FormatArg::Quoted(Text("Posting Date")), FormatArg::Quoted(Text("MM/DD/YYYY"))]));
+    assert!(matches!(
+        file[lines[0].args][..],
+        [FormatArg::Quoted(Text("Posting Date")), FormatArg::Quoted(Text("MM/DD/YYYY"))]
+    ));
     assert!(matches!(file[lines[1].args][..], [FormatArg::Quoted(Text("Amount")), FormatArg::Word(Text("flipped"))]));
     assert!(file.items[0].doc.is_some());
 
@@ -1525,7 +1636,10 @@ fn a_sync_names_its_source_and_says_where_its_records_are() {
     let src = "sync prices\n  run quotes {units} --since {since}\n  into prices/{year}.ax\nsync visa\n  read \"imports/*.qfx\"\n  format ofx\n";
     let file = parse_clean(src);
     let syncs: Vec<&Sync> = file.iter().collect();
-    assert_eq!((syncs[0].run.map(|text| text.0), syncs[0].into.map(|text| text.0)), (Some("quotes {units} --since {since}"), Some("prices/{year}.ax")));
+    assert_eq!(
+        (syncs[0].run.map(|text| text.0), syncs[0].into.map(|text| text.0)),
+        (Some("quotes {units} --since {since}"), Some("prices/{year}.ax"))
+    );
     let ofx = &file[syncs[1].format.unwrap()];
     assert!(ofx.name.0 == "ofx" && ofx.lines.is_empty());
 
@@ -1553,12 +1667,18 @@ fn a_format_names_its_fields_as_the_source_does() {
     assert_eq!(format.name.0, "camt053");
     let lines = &file[format.lines];
     let words = |line: usize| -> Vec<String> {
-        file[lines[line].args].iter().map(|arg| match arg {
-            FormatArg::Word(text) => text.0.to_string(),
-            FormatArg::Quoted(text) => format!("\"{}\"", text.0),
-        }).collect()
+        file[lines[line].args]
+            .iter()
+            .map(|arg| match arg {
+                FormatArg::Word(text) => text.0.to_string(),
+                FormatArg::Quoted(text) => format!("\"{}\"", text.0),
+            })
+            .collect()
     };
-    assert_eq!(lines.iter().map(|line| line.key.0).collect::<Vec<_>>(), ["records", "date", "amount", "code", "category"]);
+    assert_eq!(
+        lines.iter().map(|line| line.key.0).collect::<Vec<_>>(),
+        ["records", "date", "amount", "code", "category"]
+    );
     assert_eq!(words(0), ["Ntry"]);
     assert_eq!(words(1), ["BookgDt/Dt"]);
     assert_eq!(words(2), ["Amt", "sign", "CdtDbtInd", "CRDT"], "commas separate and are dropped");
@@ -1584,7 +1704,9 @@ fn spell(file: &File, pattern: &Pattern) -> String {
                 .map(|term| {
                     let atom = match &term.atom {
                         PatternAtom::Literal(text) => format!("\"{}\"", text.0),
-                        PatternAtom::Class(class) => Class::WORDS.iter().find(|(_, known)| known == class).unwrap().0.to_string(),
+                        PatternAtom::Class(class) => {
+                            Class::WORDS.iter().find(|(_, known)| known == class).unwrap().0.to_string()
+                        }
                         PatternAtom::Named(name) => name.0.to_string(),
                         PatternAtom::Group(inner) => format!("({})", spell(file, inner)),
                     };
@@ -1937,7 +2059,11 @@ fn a_short_date_where_the_place_does_not_give_the_rest_is_an_error() {
     ];
     for (place, src, missing) in cases {
         let error = place_error(place, src, "short-date");
-        assert!(error.message.ends_with(&format!("leaves out the {missing}, which no heading above it and no folder gives")));
+        assert!(
+            error
+                .message
+                .ends_with(&format!("leaves out the {missing}, which no heading above it and no folder gives"))
+        );
         let written = &src[error.anchor().unwrap().range()];
         assert!(error.message.starts_with(&format!("`{written}`")), "{}", error.message);
     }
@@ -1965,7 +2091,10 @@ fn a_short_date_that_is_not_on_the_calendar_says_so_in_its_own_form() {
         }
     }
     assert_eq!(place_error(february, "30 a -> b 5 USD\n", "bad-date").message, "February 2026 has 28 days");
-    assert_eq!(place_error(YEAR, "13-45 a -> b 5 USD\n", "bad-date").message, "`13-45` is not a date: there is no month 13");
+    assert_eq!(
+        place_error(YEAR, "13-45 a -> b 5 USD\n", "bad-date").message,
+        "`13-45` is not a date: there is no month 13"
+    );
 }
 
 /// The fast paths for plain words decline whatever would make them longer or
@@ -2641,9 +2770,13 @@ fn formatting_keeps_what_is_not_a_journal_line_and_what_has_no_tree() {
 
 #[test]
 fn a_tail_says_its_clauses_in_one_order() {
-    let src = "2026-01-05 a -> b 5 USD via c basis 1 USD against ^z due 30d for 2025 ^k ^j \"why\" #food of x ! \"ok\"\n";
+    let src =
+        "2026-01-05 a -> b 5 USD via c basis 1 USD against ^z due 30d for 2025 ^k ^j \"why\" #food of x ! \"ok\"\n";
     let once = formatted(src, Folder::default());
-    assert_eq!(once, "2026-01-05 a -> b 5 USD #food of x \"why\" ^k ^j for 2025 due 30d against ^z via c basis 1 USD ! \"ok\"\n");
+    assert_eq!(
+        once,
+        "2026-01-05 a -> b 5 USD #food of x \"why\" ^k ^j for 2025 due 30d against ^z via c basis 1 USD ! \"ok\"\n"
+    );
     // A price stays with the amount, a change's span before the rest, and a spread is part of the date.
     let src = "2026-01-05 a -> b 7 VTI ^k @ 285.70 USD #buy\n\n2026-01-05 a now 5 USD monthly ^k \"x\" until 05-31\n\n2026-01-01..2026-12-31 a -> b 5 USD ^k #food\n";
     let once = formatted(src, Folder::default());
@@ -2665,7 +2798,10 @@ fn the_sketch_the_examples_and_every_verb_format_idempotently() {
         let once = formatted(&src, folder);
         // Comments and blank lines are all still there, in order.
         let others = |text: &str| -> Vec<String> {
-            text.lines().filter(|line| line.trim().is_empty() || line.trim_start().starts_with("//")).map(str::to_string).collect()
+            text.lines()
+                .filter(|line| line.trim().is_empty() || line.trim_start().starts_with("//"))
+                .map(str::to_string)
+                .collect()
         };
         let comments = |text: &str| text.lines().filter(|line| line.contains("//")).count();
         assert_eq!(comments(&once), comments(&src), "{}", path.display());
@@ -2708,7 +2844,12 @@ fn the_tree_is_compact() {
     assert!(size_of::<Statement>() <= 168, "Statement is {}", size_of::<Statement>());
     assert!(size_of::<LineItem>() <= 96, "LineItem is {}", size_of::<LineItem>());
     // An amount is two words: a literal's text, or an expression's id in the space a null text leaves.
-    assert!(size_of::<Many<Leg>>() == 8 && size_of::<Amount>() == 16 && size_of::<Literal>() == 16 && size_of::<Name>() == 16);
+    assert!(
+        size_of::<Many<Leg>>() == 8
+            && size_of::<Amount>() == 16
+            && size_of::<Literal>() == 16
+            && size_of::<Name>() == 16
+    );
     assert!(size_of::<Quantity>() <= 24 && size_of::<Side>() <= 48, "Quantity is {}", size_of::<Quantity>());
 }
 
@@ -2756,13 +2897,27 @@ fn dump_tail(file: &File, tail: Many<Clause>) -> String {
 }
 
 fn dump_item(file: &File, item: &LineItem) -> String {
-    format!("{:?} {:?} {} {} {:?}", item.doc, item.sign, dump_amount(file, &item.amount), dump_tail(file, item.tail), item.loc)
+    format!(
+        "{:?} {:?} {} {} {:?}",
+        item.doc,
+        item.sign,
+        dump_amount(file, &item.amount),
+        dump_tail(file, item.tail),
+        item.loc
+    )
 }
 
 fn dump_body(file: &File, body: Body) -> String {
     let end = |end: &End| format!("{:?}{:?}", end.name, &file[end.select]);
     let leg = |leg: &Leg| {
-        format!("{:?} {} {} {} {:?}", leg.doc, end(&leg.end), dump_quantity(file, &leg.amount), dump_tail(file, leg.tail), leg.loc)
+        format!(
+            "{:?} {} {} {} {:?}",
+            leg.doc,
+            end(&leg.end),
+            dump_quantity(file, &leg.amount),
+            dump_tail(file, leg.tail),
+            leg.loc
+        )
     };
     let legs: Vec<String> = file[body.legs].iter().map(leg).collect();
     let items: Vec<String> = file[body.items].iter().map(|item| dump_item(file, item)).collect();
@@ -2774,7 +2929,13 @@ fn dump_flow(file: &File, flow: &Flow) -> String {
     let side = |side: &Side| {
         format!("{:?} {:?}", side.end.as_ref().map(end), side.amount.as_ref().map(|amount| dump_quantity(file, amount)))
     };
-    format!("{} -> {} {} [{}]", side(&flow.from), side(&flow.to), dump_tail(file, flow.tail), dump_body(file, flow.body))
+    format!(
+        "{} -> {} {} [{}]",
+        side(&flow.from),
+        side(&flow.to),
+        dump_tail(file, flow.tail),
+        dump_body(file, flow.body)
+    )
 }
 
 fn dump_prop(file: &File, prop: &Prop) -> String {
@@ -2818,7 +2979,9 @@ fn dump_also(file: &File, also: &Also) -> String {
 
 fn dump_statement(file: &File, said: &Statement) -> String {
     let verb = match &said.verb {
-        Verb::Occurrence(amount) => format!("Occurrence({:?})", amount.as_ref().map(|amount| dump_amount(file, amount))),
+        Verb::Occurrence(amount) => {
+            format!("Occurrence({:?})", amount.as_ref().map(|amount| dump_amount(file, amount)))
+        }
         Verb::Value(amount) => format!("Value({})", dump_amount(file, amount)),
         Verb::Owes { creditor, amount } => {
             format!("Owes({creditor:?} {:?})", amount.as_ref().map(|amount| dump_amount(file, amount)))
@@ -2833,10 +2996,8 @@ fn dump_statement(file: &File, said: &Statement) -> String {
 }
 
 fn dump_format(file: &File, format: &Format) -> String {
-    let lines: Vec<String> = file[format.lines]
-        .iter()
-        .map(|line| format!("{:?} {:?} {:?}", line.key, &file[line.args], line.loc))
-        .collect();
+    let lines: Vec<String> =
+        file[format.lines].iter().map(|line| format!("{:?} {:?} {:?}", line.key, &file[line.args], line.loc)).collect();
     format!("{:?} {lines:?}", format.name)
 }
 
@@ -2847,7 +3008,9 @@ fn dump(file: &File) -> String {
     use std::fmt::Write;
     let mut out = String::new();
     let props = |props: Many<Prop>| -> Vec<String> { file[props].iter().map(|prop| dump_prop(file, prop)).collect() };
-    let patterns = |patterns: Many<Pattern>| -> Vec<String> { file[patterns].iter().map(|pattern| spell(file, pattern)).collect() };
+    let patterns = |patterns: Many<Pattern>| -> Vec<String> {
+        file[patterns].iter().map(|pattern| spell(file, pattern)).collect()
+    };
     let alsos = |alsos: Many<Also>| -> Vec<String> { file[alsos].iter().map(|also| dump_also(file, also)).collect() };
     let laws = |laws: Many<Law>| -> Vec<String> { file[laws].iter().map(|law| dump_law(file, law)).collect() };
     for item in &file.items {
@@ -2865,7 +3028,8 @@ fn dump(file: &File) -> String {
             ItemKind::Pattern(id) => format!("{:?} {}", file[id].name, spell(file, &file[id].pattern)),
             ItemKind::Budget(id) => format!("{:?} {}", file[id].purpose, dump_allowance(file, &file[id].allowance)),
             ItemKind::Opening(id) => {
-                let claims: Vec<String> = file[file[id].claims].iter().map(|claim| dump_statement(file, claim)).collect();
+                let claims: Vec<String> =
+                    file[file[id].claims].iter().map(|claim| dump_statement(file, claim)).collect();
                 format!("{} {claims:?}", dump_body(file, Body { legs: file[id].lines, items: Many::EMPTY }))
             }
             ItemKind::Contract(id) => {
@@ -2886,7 +3050,9 @@ fn dump(file: &File) -> String {
                 let schedule = |schedule: &Option<Schedule>| {
                     schedule.map(|s| format!("{:?} {}", s.at, dump_terms(file, &s.terms)))
                 };
-                let deadline = deadline.as_ref().map(|d| format!("{:?} {:?}", d.span, d.otherwise.as_ref().map(|item| dump_item(file, item))));
+                let deadline = deadline
+                    .as_ref()
+                    .map(|d| format!("{:?} {:?}", d.span, d.otherwise.as_ref().map(|item| dump_item(file, item))));
                 format!(
                     "{name:?} {party:?} {:?} {:?} {purpose:?} {description:?} {deadline:?} {:?} {:?} {} {:?} {damaged}",
                     schedule(schedule_field),
@@ -2955,7 +3121,8 @@ fn a_file_parsed_in_pieces_is_the_file_parsed_whole() {
     damaged(EXAMPLE, 300, same);
     same(&"2026-01-01 a -> b 5 USD\n2026-01-02 a -> b 6 USD\n\tstray\n2026-01-03 a -> b 7 USD\n".repeat(50));
     // A heading reaches the lines below it, in whichever piece they are.
-    let months = (1..=12).map(|month| format!("2026-{month:02}\n01 a -> b 5 USD\n// a note\n15 a -> b 6 USD due 02-01\n"));
+    let months =
+        (1..=12).map(|month| format!("2026-{month:02}\n01 a -> b 5 USD\n// a note\n15 a -> b 6 USD due 02-01\n"));
     let headed = months.collect::<String>() + "2027\n03-04 a -> b 7 USD\n";
     same(&headed);
     same(&headed.repeat(3));

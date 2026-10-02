@@ -34,9 +34,7 @@ pub struct Expectation<'b> {
 impl Expectation<'_> {
     /// Its occurrences after `after`, up to `horizon`, as flows to apply.
     pub fn flows(&self, after: Day, horizon: Day) -> impl Iterator<Item = Flow> + '_ {
-        self.schedule
-            .days(after, horizon)
-            .map(|day| planned(self.template, day, self.out, self.arrive))
+        self.schedule.days(after, horizon).map(|day| planned(self.template, day, self.out, self.arrive))
     }
 
     /// Whether a real flow is one of this expectation's kind: the same pair.
@@ -55,10 +53,8 @@ impl Expectation<'_> {
 /// rhythms in history that no plan already says.
 pub fn expected<'b>(lens: Lens<'b, '_, '_, '_>, run: &Run) -> Vec<Expectation<'b>> {
     let book = lens.book();
-    let mut expected: Vec<_> = from_history(book, run)
-        .into_iter()
-        .filter(|habit| !has_ended(book, run, habit))
-        .collect();
+    let mut expected: Vec<_> =
+        from_history(book, run).into_iter().filter(|habit| !has_ended(book, run, habit)).collect();
     expected.retain(|item| lens.owns(item.template.from) || lens.owns(item.template.to));
     expected
 }
@@ -71,9 +67,7 @@ pub fn covered_by_contract(book: &Book, flow: &Flow) -> bool {
 
 /// Whether a contract covers a template's movement on a projected date.
 pub fn covered_on(book: &Book, template: &Flow, day: Day) -> bool {
-    book.contracts
-        .iter()
-        .any(|(_, contract)| contract.covers(template, day) != axiom_model::ContractCoverage::None)
+    book.contracts.iter().any(|(_, contract)| contract.covers(template, day) != axiom_model::ContractCoverage::None)
 }
 
 /// Who pays whom, through whom: what makes two flows the same habit.
@@ -92,15 +86,10 @@ fn from_history<'b>(book: &'b Book, run: &Run) -> Vec<Expectation<'b>> {
             && matches!(flow.origin, axiom_model::Origin::Written)
     });
     for posting in candidates {
-        groups
-            .entry((posting.flow.from, posting.flow.to, posting.flow.payee))
-            .or_default()
-            .push(posting);
+        groups.entry((posting.flow.from, posting.flow.to, posting.flow.payee)).or_default().push(posting);
     }
-    let mut habits: Vec<Expectation> = groups
-        .into_values()
-        .filter_map(|group| habit(book, &group, run.today))
-        .collect();
+    let mut habits: Vec<Expectation> =
+        groups.into_values().filter_map(|group| habit(book, &group, run.today)).collect();
     habits.sort_by_key(|habit| (habit.template.txn, habit.template.from, habit.template.to));
     habits
 }
@@ -113,41 +102,17 @@ fn habit<'b>(book: &'b Book, group: &[Posting], today: Day) -> Option<Expectatio
     let last = *group.last()?;
     let by_out = |posting: &Posting| (posting.flow.day, posting.posted.out);
     let by_arrive = |posting: &Posting| (posting.flow.day, posting.posted.arrive);
-    let (out_series, arrive_series): (Vec<_>, Vec<_>) =
-        group.iter().map(|p| (by_out(p), by_arrive(p))).unzip();
+    let (out_series, arrive_series): (Vec<_>, Vec<_>) = group.iter().map(|p| (by_out(p), by_arrive(p))).unzip();
     let steady_out = spread(&out_series) <= spread(&arrive_series);
-    let recurrence = detect(
-        if steady_out {
-            &out_series
-        } else {
-            &arrive_series
-        },
-        today,
-    )?;
+    let recurrence = detect(if steady_out { &out_series } else { &arrive_series }, today)?;
 
-    let (steady, other) = if steady_out {
-        (last.out(), last.arrive())
-    } else {
-        (last.arrive(), last.out())
-    };
+    let (steady, other) = if steady_out { (last.out(), last.arrive()) } else { (last.arrive(), last.out()) };
     let stated = Amount::new(recurrence.amount, steady.unit);
     // The other side follows the latest price.
-    let follows = Amount::new(
-        other
-            .qty
-            .share(recurrence.amount, steady.qty)
-            .unwrap_or(other.qty),
-        other.unit,
-    );
-    let (out, arrive) = if steady_out {
-        (stated, follows)
-    } else {
-        (follows, stated)
-    };
+    let follows = Amount::new(other.qty.share(recurrence.amount, steady.qty).unwrap_or(other.qty), other.unit);
+    let (out, arrive) = if steady_out { (stated, follows) } else { (follows, stated) };
     Some(Expectation {
-        origin: Origin::Habit {
-            occurrences: group.len(),
-        },
+        origin: Origin::Habit { occurrences: group.len() },
         schedule: recurrence.schedule(),
         template: &book.flows[last.id],
         out,
@@ -171,22 +136,18 @@ fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
     let (every, flow) = (habit.schedule.every, habit.template);
     let since = run.today.add_days(-2 * (every.months * 31 + every.days));
     let held = |place, unit| {
-        let found = run
-            .holdings
-            .binary_search_by_key(&(place, unit), |holding| (holding.place, holding.unit));
+        let found = run.holdings.binary_search_by_key(&(place, unit), |holding| (holding.place, holding.unit));
         found.map_or(Qty::ZERO, |at| run.holdings[at].qty())
     };
     let ends = [(flow.from, flow.out.unit), (flow.to, flow.arrive.unit)];
-    ends.into_iter()
-        .filter(|(place, _)| matches!(book.places[*place].class, Class::Asset | Class::Debt))
-        .any(|(place, unit)| {
+    ends.into_iter().filter(|(place, _)| matches!(book.places[*place].class, Class::Asset | Class::Debt)).any(
+        |(place, unit)| {
             let recent = book.touching[place].iter().rev().map(|&id| &book.flows[id]);
             let mut others = recent.take_while(|other| other.day >= since);
             held(place, unit).is_zero()
-                && !others.any(|other| {
-                    (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee)
-                })
-        })
+                && !others.any(|other| (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee))
+        },
+    )
 }
 
 #[cfg(test)]
@@ -215,34 +176,14 @@ mod tests {
                 flow.day = day(2026, month, 3);
                 flow.mode = Mode::Actual;
                 flow.arrive.unit = shares;
-                (
-                    flow,
-                    Posted {
-                        out: Qty(150_000),
-                        arrive: Qty(quanta),
-                        state: State::Actual,
-                    },
-                )
+                (flow, Posted { out: Qty(150_000), arrive: Qty(quanta), state: State::Actual })
             })
             .into();
-        let group: Vec<Posting> = buys
-            .iter()
-            .map(|(flow, posted)| Posting {
-                id: template,
-                flow,
-                posted,
-            })
-            .collect();
+        let group: Vec<Posting> = buys.iter().map(|(flow, posted)| Posting { id: template, flow, posted }).collect();
         // The last buy fetched 5.400 shares for 1,500.00: the projection buys the same 1,500.00
         // at that price, not the median share count at some other cost.
         let habit = habit(&house.book, &group, day(2026, 4, 20)).expect("a monthly standing order");
-        assert_eq!(
-            (habit.out, habit.arrive),
-            (
-                Amount::new(Qty(150_000), usd),
-                Amount::new(Qty(5_400), shares)
-            )
-        );
+        assert_eq!((habit.out, habit.arrive), (Amount::new(Qty(150_000), usd), Amount::new(Qty(5_400), shares)));
         assert_eq!(habit.schedule.every, axiom_core::Span::months(1));
     }
 
@@ -251,42 +192,22 @@ mod tests {
     fn a_habit_ends_when_the_account_it_draws_on_has_run_dry() {
         let mut house = household();
         house.run.today = day(2026, 9, 1);
-        let (clients, owed) = (
-            house.place("assets/owed/clients"),
-            house.book.flows.iter().nth(15).unwrap().0,
-        );
+        let (clients, owed) = (house.place("assets/owed/clients"), house.book.flows.iter().nth(15).unwrap().0);
         let template = &house.book.flows[owed];
         assert_eq!(template.from, clients);
         let habit = Expectation {
             origin: Origin::Habit { occurrences: 3 },
-            schedule: Schedule {
-                anchor: day(2026, 3, 26),
-                every: axiom_core::Span::months(1),
-                on: None,
-                until: None,
-            },
+            schedule: Schedule { anchor: day(2026, 3, 26), every: axiom_core::Span::months(1), on: None, until: None },
             template,
             out: template.out,
             arrive: template.arrive,
         };
-        assert!(
-            !has_ended(&house.book, &house.run, &habit),
-            "3,000 is still owed"
-        );
-        house
-            .run
-            .holdings
-            .retain(|holding| holding.place != clients);
-        assert!(
-            has_ended(&house.book, &house.run, &habit),
-            "settled, and quiet for two months"
-        );
+        assert!(!has_ended(&house.book, &house.run, &habit), "3,000 is still owed");
+        house.run.holdings.retain(|holding| holding.place != clients);
+        assert!(has_ended(&house.book, &house.run, &habit), "settled, and quiet for two months");
         // Recent activity elsewhere on the account keeps it alive.
         house.run.today = day(2026, 4, 10);
-        assert!(
-            !has_ended(&house.book, &house.run, &habit),
-            "an invoice was written on it this month"
-        );
+        assert!(!has_ended(&house.book, &house.run, &habit), "an invoice was written on it this month");
     }
 
     /// Suppression follows each contract interval, including explicit waivers,
@@ -294,9 +215,7 @@ mod tests {
     #[test]
     fn contract_suppression_tracks_each_projected_date_and_typed_identity() {
         use axiom_core::{Loc, Timeline};
-        use axiom_model::{
-            Cadence, Contract, TemplateFlow, TemplateProgram, TemplateQuantity, Terms, TermsState,
-        };
+        use axiom_model::{Cadence, Contract, TemplateFlow, TemplateProgram, TemplateQuantity, Terms, TermsState};
 
         let mut house = household();
         let today = day(2026, 5, 1);
@@ -352,10 +271,7 @@ mod tests {
             loc: Loc::default(),
         };
         house.book.contracts.push(contract);
-        assert!(
-            !covered_on(&house.book, &template, today.add_days(5)),
-            "start after today does not suppress now"
-        );
+        assert!(!covered_on(&house.book, &template, today.add_days(5)), "start after today does not suppress now");
         assert!(
             covered_on(&house.book, &template, start.add_days(1)),
             "coverage does not require the contract due day"
@@ -367,12 +283,7 @@ mod tests {
 
         let waiver_start = start.add_days(10);
         let waiver_end = start.add_days(14);
-        let mut waiver = house.book.contracts[Id::new(0)]
-            .terms
-            .as_ref()
-            .unwrap()
-            .at(waiver_start)
-            .clone();
+        let mut waiver = house.book.contracts[Id::new(0)].terms.as_ref().unwrap().at(waiver_start).clone();
         waiver.state = TermsState::Waived;
         waiver.template = Box::default();
         house.book.contracts[Id::new(0)]

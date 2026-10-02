@@ -242,10 +242,7 @@ opening 2025-12-31
         assert!(
             run.violations.is_empty(),
             "the owner's combined holdings remain 100 USD throughout the transfer: {:?}",
-            run.violations
-                .iter()
-                .map(|violation| &run.diagnostics[violation.diagnostic as usize])
-                .collect::<Vec<_>>()
+            run.violations.iter().map(|violation| &run.diagnostics[violation.diagnostic as usize]).collect::<Vec<_>>()
         );
     });
 }
@@ -311,19 +308,17 @@ law to-is-counterparty
         let by_message: Vec<_> = run
             .violations
             .iter()
-            .map(|violation| {
-                (
-                    run.diagnostics[violation.diagnostic as usize].message.as_str(),
-                    violation.cause,
-                )
-            })
+            .map(|violation| (run.diagnostics[violation.diagnostic as usize].message.as_str(), violation.cause))
             .collect();
         assert_eq!(
             by_message,
             [
                 ("outside source matches its named party", crate::Cause::Flow(axiom_core::Id::new(0))),
                 ("an account still matches its owner", crate::Cause::Flow(axiom_core::Id::new(1))),
-                ("an owned account matches its owner, not an outside party", crate::Cause::Flow(axiom_core::Id::new(1))),
+                (
+                    "an owned account matches its owner, not an outside party",
+                    crate::Cause::Flow(axiom_core::Id::new(1))
+                ),
                 ("outside recipient matches its named kind", crate::Cause::Flow(axiom_core::Id::new(1))),
             ],
             "an Outside place matches its endpoint entity, while an account matches its owner"
@@ -370,15 +365,21 @@ opening 2024-12-31
             .find(|gain| gain.day == day(2025, 11, 5))
             .expect("the zero-basis contribution realizes its full amount");
         assert_eq!((gain.basis.0, gain.proceeds.0, gain.gain().0), (0, 62_000, 62_000));
-        assert!(run.effects.iter().any(|effect| {
-            book.name(effect.name) == "distributions"
-                && effect.amount.qty.0 == 62_000
-                && effect.consequence == crate::Consequence::Count
-        }), "the unlinked HSA withdrawal remains taxable income");
-        assert!(run.violations.iter().any(|violation| {
-            run.diagnostics[violation.diagnostic as usize].code == "nonqualified-hsa-penalty"
-                && violation.verdict.is_waived()
-        }), "the ! waives the 124 USD penalty while preserving the distribution");
+        assert!(
+            run.effects.iter().any(|effect| {
+                book.name(effect.name) == "distributions"
+                    && effect.amount.qty.0 == 62_000
+                    && effect.consequence == crate::Consequence::Count
+            }),
+            "the unlinked HSA withdrawal remains taxable income"
+        );
+        assert!(
+            run.violations.iter().any(|violation| {
+                run.diagnostics[violation.diagnostic as usize].code == "nonqualified-hsa-penalty"
+                    && violation.verdict.is_waived()
+            }),
+            "the ! waives the 124 USD penalty while preserving the distribution"
+        );
         assert!(run.effects.iter().all(|effect| !effect.is_penalty()));
     });
 
@@ -391,15 +392,15 @@ opening 2024-12-31
             .expect("the linked reimbursement still realizes the HSA's taxable basis-zero amount");
         assert_eq!((gain.basis.0, gain.proceeds.0, gain.gain().0), (0, 62_000, 62_000));
         assert!(
-            !run.effects.iter().any(|effect| {
-                book.name(effect.name) == "distributions" && effect.amount.qty.0 == 62_000
-            }),
+            !run.effects
+                .iter()
+                .any(|effect| { book.name(effect.name) == "distributions" && effect.amount.qty.0 == 62_000 }),
             "the linked qualified reimbursement is excluded from taxable distributions"
         );
         assert!(
-            !run.violations.iter().any(|violation| {
-                run.diagnostics[violation.diagnostic as usize].code == "nonqualified-hsa-penalty"
-            }),
+            !run.violations
+                .iter()
+                .any(|violation| { run.diagnostics[violation.diagnostic as usize].code == "nonqualified-hsa-penalty" }),
             "the original medical purpose qualifies the linked reimbursement"
         );
     });
@@ -482,7 +483,9 @@ opening 2026-01-01
 
 #[test]
 fn an_envelope_that_runs_out_is_topped_up_from_what_is_not_tied() {
-    let text = format!("{ENVELOPES}2025-09-20 checking -> savings 300 USD\n2025-10-01 car-fund -> car-repair 250 USD #car-maintenance\n");
+    let text = format!(
+        "{ENVELOPES}2025-09-20 checking -> savings 300 USD\n2025-10-01 car-fund -> car-repair 250 USD #car-maintenance\n"
+    );
     with_run(&text, day(2025, 12, 31), |book, run| {
         assert_eq!(tied(book, run), [("trip-fund".into(), 500_00)]);
         let savings = holding(book, run, "savings", "USD").unwrap();
@@ -495,7 +498,11 @@ fn an_overspent_envelope_leaves_the_other_envelopes_alone() {
     let text = format!("{ENVELOPES}2025-10-01 car-fund -> car-repair 250 USD #car-maintenance\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         assert_eq!(tied(book, run), [("trip-fund".into(), 500_00)]);
-        assert_eq!(holding(book, run, "savings", "USD").unwrap().plain.0, -50_00, "the account owes 50 to nobody's money");
+        assert_eq!(
+            holding(book, run, "savings", "USD").unwrap().plain.0,
+            -50_00,
+            "the account owes 50 to nobody's money"
+        );
     });
 }
 
@@ -585,11 +592,7 @@ opening 2025-01-01
         let counted: Vec<_> = run.effects.iter().map(|e| (book.name(e.name), name(e.owner), e.amount.qty.0)).collect();
         assert_eq!(
             counted,
-            [
-                ("contributions", "alex", 500_00),
-                ("contributions", "jordan", 500_00),
-                ("reported", "family", 1_000_00),
-            ],
+            [("contributions", "alex", 500_00), ("contributions", "jordan", 500_00), ("reported", "family", 1_000_00),],
             "the return reads both, and each limit only its own person's"
         );
         assert!(run.violations.is_empty(), "each is under 700.00: {:?}", run.violations);
@@ -818,7 +821,10 @@ fn an_improvement_adds_basis_without_changing_the_asset_quantity() {
         let asset = book.asset("condo").unwrap();
         let parts = run.assets[asset.index()].parts();
         assert_eq!(parts.len(), 2, "opening cost and improvement stay attributable");
-        assert_eq!(parts.iter().map(|part| (part.cost.0, part.basis.0)).collect::<Vec<_>>(), [(100_000, 100_000), (10_000, 10_000)]);
+        assert_eq!(
+            parts.iter().map(|part| (part.cost.0, part.basis.0)).collect::<Vec<_>>(),
+            [(100_000, 100_000), (10_000, 10_000)]
+        );
         assert_eq!(holding(book, run, "assets/checking", "USD").unwrap().qty().0, 4_900_00);
     });
 }
@@ -852,9 +858,7 @@ opening 2025-01-01
 
 #[test]
 fn timed_asset_law_consumes_each_service_clock_part() {
-    let text = format!(
-        "{PART_DEPRECIATION}2025-02-15 checking -> seller 120 USD #improvement of condo\n"
-    );
+    let text = format!("{PART_DEPRECIATION}2025-02-15 checking -> seller 120 USD #improvement of condo\n");
     with_run(&text, day(2025, 2, 28), |book, run| {
         let errors: Vec<_> = run
             .diagnostics
@@ -882,9 +886,7 @@ fn timed_asset_law_consumes_each_service_clock_part() {
 
 #[test]
 fn sale_consumes_through_its_day_before_realizing_asset_gain() {
-    let text = format!(
-        "{PART_DEPRECIATION}2025-02-15 buyer -> checking 1_500 USD #sale of condo\n"
-    );
+    let text = format!("{PART_DEPRECIATION}2025-02-15 buyer -> checking 1_500 USD #sale of condo\n");
     with_run(&text, day(2025, 2, 28), |book, run| {
         let asset = book.asset("condo").unwrap();
         let [gain] = run.gains[..] else { panic!("sale gain: {:?}", run.gains) };
@@ -950,7 +952,11 @@ fn a_cash_assertion_explains_the_payment_which_funded_an_improvement() {
     with_run(&text, day(2025, 6, 1), |_, run| {
         let assertion = run.diagnostics.iter().find(|d| &*d.code == "assertion").expect("the assertion fails");
         let listed: Vec<_> = assertion.labels.iter().map(|label| label.text.as_str()).collect();
-        assert!(listed.iter().any(|text| text.contains("improvement")) || listed.iter().any(|text| text.contains("contractor")), "{listed:?}");
+        assert!(
+            listed.iter().any(|text| text.contains("improvement"))
+                || listed.iter().any(|text| text.contains("contractor")),
+            "{listed:?}"
+        );
     });
 }
 
@@ -1197,13 +1203,13 @@ opening 2026-01-01
             [(2_500, 13_500), (2_500, 13_500)],
             "each 2.5-share replacement gets only its apportioned $10 loss"
         );
-        assert!(broker.lots.iter().all(|lot| lot.wash_matched), "both matched quantities stay ineligible for future replacement matches");
+        assert!(
+            broker.lots.iter().all(|lot| lot.wash_matched),
+            "both matched quantities stay ineligible for future replacement matches"
+        );
         assert_eq!(
             broker.lots.iter().map(|lot| (lot.acquired, lot.held_since)).collect::<Vec<_>>(),
-            [
-                (day(2026, 1, 20), day(2026, 1, 1)),
-                (day(2026, 2, 20), day(2026, 1, 1)),
-            ],
+            [(day(2026, 1, 20), day(2026, 1, 1)), (day(2026, 2, 20), day(2026, 1, 1)),],
             "matched replacement shares retain their purchase date and tack the sold lot's holding period"
         );
         assert_eq!(run.pending_carries.len(), 1, "the unmatched second lot loss remains pending through its window");
@@ -1255,7 +1261,11 @@ opening 2026-01-01
         );
         let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
         assert_eq!(
-            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched)).collect::<Vec<_>>(),
+            broker
+                .lots
+                .iter()
+                .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched))
+                .collect::<Vec<_>>(),
             [(2_500, 13_500, day(2026, 1, 20), day(2026, 1, 1), true)],
             "a later loss does not add basis to or retack the already-matched replacement shares"
         );
@@ -1300,22 +1310,22 @@ opening 2026-01-01
             [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
             "the replacement cost is allocated to the two original loss lots in FIFO order"
         );
-        let carried: Vec<_> = run.adjustments.iter().filter_map(|adjustment| match adjustment.kind {
-            crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
-            _ => None,
-        }).collect();
+        let carried: Vec<_> = run
+            .adjustments
+            .iter()
+            .filter_map(|adjustment| match adjustment.kind {
+                crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
+                _ => None,
+            })
+            .collect();
         assert_eq!(carried, [2_000, 8_000]);
         let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
-        let mut replacement: Vec<_> = broker.lots.iter()
-            .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since))
-            .collect();
+        let mut replacement: Vec<_> =
+            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since)).collect();
         replacement.sort_by_key(|lot| lot.3);
         assert_eq!(
             replacement,
-            [
-                (5_000, 27_000, day(2026, 1, 20), day(2026, 1, 1)),
-                (5_000, 33_000, day(2026, 1, 20), day(2026, 1, 2)),
-            ],
+            [(5_000, 27_000, day(2026, 1, 20), day(2026, 1, 1)), (5_000, 33_000, day(2026, 1, 20), day(2026, 1, 2)),],
             "each five-share tranche gets its own loss basis and holding-period start"
         );
         assert!(run.pending_carries.is_empty());
@@ -1354,7 +1364,11 @@ opening 2026-01-01
         assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
         let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
         assert_eq!(
-            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched)).collect::<Vec<_>>(),
+            broker
+                .lots
+                .iter()
+                .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched))
+                .collect::<Vec<_>>(),
             [
                 (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
                 (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
@@ -1362,10 +1376,13 @@ opening 2026-01-01
             "replacement shares inherit the original start, rather than the resold lot's purchase date"
         );
         assert_eq!(
-            run.adjustments.iter().filter_map(|adjustment| match adjustment.kind {
-                crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
-                _ => None,
-            }).collect::<Vec<_>>(),
+            run.adjustments
+                .iter()
+                .filter_map(|adjustment| match adjustment.kind {
+                    crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
             [1_000, 1_000, 1_000]
         );
         assert!(run.pending_carries.is_empty());
@@ -1486,18 +1503,20 @@ opening 2025-09-01
 ";
     with_run(&text, day(2025, 10, 31), |book, run| {
         let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
-        let violations: Vec<_> = run
-            .violations
-            .iter()
-            .filter(|violation| violation.law == budget.law)
-            .collect();
+        let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == budget.law).collect();
         assert_eq!(violations.len(), 2, "the overspend is reported in each affected month: {violations:?}");
         let messages: Vec<_> = violations
             .iter()
             .map(|violation| run.diagnostics[violation.diagnostic as usize].message.as_str())
             .collect();
-        assert!(messages.iter().any(|message| message.contains("120.00 USD") && message.contains("100.00 USD")), "{messages:?}");
-        assert!(messages.iter().any(|message| message.contains("240.00 USD") && message.contains("200.00 USD")), "{messages:?}");
+        assert!(
+            messages.iter().any(|message| message.contains("120.00 USD") && message.contains("100.00 USD")),
+            "{messages:?}"
+        );
+        assert!(
+            messages.iter().any(|message| message.contains("240.00 USD") && message.contains("200.00 USD")),
+            "{messages:?}"
+        );
 
         let mut readings: Vec<_> = run
             .headroom
@@ -1528,18 +1547,20 @@ entity cinema
 ";
     with_run(&text, day(2025, 10, 31), |book, run| {
         let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
-        let violations: Vec<_> = run
-            .violations
-            .iter()
-            .filter(|violation| violation.law == budget.law)
-            .collect();
+        let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == budget.law).collect();
         assert_eq!(violations.len(), 2, "the allowance is evaluated once per historical month: {violations:?}");
         let messages: Vec<_> = violations
             .iter()
             .map(|violation| run.diagnostics[violation.diagnostic as usize].message.as_str())
             .collect();
-        assert!(messages.iter().any(|message| message.contains("120.00 USD") && message.contains("100.00 USD")), "{messages:?}");
-        assert!(messages.iter().any(|message| message.contains("340.00 USD") && message.contains("300.00 USD")), "{messages:?}");
+        assert!(
+            messages.iter().any(|message| message.contains("120.00 USD") && message.contains("100.00 USD")),
+            "{messages:?}"
+        );
+        assert!(
+            messages.iter().any(|message| message.contains("340.00 USD") && message.contains("300.00 USD")),
+            "{messages:?}"
+        );
     });
 }
 
@@ -1604,14 +1625,7 @@ opening 2025-01-01
             .headroom
             .iter()
             .filter(|reading| reading.law == budget.law)
-            .map(|reading| {
-                (
-                    reading.days.first(),
-                    reading.days.last(),
-                    reading.counted.qty.0,
-                    reading.limit.qty.0,
-                )
-            })
+            .map(|reading| (reading.days.first(), reading.days.last(), reading.counted.qty.0, reading.limit.qty.0))
             .collect();
         readings.sort();
         assert!(readings.contains(&(day(2025, 1, 1), day(2025, 1, 31), 12_000, 10_000)), "{readings:?}");
@@ -1650,11 +1664,7 @@ opening 2025-01-01
         readings.sort();
         assert_eq!(
             readings,
-            [
-                (day(2025, 1, 1), 12_000, 10_000),
-                (day(2025, 2, 1), 8_000, 10_000),
-                (day(2025, 3, 1), 19_000, 20_000),
-            ],
+            [(day(2025, 1, 1), 12_000, 10_000), (day(2025, 2, 1), 8_000, 10_000), (day(2025, 3, 1), 19_000, 20_000),],
             "a dated restatement inherits `carries` when it does not restate that property"
         );
     });

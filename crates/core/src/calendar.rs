@@ -90,11 +90,8 @@ impl DateLayout {
                     return None;
                 }
                 found[index] = true;
-                fields[count] = DateField {
-                    kind,
-                    start: u32::try_from(at).ok()?,
-                    end: u32::try_from(at + token.len()).ok()?,
-                };
+                fields[count] =
+                    DateField { kind, start: u32::try_from(at).ok()?, end: u32::try_from(at + token.len()).ok()? };
                 count += 1;
                 at += token.len();
             } else {
@@ -436,9 +433,11 @@ impl On {
             On::MonthDay(day) => clamped(month, u32::from(day)),
             On::Last => checked_day(year, month, days_in_month(year, month)),
             On::YearDay { month, day } => clamped(u32::from(month).clamp(1, 12), u32::from(day)),
-            On::Weekday(weekday) => i32::try_from(i64::from(base.0) + i64::from((u32::from(weekday) + 7 - base.weekday()) % 7))
-                .ok()
-                .map(Day),
+            On::Weekday(weekday) => {
+                i32::try_from(i64::from(base.0) + i64::from((u32::from(weekday) + 7 - base.weekday()) % 7))
+                    .ok()
+                    .map(Day)
+            }
         }
     }
 }
@@ -561,14 +560,7 @@ impl<'a> Landings<'a> {
             }
             _ => None,
         };
-        Landings {
-            base,
-            on,
-            previous: None,
-            empty_pending: true,
-            civil: None,
-            small,
-        }
+        Landings { base, on, previous: None, empty_pending: true, civil: None, small }
     }
 }
 
@@ -617,8 +609,8 @@ pub fn due<'a>(every: Cadence, on: &'a [On], anchor: Day, within: Days) -> impl 
     };
     let forward_landing = on.iter().map(|on| landing(on, false)).max().unwrap_or(0);
     let backward_landing = on.iter().map(|on| landing(on, true)).max().unwrap_or(0);
-    let target_ordinal = (i64::from(anchor.max(within.first()).0) - forward_landing)
-        .clamp(i64::from(i32::MIN), i64::from(i32::MAX));
+    let target_ordinal =
+        (i64::from(anchor.max(within.first()).0) - forward_landing).clamp(i64::from(i32::MIN), i64::from(i32::MAX));
     let target = Day(target_ordinal as i32);
     let first_step = first_cadence_at_or_after(anchor, step, target).unwrap_or(u64::MAX);
     let base_limit = (i64::from(within.last().0) + backward_landing).min(i64::from(i32::MAX));
@@ -896,10 +888,7 @@ mod tests {
             due_days(Cadence::Every(Span::days(1)), &[], Day::MIN, february),
             (1..=28).map(|d| format!("2026-02-{d:02}")).collect::<Vec<_>>()
         );
-        assert_eq!(
-            due_days(Cadence::Every(Span::months(1)), &[On::MonthDay(1)], Day::MIN, february),
-            ["2026-02-01"]
-        );
+        assert_eq!(due_days(Cadence::Every(Span::months(1)), &[On::MonthDay(1)], Day::MIN, february), ["2026-02-01"]);
         assert_eq!(
             due_days(
                 Cadence::Every(Span::months(1)),

@@ -11,8 +11,7 @@
 
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
 use axiom_model::{
-    Asset, Book, Commodity, Entity, Field, Flow, Func, Kind, Op, Place, Rule, Subject, Txn, Ty,
-    Value, Var,
+    Asset, Book, Commodity, Entity, Field, Flow, Func, Kind, Op, Place, Rule, Subject, Txn, Ty, Value, Var,
 };
 
 use crate::events::{self, Events};
@@ -114,23 +113,13 @@ impl<'b, 's> Plan<'b, 's> {
         problems.extend(solution.problems);
         let unsolved = solution.unsolved.iter().flat_map(|&id| {
             let flow = &book.flows[id];
-            [
-                ((flow.from, flow.out.unit), (flow.day, id)),
-                ((flow.to, flow.arrive.unit), (flow.day, id)),
-            ]
+            [((flow.from, flow.out.unit), (flow.day, id)), ((flow.to, flow.arrive.unit), (flow.day, id))]
         });
         let mut blocked: Map<_, (Day, Id<Flow>)> = Map::default();
         for (key, first) in unsolved {
-            blocked
-                .entry(key)
-                .and_modify(|known| *known = (*known).min(first))
-                .or_insert(first);
+            blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let laws: Box<[LawFacts]> = book
-            .laws
-            .values()
-            .map(|law| LawFacts::of(book, law))
-            .collect();
+        let laws: Box<[LawFacts]> = book.laws.values().map(|law| LawFacts::of(book, law)).collect();
         let watch = Watch::of(book, &laws);
         let places = (0..book.places.len() as u32).map(Id::new);
         let held = places.flat_map(|place| {
@@ -142,13 +131,9 @@ impl<'b, 's> Plan<'b, 's> {
         let kind_places = kind_places(book);
         let entity_owners = entity_owners(book, &mut problems);
         let place_owners = place_owners(book, &entity_owners, &mut problems);
-        let (temporal, temporal_dates, daily_temporal) =
-            temporal_queries(book, &entity_owners, &place_owners);
-        let mut occurrence_txns: Vec<_> = book
-            .txns
-            .iter()
-            .filter_map(|(id, txn)| txn.occurrence.is_some().then_some(id))
-            .collect();
+        let (temporal, temporal_dates, daily_temporal) = temporal_queries(book, &entity_owners, &place_owners);
+        let mut occurrence_txns: Vec<_> =
+            book.txns.iter().filter_map(|(id, txn)| txn.occurrence.is_some().then_some(id)).collect();
         occurrence_txns.sort_unstable_by_key(|&id| (book.txns[id].day, id));
         let mut plan = Plan {
             book,
@@ -177,12 +162,7 @@ impl<'b, 's> Plan<'b, 's> {
             daily_temporal,
         };
         let (world, mut values) = (World::new(book, &plan.watch), Vec::new());
-        plan.timed = book
-            .rules
-            .timed
-            .iter()
-            .map(|rule| Schedule::of(&plan, rule, &world, &mut values))
-            .collect();
+        plan.timed = book.rules.timed.iter().map(|rule| Schedule::of(&plan, rule, &world, &mut values)).collect();
         plan
     }
 
@@ -204,10 +184,7 @@ impl<'b, 's> Plan<'b, 's> {
     /// residence is part of the initial state but should not create unbounded
     /// history before the first dated event.
     pub(crate) fn temporal_start(&self) -> Option<Day> {
-        self.period_start
-            .into_iter()
-            .chain(self.temporal_dates.iter().copied().filter(|&day| day != Day::MIN))
-            .min()
+        self.period_start.into_iter().chain(self.temporal_dates.iter().copied().filter(|&day| day != Day::MIN)).min()
     }
 
     /// Effective financial owners of `place`, including nested business
@@ -224,20 +201,12 @@ impl<'b, 's> Plan<'b, 's> {
     /// Splits a signed quantity among a place's effective owners. Cumulative
     /// boundaries are rounded once and the final owner receives the remainder,
     /// so positive and negative amounts both conserve every quantum.
-    pub fn allocate(
-        &self,
-        place: Id<Place>,
-        amount: Qty,
-    ) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
+    pub fn allocate(&self, place: Id<Place>, amount: Qty) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
         allocate_owners(self.owners_of(place), amount)
     }
 
     /// Splits a signed quantity among an entity's effective owners.
-    pub fn allocate_entity(
-        &self,
-        entity: Id<Entity>,
-        amount: Qty,
-    ) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
+    pub fn allocate_entity(&self, entity: Id<Entity>, amount: Qty) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
         allocate_owners(self.owners_of_entity(entity), amount)
     }
 
@@ -273,10 +242,7 @@ impl<'b, 's> Plan<'b, 's> {
     /// the ledger before that day's closings. The returned run includes later
     /// same-day closings and any later journal facts; this prefix length marks
     /// exactly the effects that already existed in the view checkpoint.
-    pub fn run_with_view_and_effects_prefix(
-        &self,
-        options: Options,
-    ) -> (Run, Ledger<'_, 'b, 's>, usize) {
+    pub fn run_with_view_and_effects_prefix(&self, options: Options) -> (Run, Ledger<'_, 'b, 's>, usize) {
         fold_to_view_and_effects_prefix(self, options)
     }
 
@@ -287,9 +253,9 @@ impl<'b, 's> Plan<'b, 's> {
             Subject::Place(root) => self.book.places.covers(root, place),
             Subject::Entity(root) => self.members[root].binary_search(&place).is_ok(),
             Subject::Asset(asset) => self.asset_places[asset].binary_search(&place).is_ok(),
-            Subject::Contract(contract) => self.members[self.book.contracts[contract].owner]
-                .binary_search(&place)
-                .is_ok(),
+            Subject::Contract(contract) => {
+                self.members[self.book.contracts[contract].owner].binary_search(&place).is_ok()
+            }
         }
     }
 
@@ -315,10 +281,7 @@ impl<'b, 's> Plan<'b, 's> {
     }
 }
 
-fn allocate_owners(
-    owners: &[OwnerShare],
-    amount: Qty,
-) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
+fn allocate_owners(owners: &[OwnerShare], amount: Qty) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
     let last = owners.len().saturating_sub(1);
     owners.iter().copied().enumerate().scan(
         (Ratio::ZERO, Qty::ZERO),
@@ -329,9 +292,7 @@ fn allocate_owners(
             let boundary = if index == last {
                 amount
             } else {
-                amount
-                    .scale(*cumulative_share)
-                    .expect("an owner's quantity fits the source quantity")
+                amount.scale(*cumulative_share).expect("an owner's quantity fits the source quantity")
             };
             let part = boundary - *allocated;
             *allocated = boundary;
@@ -352,10 +313,7 @@ fn temporal_queries(
         let owners: Vec<Id<Entity>> = match rule.subject {
             Subject::Place(place) => place_owners[place].iter().map(|share| share.owner).collect(),
             Subject::Entity(entity) => entity_owners[entity].iter().map(|share| share.owner).collect(),
-            Subject::Asset(asset) => place_owners[book.assets[asset].place]
-                .iter()
-                .map(|share| share.owner)
-                .collect(),
+            Subject::Asset(asset) => place_owners[book.assets[asset].place].iter().map(|share| share.owner).collect(),
             Subject::Contract(contract) => {
                 let entity = book.contracts[contract].owner;
                 entity_owners[entity].iter().map(|share| share.owner).collect()
@@ -369,26 +327,16 @@ fn temporal_queries(
             let call = axiom_model::NodeId(id.index() as u32);
             for &owner in &owners {
                 queries.push(Query {
-                    key: crate::temporal::Key {
-                        law: rule.law,
-                        subject: rule.subject,
-                        owner,
-                        call,
-                        part: None,
-                    },
+                    key: crate::temporal::Key { law: rule.law, subject: rule.subject, owner, call, part: None },
                     func: *func,
                     root,
                 });
             }
-            daily |= law
-                .nodes
-                .values()
-                .take(root.index() + 1)
-                .any(|node| match &node.op {
-                    Op::Var(Var::Date | Var::Year | Var::Month) => true,
-                    Op::Field(_, Field::Year | Field::Month | Field::Age) => true,
-                    _ => false,
-                });
+            daily |= law.nodes.values().take(root.index() + 1).any(|node| match &node.op {
+                Op::Var(Var::Date | Var::Year | Var::Month) => true,
+                Op::Field(_, Field::Year | Field::Month | Field::Age) => true,
+                _ => false,
+            });
         }
     }
     queries.sort_by_key(|query| {
@@ -398,12 +346,7 @@ fn temporal_queries(
             Subject::Asset(id) => (2, id.index()),
             Subject::Contract(id) => (3, id.index()),
         };
-        (
-            query.key.law.index(),
-            subject,
-            query.key.owner.index(),
-            query.key.call.index(),
-        )
+        (query.key.law.index(), subject, query.key.owner.index(), query.key.call.index())
     });
     queries.dedup_by_key(|query| query.key);
 
@@ -455,11 +398,7 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
                     .map(|owner| vec![(owner, Ratio::ONE, declaration.loc.unwrap_or_default())])
                     .unwrap_or_default()
             } else {
-                declaration
-                    .owned_by
-                    .iter()
-                    .map(|share| (share.entity, share.rate, share.loc))
-                    .collect()
+                declaration.owned_by.iter().map(|share| (share.entity, share.rate, share.loc)).collect()
             }
         })
         .collect();
@@ -478,10 +417,7 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
         while let Some(&(current, edge_at)) = stack.last() {
             if edge_at < edges[current.index()].len() {
                 let (parent, _, loc) = edges[current.index()][edge_at];
-                stack
-                    .last_mut()
-                    .expect("the current ownership node is on the stack")
-                    .1 += 1;
+                stack.last_mut().expect("the current ownership node is on the stack").1 += 1;
                 match state[parent.index()] {
                     0 => {
                         state[parent.index()] = 1;
@@ -494,11 +430,8 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
                             invalid[member.index()] = true;
                         }
                         diagnostics.push(
-                            Diagnostic::error(
-                                "ownership-cycle",
-                                "entity ownership contains a cycle",
-                            )
-                            .label(loc, "this ownership edge closes the cycle"),
+                            Diagnostic::error("ownership-cycle", "entity ownership contains a cycle")
+                                .label(loc, "this ownership edge closes the cycle"),
                         );
                     }
                     _ => {}
@@ -506,15 +439,10 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
                 continue;
             }
 
-            let (entity, _) = stack
-                .pop()
-                .expect("the current ownership node is on the stack");
+            let (entity, _) = stack.pop().expect("the current ownership node is on the stack");
             active_at[entity.index()] = None;
             state[entity.index()] = 2;
-            if edges[entity.index()]
-                .iter()
-                .any(|(parent, _, _)| invalid[parent.index()])
-            {
+            if edges[entity.index()].iter().any(|(parent, _, _)| invalid[parent.index()]) {
                 invalid[entity.index()] = true;
             }
             if invalid[entity.index()] {
@@ -522,10 +450,7 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
                 continue;
             }
             if edges[entity.index()].is_empty() {
-                flattened[entity.index()] = Some(vec![OwnerShare {
-                    owner: entity,
-                    share: Ratio::ONE,
-                }]);
+                flattened[entity.index()] = Some(vec![OwnerShare { owner: entity, share: Ratio::ONE }]);
                 continue;
             }
 
@@ -550,11 +475,8 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
             }
             if let Some(loc) = overflow {
                 diagnostics.push(
-                    Diagnostic::error(
-                        "ownership-overflow",
-                        "effective ownership share is too large to represent",
-                    )
-                    .label(loc, "this share overflows while ownership is composed"),
+                    Diagnostic::error("ownership-overflow", "effective ownership share is too large to represent")
+                        .label(loc, "this share overflows while ownership is composed"),
                 );
                 invalid[entity.index()] = true;
                 flattened[entity.index()] = Some(Vec::new());
@@ -565,12 +487,7 @@ fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entit
     }
 
     let pairs = book.entities.ids().flat_map(|entity| {
-        flattened[entity.index()]
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .copied()
-            .map(move |owner| (entity, owner))
+        flattened[entity.index()].as_deref().unwrap_or_default().iter().copied().map(move |owner| (entity, owner))
     });
     Groups::build(book.entities.len(), pairs)
 }
@@ -584,12 +501,7 @@ fn place_owners(
     for place in book.places.ids() {
         let declared = &book.places[place].shares;
         if declared.is_empty() {
-            pairs.extend(
-                entity_owners[book.places[place].owner]
-                    .iter()
-                    .copied()
-                    .map(|share| (place, share)),
-            );
+            pairs.extend(entity_owners[book.places[place].owner].iter().copied().map(|share| (place, share)));
         } else {
             let mut rates = Map::default();
             let mut overflow = None;
@@ -612,14 +524,8 @@ fn place_owners(
             }
             if let Some(loc) = overflow {
                 diagnostics.push(
-                    Diagnostic::error(
-                        "ownership-overflow",
-                        "effective ownership share is too large to represent",
-                    )
-                    .label(
-                        loc,
-                        "this place share overflows while ownership is composed",
-                    ),
+                    Diagnostic::error("ownership-overflow", "effective ownership share is too large to represent")
+                        .label(loc, "this place share overflows while ownership is composed"),
                 );
                 rates.clear();
             }
@@ -632,10 +538,7 @@ fn place_owners(
 }
 
 fn sorted_shares(rates: Map<Id<Entity>, Ratio>) -> Vec<OwnerShare> {
-    let mut shares: Vec<_> = rates
-        .into_iter()
-        .map(|(owner, share)| OwnerShare { owner, share })
-        .collect();
+    let mut shares: Vec<_> = rates.into_iter().map(|(owner, share)| OwnerShare { owner, share }).collect();
     shares.sort_unstable_by_key(|share| share.owner);
     shares
 }
@@ -644,10 +547,7 @@ fn sorted_shares(rates: Map<Id<Entity>, Ratio>) -> Vec<OwnerShare> {
 /// residences under one system do.
 fn repeats(book: &Book) -> bool {
     let rules = &book.rules;
-    let per_place = rules
-        .per_place()
-        .into_iter()
-        .flat_map(|table| table.iter().map(|(_, list)| list));
+    let per_place = rules.per_place().into_iter().flat_map(|table| table.iter().map(|(_, list)| list));
     let lists = per_place
         .chain(rules.on_spend.iter().map(|(_, list)| list))
         .chain(rules.purposes.iter().map(|(_, list)| list))
@@ -655,8 +555,7 @@ fn repeats(book: &Book) -> bool {
         .chain([&rules.timed[..]]);
     lists.into_iter().any(|list: &[Rule]| {
         let mut seen = Set::default();
-        list.iter()
-            .any(|rule| !seen.insert((rule.law, rule.subject)))
+        list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
     })
 }
 
@@ -691,10 +590,7 @@ fn kind_places(book: &Book) -> Map<Id<Kind>, Box<[Id<Place>]>> {
             let Op::Call(Func::Total(..), args) = &node.op else {
                 continue;
             };
-            for &argument in args
-                .iter()
-                .filter(|&&argument| law.nodes[argument].typed_ty() == Some(Ty::Kind))
-            {
+            for &argument in args.iter().filter(|&&argument| law.nodes[argument].typed_ty() == Some(Ty::Kind)) {
                 match &law.nodes[argument].op {
                     Op::Const(Value::Kind(kind)) => {
                         requested.insert(*kind);
@@ -707,20 +603,13 @@ fn kind_places(book: &Book) -> Map<Id<Kind>, Box<[Id<Place>]>> {
     if dynamic {
         // A computed kind may select any bucket; walk each place's ancestry
         // once instead of rescanning the place table for every book kind.
-        let mut places: Map<Id<Kind>, Vec<Id<Place>>> =
-            book.kinds.ids().map(|kind| (kind, Vec::new())).collect();
+        let mut places: Map<Id<Kind>, Vec<Id<Place>>> = book.kinds.ids().map(|kind| (kind, Vec::new())).collect();
         for (place, value) in book.places.iter() {
             for kind in book.kinds.lineage(value.kind) {
-                places
-                    .get_mut(&kind)
-                    .expect("every book kind is indexed")
-                    .push(place);
+                places.get_mut(&kind).expect("every book kind is indexed").push(place);
             }
         }
-        return places
-            .into_iter()
-            .map(|(kind, matching)| (kind, matching.into_boxed_slice()))
-            .collect();
+        return places.into_iter().map(|(kind, matching)| (kind, matching.into_boxed_slice())).collect();
     }
     if requested.is_empty() {
         return Map::default();

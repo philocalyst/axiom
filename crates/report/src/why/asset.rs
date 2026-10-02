@@ -19,24 +19,14 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
         )));
     }
     let state = run.assets.iter().find(|state| state.asset == asset_id);
-    let mut overview = Section::new([
-        Column::left("Owner"),
-        Column::left("Part of"),
-        Column::right("Value"),
-        Column::right("Basis"),
-    ])
-    .headed("Asset");
-    let value = lens
-        .value(Amount::new(Qty(1), asset.unit))
-        .map(|value| lens.entity_qty(asset.owner, value));
-    let basis = state
-        .and_then(|state| state.total_basis().ok())
-        .map(|basis| lens.entity_qty(asset.owner, basis));
+    let mut overview =
+        Section::new([Column::left("Owner"), Column::left("Part of"), Column::right("Value"), Column::right("Basis")])
+            .headed("Asset");
+    let value = lens.value(Amount::new(Qty(1), asset.unit)).map(|value| lens.entity_qty(asset.owner, value));
+    let basis = state.and_then(|state| state.total_basis().ok()).map(|basis| lens.entity_qty(asset.owner, basis));
     overview.push(Row::new([
         Cell::Name(book.name(book.entities[asset.owner].path)),
-        asset.part_of.map_or(Cell::Blank, |parent| {
-            Cell::Name(book.name(book.assets[parent.value].name))
-        }),
+        asset.part_of.map_or(Cell::Blank, |parent| Cell::Name(book.name(book.assets[parent.value].name))),
         value.map_or(Cell::Blank, |value| Cell::base(book, value)),
         basis.map_or(Cell::Blank, |basis| Cell::base(book, basis)),
     ]));
@@ -60,28 +50,19 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
                 })
                 .map(|adjustment| adjustment.amount)
                 .sum::<Qty>();
-            let purpose = part
-                .flow
-                .and_then(|id| book.flows.get(id))
-                .and_then(|flow| flow.purpose)
-                .map_or_else(
-                    || {
-                        Cell::Word(match part.kind {
-                            PartKind::Acquisition => "acquisition",
-                            PartKind::Improvement => "improvement",
-                        })
-                    },
-                    |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)),
-                );
+            let purpose = part.flow.and_then(|id| book.flows.get(id)).and_then(|flow| flow.purpose).map_or_else(
+                || {
+                    Cell::Word(match part.kind {
+                        PartKind::Acquisition => "acquisition",
+                        PartKind::Improvement => "improvement",
+                    })
+                },
+                |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)),
+            );
             let source = part
                 .flow
                 .and_then(|id| book.flows.get(id).map(|flow| flow.loc))
-                .or_else(|| {
-                    part.id
-                        .origin
-                        .source_txn()
-                        .and_then(|txn| book.txns.get(txn).map(|txn| txn.loc))
-                })
+                .or_else(|| part.id.origin.source_txn().and_then(|txn| book.txns.get(txn).map(|txn| txn.loc)))
                 .map_or(Cell::Blank, Cell::Source);
             parts.push(Row::new([
                 purpose,
@@ -107,9 +88,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
     .headed("Flows about it");
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
         lens.owns(crate::flow::movement_place(lens, flow))
-            && flow
-                .purpose
-                .is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
+            && flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
     }) {
         let posting = crate::history::Posting::at(book, run, id);
         let out = posting.out();
@@ -117,10 +96,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
         if amount.is_zero() {
             continue;
         }
-        let purpose = flow
-            .purpose
-            .map(|purpose| book.name(book.purposes[purpose.purpose].name))
-            .unwrap_or("");
+        let purpose = flow.purpose.map(|purpose| book.name(book.purposes[purpose.purpose].name)).unwrap_or("");
         about.push(Row::new([
             Cell::Day(flow.day),
             Cell::Purpose(purpose),
@@ -136,8 +112,5 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
     if state.is_some_and(|state| state.disposed.is_some()) {
         overview.note("This asset was disposed of.");
     }
-    Report::new(format!("Why {name}"))
-        .with(overview)
-        .with(parts)
-        .with(about)
+    Report::new(format!("Why {name}")).with(overview).with(parts).with(about)
 }

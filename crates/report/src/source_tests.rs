@@ -37,41 +37,18 @@ fn with_sources<R>(texts: &[(&str, &str)], today: Day, then: impl FnOnce(&Book, 
         syntax_diagnostics.extend(parsed);
         parsed_files.push(file);
     }
-    assert!(
-        syntax_diagnostics.is_empty(),
-        "the source does not parse: {syntax_diagnostics:?}"
-    );
-    let sources: Vec<_> = texts
-        .iter()
-        .zip(parsed_files)
-        .map(|((path, _), file)| Source {
-            path,
-            file,
-            embedded: false,
-        })
-        .collect();
+    assert!(syntax_diagnostics.is_empty(), "the source does not parse: {syntax_diagnostics:?}");
+    let sources: Vec<_> =
+        texts.iter().zip(parsed_files).map(|((path, _), file)| Source { path, file, embedded: false }).collect();
     let (book, built) = axiom_model::build(&sources);
-    assert!(
-        built.iter().all(|diagnostic| !diagnostic.is_error()),
-        "the book has errors: {built:?}"
-    );
-    let run = axiom_engine::run(
-        &book,
-        Options {
-            today,
-            relaxed: false,
-        },
-    );
+    assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");
+    let run = axiom_engine::run(&book, Options { today, relaxed: false });
     then(&book, &run)
 }
 
 /// The rows of the first section of the report `query` asks for.
 fn rows(book: &Book, run: &Run, query: Query) -> Vec<String> {
-    lines(
-        &crate::report(book, run, &query, None)
-            .expect("the query resolves")
-            .sections[0],
-    )
+    lines(&crate::report(book, run, &query, None).expect("the query resolves").sections[0])
 }
 
 struct BorrowedSources<'a> {
@@ -105,17 +82,10 @@ impl SourceProvider for BorrowedSources<'_> {
         {
             return None;
         }
-        let line = self.text[..start]
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count();
+        let line = self.text[..start].bytes().filter(|byte| *byte == b'\n').count();
         let line_start = self.text[..start].rfind('\n').map_or(0, |at| at + 1);
         let column = self.text[line_start..start].chars().count() + 1;
-        Some(SourcePosition {
-            path: self.path,
-            line: line + 1,
-            column,
-        })
+        Some(SourcePosition { path: self.path, line: line + 1, column })
     }
 }
 
@@ -133,36 +103,19 @@ opening 2026-01-01
   checking 100 USD
 2026-01-02 checking -> grocer 5 USD #food
 ";
-    let provider = BorrowedSources {
-        path: r"C:\ledger\january.ax",
-        text: source,
-    };
-    let line = source
-        .lines()
-        .position(|text| text.starts_with("2026-01-02"))
-        .unwrap()
-        + 1;
+    let provider = BorrowedSources { path: r"C:\ledger\january.ax", text: source };
+    let line = source.lines().position(|text| text.starts_with("2026-01-02")).unwrap() + 1;
     with_run(source, day(2026, 1, 3), |book, run| {
         let target = format!(r"C:\ledger\january.ax:{line}");
         let query = Query::Why { target: &target };
         let report = crate::report_with_sources(book, run, &query, None, &provider).unwrap();
-        let context = crate::Context::new(
-            book,
-            Options {
-                today: run.today,
-                relaxed: book.relaxed,
-            },
-            None,
-        )
-        .unwrap();
+        let context = crate::Context::new(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
         let shared = context.report_with_sources(&query, &provider).unwrap();
         assert_eq!(crate::tests::cell(&report.title), "Why this line");
         assert_eq!(show(&shared), show(&report));
         assert!(crate::tests::lines(&report.sections[0])[0].contains("flow: checking → grocer"));
         assert!(crate::resolve_source_line(&query, &provider).is_some());
-        let unknown = Query::Why {
-            target: r"C:\ledger\missing.ax:1",
-        };
+        let unknown = Query::Why { target: r"C:\ledger\missing.ax:1" };
         assert_eq!(crate::resolve_source_line(&unknown, &provider), None);
     });
 }
@@ -196,11 +149,7 @@ opening 2026-01-01
         let report = crate::report(
             book,
             run,
-            &Query::Flow {
-                by: FlowBy::Period(axiom_model::Period::Month),
-                from: Some(day(2026, 1, 1)),
-                to: None,
-            },
+            &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None },
             None,
         )
         .unwrap();
@@ -208,9 +157,7 @@ opening 2026-01-01
         let amount = |purpose: &str| {
             rows.iter()
                 .find(|row| {
-                    row.cells.first().is_some_and(
-                        |cell| matches!(cell, crate::Cell::Name(name) if *name == purpose),
-                    )
+                    row.cells.first().is_some_and(|cell| matches!(cell, crate::Cell::Name(name) if *name == purpose))
                 })
                 .and_then(|row| row.cells.get(1))
         };
@@ -250,22 +197,10 @@ opening 2026-01-01
 
     with_run(source, day(2026, 2, 1), |book, run| {
         for by in [FlowBy::Period(axiom_model::Period::Month), FlowBy::Party] {
-            let expected_of = if by == FlowBy::Party {
-                "grocer"
-            } else {
-                "groceries"
-            };
-            let report = crate::report(
-                book,
-                run,
-                &Query::Flow {
-                    by,
-                    from: Some(day(2026, 1, 1)),
-                    to: None,
-                },
-                Some("theo"),
-            )
-            .unwrap();
+            let expected_of = if by == FlowBy::Party { "grocer" } else { "groceries" };
+            let report =
+                crate::report(book, run, &Query::Flow { by, from: Some(day(2026, 1, 1)), to: None }, Some("theo"))
+                    .unwrap();
             let fact = report.sections[0]
                 .facts
                 .iter()
@@ -278,11 +213,7 @@ opening 2026-01-01
         let everyone = crate::report(
             book,
             run,
-            &Query::Flow {
-                by: FlowBy::Period(axiom_model::Period::Month),
-                from: Some(day(2026, 1, 1)),
-                to: None,
-            },
+            &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None },
             None,
         )
         .unwrap();
@@ -325,11 +256,7 @@ opening 2026-01-01
         let report = crate::report(
             book,
             run,
-            &Query::Flow {
-                by: FlowBy::Period(axiom_model::Period::Month),
-                from: Some(day(2026, 1, 1)),
-                to: None,
-            },
+            &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None },
             Some("theo"),
         )
         .unwrap();
@@ -368,11 +295,7 @@ opening 2026-01-01
             let statement = crate::report(
                 book,
                 run,
-                &Query::Flow {
-                    by: FlowBy::Period(axiom_model::Period::Month),
-                    from: Some(day(2026, 1, 1)),
-                    to: None,
-                },
+                &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None },
                 Some(owner),
             )
             .unwrap();
@@ -384,17 +307,9 @@ opening 2026-01-01
                     .map(|fact| fact.value.qty)
                     .sum::<Qty>()
             };
-            let register = crate::report(
-                book,
-                run,
-                &Query::Register {
-                    place: "checking",
-                    from: None,
-                    to: None,
-                },
-                Some(owner),
-            )
-            .unwrap();
+            let register =
+                crate::report(book, run, &Query::Register { place: "checking", from: None, to: None }, Some(owner))
+                    .unwrap();
             let closing = register.sections[0]
                 .rows
                 .last()
@@ -405,19 +320,11 @@ opening 2026-01-01
                     _ => None,
                 })
                 .expect("the final register balance is a typed amount");
-            assert_eq!(
-                sum("income", "salary") - sum("spending", "groceries"),
-                closing,
-                "owner {owner}"
-            );
+            assert_eq!(sum("income", "salary") - sum("spending", "groceries"), closing, "owner {owner}");
             let before_filter = crate::report(
                 book,
                 run,
-                &Query::Register {
-                    place: "checking",
-                    from: None,
-                    to: Some(day(2026, 1, 2)),
-                },
+                &Query::Register { place: "checking", from: None, to: Some(day(2026, 1, 2)) },
                 Some(owner),
             )
             .unwrap();
@@ -435,21 +342,12 @@ opening 2026-01-01
             let party = crate::report(
                 book,
                 run,
-                &Query::Flow {
-                    by: FlowBy::Party,
-                    from: Some(day(2026, 1, 1)),
-                    to: None,
-                },
+                &Query::Flow { by: FlowBy::Party, from: Some(day(2026, 1, 1)), to: None },
                 Some(owner),
             )
             .unwrap();
             let party_net = party.sections.first().map_or(Qty::ZERO, |section| {
-                section
-                    .facts
-                    .iter()
-                    .filter(|fact| fact.concept == "income")
-                    .map(|fact| fact.value.qty)
-                    .sum::<Qty>()
+                section.facts.iter().filter(|fact| fact.concept == "income").map(|fact| fact.value.qty).sum::<Qty>()
                     - section
                         .facts
                         .iter()
@@ -462,11 +360,7 @@ opening 2026-01-01
             let filtered = crate::report(
                 book,
                 run,
-                &Query::Flow {
-                    by: FlowBy::Period(axiom_model::Period::Month),
-                    from: Some(day(2026, 1, 3)),
-                    to: None,
-                },
+                &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 3)), to: None },
                 Some(owner),
             )
             .unwrap();
@@ -478,11 +372,7 @@ opening 2026-01-01
                     .map(|fact| fact.value.qty)
                     .sum::<Qty>()
             });
-            assert_eq!(
-                filtered_spending,
-                opening_at_filter - closing,
-                "filtered owner {owner}"
-            );
+            assert_eq!(filtered_spending, opening_at_filter - closing, "filtered owner {owner}");
         }
     });
 }
@@ -513,24 +403,14 @@ opening 2026-01-01
 ";
 
     with_run(source, day(2026, 1, 4), |book, run| {
-        let report = crate::report(
-            book,
-            run,
-            &Query::Flow {
-                by: FlowBy::Party,
-                from: Some(day(2026, 1, 1)),
-                to: None,
-            },
-            None,
-        )
-        .unwrap();
+        let report =
+            crate::report(book, run, &Query::Flow { by: FlowBy::Party, from: Some(day(2026, 1, 1)), to: None }, None)
+                .unwrap();
         let rows = &report.sections[0].rows;
         let amount = |party: &str| {
             rows.iter()
                 .find(|row| {
-                    row.cells.first().is_some_and(
-                        |cell| matches!(cell, crate::Cell::Name(name) if *name == party),
-                    )
+                    row.cells.first().is_some_and(|cell| matches!(cell, crate::Cell::Name(name) if *name == party))
                 })
                 .and_then(|row| row.cells.get(1))
         };
@@ -563,18 +443,14 @@ opening 2026-01-01
         let report = crate::report(
             book,
             run,
-            &Query::Flow {
-                by: FlowBy::Period(axiom_model::Period::Month),
-                from: Some(day(2026, 1, 1)),
-                to: None,
-            },
+            &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None },
             None,
         )
         .unwrap();
         assert!(report.sections[0].rows.iter().any(|row| {
-            row.cells.iter().any(|cell| {
-                matches!(cell, crate::Cell::Text(Cow::Borrowed(text)) if *text == "line one\nline two")
-            })
+            row.cells
+                .iter()
+                .any(|cell| matches!(cell, crate::Cell::Text(Cow::Borrowed(text)) if *text == "line one\nline two"))
         }));
     });
 }
@@ -598,11 +474,7 @@ commodity HR : measure
         let report = crate::report(
             book,
             run,
-            &Query::Flow {
-                by: FlowBy::Period(axiom_model::Period::Month),
-                from: None,
-                to: None,
-            },
+            &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: None, to: None },
             None,
         )
         .unwrap();
@@ -611,26 +483,16 @@ commodity HR : measure
             .iter()
             .find(|section| crate::tests::heading(section) == Some("Measures"))
             .expect("measure section");
-        let headers: Vec<_> = measures
-            .columns
-            .iter()
-            .map(|column| crate::tests::cell(&column.title))
-            .collect();
-        let march = headers
-            .iter()
-            .position(|header| header == "2026-03")
-            .unwrap();
-        let april = headers
-            .iter()
-            .position(|header| header == "2026-04")
-            .unwrap();
-        assert!(
-            march < april,
-            "the earlier measure anchors the displayed range"
-        );
+        let headers: Vec<_> = measures.columns.iter().map(|column| crate::tests::cell(&column.title)).collect();
+        let march = headers.iter().position(|header| header == "2026-03").unwrap();
+        let april = headers.iter().position(|header| header == "2026-04").unwrap();
+        assert!(march < april, "the earlier measure anchors the displayed range");
         assert!(measures.rows.iter().any(|row| {
             row.cells.iter().any(|cell| crate::tests::cell(cell) == "HR")
-                && row.cells.iter().any(|cell| matches!(cell, crate::Cell::Amount { qty, unit: "HR", .. } if !qty.is_zero()))
+                && row
+                    .cells
+                    .iter()
+                    .any(|cell| matches!(cell, crate::Cell::Amount { qty, unit: "HR", .. } if !qty.is_zero()))
         }));
     });
 }
@@ -660,68 +522,32 @@ asset laptop : thing
 ";
 
     with_run(source, day(2026, 1, 5), |book, run| {
-        let contract = crate::report(
-            book,
-            run,
-            &Query::Register {
-                place: "figma",
-                from: None,
-                to: None,
-            },
-            None,
-        )
-        .unwrap();
-        assert!(contract.sections.iter().flat_map(|s| &s.rows).any(|row| {
-            row.cells
+        let contract =
+            crate::report(book, run, &Query::Register { place: "figma", from: None, to: None }, None).unwrap();
+        assert!(
+            contract
+                .sections
                 .iter()
-                .any(|cell| matches!(cell, crate::Cell::Word("terms active")))
-        }));
+                .flat_map(|s| &s.rows)
+                .any(|row| { row.cells.iter().any(|cell| matches!(cell, crate::Cell::Word("terms active"))) })
+        );
 
-        let party = crate::report(
-            book,
-            run,
-            &Query::Register {
-                place: "entity:figma",
-                from: None,
-                to: None,
-            },
-            None,
-        )
-        .unwrap();
-        assert!(!party.sections.iter().flat_map(|s| &s.rows).any(|row| {
-            row.cells
+        let party =
+            crate::report(book, run, &Query::Register { place: "entity:figma", from: None, to: None }, None).unwrap();
+        assert!(
+            !party
+                .sections
                 .iter()
-                .any(|cell| matches!(cell, crate::Cell::Word("terms active")))
-        }));
+                .flat_map(|s| &s.rows)
+                .any(|row| { row.cells.iter().any(|cell| matches!(cell, crate::Cell::Word("terms active"))) })
+        );
 
         let why_contract = crate::report(book, run, &Query::Why { target: "figma" }, None).unwrap();
-        assert_eq!(
-            crate::tests::heading(&why_contract.sections[0]),
-            Some("Contract")
-        );
-        let why_party = crate::report(
-            book,
-            run,
-            &Query::Why {
-                target: "entity:figma",
-            },
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            crate::tests::heading(&why_party.sections[0]),
-            Some("Places")
-        );
+        assert_eq!(crate::tests::heading(&why_contract.sections[0]), Some("Contract"));
+        let why_party = crate::report(book, run, &Query::Why { target: "entity:figma" }, None).unwrap();
+        assert_eq!(crate::tests::heading(&why_party.sections[0]), Some("Places"));
 
-        let why_asset = crate::report(
-            book,
-            run,
-            &Query::Why {
-                target: "asset:laptop",
-            },
-            None,
-        )
-        .unwrap();
+        let why_asset = crate::report(book, run, &Query::Why { target: "asset:laptop" }, None).unwrap();
         assert_eq!(crate::tests::cell(&why_asset.title), "Why laptop");
         assert_eq!(crate::tests::heading(&why_asset.sections[0]), Some("Asset"));
     });
@@ -748,18 +574,10 @@ opening 2025-01-01
 #[test]
 fn a_holding_is_valued_at_its_price_not_its_basis() {
     with_std(MARKET_VALUE, day(2025, 6, 1), |book, run| {
-        let balance = Query::Balance {
-            globs: vec![],
-            at: None,
-            value: true,
-            monthly: false,
-        };
+        let balance = Query::Balance { globs: vec![], at: None, value: true, monthly: false };
         let report = crate::report(book, run, &balance, None).unwrap();
         let worth = lines(&report.sections[1]);
-        assert_eq!(
-            worth[2], "=Net worth | 6,500.00 USD",
-            "1,500 of shares and 5,000 of cash"
-        );
+        assert_eq!(worth[2], "=Net worth | 6,500.00 USD", "1,500 of shares and 5,000 of cash");
         assert!(lines(&report.sections[0]).contains(&"=broker | 1,500.00 USD".to_string()));
     });
 }
@@ -768,17 +586,10 @@ fn a_holding_is_valued_at_its_price_not_its_basis() {
 fn a_register_shows_an_exchange_as_two_typed_movements() {
     let source = format!("{MARKET_VALUE}2025-02-01 checking 150 USD -> broker 1 UNH @ 150 USD\n");
     with_std(&source, day(2025, 6, 1), |book, run| {
-        let register = Query::Register {
-            place: "broker",
-            from: None,
-            to: None,
-        };
+        let register = Query::Register { place: "broker", from: None, to: None };
         assert_eq!(
             rows(book, run, register),
-            [
-                "2025-01-01 | opening |  |  | 10 UNH | 10 UNH",
-                "2025-02-01 | checking |  |  | 1 UNH | 11 UNH",
-            ]
+            ["2025-01-01 | opening |  |  | 10 UNH | 10 UNH", "2025-02-01 | checking |  |  | 1 UNH | 11 UNH",]
         );
     });
 }
@@ -800,11 +611,7 @@ opening 2025-01-01
 2025-02-01 wise 500 USD -> wise 400 GBP
 ";
     with_run(source, day(2025, 6, 1), |book, run| {
-        let register = Query::Register {
-            place: "wise",
-            from: None,
-            to: None,
-        };
+        let register = Query::Register { place: "wise", from: None, to: None };
         assert_eq!(
             rows(book, run, register),
             [
@@ -839,10 +646,7 @@ law audit
     with_run(source, day(2026, 6, 1), |book, run| {
         let when = |law| {
             let report = crate::report(book, run, &Query::Why { target: law }, None).unwrap();
-            lines(&report.sections[0])
-                .into_iter()
-                .find(|row| row.starts_with("When"))
-                .unwrap()
+            lines(&report.sections[0]).into_iter().find(|row| row.starts_with("When")).unwrap()
         };
         assert_eq!(when("return"), "When | each year closing 04-15");
         assert_eq!(when("audit"), "When | each year");
@@ -907,11 +711,7 @@ fn native_annual_premium_is_spread_across_months() {
         let report = crate::report(
             book,
             run,
-            &Query::Flow {
-                by: FlowBy::Period(axiom_model::Period::Month),
-                from: Some(day(2026, 1, 1)),
-                to: None,
-            },
+            &Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None },
             None,
         )
         .unwrap();
@@ -919,10 +719,7 @@ fn native_annual_premium_is_spread_across_months() {
             .into_iter()
             .find(|row| row.contains("insurance"))
             .expect("the source premium is classified under insurance");
-        assert_eq!(
-            insurance.trim_start(),
-            "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD"
-        );
+        assert_eq!(insurance.trim_start(), "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD");
     });
 }
 
@@ -951,21 +748,15 @@ opening 2025-12-01
             .rows
             .iter()
             .filter_map(|row| match (&row.cells[0], &row.cells[6], &row.cells[7]) {
-                (
-                    crate::Cell::Day(sold),
-                    crate::Cell::Amount { qty, unit, .. },
-                    crate::Cell::Text(term),
-                ) if *unit == "USD" => Some((*sold, *qty, term.as_ref())),
+                (crate::Cell::Day(sold), crate::Cell::Amount { qty, unit, .. }, crate::Cell::Text(term))
+                    if *unit == "USD" =>
+                {
+                    Some((*sold, *qty, term.as_ref()))
+                }
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            realized,
-            [
-                (day(2026, 2, 12), Qty(40_000), "short"),
-                (day(2026, 3, 3), Qty(80_000), "long")
-            ]
-        );
+        assert_eq!(realized, [(day(2026, 2, 12), Qty(40_000), "short"), (day(2026, 3, 3), Qty(80_000), "long")]);
         let total = section
             .rows
             .iter()
@@ -1001,52 +792,32 @@ contract car-loan with bank
 fn native_forecast_fixtures_build_as_contracts_not_plans() {
     with_run(NATIVE_CONTRACTS, day(2026, 4, 15), |book, _| {
         assert_eq!(book.contracts.len(), 3);
-        assert!(
-            book.contracts
-                .iter()
-                .all(|(_, contract)| contract.terms.is_some())
-        );
+        assert!(book.contracts.iter().all(|(_, contract)| contract.terms.is_some()));
     });
 }
 
 #[test]
 fn native_contract_terms_project_paychecks_once_and_preserve_overdrafts() {
     with_run(NATIVE_CONTRACTS, day(2026, 4, 15), |book, run| {
-        let report = crate::report(
-            book,
-            run,
-            &Query::Forecast {
-                until: Some(day(2026, 6, 30)),
-                paths: 0,
-            },
-            None,
-        )
-        .unwrap();
+        let report =
+            crate::report(book, run, &Query::Forecast { until: Some(day(2026, 6, 30)), paths: 0 }, None).unwrap();
         let section = |heading: &str| {
-            report
-                .sections
-                .iter()
-                .find(|section| crate::tests::heading(section) == Some(heading))
-                .unwrap()
+            report.sections.iter().find(|section| crate::tests::heading(section) == Some(heading)).unwrap()
         };
         let occurrences = section("Contract occurrences");
         let mut rows: Vec<_> = occurrences
             .rows
             .iter()
             .filter_map(|row| match (&row.cells[0], &row.cells[2], &row.cells[3]) {
-                (
-                    crate::Cell::Text(name),
-                    crate::Cell::Amount { qty, .. },
-                    crate::Cell::Day(day),
-                ) => Some((name.as_ref(), *qty, *day)),
+                (crate::Cell::Text(name), crate::Cell::Amount { qty, .. }, crate::Cell::Day(day)) => {
+                    Some((name.as_ref(), *qty, *day))
+                }
                 _ => None,
             })
             .collect();
         rows.sort_by_key(|row| row.2);
         assert_eq!(
-            rows.iter()
-                .map(|(_, qty, day)| (*qty, *day))
-                .collect::<Vec<_>>(),
+            rows.iter().map(|(_, qty, day)| (*qty, *day)).collect::<Vec<_>>(),
             [
                 (Qty(180_000), day(2026, 5, 1)),
                 (Qty(4_000_000), day(2026, 5, 2)),
@@ -1062,9 +833,7 @@ fn native_contract_terms_project_paychecks_once_and_preserve_overdrafts() {
         };
         assert_eq!(ending, Qty(-160_000));
         assert!(
-            lines(section("Problems ahead"))
-                .iter()
-                .any(|row| row.contains("overdrawn")),
+            lines(section("Problems ahead")).iter().any(|row| row.contains("overdrawn")),
             "the 40,000 USD repair reserve exceeds checking's available cash"
         );
     });
@@ -1075,26 +844,15 @@ fn native_loan_fixture_builds_a_typed_loan_contract() {
     with_run(NATIVE_LOAN, day(2026, 1, 1), |book, _| {
         let loan = &book.contracts[book.contract("car-loan").unwrap()];
         assert!(loan.terms.is_some());
-        assert!(
-            loan.loan.is_some(),
-            "loan terms must lower to the typed loan model"
-        );
+        assert!(loan.loan.is_some(), "loan terms must lower to the typed loan model");
     });
 }
 
 #[test]
 fn native_loan_forecast_stops_after_the_typed_principal_is_repaid() {
     with_run(NATIVE_LOAN, day(2026, 1, 1), |book, run| {
-        let report = crate::report(
-            book,
-            run,
-            &Query::Forecast {
-                until: Some(day(2026, 6, 30)),
-                paths: 0,
-            },
-            None,
-        )
-        .unwrap();
+        let report =
+            crate::report(book, run, &Query::Forecast { until: Some(day(2026, 6, 30)), paths: 0 }, None).unwrap();
         let occurrences = report
             .sections
             .iter()
@@ -1104,21 +862,17 @@ fn native_loan_forecast_stops_after_the_typed_principal_is_repaid() {
             .rows
             .iter()
             .filter_map(|row| match (&row.cells[0], &row.cells[2], &row.cells[3]) {
-                (
-                    crate::Cell::Text(name),
-                    crate::Cell::Amount { qty, .. },
-                    crate::Cell::Day(day),
-                ) if name.contains("car-loan") => Some((*qty, *day)),
+                (crate::Cell::Text(name), crate::Cell::Amount { qty, .. }, crate::Cell::Day(day))
+                    if name.contains("car-loan") =>
+                {
+                    Some((*qty, *day))
+                }
                 _ => None,
             })
             .collect();
         assert_eq!(
             repayments,
-            [
-                (Qty(100_000), day(2026, 2, 1)),
-                (Qty(100_000), day(2026, 3, 1)),
-                (Qty(100_000), day(2026, 4, 1)),
-            ],
+            [(Qty(100_000), day(2026, 2, 1)), (Qty(100_000), day(2026, 3, 1)), (Qty(100_000), day(2026, 4, 1)),],
             "a 3,000 USD interest-free loan over three months has three 1,000 USD payments"
         );
     });
@@ -1131,16 +885,10 @@ fn a_projected_flow_keeps_its_detail_and_moves_its_recognition_period() {
         let usd = |flow: &axiom_model::Flow| flow.out;
 
         let premium = template(2);
-        assert_eq!(
-            (premium.recognized.first(), premium.recognized.last()),
-            (day(2026, 1, 1), day(2026, 12, 31))
-        );
+        assert_eq!((premium.recognized.first(), premium.recognized.last()), (day(2026, 1, 1), day(2026, 12, 31)));
         let next = crate::synth::planned(premium, day(2027, 1, 15), usd(premium), usd(premium));
         assert_eq!(next.day, day(2027, 1, 15));
-        assert_eq!(
-            (next.recognized.first(), next.recognized.last()),
-            (day(2027, 1, 1), day(2027, 12, 31))
-        );
+        assert_eq!((next.recognized.first(), next.recognized.last()), (day(2027, 1, 1), day(2027, 12, 31)));
 
         let deposit = template(1);
         let next = crate::synth::planned(deposit, day(2026, 5, 1), usd(deposit), usd(deposit));
@@ -1148,12 +896,7 @@ fn a_projected_flow_keeps_its_detail_and_moves_its_recognition_period() {
         assert!(book.flow_view(&next).detail().basis.is_some());
 
         let depreciation = template(3);
-        let next = crate::synth::planned(
-            depreciation,
-            day(2026, 5, 28),
-            usd(depreciation),
-            usd(depreciation),
-        );
+        let next = crate::synth::planned(depreciation, day(2026, 5, 28), usd(depreciation), usd(depreciation));
         assert!(book.flow_view(&next).detail().basis.is_some());
         assert_eq!(crate::places::route(book, &next), "checking → repairer");
     });
@@ -1193,15 +936,13 @@ law recapture
 fn native_asset_law_forecast_changes_basis_without_moving_cash() {
     with_run(DEPRECIATING, day(2026, 3, 15), |book, run| {
         let house = book.asset("house").unwrap();
-        let house_state = run
-            .assets
-            .iter()
-            .find(|state| state.asset == house)
-            .unwrap();
+        let house_state = run.assets.iter().find(|state| state.asset == house).unwrap();
         assert_eq!(house_state.total_basis(), Ok(Qty(11_940_000)));
-        assert!(run.holdings.iter().all(|holding| {
-            holding.place != book.assets[house].place || holding.unit != book.base
-        }));
+        assert!(
+            run.holdings
+                .iter()
+                .all(|holding| { holding.place != book.assets[house].place || holding.unit != book.base })
+        );
         let historical_tally: Qty = run
             .effects
             .iter()
@@ -1222,26 +963,12 @@ fn native_asset_law_forecast_changes_basis_without_moving_cash() {
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            consumed,
-            [
-                (day(2026, 1, 31), Qty(30_000)),
-                (day(2026, 2, 28), Qty(30_000))
-            ]
-        );
+        assert_eq!(consumed, [(day(2026, 1, 31), Qty(30_000)), (day(2026, 2, 28), Qty(30_000))]);
 
-        let forecast = Query::Forecast {
-            until: Some(day(2026, 12, 31)),
-            paths: 1,
-        };
+        let forecast = Query::Forecast { until: Some(day(2026, 12, 31)), paths: 1 };
         let report = crate::report(book, run, &forecast, None).unwrap();
-        let section = |heading: &str| {
-            report
-                .sections
-                .iter()
-                .find(|s| crate::tests::heading(s) == Some(heading))
-                .unwrap()
-        };
+        let section =
+            |heading: &str| report.sections.iter().find(|s| crate::tests::heading(s) == Some(heading)).unwrap();
         let outlook = lines(section("Liquid net worth"));
         assert_eq!(outlook[0], "2026-03-15 | 5,100.00 USD | 5,100.00 USD");
         assert_eq!(
@@ -1249,14 +976,8 @@ fn native_asset_law_forecast_changes_basis_without_moving_cash() {
             "2026-12-31 | 4,200.00 USD | 5,100.00 USD",
             "5,100 less the 900 recaptured over the calendar year"
         );
-        assert_eq!(
-            lines(section("Obligations coming due")),
-            ["2026-12-31 | recapture | treasury | 900.00 USD"]
-        );
-        assert!(
-            lines(section("Problems ahead")).is_empty(),
-            "the house is not overdrawn"
-        );
+        assert_eq!(lines(section("Obligations coming due")), ["2026-12-31 | recapture | treasury | 900.00 USD"]);
+        assert!(lines(section("Problems ahead")).is_empty(), "the house is not overdrawn");
     });
 }
 
@@ -1266,14 +987,8 @@ fn native_asset_law_forecast_changes_basis_without_moving_cash() {
 fn a_hypothetical_flow_borrows_only_the_transaction_and_the_line() {
     with_run(FLOW_SOURCES, day(2026, 3, 1), |book, _| {
         let deposit = &book.flows[Id::new(1)];
-        let flow = crate::synth::hypothetical(
-            deposit,
-            day(2026, 4, 2),
-            deposit.to,
-            deposit.from,
-            deposit.out,
-            deposit.out,
-        );
+        let flow =
+            crate::synth::hypothetical(deposit, day(2026, 4, 2), deposit.to, deposit.from, deposit.out, deposit.out);
         assert_eq!((flow.txn, flow.loc), (deposit.txn, deposit.loc));
         assert_eq!(
             (flow.detail, flow.recognized.first(), flow.recognized.last()),
@@ -1323,21 +1038,8 @@ fn with_return<R>(system: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R)
     with_system_project(system, RETURN, today, then)
 }
 
-fn with_system_project<R>(
-    system: &str,
-    project: &str,
-    today: Day,
-    then: impl FnOnce(&Book, &Run) -> R,
-) -> R {
-    with_sources(
-        &[
-            ("systems/std.ax", STD),
-            ("systems/sample-return.ax", system),
-            ("axiom.ax", project),
-        ],
-        today,
-        then,
-    )
+fn with_system_project<R>(system: &str, project: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R {
+    with_sources(&[("systems/std.ax", STD), ("systems/sample-return.ax", system), ("axiom.ax", project)], today, then)
 }
 
 #[test]
@@ -1345,22 +1047,12 @@ fn tax_says_the_return_is_not_closed_and_leaves_what_it_owes_out_instead_of_at_z
     with_return(RETURN_SYSTEM, day(2027, 3, 1), |book, run| {
         let tax = Query::Tax { year: Some(2026) };
         let report = crate::report(book, run, &tax, None).unwrap();
-        let [counted, owed] = &report.sections[..] else {
-            panic!("two sections: {}", show(&report))
-        };
-        assert_eq!(
-            lines(counted),
-            ["=sample-return |  |", "  pay | 2,000.00 USD | 2 sources"]
-        );
+        let [counted, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
+        assert_eq!(lines(counted), ["=sample-return |  |", "  pay | 2,000.00 USD | 2 sources"]);
         assert!(owed.rows.is_empty(), "no line of the return is figured yet");
         assert_eq!(
-            owed.notes
-                .iter()
-                .map(crate::tests::cell)
-                .collect::<Vec<_>>(),
-            [
-                "The 2026 return closes on 2027-04-15; what it owes is not figured yet; the tallies are counted so far."
-            ]
+            owed.notes.iter().map(crate::tests::cell).collect::<Vec<_>>(),
+            ["The 2026 return closes on 2027-04-15; what it owes is not figured yet; the tallies are counted so far."]
         );
     });
 }
@@ -1370,63 +1062,25 @@ fn tax_after_the_return_closes_shows_what_it_owes() {
     with_return(RETURN_SYSTEM, day(2027, 4, 20), |book, run| {
         let tax = Query::Tax { year: Some(2026) };
         let report = crate::report(book, run, &tax, None).unwrap();
-        let [_, owed] = &report.sections[..] else {
-            panic!("two sections: {}", show(&report))
-        };
-        assert_eq!(
-            lines(owed)[1],
-            "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end"
-        );
-        assert!(
-            owed.notes
-                .iter()
-                .all(|note| !crate::tests::cell(note).contains("not figured")),
-            "{:?}",
-            owed.notes
-        );
+        let [_, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
+        assert_eq!(lines(owed)[1], "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end");
+        assert!(owed.notes.iter().all(|note| !crate::tests::cell(note).contains("not figured")), "{:?}", owed.notes);
     });
 }
 
 #[test]
 fn context_views_match_the_legacy_views_before_today_today_and_after_today() {
     with_return(RETURN_SYSTEM, day(2027, 3, 1), |book, run| {
-        let context = crate::Context::new(
-            book,
-            Options {
-                today: run.today,
-                relaxed: book.relaxed,
-            },
-            None,
-        )
-        .unwrap();
+        let context = crate::Context::new(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
         for at in [day(2026, 10, 1), run.today, day(2027, 4, 20)] {
             for query in [
-                Query::Balance {
-                    globs: vec![],
-                    at: Some(at),
-                    value: false,
-                    monthly: false,
-                },
-                Query::Register {
-                    place: "checking",
-                    from: None,
-                    to: Some(at),
-                },
-                Query::Flow {
-                    by: FlowBy::Period(axiom_model::Period::Month),
-                    from: None,
-                    to: Some(at),
-                },
+                Query::Balance { globs: vec![], at: Some(at), value: false, monthly: false },
+                Query::Register { place: "checking", from: None, to: Some(at) },
+                Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: None, to: Some(at) },
                 Query::Available { at: Some(at) },
                 Query::Claims { at: Some(at) },
-                Query::Lots {
-                    place: None,
-                    at: Some(at),
-                },
-                Query::Forecast {
-                    until: Some(at),
-                    paths: 0,
-                },
+                Query::Lots { place: None, at: Some(at) },
+                Query::Forecast { until: Some(at), paths: 0 },
             ] {
                 let shared = context.report(&query).unwrap();
                 let old = crate::report(book, context.run(), &query, None).unwrap();
@@ -1479,26 +1133,11 @@ law pad-fee
 ";
 
     with_sources(
-        &[
-            ("systems/std.ax", STD),
-            ("systems/context-return.ax", system),
-            ("axiom.ax", source),
-        ],
+        &[("systems/std.ax", STD), ("systems/context-return.ax", system), ("axiom.ax", source)],
         day(2026, 12, 31),
         |book, run| {
-            let context = crate::Context::new(
-                book,
-                Options {
-                    today: run.today,
-                    relaxed: book.relaxed,
-                },
-                None,
-            )
-            .unwrap();
-            let query = Query::Forecast {
-                until: Some(day(2027, 3, 1)),
-                paths: 0,
-            };
+            let context = crate::Context::new(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
+            let query = Query::Forecast { until: Some(day(2027, 3, 1)), paths: 0 };
             let shared = context.report(&query).unwrap();
             let old = crate::report(book, context.run(), &query, None).unwrap();
             assert_eq!(show(&shared), show(&old));
@@ -1524,27 +1163,15 @@ law pad-fee
 #[test]
 fn a_context_checkpoint_keeps_same_day_closings_pending_for_a_withdrawal() {
     with_run(YEAR_END_RETURN, day(2026, 6, 1), |book, run| {
-        let context = crate::Context::new(
-            book,
-            Options {
-                today: run.today,
-                relaxed: book.relaxed,
-            },
-            None,
-        )
-        .unwrap();
-        let query = Query::Available {
-            at: Some(day(2026, 12, 31)),
-        };
+        let context = crate::Context::new(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
+        let query = Query::Available { at: Some(day(2026, 12, 31)) };
         let shared = context.report(&query).unwrap();
         let old = crate::report(book, context.run(), &query, None).unwrap();
         assert_eq!(show(&shared), show(&old));
         let reach = shared
             .sections
             .iter()
-            .find(|section| {
-                crate::tests::heading(section) == Some("What it would take to reach the rest")
-            })
+            .find(|section| crate::tests::heading(section) == Some("What it would take to reach the rest"))
             .unwrap();
         assert_eq!(
             lines(reach)[0],
@@ -1574,22 +1201,9 @@ opening 2026-01-01
 ";
     with_run(source, day(2026, 1, 2), |book, run| {
         let make = |owner| {
-            crate::Context::new(
-                book,
-                Options {
-                    today: run.today,
-                    relaxed: book.relaxed,
-                },
-                Some(owner),
-            )
-            .unwrap()
+            crate::Context::new(book, Options { today: run.today, relaxed: book.relaxed }, Some(owner)).unwrap()
         };
-        let query = Query::Balance {
-            globs: vec![],
-            at: None,
-            value: false,
-            monthly: false,
-        };
+        let query = Query::Balance { globs: vec![], at: None, value: false, monthly: false };
         let mine = make("me").report(&query).unwrap();
         let jordan = make("jordan").report(&query).unwrap();
         assert!(show(&mine).contains("mine | 100.00 USD"));
@@ -1597,20 +1211,10 @@ opening 2026-01-01
         assert!(show(&jordan).contains("theirs | 200.00 USD"));
         assert!(!show(&jordan).contains("mine | 100.00 USD"));
 
-        let register = crate::report(
-            book,
-            run,
-            &Query::Register {
-                place: "jordan",
-                from: None,
-                to: None,
-            },
-            Some("me"),
-        )
-        .unwrap();
+        let register =
+            crate::report(book, run, &Query::Register { place: "jordan", from: None, to: None }, Some("me")).unwrap();
         assert!(!show(&register).contains("200.00 USD"));
-        let explanation =
-            crate::report(book, run, &Query::Why { target: "jordan" }, Some("me")).unwrap();
+        let explanation = crate::report(book, run, &Query::Why { target: "jordan" }, Some("me")).unwrap();
         assert!(!show(&explanation).contains("theirs | 200.00 USD"));
     });
 }
@@ -1620,29 +1224,23 @@ opening 2026-01-01
 #[test]
 fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
     let state = "\nlaw state-return\n  each year closing 06-15\n  owe tally(pay) * 5% to treasury as state-tax\n";
-    with_return(
-        &format!("{RETURN_SYSTEM}{state}"),
-        day(2027, 5, 1),
-        |book, run| {
-            let tax = Query::Tax { year: Some(2026) };
-            let report = crate::report(book, run, &tax, None).unwrap();
-            let [_, owed] = &report.sections[..] else {
-                panic!("two sections: {}", show(&report))
-            };
-            assert_eq!(
-                lines(owed),
-                [
-                    "=sample-return |  |  |  |",
-                    "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end",
-                    "=Total owed so far |  |  | 200.00 USD |",
-                ]
-            );
-            assert_eq!(
-                crate::tests::cell(&owed.notes[0]),
-                "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far."
-            );
-        },
-    );
+    with_return(&format!("{RETURN_SYSTEM}{state}"), day(2027, 5, 1), |book, run| {
+        let tax = Query::Tax { year: Some(2026) };
+        let report = crate::report(book, run, &tax, None).unwrap();
+        let [_, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
+        assert_eq!(
+            lines(owed),
+            [
+                "=sample-return |  |  |  |",
+                "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end",
+                "=Total owed so far |  |  | 200.00 USD |",
+            ]
+        );
+        assert_eq!(
+            crate::tests::cell(&owed.notes[0]),
+            "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far."
+        );
+    });
 }
 
 // ─── Budgets ────────────────────────────────────────────────────────────────
@@ -1672,10 +1270,7 @@ opening 2026-01-01
 #[test]
 fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
     with_run(ENVELOPES, day(2026, 2, 14), |book, run| {
-        let budget = Query::Budget {
-            at: Some(day(2026, 1, 1)),
-            by: axiom_model::Period::Year,
-        };
+        let budget = Query::Budget { at: Some(day(2026, 1, 1)), by: axiom_model::Period::Year };
         assert_eq!(
             rows(book, run, budget),
             [
@@ -1711,28 +1306,14 @@ opening 2026-01-01
 ";
     with_std(SOURCE, day(2026, 3, 31), |book, run| {
         assert_eq!(
-            rows(
-                book,
-                run,
-                Query::Budget {
-                    at: Some(day(2026, 2, 10)),
-                    by: axiom_model::Period::Month,
-                },
-            ),
+            rows(book, run, Query::Budget { at: Some(day(2026, 2, 10)), by: axiom_model::Period::Month },),
             [
                 "!#coverage | me | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
                 "#meals | me | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
             ]
         );
         assert_eq!(
-            rows(
-                book,
-                run,
-                Query::Budget {
-                    at: Some(day(2026, 2, 10)),
-                    by: axiom_model::Period::Year,
-                },
-            ),
+            rows(book, run, Query::Budget { at: Some(day(2026, 2, 10)), by: axiom_model::Period::Year },),
             [
                 "!#coverage | me | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
                 "#meals | me | 2026 | 204.20 USD | 1,500.00 USD | 1,295.80 USD | 1021/75%",
@@ -1753,24 +1334,15 @@ purpose meals : spending
 budget meals 500 USD monthly
 ";
     with_run(source, day(2026, 2, 14), |book, run| {
-        let query = Query::Budget {
-            at: Some(day(2026, 2, 10)),
-            by: axiom_model::Period::Month,
-        };
+        let query = Query::Budget { at: Some(day(2026, 2, 10)), by: axiom_model::Period::Month };
         let jordan = crate::report(book, run, &query, Some("jordan")).unwrap();
         let everyone = crate::report(book, run, &query, None).unwrap();
-        assert!(matches!(
-            jordan.sections[0].rows[0].cells[0],
-            crate::Cell::Purpose("meals")
-        ));
+        assert!(matches!(jordan.sections[0].rows[0].cells[0], crate::Cell::Purpose("meals")));
         assert_eq!(
             lines(&everyone.sections[0]),
             ["#meals | budget | 2026-02 | 0.00 USD | 500.00 USD | 500.00 USD | 0%"]
         );
-        assert_eq!(
-            lines(&jordan.sections[0]),
-            ["#meals | jordan | 2026-02 | 0.00 USD | 500.00 USD | 500.00 USD | 0%"]
-        );
+        assert_eq!(lines(&jordan.sections[0]), ["#meals | jordan | 2026-02 | 0.00 USD | 500.00 USD | 500.00 USD | 0%"]);
     });
 }
 
@@ -1787,10 +1359,7 @@ budget meals 50 EUR monthly
         let report = crate::report(
             book,
             run,
-            &Query::Budget {
-                at: Some(day(2026, 2, 10)),
-                by: axiom_model::Period::Year,
-            },
+            &Query::Budget { at: Some(day(2026, 2, 10)), by: axiom_model::Period::Year },
             Some("jordan"),
         )
         .unwrap();
@@ -1805,11 +1374,7 @@ budget meals 50 EUR monthly
         );
         assert!(matches!(section.rows[0].cells[0], crate::Cell::Blank));
         assert_eq!(
-            section
-                .notes
-                .iter()
-                .map(crate::tests::cell)
-                .collect::<Vec<_>>(),
+            section.notes.iter().map(crate::tests::cell).collect::<Vec<_>>(),
             ["1 budget total left out for lack of a price."]
         );
     });
@@ -1817,32 +1382,17 @@ budget meals 50 EUR monthly
 
 #[test]
 fn a_future_budget_window_does_not_invent_headroom_past_the_run() {
-    with_run(
-        "base USD\npurpose meals : spending\nbudget meals 50 USD monthly\n",
-        day(2026, 3, 31),
-        |book, run| {
-            let report = crate::report(
-                book,
-                run,
-                &Query::Budget {
-                    at: Some(day(2027, 2, 1)),
-                    by: axiom_model::Period::Year,
-                },
-                None,
-            )
-            .unwrap();
-            let section = &report.sections[0];
-            assert!(section.rows.is_empty());
-            assert_eq!(
-                section
-                    .notes
-                    .iter()
-                    .map(crate::tests::cell)
-                    .collect::<Vec<_>>(),
-                ["The requested budget window is beyond the run horizon."]
-            );
-        },
-    );
+    with_run("base USD\npurpose meals : spending\nbudget meals 50 USD monthly\n", day(2026, 3, 31), |book, run| {
+        let report =
+            crate::report(book, run, &Query::Budget { at: Some(day(2027, 2, 1)), by: axiom_model::Period::Year }, None)
+                .unwrap();
+        let section = &report.sections[0];
+        assert!(section.rows.is_empty());
+        assert_eq!(
+            section.notes.iter().map(crate::tests::cell).collect::<Vec<_>>(),
+            ["The requested budget window is beyond the run horizon."]
+        );
+    });
 }
 
 // ─── Looking ahead to the day a return closes ───────────────────────────────
@@ -1886,10 +1436,8 @@ fn available_runs_the_books_to_the_day_the_return_closes_to_price_a_withdrawal()
     with_run(IRA, day(2026, 6, 1), |book, run| {
         let available = Query::Available { at: None };
         let report = crate::report(book, run, &available, None).unwrap();
-        let reach = report
-            .sections
-            .iter()
-            .find(|s| crate::tests::heading(s) == Some("What it would take to reach the rest"));
+        let reach =
+            report.sections.iter().find(|s| crate::tests::heading(s) == Some("What it would take to reach the rest"));
         assert_eq!(
             lines(reach.unwrap())[0],
             "ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
@@ -1992,15 +1540,8 @@ fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horiz
         let forecast = |until| Query::Forecast { until, paths: 1 };
         let report = crate::report(book, run, &forecast(None), None).unwrap();
         assert_eq!(crate::tests::cell(&report.title), "Forecast to 2027-04-15");
-        let owed = report
-            .sections
-            .iter()
-            .find(|s| crate::tests::heading(s) == Some("Obligations coming due"))
-            .unwrap();
-        assert_eq!(
-            lines(owed),
-            ["2027-04-15 | income-tax | treasury | 1,200.00 USD"]
-        );
+        let owed = report.sections.iter().find(|s| crate::tests::heading(s) == Some("Obligations coming due")).unwrap();
+        assert_eq!(lines(owed), ["2027-04-15 | income-tax | treasury | 1,200.00 USD"]);
 
         // What was asked for is what is shown.
         let asked = crate::report(book, run, &forecast(Some(day(2027, 1, 10))), None).unwrap();
@@ -2012,16 +1553,7 @@ fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horiz
 #[test]
 fn the_forecast_stops_at_a_year_when_the_next_closing_day_is_far() {
     with_system_project(SALARY_SYSTEM, SALARY, day(2026, 5, 10), |book, run| {
-        let report = crate::report(
-            book,
-            run,
-            &Query::Forecast {
-                until: None,
-                paths: 1,
-            },
-            None,
-        )
-        .unwrap();
+        let report = crate::report(book, run, &Query::Forecast { until: None, paths: 1 }, None).unwrap();
         assert_eq!(crate::tests::cell(&report.title), "Forecast to 2027-05-10");
     });
 }
@@ -2050,11 +1582,7 @@ opening 2025-01-01
 #[test]
 fn a_register_says_where_each_gap_came_from() {
     with_run(GAPS, day(2025, 12, 31), |book, run| {
-        let register = Query::Register {
-            place: "k",
-            from: None,
-            to: None,
-        };
+        let register = Query::Register { place: "k", from: None, to: None };
         assert_eq!(
             rows(book, run, register),
             [
@@ -2078,18 +1606,9 @@ fn the_line_of_an_assertion_says_where_its_gap_came_from() {
                 lines(&crate::report(book, run, &line, None).unwrap().sections[0])[0].clone()
             })
             .collect();
-        assert!(
-            words[0].starts_with("assertion: assets/k = 9,000.00 USD, revalued via market"),
-            "{words:?}"
-        );
-        assert!(
-            words[1].starts_with(
-                "assertion: assets/k = 9,500.00 USD, unexplained gap, accepted with !"
-            )
-        );
-        assert!(
-            words[2].starts_with("assertion: assets/k = 9,800.00 USD, gap via assets/checking")
-        );
+        assert!(words[0].starts_with("assertion: assets/k = 9,000.00 USD, revalued via market"), "{words:?}");
+        assert!(words[1].starts_with("assertion: assets/k = 9,500.00 USD, unexplained gap, accepted with !"));
+        assert!(words[2].starts_with("assertion: assets/k = 9,800.00 USD, gap via assets/checking"));
     });
 }
 
@@ -2097,20 +1616,14 @@ fn the_line_of_an_assertion_says_where_its_gap_came_from() {
 #[test]
 fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
     with_run(GAPS, day(2025, 12, 31), |book, run| {
-        let register = |place| Query::Register {
-            place,
-            from: None,
-            to: None,
-        };
+        let register = |place| Query::Register { place, from: None, to: None };
         assert_eq!(
             rows(book, run, register("checking")).last().unwrap(),
             "2025-09-30 | assets/k |  | gap via assets/checking | -300.00 USD | 4,700.00 USD"
         );
         assert_eq!(
             rows(book, run, register("market")),
-            [
-                "2025-03-31 |  | assets/k → market | 1,000.00 USD | revalued via market | actual | @1"
-            ]
+            ["2025-03-31 |  | assets/k → market | 1,000.00 USD | revalued via market | actual | @1"]
         );
     });
 }
@@ -2121,21 +1634,12 @@ fn snapshots_apply_assertion_pads_through_each_requested_day() {
         let whose = crate::lens::Whose::default();
         let plan = axiom_engine::Plan::new(book);
         let lens = crate::lens::Lens::new(&plan, &whose, run.today);
-        let days = [
-            day(2025, 1, 1),
-            day(2025, 3, 31),
-            day(2025, 6, 30),
-            day(2025, 9, 30),
-        ];
+        let days = [day(2025, 1, 1), day(2025, 3, 31), day(2025, 6, 30), day(2025, 9, 30)];
         let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
         let place = book.place("assets/k").unwrap();
-        let balances: Vec<_> = (0..days.len())
-            .map(|column| snapshots.subtree(book, column, place).get(book.base))
-            .collect();
-        assert_eq!(
-            balances,
-            [Qty(1_000_000), Qty(900_000), Qty(950_000), Qty(980_000)]
-        );
+        let balances: Vec<_> =
+            (0..days.len()).map(|column| snapshots.subtree(book, column, place).get(book.base)).collect();
+        assert_eq!(balances, [Qty(1_000_000), Qty(900_000), Qty(950_000), Qty(980_000)]);
     });
 }
 
@@ -2163,12 +1667,7 @@ opening 2025-01-01
         let whose = crate::lens::Whose::default();
         let plan = axiom_engine::Plan::new(book);
         let lens = crate::lens::Lens::new(&plan, &whose, run.today);
-        let days = [
-            day(2025, 1, 1),
-            day(2025, 1, 2),
-            day(2025, 1, 3),
-            day(2025, 1, 4),
-        ];
+        let days = [day(2025, 1, 1), day(2025, 1, 2), day(2025, 1, 3), day(2025, 1, 4)];
         let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
         let broker = book.place("assets/broker").unwrap();
         let checking = book.place("assets/checking").unwrap();
@@ -2226,38 +1725,19 @@ fn basis_consumption_and_later_replay_preserve_the_native_purchase_economics() {
             .sum();
         assert_eq!(consumed, Qty(30_000));
 
-        let balance = Query::Balance {
-            globs: vec![],
-            at: None,
-            value: false,
-            monthly: false,
-        };
-        assert_eq!(
-            rows(book, run, balance),
-            ["=checking | 1,000.00 USD", "=house | 1 house",]
-        );
+        let balance = Query::Balance { globs: vec![], at: None, value: false, monthly: false };
+        assert_eq!(rows(book, run, balance), ["=checking | 1,000.00 USD", "=house | 1 house",]);
 
         let plan = axiom_engine::Plan::new(book);
         let whose = crate::lens::Whose::default();
         let lens = crate::lens::Lens::new(&plan, &whose, run.today);
-        let days = [
-            day(2025, 1, 1),
-            day(2025, 2, 28),
-            day(2026, 4, 16),
-            day(2026, 5, 1),
-        ];
+        let days = [day(2025, 1, 1), day(2025, 2, 28), day(2026, 4, 16), day(2026, 5, 1)];
         let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
         let checking = book.place("checking").unwrap();
         let house = book.place("house").unwrap();
         let house_unit = book.assets[asset].unit;
-        assert_eq!(
-            snapshots.subtree(book, 0, checking).get(book.base),
-            Qty(100_000)
-        );
-        assert_eq!(
-            snapshots.subtree(book, 1, checking).get(book.base),
-            Qty(100_000)
-        );
+        assert_eq!(snapshots.subtree(book, 0, checking).get(book.base), Qty(100_000));
+        assert_eq!(snapshots.subtree(book, 1, checking).get(book.base), Qty(100_000));
         assert_eq!(
             snapshots.subtree(book, 2, checking).get(book.base),
             Qty(100_000),
@@ -2269,10 +1749,7 @@ fn basis_consumption_and_later_replay_preserve_the_native_purchase_economics() {
             "the May repair lowers cash by exactly $1"
         );
         for column in 0..days.len() {
-            assert_eq!(
-                snapshots.subtree(book, column, house).get(house_unit),
-                Qty(1)
-            );
+            assert_eq!(snapshots.subtree(book, column, house).get(house_unit), Qty(1));
         }
     });
 }

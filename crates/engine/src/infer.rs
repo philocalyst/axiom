@@ -36,9 +36,7 @@ pub(crate) fn solve(book: &Book, events: &Events, sides: &Sides) -> Solution {
         .flows
         .iter()
         .filter(|(id, flow)| {
-            flow.infer == Infer::Unknown
-                && book.txns[flow.txn].occurrence.is_none()
-                && is_real(events.state(*id, flow))
+            flow.infer == Infer::Unknown && book.txns[flow.txn].occurrence.is_none() && is_real(events.state(*id, flow))
         })
         .map(|(id, _)| id)
         .collect();
@@ -257,10 +255,8 @@ impl Stretches<'_> {
         let txn = &self.book.txns[flow.txn];
         let Some(program_id) = txn.program else { return false };
         let Some(program) = self.book.journal_programs.get(program_id) else { return false };
-        let Some(offset) = id
-            .index()
-            .checked_sub(txn.flows.start().index())
-            .and_then(|offset| u32::try_from(offset).ok())
+        let Some(offset) =
+            id.index().checked_sub(txn.flows.start().index()).and_then(|offset| u32::try_from(offset).ok())
         else {
             return false;
         };
@@ -284,8 +280,7 @@ fn lands(book: &Book, id: Id<Flow>, flow: &Flow, state: State) -> [Option<(Momen
     let txn = &book.txns[flow.txn];
     let source = SourceOrder {
         txn: u32::try_from(flow.txn.index()).unwrap_or(u32::MAX),
-        flow: u32::try_from(id.index().saturating_sub(txn.flows.start().index()))
-            .unwrap_or(u32::MAX),
+        flow: u32::try_from(id.index().saturating_sub(txn.flows.start().index())).unwrap_or(u32::MAX),
     };
     let source_fact = Fact::Source(source, SourceFact::Flow(id));
     match state {

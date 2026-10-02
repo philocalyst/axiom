@@ -16,9 +16,7 @@ use std::iter;
 use axiom_core::day::days_in_month;
 use axiom_core::{Arena, Day, Days, Id, Map, Qty, Set, Span};
 use axiom_engine::{Checkpoint, Effect, Plan, Run, Violation};
-use axiom_model::{
-    Amount, Book, Contract, Law, Period, RuntimeDetail, RuntimeFlow, ScheduleKind, Subject,
-};
+use axiom_model::{Amount, Book, Contract, Law, Period, RuntimeDetail, RuntimeFlow, ScheduleKind, Subject};
 
 use self::bands::{Bands, Share};
 use self::expected::{Expectation, Origin, covered_by_contract, covered_on, expected};
@@ -48,16 +46,7 @@ pub fn view_from<'p, 'b, 's>(
     until: Option<Day>,
     paths: u32,
 ) -> Report<'b> {
-    view_with(
-        plan,
-        Some(checkpoint),
-        Some(historical_effects),
-        run,
-        lens,
-        relaxed,
-        until,
-        paths,
-    )
+    view_with(plan, Some(checkpoint), Some(historical_effects), run, lens, relaxed, until, paths)
 }
 
 pub(crate) fn view_with_lens<'b, 's>(
@@ -66,16 +55,7 @@ pub(crate) fn view_with_lens<'b, 's>(
     until: Option<Day>,
     paths: u32,
 ) -> Report<'b> {
-    view_with(
-        lens.plan(),
-        None,
-        None,
-        run,
-        lens,
-        lens.book().relaxed,
-        until,
-        paths,
-    )
+    view_with(lens.plan(), None, None, run, lens, lens.book().relaxed, until, paths)
 }
 
 fn view_with<'p, 'b, 's>(
@@ -90,9 +70,7 @@ fn view_with<'p, 'b, 's>(
 ) -> Report<'b> {
     let book = lens.book();
     let today = run.today;
-    let until = until
-        .unwrap_or_else(|| default_horizon(book, today))
-        .max(today);
+    let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
 
     let expected = expected(lens, run);
     let mut flows: Vec<RuntimeFlow> = expected
@@ -108,24 +86,16 @@ fn view_with<'p, 'b, 's>(
     flows.sort_by_key(|flow| flow.flow.day);
     let checkpoints = checkpoints(today, until);
     let trace = match checkpoint {
-        Some(checkpoint) => project_runtime_from(
-            plan,
-            checkpoint,
-            lens,
-            today,
-            relaxed,
-            flows,
-            &runtime_details,
-            &checkpoints,
-        ),
+        Some(checkpoint) => {
+            project_runtime_from(plan, checkpoint, lens, today, relaxed, flows, &runtime_details, &checkpoints)
+        }
         None => project_runtime(plan, lens, today, flows, &runtime_details, &checkpoints),
     };
 
     let due = coming_due(&trace, historical_effects, lens.whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
     let variable = Variable::from_history(lens, run, |flow| {
-        expected.iter().any(|expectation| expectation.covers(flow))
-            || covered_by_contract(book, flow)
+        expected.iter().any(|expectation| expectation.covers(flow)) || covered_by_contract(book, flow)
     });
     let bands = simulate(&checkpoints, &committed, &variable, paths);
 
@@ -140,15 +110,12 @@ fn view_with<'p, 'b, 's>(
         ));
     }
 
-    let mut report = Report::new(format!("Forecast to {until}"))
-        .with(outlook)
-        .with(expected_section(lens, &expected, today, until));
+    let mut report =
+        Report::new(format!("Forecast to {until}")).with(outlook).with(expected_section(lens, &expected, today, until));
     if !book.contracts.is_empty() {
         report = report.with(contract_section(book, &contract_rows, &contract_issues));
     }
-    report
-        .with(owed_section(book, &due))
-        .with(problems_section(book, &trace, today))
+    report.with(owed_section(book, &due)).with(problems_section(book, &trace, today))
 }
 
 /// A return that closes within this long after the default horizon is looked
@@ -167,9 +134,7 @@ fn default_horizon(book: &Book, today: Day) -> Day {
 /// Today, then the end of every month up to `until`, which closes the last.
 fn checkpoints(today: Day, until: Day) -> Vec<Day> {
     let months = Periods::covering(Period::Month, today, until);
-    let mut days: Vec<Day> = iter::once(today)
-        .chain(months.ends().map(|end| end.min(until)))
-        .collect();
+    let mut days: Vec<Day> = iter::once(today).chain(months.ends().map(|end| end.min(until))).collect();
     days.dedup();
     days
 }
@@ -185,12 +150,7 @@ fn coming_due<'a>(
     whose: &Whose,
     today: Day,
 ) -> Vec<&'a Effect> {
-    let mut due = select_due_effects(
-        historical_effects,
-        trace.ledger.recorded().effects,
-        whose,
-        today,
-    );
+    let mut due = select_due_effects(historical_effects, trace.ledger.recorded().effects, whose, today);
     due.sort_by_key(|effect| effect.owed().map(|owed| owed.due));
     due
 }
@@ -204,40 +164,22 @@ fn select_due_effects<'a>(
     whose: &Whose,
     today: Day,
 ) -> Vec<&'a Effect> {
-    let belongs = |effect: &&Effect| {
-        whose.includes(effect.owner) && effect.owed().is_some_and(|owed| owed.due > today)
-    };
-    historical
-        .into_iter()
-        .flat_map(|effects| effects.iter())
-        .chain(resumed.iter())
-        .filter(belongs)
-        .collect()
+    let belongs = |effect: &&Effect| whose.includes(effect.owner) && effect.owed().is_some_and(|owed| owed.due > today);
+    historical.into_iter().flat_map(|effects| effects.iter()).chain(resumed.iter()).filter(belongs).collect()
 }
 
 /// The liquid position at each checkpoint, less obligations already due.
 fn committed(lens: Lens, checkpoints: &[Day], liquid: &[Qty], due: &[&Effect]) -> Vec<Qty> {
     let lens = lens.on(checkpoints[0]);
     let owed_by = |day: Day| -> Qty {
-        let paid = due
-            .iter()
-            .filter(|effect| effect.owed().is_some_and(|owed| owed.due <= day));
+        let paid = due.iter().filter(|effect| effect.owed().is_some_and(|owed| owed.due <= day));
         paid.filter_map(|effect| lens.value(effect.amount)).sum()
     };
-    checkpoints
-        .iter()
-        .zip(liquid)
-        .map(|(&day, &liquid)| liquid - owed_by(day))
-        .collect()
+    checkpoints.iter().zip(liquid).map(|(&day, &liquid)| liquid - owed_by(day)).collect()
 }
 
 /// Bands for every checkpoint after today, if there is a past to draw on.
-fn simulate(
-    checkpoints: &[Day],
-    committed: &[Qty],
-    variable: &Variable,
-    paths: u32,
-) -> Option<Bands> {
+fn simulate(checkpoints: &[Day], committed: &[Qty], variable: &Variable, paths: u32) -> Option<Bands> {
     if paths == 0 || variable.months < MIN_HISTORY_MONTHS || variable.categories.is_empty() {
         return None;
     }
@@ -248,10 +190,7 @@ fn simulate(
         .windows(2)
         .map(|pair| {
             let (year, month, _) = pair[1].ymd();
-            Share {
-                days: i64::from(pair[1].0 - pair[0].0),
-                of: i64::from(days_in_month(year, month)),
-            }
+            Share { days: i64::from(pair[1].0 - pair[0].0), of: i64::from(days_in_month(year, month)) }
         })
         .collect();
     Some(bands::simulate(
@@ -268,12 +207,7 @@ fn simulate(
 // ─── Sections ───────────────────────────────────────────────────────────────
 
 /// How the outlook was worked out, in plain words.
-fn method_notes(
-    book: &Book,
-    bands: Option<&Bands>,
-    history_months: usize,
-    paths: u32,
-) -> [String; 2] {
+fn method_notes(book: &Book, bands: Option<&Bands>, history_months: usize, paths: u32) -> [String; 2] {
     let committed = format!(
         "Committed: money in hand, less what is owed on debts with no term and on obligations as they fall due, in {}, \
          after plans, recurring flows found in history and what they can still give. Investments and property are net \
@@ -288,9 +222,7 @@ fn method_notes(
             bands.paths()
         ),
         None if paths == 0 => "Bands are off (--paths 0).".to_string(),
-        None => format!(
-            "Bands need {MIN_HISTORY_MONTHS} full months of spending history; there is not enough yet."
-        ),
+        None => format!("Bands need {MIN_HISTORY_MONTHS} full months of spending history; there is not enough yet."),
     };
     [committed, spread]
 }
@@ -302,49 +234,29 @@ fn outlook_section<'s>(
     worth: &[Qty],
     bands: Option<&Bands>,
 ) -> Section<'s> {
-    let mut columns = vec![
-        Column::left("Month end"),
-        Column::right("Committed"),
-        Column::right("Net worth"),
-    ];
+    let mut columns = vec![Column::left("Month end"), Column::right("Committed"), Column::right("Net worth")];
     if bands.is_some() {
         columns.extend(["p10", "p50", "p90"].map(Column::right));
     }
     let mut section = Section::new(columns).headed("Liquid net worth");
-    for (index, ((&day, &qty), &worth)) in checkpoints.iter().zip(committed).zip(worth).enumerate()
-    {
-        let mut cells = vec![
-            Cell::Day(day),
-            Cell::base(book, qty),
-            Cell::base(book, worth),
-        ];
+    for (index, ((&day, &qty), &worth)) in checkpoints.iter().zip(committed).zip(worth).enumerate() {
+        let mut cells = vec![Cell::Day(day), Cell::base(book, qty), Cell::base(book, worth)];
         if let Some(bands) = bands {
             // The first checkpoint is today: nothing has been spent yet.
             let spread = match index.checked_sub(1) {
-                Some(month) => bands
-                    .percentiles(month)
-                    .map(|quanta| Cell::base(book, Qty(quanta))),
+                Some(month) => bands.percentiles(month).map(|quanta| Cell::base(book, Qty(quanta))),
                 None => [Cell::Blank, Cell::Blank, Cell::Blank],
             };
             cells.extend(spread);
         }
-        section.push(Row::new(cells).style(if qty.is_negative() {
-            Style::Alert
-        } else {
-            Style::Normal
-        }));
+        section.push(Row::new(cells).style(if qty.is_negative() { Style::Alert } else { Style::Normal }));
     }
     section
 }
 
 /// One row for each thing that recurs, soonest first: a paycheck's legs are one
 /// row, shown under its biggest leg with what all of them come to.
-fn expected_section<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    expected: &[Expectation],
-    today: Day,
-    until: Day,
-) -> Section<'s> {
+fn expected_section<'s>(lens: Lens<'s, '_, '_, '_>, expected: &[Expectation], today: Day, until: Day) -> Section<'s> {
     let book = lens.book();
     let columns = [
         Column::left("Expected"),
@@ -360,17 +272,9 @@ fn expected_section<'s>(
             continue;
         };
         let flow = main.template;
-        let payee = flow
-            .payee
-            .map(|entity| format!(" ({})", book.name(book.entities[entity].path)));
-        let more =
-            (legs.len() > 1).then(|| format!(", and {}", plural(legs.len() - 1, "more leg")));
-        let what = format!(
-            "{}{}{}",
-            route(book, flow),
-            payee.unwrap_or_default(),
-            more.unwrap_or_default()
-        );
+        let payee = flow.payee.map(|entity| format!(" ({})", book.name(book.entities[entity].path)));
+        let more = (legs.len() > 1).then(|| format!(", and {}", plural(legs.len() - 1, "more leg")));
+        let what = format!("{}{}{}", route(book, flow), payee.unwrap_or_default(), more.unwrap_or_default());
         let total = legs
             .iter()
             .filter(|leg| leg.out.unit == main.out.unit)
@@ -378,11 +282,7 @@ fn expected_section<'s>(
             .sum();
         let next = legs
             .iter()
-            .flat_map(|leg| {
-                leg.schedule
-                    .days(today, until)
-                    .filter(move |&day| !covered_on(book, leg.template, day))
-            })
+            .flat_map(|leg| leg.schedule.days(today, until).filter(move |&day| !covered_on(book, leg.template, day)))
             .min();
         let source = match main.origin {
             Origin::Habit { occurrences } => format!("seen {occurrences} times"),
@@ -430,12 +330,7 @@ fn contract_forecasts<'s>(
     today: Day,
     until: Day,
     relaxed: bool,
-) -> (
-    Vec<RuntimeFlow>,
-    Arena<RuntimeDetail>,
-    Vec<ContractRow>,
-    Vec<(Id<Contract>, String)>,
-) {
+) -> (Vec<RuntimeFlow>, Arena<RuntimeDetail>, Vec<ContractRow>, Vec<(Id<Contract>, String)>) {
     let book = lens.book();
     let mut flows = Vec::new();
     let mut details = Arena::new();
@@ -446,8 +341,7 @@ fn contract_forecasts<'s>(
         .txns
         .iter()
         .filter_map(|(_, txn)| {
-            let (contract, schedule, written) =
-                (txn.contract?, txn.contract_schedule?, txn.occurrence?);
+            let (contract, schedule, written) = (txn.contract?, txn.contract_schedule?, txn.occurrence?);
             let occurrence = book.written_occurrences.get(written)?;
             Some((contract, schedule, occurrence.due))
         })
@@ -458,10 +352,7 @@ fn contract_forecasts<'s>(
 
     // Preserve the query's source flows while deriving contract occurrences:
     // computed roots at a later due date must see earlier forecast postings.
-    let options = axiom_engine::Options {
-        today: until,
-        relaxed,
-    };
+    let options = axiom_engine::Options { today: until, relaxed };
     let mut ledger = match checkpoint {
         Some(checkpoint) => plan.resume(checkpoint, options),
         None => plan.start(options),
@@ -491,12 +382,7 @@ fn contract_forecasts<'s>(
                 issues.push((id, "too many scheduled occurrences to identify".to_string()));
                 break;
             };
-            scheduled.push(Scheduled {
-                day: occurrence.day,
-                contract: id,
-                schedule: occurrence.schedule,
-                ordinal,
-            });
+            scheduled.push(Scheduled { day: occurrence.day, contract: id, schedule: occurrence.schedule, ordinal });
         }
     }
     scheduled.sort_by_key(|occurrence| {
@@ -524,24 +410,17 @@ fn contract_forecasts<'s>(
         };
         ledger.advance_to_closing(day);
 
-        while expected_flows
-            .get(source)
-            .is_some_and(|flow| flow.flow.day == day)
-        {
+        while expected_flows.get(source).is_some_and(|flow| flow.flow.day == day) {
             let flow = &expected_flows[source];
             ledger.apply_runtime(flow, &details);
             source += 1;
         }
 
-        while scheduled
-            .get(occurrence)
-            .is_some_and(|item| item.day == day)
-        {
+        while scheduled.get(occurrence).is_some_and(|item| item.day == day) {
             let item = scheduled[occurrence];
             occurrence += 1;
             let contract = &book.contracts[item.contract];
-            let (flow_start, detail_start, missing_start) =
-                (flows.len(), details.len(), missing_inputs.len());
+            let (flow_start, detail_start, missing_start) = (flows.len(), details.len(), missing_inputs.len());
             let made = match ledger.instantiate_occurrence(
                 item.contract,
                 item.schedule,
@@ -572,30 +451,17 @@ fn contract_forecasts<'s>(
             let amount = main.map(|main| {
                 let qty = contract_flows
                     .iter()
-                    .filter(|flow| {
-                        flow.flow.day == item.day && flow.flow.out.unit == main.flow.out.unit
-                    })
-                    .map(|flow| {
-                        crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty)
-                    })
+                    .filter(|flow| flow.flow.day == item.day && flow.flow.out.unit == main.flow.out.unit)
+                    .map(|flow| crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty))
                     .sum();
                 Amount::new(qty, main.flow.out.unit)
             });
-            let what = main.map_or_else(
-                || book.name(contract.name).to_string(),
-                |flow| route(book, &flow.flow),
-            );
+            let what = main.map_or_else(|| book.name(contract.name).to_string(), |flow| route(book, &flow.flow));
             let cadence = contract
                 .terms_on_schedule(item.schedule, item.day)
                 .map(|terms| describe_contract(terms.every))
                 .unwrap_or_else(|| "scheduled".to_string());
-            rows.push(ContractRow {
-                contract: item.contract,
-                every: cadence,
-                what,
-                next: item.day,
-                amount,
-            });
+            rows.push(ContractRow { contract: item.contract, every: cadence, what, next: item.day, amount });
             for flow in contract_flows {
                 ledger.apply_runtime(flow, &details);
             }
@@ -603,18 +469,11 @@ fn contract_forecasts<'s>(
                 let names = contract
                     .terms_on_schedule(item.schedule, item.day)
                     .into_iter()
-                    .flat_map(|terms| {
-                        missing
-                            .iter()
-                            .filter_map(|&index| terms.inputs.get(index as usize))
-                    })
+                    .flat_map(|terms| missing.iter().filter_map(|&index| terms.inputs.get(index as usize)))
                     .map(|input| book.name(input.name))
                     .collect::<Vec<_>>()
                     .join(", ");
-                issues.push((
-                    item.contract,
-                    format!("required input(s) are missing: {names}"),
-                ));
+                issues.push((item.contract, format!("required input(s) are missing: {names}")));
             }
         }
         ledger.advance(day);
@@ -636,34 +495,20 @@ fn contract_section<'s>(
     contracts: &[ContractRow],
     issues: &[(Id<Contract>, String)],
 ) -> Section<'s> {
-    let mut section = Section::new([
-        Column::left("Contract"),
-        Column::left("Every"),
-        Column::right("Amount"),
-        Column::left("Next"),
-    ])
-    .headed("Contract occurrences");
+    let mut section =
+        Section::new([Column::left("Contract"), Column::left("Every"), Column::right("Amount"), Column::left("Next")])
+            .headed("Contract occurrences");
     for row in contracts {
-        let amount = row
-            .amount
-            .map_or(Cell::Blank, |amount| Cell::amount(book, amount));
+        let amount = row.amount.map_or(Cell::Blank, |amount| Cell::amount(book, amount));
         section.push(Row::new([
-            Cell::text(format!(
-                "{} · {}",
-                book.name(book.contracts[row.contract].name),
-                row.what
-            )),
+            Cell::text(format!("{} · {}", book.name(book.contracts[row.contract].name), row.what)),
             Cell::text(row.every.clone()),
             amount,
             Cell::Day(row.next),
         ]));
     }
     for (id, error) in issues {
-        section.note(format!(
-            "{} could not be forecast: {}",
-            book.name(book.contracts[*id].name),
-            error
-        ));
+        section.note(format!("{} could not be forecast: {}", book.name(book.contracts[*id].name), error));
     }
     if !issues.is_empty() {
         section.note(format!(
@@ -678,12 +523,7 @@ fn contract_section<'s>(
 }
 
 fn owed_section<'s>(book: &'s Book<'_>, due: &[&Effect]) -> Section<'s> {
-    let columns = [
-        Column::left("Due"),
-        Column::left("Obligation"),
-        Column::left("To"),
-        Column::right("Amount"),
-    ];
+    let columns = [Column::left("Due"), Column::left("Obligation"), Column::left("To"), Column::right("Amount")];
     let mut section = Section::new(columns).headed("Obligations coming due");
     for effect in due {
         let Some(owed) = effect.owed() else { continue };
@@ -702,54 +542,27 @@ fn owed_section<'s>(book: &'s Book<'_>, due: &[&Effect]) -> Section<'s> {
 fn problems_section<'s>(book: &'s Book<'_>, trace: &Trace<'_, '_, '_>, today: Day) -> Section<'s> {
     let recorded = trace.ledger.recorded();
     let mut repeats: Map<(Id<Law>, Subject), (usize, &Violation)> = Map::default();
-    for violation in recorded
-        .violations
-        .iter()
-        .filter(|violation| violation.day > today)
-    {
-        repeats
-            .entry((violation.law, violation.subject))
-            .or_insert((0, violation))
-            .0 += 1;
+    for violation in recorded.violations.iter().filter(|violation| violation.day > today) {
+        repeats.entry((violation.law, violation.subject)).or_insert((0, violation)).0 += 1;
     }
     let mut problems: Vec<(Day, String, Style)> = Vec::new();
     for (count, first) in repeats.into_values() {
         let message = &recorded.diagnostics[first.diagnostic as usize].message;
-        let more = if count > 1 {
-            format!(" (and {} more)", count - 1)
-        } else {
-            String::new()
-        };
-        let text = format!(
-            "{}: {}{more}",
-            book.name(book.laws[first.law].name),
-            headline(message)
-        );
-        problems.push((
-            first.day,
-            text,
-            if first.verdict.is_waived() {
-                Style::Muted
-            } else {
-                Style::Alert
-            },
-        ));
+        let more = if count > 1 { format!(" (and {} more)", count - 1) } else { String::new() };
+        let text = format!("{}: {}{more}", book.name(book.laws[first.law].name), headline(message));
+        problems.push((first.day, text, if first.verdict.is_waived() { Style::Muted } else { Style::Alert }));
     }
     for overdraft in &trace.overdrafts {
         let lowest = book.show(Amount::new(overdraft.lowest, book.base));
         problems.push((
             overdraft.first,
-            format!(
-                "{} is overdrawn, down to {lowest}",
-                path(book, overdraft.place)
-            ),
+            format!("{} is overdrawn, down to {lowest}", path(book, overdraft.place)),
             Style::Alert,
         ));
     }
     problems.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
 
-    let mut section =
-        Section::new([Column::left("Date"), Column::left("Problem")]).headed("Problems ahead");
+    let mut section = Section::new([Column::left("Date"), Column::left("Problem")]).headed("Problems ahead");
     for (day, text, style) in problems {
         section.push(Row::new([Cell::Day(day), Cell::text(text)]).style(style));
     }
@@ -772,22 +585,11 @@ mod tests {
         // Mid-month: a partial first month, and a horizon that ends the last.
         assert_eq!(
             checkpoints(day(2026, 3, 15), day(2026, 5, 10)),
-            [
-                day(2026, 3, 15),
-                day(2026, 3, 31),
-                day(2026, 4, 30),
-                day(2026, 5, 10)
-            ]
+            [day(2026, 3, 15), day(2026, 3, 31), day(2026, 4, 30), day(2026, 5, 10)]
         );
         // Standing on a month end, it is not repeated.
-        assert_eq!(
-            checkpoints(day(2026, 3, 31), day(2026, 4, 30)),
-            [day(2026, 3, 31), day(2026, 4, 30)]
-        );
-        assert_eq!(
-            checkpoints(day(2026, 3, 31), day(2026, 3, 31)),
-            [day(2026, 3, 31)]
-        );
+        assert_eq!(checkpoints(day(2026, 3, 31), day(2026, 4, 30)), [day(2026, 3, 31), day(2026, 4, 30)]);
+        assert_eq!(checkpoints(day(2026, 3, 31), day(2026, 3, 31)), [day(2026, 3, 31)]);
     }
 
     #[test]
@@ -808,19 +610,11 @@ mod tests {
             day: when,
             name,
             amount: Amount::new(Qty(qty), base),
-            consequence: Consequence::Owe(Owed {
-                to: Id::new(0),
-                due,
-            }),
+            consequence: Consequence::Owe(Owed { to: Id::new(0), due }),
             cause,
         };
         let historical = [
-            effect(
-                today.add_days(-10),
-                Cause::Flow(Id::new(0)),
-                today.add_days(5),
-                1,
-            ),
+            effect(today.add_days(-10), Cause::Flow(Id::new(0)), today.add_days(5), 1),
             effect(today, Cause::Flow(Id::new(1)), today.add_days(4), 2),
             // A same-day assertion posting before closing also has Cause::Time.
             effect(today, Cause::Time, today.add_days(3), 3),
@@ -834,19 +628,14 @@ mod tests {
         ];
         let due = select_due_effects(Some(&historical), &resumed, &Whose::default(), today);
         assert_eq!(
-            due.iter()
-                .map(|effect| effect.amount.qty.0)
-                .collect::<Vec<_>>(),
+            due.iter().map(|effect| effect.amount.qty.0).collect::<Vec<_>>(),
             [1, 2, 3, 5, 6, 7],
             "the exact prefix keeps same-day pre-close Time effects, excludes already-due items, and adds each resumed closing once"
         );
 
         let fresh_trace_effects = select_due_effects(None, &historical, &Whose::default(), today);
         assert_eq!(
-            fresh_trace_effects
-                .iter()
-                .map(|effect| effect.amount.qty.0)
-                .collect::<Vec<_>>(),
+            fresh_trace_effects.iter().map(|effect| effect.amount.qty.0).collect::<Vec<_>>(),
             [1, 2, 3],
             "a fresh projection uses only its trace and does not add a paired-run prefix"
         );
@@ -871,16 +660,9 @@ contract rent with landlord
     fn forecast_materializes_contracts_even_when_the_run_monitor_is_incomplete() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
             assert!(!run.monitor_complete);
-            let report = crate::report(
-                book,
-                run,
-                &crate::Query::Forecast {
-                    until: Some(day(2026, 2, 28)),
-                    paths: 0,
-                },
-                None,
-            )
-            .unwrap();
+            let report =
+                crate::report(book, run, &crate::Query::Forecast { until: Some(day(2026, 2, 28)), paths: 0 }, None)
+                    .unwrap();
             let occurrences = report
                 .sections
                 .iter()
@@ -891,9 +673,12 @@ contract rent with landlord
                 (&occurrences.rows[0].cells[2], &occurrences.rows[0].cells[3]),
                 (Cell::Amount { qty: Qty(10_000), .. }, Cell::Day(due)) if *due == day(2026, 2, 15)
             ));
-            assert!(occurrences.notes.iter().all(|note| {
-                !crate::tests::cell(note).contains("did not finish the native occurrence monitor")
-            }));
+            assert!(
+                occurrences
+                    .notes
+                    .iter()
+                    .all(|note| { !crate::tests::cell(note).contains("did not finish the native occurrence monitor") })
+            );
         });
     }
 
@@ -902,16 +687,9 @@ contract rent with landlord
     #[test]
     fn native_contract_occurrences_change_projection_and_keep_typed_amounts() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
-            let report = crate::report(
-                book,
-                run,
-                &crate::Query::Forecast {
-                    until: Some(day(2026, 4, 30)),
-                    paths: 0,
-                },
-                None,
-            )
-            .unwrap();
+            let report =
+                crate::report(book, run, &crate::Query::Forecast { until: Some(day(2026, 4, 30)), paths: 0 }, None)
+                    .unwrap();
             let occurrences = report
                 .sections
                 .iter()
@@ -921,9 +699,7 @@ contract rent with landlord
                 .rows
                 .iter()
                 .filter_map(|row| match (&row.cells[0], &row.cells[2], &row.cells[3]) {
-                    (Cell::Text(title), Cell::Amount { qty, .. }, Cell::Day(due))
-                        if title.contains("rent") =>
-                    {
+                    (Cell::Text(title), Cell::Amount { qty, .. }, Cell::Day(due)) if title.contains("rent") => {
                         Some((*qty, *due))
                     }
                     _ => None,
@@ -931,11 +707,7 @@ contract rent with landlord
                 .collect();
             assert_eq!(
                 rent,
-                [
-                    (Qty(10_000), day(2026, 2, 15)),
-                    (Qty(10_000), day(2026, 3, 15)),
-                    (Qty(10_000), day(2026, 4, 15)),
-                ]
+                [(Qty(10_000), day(2026, 2, 15)), (Qty(10_000), day(2026, 3, 15)), (Qty(10_000), day(2026, 4, 15)),]
             );
             let outlook = &report.sections[0].rows;
             let Cell::Amount { qty: ending, .. } = outlook.last().unwrap().cells[1] else {

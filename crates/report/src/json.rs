@@ -107,10 +107,7 @@ pub fn diagnostics(diagnostics: &[&Diagnostic], sources: &dyn SourceProvider) ->
             },
         );
         out.push_str(",\"headline\":");
-        string(
-            &mut out,
-            diagnostic.message.lines().next().unwrap_or_default(),
-        );
+        string(&mut out, diagnostic.message.lines().next().unwrap_or_default());
         out.push_str(",\"message\":");
         string(&mut out, &diagnostic.message);
         out.push_str(",\"labels\":[");
@@ -144,11 +141,7 @@ pub fn diagnostics(diagnostics: &[&Diagnostic], sources: &dyn SourceProvider) ->
             location(&mut out, *loc, sources);
             // Edits use half-open ranges; the end position is the cursor just
             // after the replaced text, which stays on a UTF-8 boundary.
-            let end = Loc {
-                start: loc.end,
-                end: loc.end,
-                ..*loc
-            };
+            let end = Loc { start: loc.end, end: loc.end, ..*loc };
             let end_position = SourceProvider::describe(sources, end);
             out.push_str(",\"end_line\":");
             optional_number(&mut out, end_position.map(|position| position.line));
@@ -277,11 +270,7 @@ fn plain_string(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider)
 
 /// Writes a cell's human-readable form directly into an escaped JSON string.
 /// In particular, nested sentence parts never allocate a temporary `String`.
-fn write_plain(
-    out: &mut impl std::fmt::Write,
-    cell: &Cell<'_>,
-    sources: &dyn SourceProvider,
-) -> std::fmt::Result {
+fn write_plain(out: &mut impl std::fmt::Write, cell: &Cell<'_>, sources: &dyn SourceProvider) -> std::fmt::Result {
     match cell {
         Cell::Blank => Ok(()),
         Cell::Word(word) => out.write_str(word),
@@ -328,9 +317,7 @@ fn plain_visible(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
         Cell::Blank => false,
         Cell::Text(text) | Cell::Said(text) => !text.is_empty(),
         Cell::Word(text) | Cell::Name(text) | Cell::Purpose(text) => !text.is_empty(),
-        Cell::Source(loc) => {
-            SourceProvider::describe(sources, *loc).is_some_and(|pos| !pos.path.is_empty())
-        }
+        Cell::Source(loc) => SourceProvider::describe(sources, *loc).is_some_and(|pos| !pos.path.is_empty()),
         Cell::Join(_, parts) => parts.iter().any(|part| plain_visible(part, sources)),
         _ => true,
     }
@@ -347,9 +334,7 @@ fn starts_with_punctuation(cell: &Cell<'_>, sources: &dyn SourceProvider) -> boo
                 .find(|part| plain_visible(part, sources))
                 .is_some_and(|part| starts_with_punctuation(part, sources));
         }
-        Cell::Source(loc) => {
-            SourceProvider::describe(sources, *loc).and_then(|pos| pos.path.chars().next())
-        }
+        Cell::Source(loc) => SourceProvider::describe(sources, *loc).and_then(|pos| pos.path.chars().next()),
         _ => None,
     };
     first.is_some_and(|ch| matches!(ch, ',' | ';' | ':' | '.' | ')'))
@@ -399,11 +384,7 @@ fn digits(out: &mut String, qty: Qty, scale: u8) {
 
 fn write_period(out: &mut String, days: Days) {
     let end = |day: axiom_core::Day| {
-        if day == axiom_core::Day::MIN || day == axiom_core::Day::MAX {
-            None
-        } else {
-            Some(day)
-        }
+        if day == axiom_core::Day::MIN || day == axiom_core::Day::MAX { None } else { Some(day) }
     };
     out.push('{');
     out.push_str("\"from\":");
@@ -473,10 +454,7 @@ struct StackText {
 
 impl StackText {
     fn new() -> StackText {
-        StackText {
-            bytes: [0; 64],
-            len: 0,
-        }
+        StackText { bytes: [0; 64], len: 0 }
     }
 
     fn as_str(&self) -> &str {
@@ -486,11 +464,7 @@ impl StackText {
 
 impl std::fmt::Write for StackText {
     fn write_str(&mut self, text: &str) -> std::fmt::Result {
-        let Some(end) = self
-            .len
-            .checked_add(text.len())
-            .filter(|&end| end <= self.bytes.len())
-        else {
+        let Some(end) = self.len.checked_add(text.len()).filter(|&end| end <= self.bytes.len()) else {
             return Err(std::fmt::Error);
         };
         self.bytes[self.len..end].copy_from_slice(text.as_bytes());
@@ -518,11 +492,7 @@ fn location(out: &mut String, loc: Loc, sources: &dyn SourceProvider) {
     optional_number(out, position.map(|position| position.line));
     out.push_str(",\"column\":");
     optional_number(out, position.map(|position| position.column));
-    let _ = write!(
-        out,
-        ",\"file_id\":{},\"start_byte\":{},\"end_byte\":{}",
-        loc.file.0, loc.start, loc.end
-    );
+    let _ = write!(out, ",\"file_id\":{},\"start_byte\":{},\"end_byte\":{}", loc.file.0, loc.start, loc.end);
 }
 
 fn optional_number(out: &mut String, number: Option<usize>) {
@@ -592,16 +562,11 @@ mod tests {
             if path != self.path {
                 return None;
             }
-            let starts = std::iter::once(0)
-                .chain(self.text.match_indices('\n').map(|(at, _)| at + 1))
-                .collect::<Vec<_>>();
+            let starts =
+                std::iter::once(0).chain(self.text.match_indices('\n').map(|(at, _)| at + 1)).collect::<Vec<_>>();
             let start = *starts.get(line.checked_sub(1)?)?;
             let end = starts.get(line).copied().unwrap_or(self.text.len());
-            Some(Loc::new(
-                FileId(0),
-                start as u32,
-                end.min(self.text.len()) as u32,
-            ))
+            Some(Loc::new(FileId(0), start as u32, end.min(self.text.len()) as u32))
         }
 
         fn describe(&self, loc: Loc) -> Option<SourcePosition<'_>> {
@@ -616,31 +581,19 @@ mod tests {
             }
             Some({
                 let offset = start;
-                let line = self.text[..offset]
-                    .bytes()
-                    .filter(|byte| *byte == b'\n')
-                    .count();
+                let line = self.text[..offset].bytes().filter(|byte| *byte == b'\n').count();
                 let start = self.text[..offset].rfind('\n').map_or(0, |at| at + 1);
-                let column = self.text[start..]
-                    .char_indices()
-                    .take_while(|(relative, _)| start + *relative < offset)
-                    .count()
-                    + 1;
-                SourcePosition {
-                    path: &self.path,
-                    line: line + 1,
-                    column,
-                }
+                let column =
+                    self.text[start..].char_indices().take_while(|(relative, _)| start + *relative < offset).count()
+                        + 1;
+                SourcePosition { path: &self.path, line: line + 1, column }
             })
         }
     }
 
     #[test]
     fn report_json_preserves_typed_cells_and_escapes_text() {
-        let sources = InMemorySources {
-            path: "ledger.ax".to_string(),
-            text: "α\tchecking\n".to_string(),
-        };
+        let sources = InMemorySources { path: "ledger.ax".to_string(), text: "α\tchecking\n".to_string() };
         let report = Report {
             title: Cell::text("Balance \"sheet\"\n🧾"),
             sections: vec![Section {
@@ -648,19 +601,12 @@ mod tests {
                 columns: vec![
                     Column::left("Place"),
                     Column::right("Balance"),
-                    Column {
-                        title: Cell::Word("Since"),
-                        align: Align::Left,
-                    },
+                    Column { title: Cell::Word("Since"), align: Align::Left },
                     Column::left("Source"),
                 ],
                 rows: vec![Row::new([
                     Cell::text("Checking\\savings"),
-                    Cell::Amount {
-                        qty: Qty(-123_450),
-                        scale: 2,
-                        unit: "U\"D",
-                    },
+                    Cell::Amount { qty: Qty(-123_450), scale: 2, unit: "U\"D" },
                     Cell::Day(Day::from_ymd(2026, 3, 4).unwrap()),
                     Cell::Source(Loc::new(FileId(0), 0, 2)),
                 ])],
@@ -679,10 +625,7 @@ mod tests {
 
     #[test]
     fn json_source_and_empty_report_keep_stable_shapes() {
-        let sources = InMemorySources {
-            path: "journal/one.ax".to_string(),
-            text: "α\nnext\n".to_string(),
-        };
+        let sources = InMemorySources { path: "journal/one.ax".to_string(), text: "α\nnext\n".to_string() };
         let pos = SourceProvider::describe(&sources, Loc::new(FileId(0), 3, 5)).unwrap();
         assert_eq!((pos.path, pos.line, pos.column), ("journal/one.ax", 2, 1));
         assert_eq!(
@@ -695,19 +638,9 @@ mod tests {
             None,
             "out-of-bounds locations are rejected"
         );
+        assert_eq!(SourceProvider::describe(&sources, Loc::new(FileId(0), 5, 4)), None, "reversed ranges are rejected");
         assert_eq!(
-            SourceProvider::describe(&sources, Loc::new(FileId(0), 5, 4)),
-            None,
-            "reversed ranges are rejected"
-        );
-        assert_eq!(
-            render(
-                &Report {
-                    title: Cell::text(""),
-                    sections: Vec::new()
-                },
-                &sources
-            ),
+            render(&Report { title: Cell::text(""), sections: Vec::new() }, &sources),
             "{\"title\":\"\",\"sections\":[],\"facts\":[]}\n"
         );
         assert_eq!(crate::percent(Ratio::percent(25, 2).unwrap()), "0.25%");
@@ -715,10 +648,7 @@ mod tests {
 
     #[test]
     fn diagnostics_keep_messages_notes_edits_and_exact_ranges() {
-        let sources = InMemorySources {
-            path: "journal/one.ax".to_string(),
-            text: "a\tβc\nlast\n".to_string(),
-        };
+        let sources = InMemorySources { path: "journal/one.ax".to_string(), text: "a\tβc\nlast\n".to_string() };
         let loc = Loc::new(FileId(0), 2, 9);
         let diagnostic = Diagnostic::error("bad\"entry", "headline\nsecond line")
             .label(loc, "near \"beta\"")
@@ -726,9 +656,7 @@ mod tests {
             .help("replace it")
             .fix("use a name", loc, "owner");
         let output = diagnostics(&[&diagnostic], &sources);
-        assert!(
-            output.contains("\"headline\":\"headline\",\"message\":\"headline\\nsecond line\"")
-        );
+        assert!(output.contains("\"headline\":\"headline\",\"message\":\"headline\\nsecond line\""));
         assert!(output.contains("\"file\":\"journal/one.ax\",\"line\":1,\"column\":3"));
         assert!(output.contains("\"start_byte\":2,\"end_byte\":9"));
         assert!(output.contains("\"end_line\":2,\"end_column\":4"));

@@ -60,10 +60,9 @@ pub(crate) fn subject_key(subject: Subject) -> (u8, usize) {
 pub(crate) fn fault(book: &Book, fault: Fault, day: Day) -> (String, Option<String>) {
     let symbol = |unit: Id<Commodity>| book.name(book.commodities[unit].symbol);
     match fault {
-        Fault::InvalidProgram => (
-            "the compiled expression is invalid".into(),
-            Some("check the expression and its declared type".into()),
-        ),
+        Fault::InvalidProgram => {
+            ("the compiled expression is invalid".into(), Some("check the expression and its declared type".into()))
+        }
         Fault::MissingInput(index) => (
             format!("contract input {} has no value for {day}", usize::from(index) + 1),
             Some("supply this input on the contract occurrence".into()),

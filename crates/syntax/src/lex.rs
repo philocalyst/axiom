@@ -287,7 +287,8 @@ impl<'s> Lexer<'s> {
         let start = self.raw_start()?;
         let rest = &self.src[start..self.bytes.len()];
         // A `//` ends the text only where it would start a comment: after a blank.
-        let comment = rest.match_indices("//").find(|&(at, _)| at > 0 && matches!(rest.as_bytes()[at - 1], b' ' | b'\t'));
+        let comment =
+            rest.match_indices("//").find(|&(at, _)| at > 0 && matches!(rest.as_bytes()[at - 1], b' ' | b'\t'));
         let text = &rest[..comment.map_or(rest.len(), |(at, _)| at)];
         Some(self.resume(start, start + text.trim_end().len()))
     }
@@ -312,9 +313,8 @@ impl<'s> Lexer<'s> {
         }
         // `//` starts a comment only at the start of the line or after
         // whitespace: a path never contains `//`, and `a//b` is not a comment.
-        let comment = |first: u8| {
-            first == b'/' && bytes[start..].starts_with(b"//") && (start == self.body || start > self.pos)
-        };
+        let comment =
+            |first: u8| first == b'/' && bytes[start..].starts_with(b"//") && (start == self.body || start > self.pos);
         let Some(&first) = bytes.get(start).filter(|&&first| !comment(first)) else {
             self.pos = bytes.len();
             return Token { tok: Tok::Eol, loc: self.loc(self.last_end, self.last_end) };
@@ -669,7 +669,8 @@ fn is_rate(text: &str) -> bool {
 fn fraction_of(text: &str) -> Option<(u32, u32)> {
     let number = |part: &str| {
         let digits = part.bytes().all(|b| matches!(b, b'0'..=b'9' | b'_'));
-        let whole = Dec::parse(part.as_bytes()).filter(|_| digits && (!part.contains('_') || underscores_between_digits(part.as_bytes())));
+        let whole = Dec::parse(part.as_bytes())
+            .filter(|_| digits && (!part.contains('_') || underscores_between_digits(part.as_bytes())));
         whole.and_then(|dec| u32::try_from(dec.mantissa).ok())
     };
     let (top, bottom) = text.split_once('/')?;

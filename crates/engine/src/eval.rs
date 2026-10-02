@@ -16,14 +16,17 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Arena, Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field,
-    Func, Law, NodeId, Object, Op, Param, Prop, Purposed, RuntimeDetail, RuntimeFlow, SelectKey,
-    FlowCodes, StepKind, Subject, Text, Ty, Value, Var, Window,
+    self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field, FlowCodes, Func, Law,
+    NodeId, Object, Op, Param, Prop, Purposed, RuntimeDetail, RuntimeFlow, SelectKey, StepKind, Subject, Text, Ty,
+    Value, Var, Window,
 };
 
-use crate::calc::{Calc, progressive};
-use crate::budget::{carry_start as budget_carry_start, segment_end as budget_segment_end, segment_start as budget_segment_start, window as budget_window};
 use crate::assets::PartId;
+use crate::budget::{
+    carry_start as budget_carry_start, segment_end as budget_segment_end, segment_start as budget_segment_start,
+    window as budget_window,
+};
+use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::plan::Plan;
@@ -78,13 +81,7 @@ pub(crate) struct Occasion<'a> {
 
 impl<'a> Occasion<'a> {
     /// Something that happened on `day`, with nothing more said about it yet.
-    fn on(
-        day: Day,
-        over: Days,
-        span: Days,
-        cause: Cause,
-        motion: Option<&'a Motion<'a>>,
-    ) -> Occasion<'a> {
+    fn on(day: Day, over: Days, span: Days, cause: Cause, motion: Option<&'a Motion<'a>>) -> Occasion<'a> {
         let (amount, realized, skip_internal, checking) = (None, None, false, false);
         Occasion {
             day,
@@ -119,36 +116,23 @@ impl<'a> Occasion<'a> {
     /// A window that some flow recognized value into ahead of time, entered on
     /// `day`: the laws about its total are read as no flow will make them.
     pub fn window(day: Day, period: Days) -> Occasion<'static> {
-        Occasion {
-            checking: true,
-            ..Occasion::time(day, period)
-        }
+        Occasion { checking: true, ..Occasion::time(day, period) }
     }
 
     /// A purpose total reaches a new month or year before its flows land.
     pub fn purpose_window(day: Day, period: Days, window: Window) -> Occasion<'static> {
-        Occasion {
-            purpose_window: Some(window),
-            ..Occasion::window(day, period)
-        }
+        Occasion { purpose_window: Some(window), ..Occasion::window(day, period) }
     }
 
     /// A partial final period evaluated immediately before an asset is sold.
     pub fn partial_terminal(day: Day, period: Days) -> Occasion<'static> {
-        Occasion {
-            partial_terminal: true,
-            ..Occasion::on(day, Days::on(day), period, Cause::Time, None)
-        }
+        Occasion { partial_terminal: true, ..Occasion::on(day, Days::on(day), period, Cause::Time, None) }
     }
 
     /// The day whose window totals are read: the day a flow moved, or the last
     /// day of the period a law closes.
     pub fn anchor(&self) -> Day {
-        if self.motion.is_some() {
-            self.day
-        } else {
-            self.over.first()
-        }
+        if self.motion.is_some() { self.day } else { self.over.first() }
     }
 }
 
@@ -270,38 +254,20 @@ pub(crate) enum Outcome {
     /// A `require` or `warn` that does not hold.
     Broken { step: u32, warn: bool },
     /// A `require … else owe …` that did not hold: priced, and owed.
-    Priced {
-        step: u32,
-        name: Sym,
-        amount: Amount,
-        owed: Owed,
-    },
+    Priced { step: u32, name: Sym, amount: Amount, owed: Owed },
     /// A fault reached a step.
     Faulted { step: u32, fault: Fault },
     /// `count`: adds `amount` (base currency) to a tally.
     Count { name: Sym, amount: Qty },
     /// `owe`.
-    Owe {
-        name: Sym,
-        amount: Amount,
-        owed: Owed,
-    },
+    Owe { name: Sym, amount: Amount, owed: Owed },
     /// What a `require` or `warn` compared: `counted <= limit`, the sides of a
     /// `>=` swapped.
-    Read {
-        step: u32,
-        counted: Amount,
-        limit: Amount,
-    },
+    Read { step: u32, counted: Amount, limit: Amount },
     /// A part-scoped reduction of an asset's remaining basis.
     Consume { step: u32, amount: Amount },
     /// A disallowed loss that the asset monitor carries to a matching part.
-    Carry {
-        step: u32,
-        amount: Amount,
-        unit: Id<Commodity>,
-        within: Span,
-    },
+    Carry { step: u32, amount: Amount, unit: Id<Commodity>, within: Span },
 }
 
 /// Runs `law`'s steps in order. Returns whether it ran to the end rather than
@@ -316,26 +282,17 @@ pub(crate) fn run(
 ) -> bool {
     values.resize(law.nodes.len(), Value::Empty);
     let law_id = law_identity(env.plan, law, ctx);
-    let mut machine = Machine {
-        env,
-        nodes: &law.nodes,
-        law: Some(law),
-        law_id,
-        ctx,
-        values,
-        budget_values,
-        out,
-    };
+    let mut machine = Machine { env, nodes: &law.nodes, law: Some(law), law_id, ctx, values, budget_values, out };
     if let Some(window) = ctx.purpose_window {
         let last = law
             .steps
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, step)| {
-                        matches!(&step.kind, StepKind::Require { .. })
-                            .then_some(index)
-                            .filter(|&index| purpose_reader_step(env.plan.book, law, index, window, ctx.day))
-                    })
+            .iter()
+            .enumerate()
+            .filter_map(|(index, step)| {
+                matches!(&step.kind, StepKind::Require { .. })
+                    .then_some(index)
+                    .filter(|&index| purpose_reader_step(env.plan.book, law, index, window, ctx.day))
+            })
             .last();
         let Some(last) = last else { return true };
         (0..=last)
@@ -407,8 +364,7 @@ fn sample_temporal_query(
 ) {
     let law = &plan.book.laws[query.key.law];
     let occasion = Occasion::time(day, Days::on(day));
-    let mut context = Context::new(query.key.subject, query.key.owner, &occasion)
-        .for_law(query.key.law);
+    let mut context = Context::new(query.key.subject, query.key.owner, &occasion).for_law(query.key.law);
     if let Some(part) = part {
         context = context.for_asset_part(part);
     }
@@ -419,13 +375,7 @@ fn sample_temporal_query(
 }
 
 /// Evaluates one expression of `law` (a `by` date, say).
-pub(crate) fn expression(
-    env: Env,
-    law: &Law,
-    root: NodeId,
-    ctx: &Context,
-    values: &mut Vec<Value>,
-) -> Value {
+pub(crate) fn expression(env: Env, law: &Law, root: NodeId, ctx: &Context, values: &mut Vec<Value>) -> Value {
     values.resize(law.nodes.len(), Value::Empty);
     let law_id = law_identity(env.plan, law, ctx);
     Machine {
@@ -485,10 +435,7 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     fn calc(&self) -> Calc<'a, 's> {
-        Calc {
-            book: self.env.plan.book,
-            day: self.ctx.day,
-        }
+        Calc { book: self.env.plan.book, day: self.ctx.day }
     }
 
     fn base(&self, qty: Qty) -> Value {
@@ -549,12 +496,7 @@ impl<'a, 's> Machine<'a, 's> {
                 }
                 _ => unreachable!("{TYPED}"),
             },
-            StepKind::Require {
-                cond,
-                otherwise,
-                severity,
-                ..
-            } => {
+            StepKind::Require { cond, otherwise, severity, .. } => {
                 let held = self.scan(*cond);
                 self.read(step, *cond);
                 match held {
@@ -562,10 +504,7 @@ impl<'a, 's> Machine<'a, 's> {
                     // v3 bridge: a v3 `require` has one reparation at most.
                     Value::Bool(false) => match otherwise.first() {
                         Some(effect) => self.price(step, effect),
-                        None => self.out.push(Outcome::Broken {
-                            step,
-                            warn: *severity == Severity::Warning,
-                        }),
+                        None => self.out.push(Outcome::Broken { step, warn: *severity == Severity::Warning }),
                     },
                     Value::Fault(fault) => self.out.push(Outcome::Faulted { step, fault }),
                     _ => unreachable!("{TYPED}"),
@@ -581,23 +520,13 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// Notes what a comparison of amounts compared: the counted side and its limit.
     fn read(&mut self, step: u32, cond: NodeId) {
-        let Some((cmp, left, right)) = compared(
-            self.law.expect("only law steps produce comparisons"),
-            self.values,
-            cond,
-        ) else {
+        let Some((cmp, left, right)) =
+            compared(self.law.expect("only law steps produce comparisons"), self.values, cond)
+        else {
             return;
         };
-        let (counted, limit) = if matches!(cmp, BinOp::Lt | BinOp::Le) {
-            (left, right)
-        } else {
-            (right, left)
-        };
-        self.out.push(Outcome::Read {
-            step,
-            counted,
-            limit,
-        });
+        let (counted, limit) = if matches!(cmp, BinOp::Lt | BinOp::Le) { (left, right) } else { (right, left) };
+        self.out.push(Outcome::Read { step, counted, limit });
     }
 
     /// A `require … else owe …` that failed: the violation is priced.
@@ -605,12 +534,7 @@ impl<'a, 's> Machine<'a, 's> {
         let before = self.out.len();
         self.effect(step, effect);
         if let Some(&Outcome::Owe { name, amount, owed }) = self.out.get(before) {
-            self.out[before] = Outcome::Priced {
-                step,
-                name,
-                amount,
-                owed,
-            };
+            self.out[before] = Outcome::Priced { step, name, amount, owed };
         }
     }
 
@@ -621,19 +545,11 @@ impl<'a, 's> Machine<'a, 's> {
                     return;
                 };
                 match self.calc().convert(amount, self.book().base) {
-                    Ok(base) => self.out.push(Outcome::Count {
-                        name,
-                        amount: base.qty,
-                    }),
+                    Ok(base) => self.out.push(Outcome::Count { name, amount: base.qty }),
                     Err(fault) => self.out.push(Outcome::Faulted { step, fault }),
                 }
             }
-            LawEffect::Owe {
-                amount,
-                to,
-                due,
-                name,
-            } => {
+            LawEffect::Owe { amount, to, due, name } => {
                 let Some(amount) = self.nonzero_amount(step, amount) else {
                     return;
                 };
@@ -645,11 +561,7 @@ impl<'a, 's> Machine<'a, 's> {
                     }
                     Some(_) => unreachable!("{TYPED}"),
                 };
-                self.out.push(Outcome::Owe {
-                    name,
-                    amount,
-                    owed: Owed { to, due },
-                });
+                self.out.push(Outcome::Owe { name, amount, owed: Owed { to, due } });
             }
             LawEffect::Consume { amount } => {
                 if let Some(amount) = self.nonzero_amount(step, amount) {
@@ -702,14 +614,9 @@ impl<'a, 's> Machine<'a, 's> {
             Some(_) => unreachable!("{TYPED}"),
         };
         let counted = self.out.iter().filter_map(|o| match *o {
-            Outcome::Count {
-                name: counted,
-                amount,
-            } if counted == name && year == this_year => Some(spread(
-                amount,
-                ctx.over,
-                Window::Year.around(ctx.over.first()),
-            )),
+            Outcome::Count { name: counted, amount } if counted == name && year == this_year => {
+                Some(spread(amount, ctx.over, Window::Year.around(ctx.over.first())))
+            }
             _ => None,
         });
         self.base(tallies.read(ctx.owner, year, name) + counted.sum())
@@ -738,9 +645,7 @@ impl<'a, 's> Machine<'a, 's> {
                 self.at(*r),
                 self.nodes[*l].typed_ty().unwrap_or(Ty::Empty),
                 self.nodes[*r].typed_ty().unwrap_or(Ty::Empty),
-                self.nodes[NodeId(at as u32)]
-                    .typed_ty()
-                    .unwrap_or(Ty::Empty),
+                self.nodes[NodeId(at as u32)].typed_ty().unwrap_or(Ty::Empty),
             ),
             Op::At(quantity, price) => self.calc().binary_typed(
                 BinOp::Mul,
@@ -748,9 +653,7 @@ impl<'a, 's> Machine<'a, 's> {
                 self.at(*price),
                 self.nodes[*quantity].typed_ty().unwrap_or(Ty::Empty),
                 self.nodes[*price].typed_ty().unwrap_or(Ty::Empty),
-                self.nodes[NodeId(at as u32)]
-                    .typed_ty()
-                    .unwrap_or(Ty::Empty),
+                self.nodes[NodeId(at as u32)].typed_ty().unwrap_or(Ty::Empty),
             ),
             Op::Of(purpose, object) => match (self.at(*purpose), self.at(*object)) {
                 (Value::Fault(fault), _) | (_, Value::Fault(fault)) => Value::Fault(fault),
@@ -768,18 +671,15 @@ impl<'a, 's> Machine<'a, 's> {
             Op::Select(keys) => self.select(keys),
             Op::Is(x, alternatives) => match self.at(*x) {
                 fault @ Value::Fault(_) => fault,
-                left => Value::Bool(
-                    alternatives
-                        .iter()
-                        .any(|&alt| self.matches(left, self.at(alt))),
-                ),
+                left => Value::Bool(alternatives.iter().any(|&alt| self.matches(left, self.at(alt)))),
             },
             Op::Resides(entity, systems) => match self.at(*entity) {
                 Value::Fault(fault) => Value::Fault(fault),
                 Value::Entity(entity) => Value::Bool(
-                    self.book().entities[entity].lives.iter().any(|residence| {
-                        residence.days.contains(self.ctx.day) && systems.contains(&residence.system)
-                    }),
+                    self.book().entities[entity]
+                        .lives
+                        .iter()
+                        .any(|residence| residence.days.contains(self.ctx.day) && systems.contains(&residence.system)),
                 ),
                 _ => Value::Fault(Fault::InvalidProgram),
             },
@@ -796,8 +696,7 @@ impl<'a, 's> Machine<'a, 's> {
     fn var(&self, var: Var) -> Value {
         let ctx = self.ctx;
         let flow = |pick: fn(&Motion) -> Value| ctx.motion.map_or(Value::Empty, pick);
-        let realized =
-            |pick: fn(&Realized) -> Qty| ctx.realized.map_or(Value::Empty, |r| self.base(pick(&r)));
+        let realized = |pick: fn(&Realized) -> Qty| ctx.realized.map_or(Value::Empty, |r| self.base(pick(&r)));
         match var {
             Var::Amount => ctx.amount.map_or(Value::Empty, Value::Amount),
             Var::From => flow(|m| Value::Place(m.from)),
@@ -822,16 +721,9 @@ impl<'a, 's> Machine<'a, 's> {
             Var::Remaining => self.remaining(),
             Var::Flow => Value::Flow,
             // v3 bridge: no v3 trigger says what a flow is for.
-            Var::Purpose => ctx.purpose.map_or(Value::Empty, |purpose| {
-                Value::Purpose(purpose.purpose, purpose.of)
-            }),
+            Var::Purpose => ctx.purpose.map_or(Value::Empty, |purpose| Value::Purpose(purpose.purpose, purpose.of)),
             Var::Description => ctx.description.map_or(Value::Empty, Value::Text),
-            Var::Input(index) => match ctx
-                .inputs
-                .and_then(|inputs| inputs.get(index as usize))
-                .copied()
-                .flatten()
-            {
+            Var::Input(index) => match ctx.inputs.and_then(|inputs| inputs.get(index as usize)).copied().flatten() {
                 Some(amount) => Value::Amount(amount),
                 None => Value::Fault(Fault::MissingInput(index)),
             },
@@ -853,9 +745,7 @@ impl<'a, 's> Machine<'a, 's> {
             (Field::InService, Value::Asset(asset)) => self.asset_in_service(asset),
             (Field::Parts, Value::Asset(asset)) => {
                 let count = self.env.world.assets.asset(asset).map_or(0, |state| state.part_count());
-                i64::try_from(count).map_or(Value::Fault(Fault::Overflow), |count| {
-                    Value::Num(Ratio::int(count))
-                })
+                i64::try_from(count).map_or(Value::Fault(Fault::Overflow), |count| Value::Num(Ratio::int(count)))
             }
             (Field::Unit, Value::Amount(amount)) => Value::Unit(amount.unit),
             (Field::Unit, Value::Empty) => Value::Unit(book.base),
@@ -901,9 +791,8 @@ impl<'a, 's> Machine<'a, 's> {
                         to_matches &= view.arrive.unit == unit;
                     }
                     SelectKey::Purpose(wanted) => {
-                        other_matches &= view.purpose.is_some_and(|actual| {
-                            book.purposes.covers(wanted, actual.purpose)
-                        });
+                        other_matches &=
+                            view.purpose.is_some_and(|actual| book.purposes.covers(wanted, actual.purpose));
                     }
                     SelectKey::Code(code) => {
                         other_matches &= view.codes().any(|candidate| candidate == code);
@@ -916,11 +805,7 @@ impl<'a, 's> Machine<'a, 's> {
             if !other_matches || (has_side_key && !from_matches && !to_matches) {
                 continue;
             }
-            let amount = if has_side_key && !from_matches {
-                view.arrive
-            } else {
-                view.out
-            };
+            let amount = if has_side_key && !from_matches { view.arrive } else { view.out };
             total = Some(match total {
                 None => amount,
                 Some(sum) if sum.unit == amount.unit => {
@@ -929,10 +814,7 @@ impl<'a, 's> Machine<'a, 's> {
                     };
                     Amount::new(Qty(qty), sum.unit)
                 }
-                Some(sum) => return Value::Fault(Fault::UnitMismatch {
-                    found: amount.unit,
-                    expected: sum.unit,
-                }),
+                Some(sum) => return Value::Fault(Fault::UnitMismatch { found: amount.unit, expected: sum.unit }),
             });
         }
         total.map_or(Value::Empty, Value::Amount)
@@ -940,17 +822,9 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// From the entity's `born` date to the day of evaluation.
     fn age(&self, entity: Id<Entity>) -> Value {
-        let born = self
-            .env
-            .plan
-            .known
-            .born
-            .expect("a law that reads `.age` makes the model intern `born`");
+        let born = self.env.plan.known.born.expect("a law that reads `.age` makes the model intern `born`");
         match axiom_model::prop(&self.book().entities[entity].props, born, self.ctx.day) {
-            Some(Prop {
-                value: Value::Day(day),
-                ..
-            }) => Value::Span(self.ctx.day.since(*day)),
+            Some(Prop { value: Value::Day(day), .. }) => Value::Span(self.ctx.day.since(*day)),
             _ => Value::Fault(Fault::Unset(born)),
         }
     }
@@ -1007,18 +881,15 @@ impl<'a, 's> Machine<'a, 's> {
         if self.env.world.assets.part(part).is_none_or(|(owner, _)| owner != asset) {
             return Value::Fault(Fault::InvalidProgram);
         }
-        let property = self.book().names.get("in-service").map_or(Value::Empty, |name| {
-            self.prop(Value::Asset(asset), name)
-        });
+        let property =
+            self.book().names.get("in-service").map_or(Value::Empty, |name| self.prop(Value::Asset(asset), name));
         let property = match property {
             Value::Day(day) => Some(day),
             Value::Fault(fault) => return Value::Fault(fault),
             Value::Empty => None,
             _ => return Value::Fault(Fault::InvalidProgram),
         };
-        state
-            .in_service(part, property)
-            .map_or(Value::Fault(Fault::InvalidProgram), Value::Day)
+        state.in_service(part, property).map_or(Value::Fault(Fault::InvalidProgram), Value::Day)
     }
 
     /// A declared property: the thing's own, else its kind's default.
@@ -1053,9 +924,9 @@ impl<'a, 's> Machine<'a, 's> {
         let explicit = axiom_model::prop(props, name, self.ctx.day).map(|property| property.value);
         if asset_property_applies {
             if let Some(value) = explicit {
-            if value != Value::Empty {
-                return value;
-            }
+                if value != Value::Empty {
+                    return value;
+                }
             }
         }
         if let Some(kind) = kind {
@@ -1142,18 +1013,17 @@ impl<'a, 's> Machine<'a, 's> {
                 | axiom_model::Role::Tab(party)
                 | axiom_model::Role::Holding(party) => book.is_a(book.entities[party].kind, k),
                 axiom_model::Role::Issuer(unit) => book.is_a(book.commodities[unit].kind, k),
-                axiom_model::Role::Outside(None)
-                | axiom_model::Role::Account { .. }
-                | axiom_model::Role::Asset(_) => book.is_a(book.places[p].kind, k),
+                axiom_model::Role::Outside(None) | axiom_model::Role::Account { .. } | axiom_model::Role::Asset(_) => {
+                    book.is_a(book.places[p].kind, k)
+                }
             },
             (Value::Entity(e), Value::Kind(k)) => book.is_a(book.entities[e].kind, k),
             (Value::Unit(u), Value::Kind(k)) => book.is_a(book.commodities[u].kind, k),
             (Value::Kind(a), Value::Kind(k)) => book.is_a(a, k),
             (Value::Purpose(actual, actual_of), Value::Purpose(wanted, wanted_of)) => {
                 book.purposes.covers(wanted, actual)
-                    && wanted_of.is_none_or(|wanted| {
-                        actual_of.is_some_and(|actual| object_matches(book, actual, wanted))
-                    })
+                    && wanted_of
+                        .is_none_or(|wanted| actual_of.is_some_and(|actual| object_matches(book, actual, wanted)))
             }
             (Value::Place(p), Value::Place(root)) => book.places.covers(root, p),
             (Value::Place(place), Value::Entity(root)) => {
@@ -1162,9 +1032,7 @@ impl<'a, 's> Machine<'a, 's> {
                     | axiom_model::Role::Tab(party)
                     | axiom_model::Role::Holding(party) => Some(party),
                     axiom_model::Role::Outside(None) | axiom_model::Role::Issuer(_) => None,
-                    axiom_model::Role::Account { .. } | axiom_model::Role::Asset(_) => {
-                        Some(book.places[place].owner)
-                    }
+                    axiom_model::Role::Account { .. } | axiom_model::Role::Asset(_) => Some(book.places[place].owner),
                 };
                 endpoint.is_some_and(|entity| book.entities.covers(root, entity))
             }
@@ -1173,10 +1041,9 @@ impl<'a, 's> Machine<'a, 's> {
             (Value::Place(p), Value::Glob(pattern)) => named(pattern, book.places[p].path),
             (Value::Entity(e), Value::Glob(pattern)) => named(pattern, book.entities[e].path),
             (Value::Unit(u), Value::Glob(pattern)) => named(pattern, book.commodities[u].symbol),
-            (Value::Flow, Value::Code(code)) => self
-                .ctx
-                .motion
-                .is_some_and(|m| m.codes().any(|mark| named(code, mark))),
+            (Value::Flow, Value::Code(code)) => {
+                self.ctx.motion.is_some_and(|m| m.codes().any(|mark| named(code, mark)))
+            }
             _ => false,
         }
     }
@@ -1184,16 +1051,9 @@ impl<'a, 's> Machine<'a, 's> {
     fn call(&mut self, at: NodeId, func: Func, args: &[NodeId]) -> Value {
         let arg = |i: usize| self.at(args[i]);
         // `total` and `tally` take their operands from the function itself.
-        let operands = !matches!(
-            func,
-            Func::Total(..) | Func::PurposeTotal { .. } | Func::BudgetTotal(_) | Func::Tally(_)
-        );
-        if operands
-            && let Some(fault) = args
-                .iter()
-                .map(|&a| self.at(a))
-                .find(|v| matches!(v, Value::Fault(_)))
-        {
+        let operands =
+            !matches!(func, Func::Total(..) | Func::PurposeTotal { .. } | Func::BudgetTotal(_) | Func::Tally(_));
+        if operands && let Some(fault) = args.iter().map(|&a| self.at(a)).find(|v| matches!(v, Value::Fault(_))) {
             return fault;
         }
         match func {
@@ -1211,10 +1071,9 @@ impl<'a, 's> Machine<'a, 's> {
             },
             Func::Progressive => self.progressive(arg(0), arg(1)),
             Func::Value => match (arg(0), arg(1)) {
-                (Value::Amount(a), Value::Unit(unit)) => self
-                    .calc()
-                    .convert(a, unit)
-                    .map_or_else(Value::Fault, Value::Amount),
+                (Value::Amount(a), Value::Unit(unit)) => {
+                    self.calc().convert(a, unit).map_or_else(Value::Fault, Value::Amount)
+                }
                 (Value::Empty, Value::Unit(unit)) => Value::Amount(Amount::zero(unit)),
                 _ => unreachable!("{TYPED}"),
             },
@@ -1241,13 +1100,8 @@ impl<'a, 's> Machine<'a, 's> {
             },
             _ => return Value::Fault(Fault::InvalidProgram),
         };
-        let key = TemporalKey {
-            law,
-            subject: self.ctx.subject,
-            owner: self.ctx.owner,
-            call,
-            part: self.ctx.asset_part,
-        };
+        let key =
+            TemporalKey { law, subject: self.ctx.subject, owner: self.ctx.owner, call, part: self.ctx.asset_part };
         let samples = self.env.world.temporal.get(key);
         if matches!(self.at(window_arg), Value::Name(name) if self.book().name(name) == "ever") {
             days = samples
@@ -1263,13 +1117,7 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    fn extreme(
-        &self,
-        func: Func,
-        days: Days,
-        samples: &[crate::temporal::Sample],
-        current: Value,
-    ) -> Value {
+    fn extreme(&self, func: Func, days: Days, samples: &[crate::temporal::Sample], current: Value) -> Value {
         let peak = func == Func::Peak;
         let mut best = samples
             .iter()
@@ -1289,15 +1137,14 @@ impl<'a, 's> Machine<'a, 's> {
             }
             best = match best {
                 None => Some(sample.value),
-                Some(previous) => match self
-                    .calc()
-                    .binary(if peak { BinOp::Ge } else { BinOp::Le }, sample.value, previous)
-                {
-                    Value::Bool(true) => Some(sample.value),
-                    Value::Bool(false) => Some(previous),
-                    Value::Fault(fault) => return Value::Fault(fault),
-                    _ => return Value::Fault(Fault::InvalidProgram),
-                },
+                Some(previous) => {
+                    match self.calc().binary(if peak { BinOp::Ge } else { BinOp::Le }, sample.value, previous) {
+                        Value::Bool(true) => Some(sample.value),
+                        Value::Bool(false) => Some(previous),
+                        Value::Fault(fault) => return Value::Fault(fault),
+                        _ => return Value::Fault(Fault::InvalidProgram),
+                    }
+                }
             };
         }
         if days.contains(self.ctx.day) {
@@ -1307,28 +1154,21 @@ impl<'a, 's> Machine<'a, 's> {
             if current != Value::Empty {
                 best = match best {
                     None => Some(current),
-                    Some(previous) => match self
-                        .calc()
-                        .binary(if peak { BinOp::Ge } else { BinOp::Le }, current, previous)
-                    {
-                        Value::Bool(true) => Some(current),
-                        Value::Bool(false) => Some(previous),
-                        Value::Fault(fault) => return Value::Fault(fault),
-                        _ => return Value::Fault(Fault::InvalidProgram),
-                    },
+                    Some(previous) => {
+                        match self.calc().binary(if peak { BinOp::Ge } else { BinOp::Le }, current, previous) {
+                            Value::Bool(true) => Some(current),
+                            Value::Bool(false) => Some(previous),
+                            Value::Fault(fault) => return Value::Fault(fault),
+                            _ => return Value::Fault(Fault::InvalidProgram),
+                        }
+                    }
                 };
             }
         }
         best.unwrap_or(Value::Empty)
     }
 
-    fn day_count(
-        &self,
-        days: Days,
-        samples: &[crate::temporal::Sample],
-        current_day: Day,
-        current: Value,
-    ) -> Value {
+    fn day_count(&self, days: Days, samples: &[crate::temporal::Sample], current_day: Day, current: Value) -> Value {
         let mut cursor = days.first();
         let mut state = samples
             .iter()
@@ -1428,18 +1268,15 @@ impl<'a, 's> Machine<'a, 's> {
             budget_segment_start(budget, start, anchor)
         };
         let active_start = budget_segment_start(budget, start, anchor);
-        let active_end = budget_segment_end(
-            budget,
-            active_start,
-            budget_window(terms.period).around(anchor).last(),
-        );
+        let active_end = budget_segment_end(budget, active_start, budget_window(terms.period).around(anchor).last());
         let Some(span) = Days::new(first, active_end) else {
             return Value::Fault(Fault::InvalidProgram);
         };
-        let (incoming, outgoing) = match self.env.world.totals.read_purpose_between(self.ctx.owner, budget.purpose, span) {
-            Ok(flowed) => flowed,
-            Err(fault) => return Value::Fault(fault),
-        };
+        let (incoming, outgoing) =
+            match self.env.world.totals.read_purpose_between(self.ctx.owner, budget.purpose, span) {
+                Ok(flowed) => flowed,
+                Err(fault) => return Value::Fault(fault),
+            };
         let total = match purpose_net(self.book().purposes[budget.purpose].root, incoming, outgoing) {
             Ok(total) => total,
             Err(fault) => return Value::Fault(fault),
@@ -1476,9 +1313,7 @@ impl<'a, 's> Machine<'a, 's> {
         let mut cursor = budget_carry_start(budget, start, day).unwrap_or(start);
         let mut total = Qty::ZERO;
         while cursor <= day {
-            let period_end = budget_window(budget.terms.at(cursor).period)
-                .around(cursor)
-                .last();
+            let period_end = budget_window(budget.terms.at(cursor).period).around(cursor).last();
             let end = budget_segment_end(budget, cursor, period_end);
             let Some(span) = Days::new(cursor, end) else {
                 return Value::Fault(Fault::InvalidProgram);
@@ -1519,12 +1354,7 @@ impl<'a, 's> Machine<'a, 's> {
         match limit {
             axiom_model::Limit::Amount(amount) => Value::Amount(amount),
             axiom_model::Limit::Share { rate, of } => {
-                let (incoming, outgoing) = match self
-                    .env
-                    .world
-                    .totals
-                    .read_purpose_between(self.ctx.owner, of, span)
-                {
+                let (incoming, outgoing) = match self.env.world.totals.read_purpose_between(self.ctx.owner, of, span) {
                     Ok(flowed) => flowed,
                     Err(fault) => return Value::Fault(fault),
                 };
@@ -1533,9 +1363,9 @@ impl<'a, 's> Machine<'a, 's> {
                     Ok(total) => total,
                     Err(fault) => return Value::Fault(fault),
                 };
-                total.scale(rate).map_or(Value::Fault(Fault::Overflow), |qty| {
-                    Value::Amount(Amount::new(qty, self.book().base))
-                })
+                total
+                    .scale(rate)
+                    .map_or(Value::Fault(Fault::Overflow), |qty| Value::Amount(Amount::new(qty, self.book().base)))
             }
             axiom_model::Limit::Computed(root) => {
                 let Some(law) = self.law.filter(|law| law.budget == Some(id)) else {
@@ -1565,12 +1395,9 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     fn straight_line(&self, args: &[NodeId]) -> Value {
-        let (Value::Amount(cost), Value::Span(life), Value::Day(from), Value::Name(period)) = (
-            self.at(args[0]),
-            self.at(args[1]),
-            self.at(args[2]),
-            self.at(args[3]),
-        ) else {
+        let (Value::Amount(cost), Value::Span(life), Value::Day(from), Value::Name(period)) =
+            (self.at(args[0]), self.at(args[1]), self.at(args[2]), self.at(args[3]))
+        else {
             unreachable!("{TYPED}");
         };
         let window = match self.book().name(period) {
@@ -1578,9 +1405,9 @@ impl<'a, 's> Machine<'a, 's> {
             "year" => Window::Year,
             _ => unreachable!("{TYPED}"),
         };
-        let mid_month = args.get(4).is_some_and(|&node| {
-            matches!(self.at(node), Value::Name(name) if self.book().name(name) == "mid-month")
-        });
+        let mid_month = args
+            .get(4)
+            .is_some_and(|&node| matches!(self.at(node), Value::Name(name) if self.book().name(name) == "mid-month"));
         crate::calc::straight_line_with_terminal(
             cost.qty,
             life,
@@ -1590,9 +1417,7 @@ impl<'a, 's> Machine<'a, 's> {
             mid_month,
             self.ctx.partial_terminal,
         )
-            .map_or(Value::Fault(Fault::Overflow), |qty| {
-                Value::Amount(Amount::new(qty, cost.unit))
-            })
+        .map_or(Value::Fault(Fault::Overflow), |qty| Value::Amount(Amount::new(qty, cost.unit)))
     }
 
     fn open(&self, code: Sym) -> Value {
@@ -1646,13 +1471,7 @@ impl<'a, 's> Machine<'a, 's> {
                 Ok(totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor()))
             }
         };
-        let widen = args.iter().find_map(|&a| {
-            if let Value::Kind(kind) = self.at(a) {
-                Some(kind)
-            } else {
-                None
-            }
-        });
+        let widen = args.iter().find_map(|&a| if let Value::Kind(kind) = self.at(a) { Some(kind) } else { None });
         let sum = match widen {
             None => read(ctx.subject),
             Some(kind) => self
@@ -1672,9 +1491,7 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     fn progressive(&self, schedule: Value, income: Value) -> Value {
-        let Value::Schedule(id) = schedule else {
-            unreachable!("{TYPED}")
-        };
+        let Value::Schedule(id) = schedule else { unreachable!("{TYPED}") };
         let schedule = &self.book().schedules[id];
         let income = match income {
             Value::Amount(a) => self.calc().convert(a, schedule.unit).map(|a| a.qty),
@@ -1682,9 +1499,7 @@ impl<'a, 's> Machine<'a, 's> {
         };
         match income {
             Ok(income) => progressive(&schedule.brackets, income)
-                .map_or(Value::Fault(Fault::Overflow), |tax| {
-                    Value::Amount(Amount::new(tax, schedule.unit))
-                }),
+                .map_or(Value::Fault(Fault::Overflow), |tax| Value::Amount(Amount::new(tax, schedule.unit))),
             Err(fault) => Value::Fault(fault),
         }
     }
@@ -1696,20 +1511,14 @@ impl<'a, 's> Machine<'a, 's> {
     /// Everything the subject holds, valued in the base currency.
     fn balance(&self, subject: Subject) -> Value {
         let sign = sign(self.env.plan, subject);
-        self.sum_in_base(
-            self.held(subject)
-                .map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)),
-        )
+        self.sum_in_base(self.held(subject).map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)))
     }
 
     /// What everything the subject holds has already accounted for, in the base
     /// currency: the total basis of its parcels.
     fn basis(&self, subject: Subject) -> Value {
         let (book, sign) = (self.book(), sign(self.env.plan, subject));
-        let basis: Qty = self
-            .held(subject)
-            .map(|slot| slot.basis(is_money(book, slot.place, slot.unit)))
-            .sum();
+        let basis: Qty = self.held(subject).map(|slot| slot.basis(is_money(book, slot.place, slot.unit))).sum();
         self.base(Qty(basis.0 * sign))
     }
 
@@ -1719,10 +1528,7 @@ impl<'a, 's> Machine<'a, 's> {
             return Value::Empty;
         };
         let tied = self.env.world.holdings.iter().flat_map(|h| {
-            h.lots
-                .iter()
-                .filter(move |lot| lot.tied == Some(entity))
-                .map(move |lot| Amount::new(lot.qty, h.unit))
+            h.lots.iter().filter(move |lot| lot.tied == Some(entity)).map(move |lot| Amount::new(lot.qty, h.unit))
         });
         self.sum_in_base(tied)
     }
@@ -1768,11 +1574,7 @@ fn object_matches(book: &Book, actual: Object, wanted: Object) -> bool {
 
 /// The holdings within the subject: a place's subtree, which is one stretch of
 /// the holdings, or the asset places an entity holds.
-pub(crate) fn held<'a>(
-    plan: &'a Plan,
-    world: &'a World,
-    subject: Subject,
-) -> impl Iterator<Item = &'a Slot> {
+pub(crate) fn held<'a>(plan: &'a Plan, world: &'a World, subject: Subject) -> impl Iterator<Item = &'a Slot> {
     let holdings: &'a Holdings = &world.holdings;
     let book = plan.book;
     let (subtree, places) = match subject {
@@ -1797,14 +1599,8 @@ pub(crate) fn sign(plan: &Plan, subject: Subject) -> i64 {
 
 /// What an ordering comparison (`<`, `<=`, `>`, `>=`) compared, an `empty` side as zero. `None` for any other
 /// condition, or one whose sides are not amounts.
-pub(crate) fn compared(
-    law: &Law,
-    values: &[Value],
-    cond: NodeId,
-) -> Option<(BinOp, Amount, Amount)> {
-    let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) =
-        law.nodes[cond].op
-    else {
+pub(crate) fn compared(law: &Law, values: &[Value], cond: NodeId) -> Option<(BinOp, Amount, Amount)> {
+    let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) = law.nodes[cond].op else {
         return None;
     };
     match (values[left.index()], values[right.index()]) {
@@ -1823,26 +1619,17 @@ fn civil_date(year: Value, month: Value, day: Value) -> Result<Day, Fault> {
         _ => Err(Fault::Overflow),
     };
     let (year, month, day) = (int(year)?, int(month)?, int(day)?);
-    let month = u32::try_from(month)
-        .ok()
-        .filter(|m| (1..=12).contains(m))
-        .ok_or(Fault::Overflow)?;
-    let day = u32::try_from(day.max(1))
-        .unwrap_or(1)
-        .min(days_in_month(year, month));
+    let month = u32::try_from(month).ok().filter(|m| (1..=12).contains(m)).ok_or(Fault::Overflow)?;
+    let day = u32::try_from(day.max(1)).unwrap_or(1).min(days_in_month(year, month));
     Day::from_ymd(year, month, day).ok_or(Fault::Overflow)
 }
 
-fn purpose_net(
-    root: axiom_model::PurposeRoot,
-    incoming: Qty,
-    outgoing: Qty,
-) -> Result<Qty, Fault> {
+fn purpose_net(root: axiom_model::PurposeRoot, incoming: Qty, outgoing: Qty) -> Result<Qty, Fault> {
     let (positive, negative) = match root {
         axiom_model::PurposeRoot::Income => (incoming, outgoing),
-        axiom_model::PurposeRoot::Spending
-        | axiom_model::PurposeRoot::Capital
-        | axiom_model::PurposeRoot::Transfer => (outgoing, incoming),
+        axiom_model::PurposeRoot::Spending | axiom_model::PurposeRoot::Capital | axiom_model::PurposeRoot::Transfer => {
+            (outgoing, incoming)
+        }
     };
     positive.0.checked_sub(negative.0).map(Qty).ok_or(Fault::Overflow)
 }
@@ -1876,11 +1663,8 @@ account temporary : temporary-account
 ";
         let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
         assert!(parsed.is_empty(), "{parsed:?}");
-        let (book, diagnostics) = axiom_model::build(&[axiom_model::Source {
-            path: "axiom.ax",
-            file,
-            embedded: false,
-        }]);
+        let (book, diagnostics) =
+            axiom_model::build(&[axiom_model::Source { path: "axiom.ax", file, embedded: false }]);
         assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
 
         let plan = Plan::new(&book);
@@ -1941,17 +1725,10 @@ entity employer
 2026-01-02 checking 90_000 USD -> savings 3 VTI #wages
   5 USD #fees
 ";
-        let (file, parsed) = axiom_syntax::parse(
-            axiom_core::FileId(0),
-            text,
-            axiom_syntax::Folder::default(),
-        );
+        let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
         assert!(parsed.is_empty(), "{parsed:?}");
-        let (mut book, diagnostics) = axiom_model::build(&[axiom_model::Source {
-            path: "axiom.ax",
-            file,
-            embedded: false,
-        }]);
+        let (mut book, diagnostics) =
+            axiom_model::build(&[axiom_model::Source { path: "axiom.ax", file, embedded: false }]);
         assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
         let checking = book.place("checking").unwrap();
         let retirement = book.place("ira").unwrap();
@@ -1971,31 +1748,20 @@ entity employer
         selected.to = retirement;
         selected.out = Amount::new(Qty(25_000), usd);
         selected.arrive = Amount::new(Qty(7), vti);
-        selected.purpose = Some(Purposed {
-            purpose: retirement_purpose,
-            of: None,
-            source: axiom_model::Provenance::Written,
-        });
+        selected.purpose =
+            Some(Purposed { purpose: retirement_purpose, of: None, source: axiom_model::Provenance::Written });
         let mut unrelated = book.flows.get(second_header).unwrap().clone();
         unrelated.from = checking;
         unrelated.to = savings;
         unrelated.out = Amount::new(Qty(90_000), usd);
         unrelated.arrive = unrelated.out;
-        unrelated.purpose = Some(Purposed {
-            purpose: wages,
-            of: None,
-            source: axiom_model::Provenance::Written,
-        });
+        unrelated.purpose = Some(Purposed { purpose: wages, of: None, source: axiom_model::Provenance::Written });
         let mut mixed = book.flows.get(second_header).unwrap().clone();
         mixed.from = checking;
         mixed.to = retirement;
         mixed.out = Amount::new(Qty(1_000), usd);
         mixed.arrive = mixed.out;
-        mixed.purpose = Some(Purposed {
-            purpose: wages,
-            of: None,
-            source: axiom_model::Provenance::Written,
-        });
+        mixed.purpose = Some(Purposed { purpose: wages, of: None, source: axiom_model::Provenance::Written });
         let flows = [
             RuntimeFlow::source_at(selected, 0),
             RuntimeFlow::source_at(unrelated, 1),
@@ -2006,8 +1772,7 @@ entity employer
         let world = World::new(&book, &plan.watch);
         let day = Day::from_ymd(2026, 1, 2).unwrap();
         let occasion = Occasion::time(day, Days::on(day));
-        let context = Context::new(Subject::Entity(owner), owner, &occasion)
-            .with_template_flows(&flows, &details);
+        let context = Context::new(Subject::Entity(owner), owner, &occasion).with_template_flows(&flows, &details);
         let nodes = Arena::new();
         let mut values = Vec::new();
         let mut budget_values = Vec::new();
@@ -2040,10 +1805,7 @@ entity employer
         );
         assert_eq!(
             machine.select(&[SelectKey::End(retirement)]),
-            Value::Fault(Fault::UnitMismatch {
-                found: usd,
-                expected: vti,
-            }),
+            Value::Fault(Fault::UnitMismatch { found: usd, expected: vti }),
             "matching both sides with incompatible units refuses to invent a sum"
         );
     }
@@ -2066,12 +1828,7 @@ entity employer
             unit: usd,
             part_of: None,
             props: vec![
-                Prop {
-                    name: land,
-                    value: Value::Amount(Amount::new(Qty(12_000), usd)),
-                    since: Day::MIN,
-                    loc: None,
-                },
+                Prop { name: land, value: Value::Amount(Amount::new(Qty(12_000), usd)), since: Day::MIN, loc: None },
                 Prop {
                     name: in_service,
                     value: Value::Day(Day::from_ymd(2024, 3, 1).unwrap()),
@@ -2138,10 +1895,7 @@ entity employer
         assert_eq!(machine.asset_cost(asset), Value::Amount(Amount::new(Qty(402_000), book.base)));
         assert_eq!(machine.asset_basis(asset), Value::Amount(Amount::new(Qty(382_000), book.base)));
         assert_eq!(machine.prop(Value::Asset(asset), land), Value::Amount(Amount::new(Qty(12_000), usd)));
-        assert_eq!(
-            machine.asset_in_service(asset),
-            Value::Day(Day::from_ymd(2024, 3, 1).unwrap())
-        );
+        assert_eq!(machine.asset_in_service(asset), Value::Day(Day::from_ymd(2024, 3, 1).unwrap()));
 
         let improvement_context = Context::new(Subject::Asset(asset), me, &occasion).for_asset_part(improvement);
         let machine = Machine { ctx: &improvement_context, ..machine };
@@ -2189,9 +1943,6 @@ entity employer
             crate::temporal::Sample { day: day(2), value: Value::Bool(false) },
             crate::temporal::Sample { day: day(3), value: Value::Bool(true) },
         ];
-        assert_eq!(
-            machine.day_count(span, &states, day(4), Value::Bool(false)),
-            Value::Num(Ratio::int(2)),
-        );
+        assert_eq!(machine.day_count(span, &states, day(4), Value::Bool(false)), Value::Num(Ratio::int(2)),);
     }
 }

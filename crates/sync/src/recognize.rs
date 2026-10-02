@@ -14,13 +14,7 @@ use crate::Record;
 use crate::peg::{Found, Patterns, Run};
 
 const CHUNK: usize = 4096;
-const BUILTINS: [Capture; 5] = [
-    Capture::Payee,
-    Capture::Code,
-    Capture::Amount,
-    Capture::Original,
-    Capture::Date,
-];
+const BUILTINS: [Capture; 5] = [Capture::Payee, Capture::Code, Capture::Amount, Capture::Original, Capture::Date];
 type Parts = [Option<(usize, usize)>; 5];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -111,10 +105,7 @@ struct TrieNode {
 
 impl Trie {
     fn new() -> Trie {
-        Trie {
-            nodes: vec![TrieNode::default()],
-            first: [0; 256],
-        }
+        Trie { nodes: vec![TrieNode::default()], first: [0; 256] }
     }
 
     fn insert(&mut self, literal: &[u8], entry: usize) {
@@ -125,11 +116,7 @@ impl Trie {
         for (depth, &byte) in literal.iter().enumerate() {
             let existing = match depth {
                 0 => Some(self.first[byte as usize]).filter(|&node| node != 0),
-                _ => self.nodes[at as usize]
-                    .next
-                    .iter()
-                    .find(|(next, _)| *next == byte)
-                    .map(|&(_, node)| node),
+                _ => self.nodes[at as usize].next.iter().find(|(next, _)| *next == byte).map(|&(_, node)| node),
             };
             at = existing.unwrap_or_else(|| {
                 self.nodes.push(TrieNode::default());
@@ -148,16 +135,9 @@ impl Trie {
         let Some(&lead) = hay.get(at) else { return };
         let (mut node, mut cursor) = (self.first[lead as usize], at + 1);
         while node != 0 {
-            self.nodes[node as usize]
-                .entries
-                .iter()
-                .for_each(|&entry| visit(entry));
+            self.nodes[node as usize].entries.iter().for_each(|&entry| visit(entry));
             let Some(&byte) = hay.get(cursor) else { return };
-            node = self.nodes[node as usize]
-                .next
-                .iter()
-                .find(|(next, _)| *next == byte)
-                .map_or(0, |&(_, node)| node);
+            node = self.nodes[node as usize].next.iter().find(|(next, _)| *next == byte).map_or(0, |&(_, node)| node);
             cursor += 1;
         }
     }
@@ -207,16 +187,9 @@ impl<'b, 's> Recognizer<'b, 's> {
             for &pattern in item.patterns {
                 let entry = entries.len();
                 let whole = matches!(book.patterns[pattern].program.as_ref(), [Op::Name(_)]);
-                entries.push(Entry {
-                    owner,
-                    pattern: Some(pattern),
-                    own: None,
-                    whole,
-                });
+                entries.push(Entry { owner, pattern: Some(pattern), own: None, whole });
                 match patterns.starts(pattern) {
-                    Some(literals) => literals
-                        .iter()
-                        .for_each(|literal| starts.insert(literal, entry)),
+                    Some(literals) => literals.iter().for_each(|literal| starts.insert(literal, entry)),
                     None => floating.push(entry),
                 }
             }
@@ -238,38 +211,20 @@ impl<'b, 's> Recognizer<'b, 's> {
                 let entry = entries.len();
                 let first = own.split(|byte| *byte == b' ').next().unwrap_or(&own);
                 starts.insert(first, entry);
-                entries.push(Entry {
-                    owner,
-                    pattern: None,
-                    own: Some(own),
-                    whole: true,
-                });
+                entries.push(Entry { owner, pattern: None, own: Some(own), whole: true });
             }
         }
-        let codes = book
-            .code_rules
-            .iter()
-            .flat_map(|rule| rule.known_as.iter().copied())
-            .collect();
-        Recognizer {
-            known,
-            entries,
-            starts,
-            floating,
-            codes,
-            patterns,
-        }
+        let codes = book.code_rules.iter().flat_map(|rule| rule.known_as.iter().copied()).collect();
+        Recognizer { known, entries, starts, floating, codes, patterns }
     }
 
     pub fn account(&self, name: &str) -> Option<&'s str> {
         let mut found = None;
-        for known in self.known.iter().filter(|known| {
-            known.account
-                && known
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(name))
-        }) {
+        for known in self
+            .known
+            .iter()
+            .filter(|known| known.account && known.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(name)))
+        {
             if found.is_some_and(|previous| previous != known.name) {
                 return None;
             }
@@ -279,14 +234,11 @@ impl<'b, 's> Recognizer<'b, 's> {
     }
 
     pub(crate) fn who_named(&self, name: &str) -> Option<Who<'s>> {
-        self.known
-            .iter()
-            .find(|known| known.name == name)
-            .map(|known| Who {
-                id: known.id,
-                name: known.name,
-                account: known.account,
-            })
+        self.known.iter().find(|known| known.name == name).map(|known| Who {
+            id: known.id,
+            name: known.name,
+            account: known.account,
+        })
     }
 
     pub fn read_all<'t>(&self, records: &[Record<'t>]) -> Vec<Reading<'s>> {
@@ -335,16 +287,11 @@ impl<'b, 's> Recognizer<'b, 's> {
 
     fn find_hits(&self, hay: &[u8], run: &mut Run, hits: &mut Vec<Hit>) {
         hits.clear();
-        for (at, _) in std::str::from_utf8(hay)
-            .expect("memos and normalized text are valid UTF-8")
-            .char_indices()
-        {
+        for (at, _) in std::str::from_utf8(hay).expect("memos and normalized text are valid UTF-8").char_indices() {
             let mut try_entry = |entry_index: usize| {
                 let entry = &self.entries[entry_index];
                 let found = match (entry.pattern, entry.own.as_deref()) {
-                    (Some(pattern), _) => {
-                        run.matches_at_valid(pattern, hay, at, &self.patterns)
-                    }
+                    (Some(pattern), _) => run.matches_at_valid(pattern, hay, at, &self.patterns),
                     (None, Some(literal)) => at
                         .checked_add(literal.len())
                         .and_then(|end| hay.get(at..end).map(|candidate| (end, candidate)))
@@ -357,18 +304,13 @@ impl<'b, 's> Recognizer<'b, 's> {
                                 }
                             })
                         })
-                        .map(|(end, _)| Found {
-                            start: at,
-                            end,
-                            literal: literal.len(),
-                        }),
+                        .map(|(end, _)| Found { start: at, end, literal: literal.len() }),
                     _ => None,
                 }
                 .filter(|found| found.end > found.start);
                 let word = |at: usize| hay.get(at).is_some_and(|byte| byte.is_ascii_alphanumeric());
-                let bounded = |found: &Found| {
-                    !entry.whole || !(found.start > 0 && word(found.start - 1) || word(found.end))
-                };
+                let bounded =
+                    |found: &Found| !entry.whole || !(found.start > 0 && word(found.start - 1) || word(found.end));
                 if let Some(found) = found.filter(bounded) {
                     let mut parts = [None; 5];
                     if entry.pattern.is_some() {
@@ -376,11 +318,7 @@ impl<'b, 's> Recognizer<'b, 's> {
                             parts[slot] = run.capture(capture);
                         }
                     }
-                    hits.push(Hit {
-                        entry: entry_index,
-                        found,
-                        parts,
-                    });
+                    hits.push(Hit { entry: entry_index, found, parts });
                 }
             };
             self.starts.walk(hay, at, &mut try_entry);
@@ -394,35 +332,19 @@ impl<'b, 's> Recognizer<'b, 's> {
 
     fn who(&self, owner: usize) -> Who<'s> {
         let known = &self.known[owner];
-        Who {
-            id: known.id,
-            name: known.name,
-            account: known.account,
-        }
+        Who { id: known.id, name: known.name, account: known.account }
     }
 
-    fn decide<'a>(
-        &self,
-        hay: &[u8],
-        hits: &mut [Hit],
-        depth: usize,
-    ) -> Result<(Recognized<'s>, Parts), Tie<'s>> {
+    fn decide<'a>(&self, hay: &[u8], hits: &mut [Hit], depth: usize) -> Result<(Recognized<'s>, Parts), Tie<'s>> {
         if depth > 32 {
             return Ok((Recognized::default(), [None; 5]));
         }
-        hits.sort_unstable_by_key(|hit| {
-            (self.owner(hit), Reverse(hit.found.literal), hit.found.start)
-        });
-        let payee = |hit: &Hit| {
-            hit.part(Capture::Payee)
-                .filter(|_| !self.known[self.owner(hit)].account)
-        };
+        hits.sort_unstable_by_key(|hit| (self.owner(hit), Reverse(hit.found.literal), hit.found.start));
+        let payee = |hit: &Hit| hit.part(Capture::Payee).filter(|_| !self.known[self.owner(hit)].account);
         let inside_a_payee = |hit: &Hit| {
             hits.iter().any(|other| {
                 payee(other).is_some_and(|(start, end)| {
-                    self.owner(other) != self.owner(hit)
-                        && start <= hit.found.start
-                        && hit.found.end <= end
+                    self.owner(other) != self.owner(hit) && start <= hit.found.start && hit.found.end <= end
                 })
             })
         };
@@ -439,9 +361,9 @@ impl<'b, 's> Recognizer<'b, 's> {
                     next = best;
                     best = Some(hit);
                 }
-                Some(_) if next.is_none_or(|current: &Hit| {
-                    hit.found.literal > current.found.literal
-                }) => next = Some(hit),
+                Some(_) if next.is_none_or(|current: &Hit| hit.found.literal > current.found.literal) => {
+                    next = Some(hit)
+                }
                 _ => {}
             }
         }
@@ -466,29 +388,17 @@ impl<'b, 's> Recognizer<'b, 's> {
     ) -> Result<Recognized<'s>, Tie<'s>> {
         let outer = self.who(self.owner(best));
         let Some((start, end)) = payee else {
-            return Ok(Recognized {
-                who: Some(outer),
-                via: None,
-            });
+            return Ok(Recognized { who: Some(outer), via: None });
         };
         let Some(inner) = hay.get(start..end) else {
-            return Ok(Recognized {
-                who: Some(outer),
-                via: None,
-            });
+            return Ok(Recognized { who: Some(outer), via: None });
         };
         let mut run = Run::default();
         let mut hits = Vec::new();
         self.find_hits(inner, &mut run, &mut hits);
         Ok(match self.decide(inner, &mut hits, depth + 1)?.0.who {
-            Some(inner) if inner.id != outer.id => Recognized {
-                who: Some(inner),
-                via: Some(outer.name),
-            },
-            _ => Recognized {
-                who: Some(outer),
-                via: None,
-            },
+            Some(inner) if inner.id != outer.id => Recognized { who: Some(inner), via: Some(outer.name) },
+            _ => Recognized { who: Some(outer), via: None },
         })
     }
 
@@ -497,9 +407,7 @@ impl<'b, 's> Recognizer<'b, 's> {
         for &pattern in &self.codes {
             let mut from = 0;
             while let Some(found) = run.find(pattern, hay, from, &self.patterns) {
-                let (start, end) = run
-                    .capture(Capture::Code)
-                    .unwrap_or((found.start, found.end));
+                let (start, end) = run.capture(Capture::Code).unwrap_or((found.start, found.end));
                 if memo.get(start..end).is_some() {
                     codes.push(start..end);
                 }

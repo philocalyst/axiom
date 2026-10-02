@@ -60,7 +60,14 @@ pub(crate) enum Identity {
     Money { tied: Option<Id<Entity>>, basis: Qty, qty: Qty, part: Option<PartId>, wash_matched: bool },
     /// Anything else: each purchase is its own lot, for selectors and for how
     /// long it has been held.
-    Lot { acquired: Day, held_since: Day, wash_matched: bool, txn: RuntimeTxn, tied: Option<Id<Entity>>, part: Option<PartId> },
+    Lot {
+        acquired: Day,
+        held_since: Day,
+        wash_matched: bool,
+        txn: RuntimeTxn,
+        tied: Option<Id<Entity>>,
+        part: Option<PartId>,
+    },
 }
 
 impl PartialEq for Identity {
@@ -77,9 +84,7 @@ impl PartialEq for Identity {
             (
                 Identity::Lot { acquired: a, held_since: ah, wash_matched: aw, txn: at, tied: ap, part: apart },
                 Identity::Lot { acquired: b, held_since: bh, wash_matched: bw, txn: bt, tied: bp, part: bpart },
-            ) => {
-                (a, ah, aw, at, ap, apart) == (b, bh, bw, bt, bp, bpart)
-            }
+            ) => (a, ah, aw, at, ap, apart) == (b, bh, bw, bt, bp, bpart),
             _ => false,
         }
     }
@@ -627,7 +632,9 @@ impl Slot {
                 acquired: Day::MIN,
                 txn: None,
                 tied: None,
-                identity: if money { Identity::Money { tied: None, basis, qty: plain, part: None, wash_matched: false } } else {
+                identity: if money {
+                    Identity::Money { tied: None, basis, qty: plain, part: None, wash_matched: false }
+                } else {
                     Identity::Plain { basis, qty: plain }
                 },
             });
@@ -778,7 +785,9 @@ impl Selection<'_> {
         let (mut ranges, mut codes) = (ranges.peekable(), codes.peekable());
         let in_range = ranges.peek().is_none() || ranges.any(|days| days.contains(lot.acquired));
         let marked = codes.peek().is_none()
-            || codes.any(|code| self.codes[lot.codes.header].contains(&code) || self.codes[lot.codes.local].contains(&code));
+            || codes.any(|code| {
+                self.codes[lot.codes.header].contains(&code) || self.codes[lot.codes.local].contains(&code)
+            });
         in_range && marked
     }
 }
@@ -911,10 +920,7 @@ impl CarryLotBatchAdjustment<'_> {
             } else {
                 slot.holding.lots[change.parcel].qty -= change.quantity;
                 slot.holding.lots[change.parcel].basis -= old_piece_basis;
-                let at = slot
-                    .holding
-                    .lots
-                    .partition_point(|lot| lot.acquired <= carried.acquired);
+                let at = slot.holding.lots.partition_point(|lot| lot.acquired <= carried.acquired);
                 slot.holding.lots.insert(at, carried);
                 slot.first = slot.first.min(at);
                 slot.ties += u32::from(carried.tied.is_some());
@@ -965,12 +971,7 @@ impl PartBasisAdjustment<'_> {
 
 impl Holdings {
     pub fn new(places: usize) -> Holdings {
-        Holdings {
-            heads: vec![NONE; places],
-            slots: Vec::new(),
-            part_slots: axiom_core::Map::default(),
-            untidy: false,
-        }
+        Holdings { heads: vec![NONE; places], slots: Vec::new(), part_slots: axiom_core::Map::default(), untidy: false }
     }
 
     fn chain(&self, head: u32) -> impl Iterator<Item = &Slot> {
@@ -1002,12 +1003,7 @@ impl Holdings {
 
     /// Records that a live asset part can be held in this stable slot. The
     /// slot ids never move when lot vectors are sorted, split or swept.
-    pub(crate) fn index_part_slot(
-        &mut self,
-        place: Id<Place>,
-        unit: Id<Commodity>,
-        part: PartId,
-    ) {
+    pub(crate) fn index_part_slot(&mut self, place: Id<Place>, unit: Id<Commodity>, part: PartId) {
         let slot = self.slot_index(place, unit).unwrap_or_else(|| {
             self.entry(place, unit);
             self.slot_index(place, unit).expect("entry creates the slot")
@@ -1063,10 +1059,7 @@ impl Holdings {
             .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
             .try_fold(Qty::ZERO, |basis, parcel| {
                 found = true;
-                basis.0
-                    .checked_add(parcel.basis.0)
-                    .map(Qty)
-                    .ok_or(AssetError::Overflow)
+                basis.0.checked_add(parcel.basis.0).map(Qty).ok_or(AssetError::Overflow)
             })
             .and_then(|basis| if found { Ok(basis) } else { Err(AssetError::UnknownPart) })
     }
@@ -1091,11 +1084,8 @@ impl Holdings {
             return Ok(PartBasisAdjustment { holdings: self, part, delta, whole: Qty::ZERO });
         }
         let basis = self.part_basis(part)?;
-        let magnitude = if delta.is_negative() {
-            delta.0.checked_neg().map(Qty).ok_or(AssetError::Overflow)?
-        } else {
-            delta
-        };
+        let magnitude =
+            if delta.is_negative() { delta.0.checked_neg().map(Qty).ok_or(AssetError::Overflow)? } else { delta };
         let slots = self.part_slots.get(&part).ok_or(AssetError::UnknownPart)?;
         let weights = if delta.is_negative() {
             if magnitude > basis {
@@ -1165,9 +1155,7 @@ impl Holdings {
                     }
                     let used = plans
                         .iter()
-                        .filter(|plan: &&ParcelCarryChange| {
-                            plan.slot == slot_index && plan.parcel == parcel_index
-                        })
+                        .filter(|plan: &&ParcelCarryChange| plan.slot == slot_index && plan.parcel == parcel_index)
                         .try_fold(Qty::ZERO, |sum, plan| {
                             sum.0.checked_add(plan.quantity.0).map(Qty).ok_or(AssetError::Overflow)
                         })?;
@@ -1193,17 +1181,13 @@ impl Holdings {
                     }
                     let used_qty = plans
                         .iter()
-                        .filter(|plan: &&ParcelCarryChange| {
-                            plan.slot == slot_index && plan.parcel == parcel_index
-                        })
+                        .filter(|plan: &&ParcelCarryChange| plan.slot == slot_index && plan.parcel == parcel_index)
                         .try_fold(Qty::ZERO, |sum, plan| {
                             sum.0.checked_add(plan.quantity.0).map(Qty).ok_or(AssetError::Overflow)
                         })?;
                     let used_basis = plans
                         .iter()
-                        .filter(|plan: &&ParcelCarryChange| {
-                            plan.slot == slot_index && plan.parcel == parcel_index
-                        })
+                        .filter(|plan: &&ParcelCarryChange| plan.slot == slot_index && plan.parcel == parcel_index)
                         .try_fold(Qty::ZERO, |sum, plan| {
                             sum.0.checked_add(plan.basis.0).map(Qty).ok_or(AssetError::Overflow)
                         })?;
@@ -1341,8 +1325,17 @@ mod tests {
         let codes = Arena::new();
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
         let (spender, now) = (ask.spender, (Day(1_000), journal(0)));
-        let request =
-            Request { need: Qty(need), money, selectors, policy, codes: &codes, permits, spender, now, explain: &|| true };
+        let request = Request {
+            need: Qty(need),
+            money,
+            selectors,
+            policy,
+            codes: &codes,
+            permits,
+            spender,
+            now,
+            explain: &|| true,
+        };
         slot.relieve(&request, &mut relief);
         relief
     }
@@ -1545,10 +1538,18 @@ mod tests {
             (relief.slices.iter().map(|s| s.tied).collect::<Vec<_>>(), relief.shortfall.0)
         };
         assert_eq!(order(Some(car), &[], 8), (vec![Some(car), None], 0), "then what is tied to nobody");
-        assert_eq!(order(Some(car), &[], 20), (vec![Some(car), None], 5), "and what trip-fund holds is not its to spend");
+        assert_eq!(
+            order(Some(car), &[], 20),
+            (vec![Some(car), None], 5),
+            "and what trip-fund holds is not its to spend"
+        );
         let permitted = [(trip, true), (car, true)];
         assert_eq!(order(None, &permitted, 12), (vec![Some(trip), Some(car), None], 0), "no spender: the laws decide");
-        assert_eq!(order(None, &[], 20), (vec![None, Some(trip), Some(car)], 0), "and refused money is the last resort");
+        assert_eq!(
+            order(None, &[], 20),
+            (vec![None, Some(trip), Some(car)], 0),
+            "and refused money is the last resort"
+        );
     }
 
     #[test]
@@ -1674,10 +1675,7 @@ mod tests {
     #[test]
     fn asset_part_identity_survives_partial_relief_and_is_not_merged() {
         let origin = RuntimeTxn::Adjustment { place: Id::new(1), day: Day(10) };
-        let (first, second) = (
-            PartId { origin, ordinal: 0 },
-            PartId { origin, ordinal: 1 },
-        );
+        let (first, second) = (PartId { origin, ordinal: 0 }, PartId { origin, ordinal: 1 });
         let mut a = lot(4, 40, 10);
         a.part = Some(first);
         let mut b = a;

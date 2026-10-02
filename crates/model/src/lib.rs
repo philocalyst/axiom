@@ -23,11 +23,13 @@ mod kinds;
 mod laws;
 mod lower;
 mod names;
+#[cfg(test)]
+mod names_tests;
 mod params;
 mod paths;
-mod purposes;
 mod prices;
 mod props;
+mod purposes;
 mod resolve;
 mod rules;
 mod scope;
@@ -35,8 +37,6 @@ mod sources;
 mod sync_lower;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod names_tests;
 mod values;
 
 pub use book::*;
@@ -66,16 +66,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let settings = declare::settings(&sites, &mut diags);
     let scopes = declare::scopes(&sites, &systems, &systems_tree, &mut diags);
     let survey = lower::survey(&sites);
-    let mut world = declare::declare(
-        &sites,
-        &settings,
-        names,
-        systems_tree,
-        systems,
-        scopes,
-        &survey,
-        &mut diags,
-    );
+    let mut world = declare::declare(&sites, &settings, names, systems_tree, systems, scopes, &survey, &mut diags);
     props::declare(&mut world, &sites, &mut diags);
     world.finish_props();
     params::declare(&mut world, &sites, &mut diags);

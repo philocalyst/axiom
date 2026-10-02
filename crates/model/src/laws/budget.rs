@@ -7,9 +7,7 @@ use super::compile;
 use crate::book::{Amount, Budget, BudgetTerms, Limit};
 use crate::declare::World;
 use crate::errors::Word;
-use crate::law::{
-    BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var,
-};
+use crate::law::{BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -33,11 +31,7 @@ enum BudgetLimit {
 /// Each generated warning law reads the effective limit through one typed
 /// `BudgetLimit` call, so later rows and bounded `until` changes are not baked
 /// into a stale literal.
-pub(super) fn declare<'a, 's>(
-    world: &mut World<'s>,
-    sites: &'a [Site<'a, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], diags: &mut Vec<Diagnostic>) {
     let mut entries: Map<Id<crate::book::Purpose>, Vec<BudgetEntry<'a, 's>>> = Map::default();
     let mut declared: Set<Id<crate::book::Purpose>> = Set::default();
 
@@ -50,18 +44,12 @@ pub(super) fn declare<'a, 's>(
                     if let Some(allowance) = decl.budget {
                         if decl.what != DeclKind::Purpose {
                             diags.push(
-                                Diagnostic::error(
-                                    "budget-owner",
-                                    "a declaration budget belongs to a purpose",
-                                )
-                                .label(item.loc, "write this inside a purpose declaration"),
+                                Diagnostic::error("budget-owner", "a declaration budget belongs to a purpose")
+                                    .label(item.loc, "write this inside a purpose declaration"),
                             );
                             continue;
                         }
-                        let word = Word {
-                            text: decl.name.0,
-                            loc: file.loc(decl.name.0),
-                        };
+                        let word = Word { text: decl.name.0, loc: file.loc(decl.name.0) };
                         let purpose = match world.purpose(source.home, word) {
                             Ok(purpose) => purpose,
                             Err(problem) => {
@@ -73,10 +61,7 @@ pub(super) fn declare<'a, 's>(
                             diags.push(
                                 Diagnostic::error(
                                     "duplicate-budget",
-                                    format!(
-                                        "purpose `{}` has more than one starting budget",
-                                        word.text
-                                    ),
+                                    format!("purpose `{}` has more than one starting budget", word.text),
                                 )
                                 .label(item.loc, "keep one initial budget declaration"),
                             );
@@ -94,10 +79,7 @@ pub(super) fn declare<'a, 's>(
                 }
                 ItemKind::Budget(reference) => {
                     let budget = &file[reference];
-                    let word = Word {
-                        text: budget.purpose.0,
-                        loc: file.loc(budget.purpose.0),
-                    };
+                    let word = Word { text: budget.purpose.0, loc: file.loc(budget.purpose.0) };
                     let purpose = match world.purpose(source.home, word) {
                         Ok(purpose) => purpose,
                         Err(problem) => {
@@ -109,10 +91,7 @@ pub(super) fn declare<'a, 's>(
                         diags.push(
                             Diagnostic::error(
                                 "duplicate-budget",
-                                format!(
-                                    "purpose `{}` has more than one starting budget",
-                                    word.text
-                                ),
+                                format!("purpose `{}` has more than one starting budget", word.text),
                             )
                             .label(item.loc, "keep one initial budget declaration"),
                         );
@@ -134,18 +113,12 @@ pub(super) fn declare<'a, 's>(
                     };
                     let ast::Subject::Purpose(name) = statement.subject else {
                         diags.push(
-                            Diagnostic::error(
-                                "budget-owner",
-                                "a dated budget change must name a purpose with `#`",
-                            )
-                            .label(item.loc, "write `#purpose now budget …`"),
+                            Diagnostic::error("budget-owner", "a dated budget change must name a purpose with `#`")
+                                .label(item.loc, "write `#purpose now budget …`"),
                         );
                         continue;
                     };
-                    let word = Word {
-                        text: name.0,
-                        loc: file.loc(name.0),
-                    };
+                    let word = Word { text: name.0, loc: file.loc(name.0) };
                     let purpose = match world.purpose(source.home, word) {
                         Ok(purpose) => purpose,
                         Err(problem) => {
@@ -160,11 +133,8 @@ pub(super) fn declare<'a, 's>(
                             if until.replace(day).is_some() {
                                 invalid_until = true;
                                 diags.push(
-                                    Diagnostic::error(
-                                        "duplicate-until",
-                                        "a budget change has one `until` date",
-                                    )
-                                    .label(clause.at, "remove this extra end date"),
+                                    Diagnostic::error("duplicate-until", "a budget change has one `until` date")
+                                        .label(clause.at, "remove this extra end date"),
                                 );
                             }
                         }
@@ -175,11 +145,8 @@ pub(super) fn declare<'a, 's>(
                     let last = until.unwrap_or(Day::MAX);
                     let Some(days) = Days::new(statement.date, last) else {
                         diags.push(
-                            Diagnostic::error(
-                                "budget-until",
-                                "a budget change ends before it begins",
-                            )
-                            .label(item.loc, "the `until` date precedes this change"),
+                            Diagnostic::error("budget-until", "a budget change ends before it begins")
+                                .label(item.loc, "the `until` date precedes this change"),
                         );
                         continue;
                     };
@@ -201,14 +168,7 @@ pub(super) fn declare<'a, 's>(
     entries.sort_by_key(|(purpose, _)| purpose.index());
     for (purpose, mut entries) in entries {
         entries.sort_by_key(|entry| {
-            if entry.declared {
-                Day::MIN
-            } else {
-                entry
-                    .days
-                    .expect("dated budget entries have a range")
-                    .first()
-            }
+            if entry.declared { Day::MIN } else { entry.days.expect("dated budget entries have a range").first() }
         });
         lower_budget(world, purpose, &entries, diags);
     }
@@ -236,11 +196,8 @@ fn lower_budget<'s>(
         let Some(days) = entry.days else {
             if !entry.declared {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-budget",
-                        "a purpose has more than one starting budget",
-                    )
-                    .label(entry.loc, "remove the duplicate starting budget"),
+                    Diagnostic::error("duplicate-budget", "a purpose has more than one starting budget")
+                        .label(entry.loc, "remove the duplicate starting budget"),
                 );
                 continue;
             }
@@ -248,15 +205,7 @@ fn lower_budget<'s>(
             // Its own values replace the initial zero/default terms.
             let prior = *timeline.at(Day::MIN);
             let nodes_before = nodes.len();
-            let Some(terms) = lower_budget_terms(
-                world,
-                purpose,
-                entry,
-                purpose_name,
-                prior,
-                &mut nodes,
-                diags,
-            ) else {
+            let Some(terms) = lower_budget_terms(world, purpose, entry, purpose_name, prior, &mut nodes, diags) else {
                 nodes.truncate(nodes_before);
                 return None;
             };
@@ -266,15 +215,7 @@ fn lower_budget<'s>(
         };
         let prior = *timeline.at(days.first());
         let nodes_before = nodes.len();
-        let Some(terms) = lower_budget_terms(
-            world,
-            purpose,
-            entry,
-            purpose_name,
-            prior,
-            &mut nodes,
-            diags,
-        ) else {
+        let Some(terms) = lower_budget_terms(world, purpose, entry, purpose_name, prior, &mut nodes, diags) else {
             nodes.truncate(nodes_before);
             if !has_starting_terms {
                 return None;
@@ -293,46 +234,15 @@ fn lower_budget<'s>(
     let mut steps = Vec::new();
     if starts != Day::MIN {
         let date = push_node(&mut nodes, Op::Var(Var::Date), Ty::Day, first.loc, None);
-        let day = push_node(
-            &mut nodes,
-            Op::Const(Value::Day(starts)),
-            Ty::Day,
-            first.loc,
-            None,
-        );
-        let after_start = push_node(
-            &mut nodes,
-            Op::Bin(BinOp::Ge, date, day),
-            Ty::Bool,
-            first.loc,
-            Some(NodeId(0)),
-        );
-        steps.push(Step {
-            loc: first.loc,
-            kind: StepKind::When(after_start),
-        });
+        let day = push_node(&mut nodes, Op::Const(Value::Day(starts)), Ty::Day, first.loc, None);
+        let after_start = push_node(&mut nodes, Op::Bin(BinOp::Ge, date, day), Ty::Bool, first.loc, Some(NodeId(0)));
+        steps.push(Step { loc: first.loc, kind: StepKind::When(after_start) });
     }
-    let total = push_node(
-        &mut nodes,
-        Op::Call(Func::BudgetTotal(budget_id), Box::default()),
-        Ty::AMOUNT,
-        first.loc,
-        None,
-    );
-    let cap = push_node(
-        &mut nodes,
-        Op::Call(Func::BudgetLimit(budget_id), Box::default()),
-        Ty::AMOUNT,
-        first.loc,
-        None,
-    );
-    let condition = push_node(
-        &mut nodes,
-        Op::Bin(BinOp::Le, total, cap),
-        Ty::Bool,
-        first.loc,
-        Some(NodeId(0)),
-    );
+    let total =
+        push_node(&mut nodes, Op::Call(Func::BudgetTotal(budget_id), Box::default()), Ty::AMOUNT, first.loc, None);
+    let cap =
+        push_node(&mut nodes, Op::Call(Func::BudgetLimit(budget_id), Box::default()), Ty::AMOUNT, first.loc, None);
+    let condition = push_node(&mut nodes, Op::Bin(BinOp::Le, total, cap), Ty::Bool, first.loc, Some(NodeId(0)));
     steps.push(Step {
         loc: first.loc,
         kind: StepKind::Require {
@@ -343,13 +253,7 @@ fn lower_budget<'s>(
         },
     });
 
-    let budget = Budget {
-        purpose,
-        starts,
-        terms: timeline,
-        law: law_id,
-        loc: first.loc,
-    };
+    let budget = Budget { purpose, starts, terms: timeline, law: law_id, loc: first.loc };
     let actual_budget = world.book.budgets.push(budget);
     if actual_budget != budget_id {
         return None;
@@ -385,14 +289,7 @@ fn lower_budget_terms<'s>(
 ) -> Option<BudgetTerms> {
     let limit = lower_budget_limit(world, purpose, entry, name, nodes, diags)?;
     let funded = if entry.allowance.funded.is_some() {
-        funding(
-            world,
-            entry.home,
-            entry.file,
-            entry.allowance.funded,
-            entry.loc,
-            diags,
-        )?
+        funding(world, entry.home, entry.file, entry.allowance.funded, entry.loc, diags)?
     } else if entry.declared {
         None
     } else {
@@ -404,10 +301,7 @@ fn lower_budget_terms<'s>(
             BudgetLimit::Computed(root) => Limit::Computed(root),
         },
         period: entry.allowance.per,
-        carries: entry
-            .allowance
-            .carries
-            .unwrap_or_else(|| if entry.declared { false } else { prior.carries }),
+        carries: entry.allowance.carries.unwrap_or_else(|| if entry.declared { false } else { prior.carries }),
         funded,
     })
 }
@@ -424,10 +318,7 @@ fn lower_budget_limit<'s>(
         ast::Limit::Amount(ast::Amount::Literal(literal)) => {
             let unit = match literal.unit() {
                 Some(unit) => world
-                    .commodity_of(Word {
-                        text: unit.0,
-                        loc: entry.file.loc(unit.0),
-                    })
+                    .commodity_of(Word { text: unit.0, loc: entry.file.loc(unit.0) })
                     .map_err(|problem| diags.push(problem))
                     .ok()?,
                 None => world.book.base,
@@ -439,9 +330,8 @@ fn lower_budget_limit<'s>(
                 .map(|amount| BudgetLimit::Ready(Limit::Amount(amount)))
         }
         ast::Limit::Amount(ast::Amount::Computed(root)) => {
-            let (program, local_root) = compile::compile_budget_limit(
-                world, diags, entry.file, entry.home, purpose, name, root,
-            )?;
+            let (program, local_root) =
+                compile::compile_budget_limit(world, diags, entry.file, entry.home, purpose, name, root)?;
             let law_offset = nodes.len() as u32;
             for (_, node) in program.nodes.iter() {
                 nodes.push(Node {
@@ -454,14 +344,8 @@ fn lower_budget_limit<'s>(
             Some(BudgetLimit::Computed(NodeId(local_root.0 + law_offset)))
         }
         ast::Limit::Share { percent, of } => {
-            let word = Word {
-                text: of.0,
-                loc: entry.file.loc(of.0),
-            };
-            let of = world
-                .purpose(entry.home, word)
-                .map_err(|problem| diags.push(problem))
-                .ok()?;
+            let word = Word { text: of.0, loc: entry.file.loc(of.0) };
+            let of = world.purpose(entry.home, word).map_err(|problem| diags.push(problem)).ok()?;
             let rate = Ratio::percent(percent.mantissa as i128, percent.scale)?;
             Some(BudgetLimit::Ready(Limit::Share { rate, of }))
         }
@@ -478,14 +362,8 @@ fn funding(
 ) -> Option<Option<(Id<crate::book::Place>, Id<crate::book::Place>)>> {
     funded
         .map(|funding| {
-            let from = world.place(Word {
-                text: funding.from.0,
-                loc: file.loc(funding.from.0),
-            });
-            let to = world.place(Word {
-                text: funding.into.0,
-                loc: file.loc(funding.into.0),
-            });
+            let from = world.place(Word { text: funding.from.0, loc: file.loc(funding.from.0) });
+            let to = world.place(Word { text: funding.into.0, loc: file.loc(funding.into.0) });
             match (from, to) {
                 (Ok(from), Ok(to)) => Some((from, to)),
                 (from, to) => {
@@ -502,20 +380,9 @@ fn funding(
         .map_or(Some(None), |funded| funded.map(Some))
 }
 
-fn push_node(
-    nodes: &mut Arena<Node>,
-    op: Op,
-    ty: Ty,
-    loc: axiom_core::Loc,
-    first: Option<NodeId>,
-) -> NodeId {
+fn push_node(nodes: &mut Arena<Node>, op: Op, ty: Ty, loc: axiom_core::Loc, first: Option<NodeId>) -> NodeId {
     let id = NodeId(nodes.len() as u32);
-    nodes.push(Node {
-        op,
-        ty: Some(ty),
-        loc,
-        first: first.unwrap_or(id),
-    });
+    nodes.push(Node { op, ty: Some(ty), loc, first: first.unwrap_or(id) });
     id
 }
 
@@ -540,9 +407,7 @@ fn offset_op(op: &Op, by: u32) -> Op {
         Op::Neg(node) => Op::Neg(one(*node)),
         Op::Not(node) => Op::Not(one(*node)),
         Op::Bin(op, left, right) => Op::Bin(*op, one(*left), one(*right)),
-        Op::Is(node, alternatives) => {
-            Op::Is(one(*node), alternatives.iter().copied().map(one).collect())
-        }
+        Op::Is(node, alternatives) => Op::Is(one(*node), alternatives.iter().copied().map(one).collect()),
         Op::Resides(entity, systems) => Op::Resides(one(*entity), systems.clone()),
         Op::If(condition, yes, no) => Op::If(one(*condition), one(*yes), one(*no)),
     }

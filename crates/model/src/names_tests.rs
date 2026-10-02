@@ -15,10 +15,7 @@ fn build_project(project: &str) -> (crate::Book<'_>, Vec<Diagnostic>) {
     assert!(diagnostics.is_empty(), "std should parse: {diagnostics:?}");
     let (file, diagnostics) = parse(FileId(1), project, Folder::default());
     assert!(diagnostics.is_empty(), "project should parse: {diagnostics:?}");
-    build(&[
-        Source { path: "std.ax", file: std, embedded: true },
-        Source { path: "axiom.ax", file, embedded: false },
-    ])
+    build(&[Source { path: "std.ax", file: std, embedded: true }, Source { path: "axiom.ax", file, embedded: false }])
 }
 
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
@@ -82,10 +79,7 @@ contract lantern with lantern
 entity lantern : person
 ";
     let (_, diagnostics) = build_project(matching);
-    assert!(
-        !diagnostics.iter().any(|diagnostic| diagnostic.code == "ambiguous-name"),
-        "{diagnostics:?}"
-    );
+    assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "ambiguous-name"), "{diagnostics:?}");
 
     let unrelated = "\
 use std

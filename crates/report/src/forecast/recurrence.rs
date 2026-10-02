@@ -19,39 +19,17 @@ pub struct Cadence {
     word: &'static str,
 }
 
-const WEEKLY: Cadence = Cadence {
-    every: Span::days(7),
-    days: 7,
-    word: "weekly",
-};
-const BIWEEKLY: Cadence = Cadence {
-    every: Span::days(14),
-    days: 14,
-    word: "every 2 weeks",
-};
-const MONTHLY: Cadence = Cadence {
-    every: Span::months(1),
-    days: 30,
-    word: "monthly",
-};
-const QUARTERLY: Cadence = Cadence {
-    every: Span::months(3),
-    days: 91,
-    word: "quarterly",
-};
-const YEARLY: Cadence = Cadence {
-    every: Span::months(12),
-    days: 365,
-    word: "yearly",
-};
+const WEEKLY: Cadence = Cadence { every: Span::days(7), days: 7, word: "weekly" };
+const BIWEEKLY: Cadence = Cadence { every: Span::days(14), days: 14, word: "every 2 weeks" };
+const MONTHLY: Cadence = Cadence { every: Span::months(1), days: 30, word: "monthly" };
+const QUARTERLY: Cadence = Cadence { every: Span::months(3), days: 91, word: "quarterly" };
+const YEARLY: Cadence = Cadence { every: Span::months(12), days: 365, word: "yearly" };
 const CADENCES: [Cadence; 5] = [WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, YEARLY];
 
 impl Cadence {
     /// The cadence a typical gap belongs to: within 15% of its length.
     fn snap(gap: i32) -> Option<Cadence> {
-        CADENCES
-            .into_iter()
-            .find(|cadence| (gap - cadence.days).abs() * 100 <= cadence.days * 15)
+        CADENCES.into_iter().find(|cadence| (gap - cadence.days).abs() * 100 <= cadence.days * 15)
     }
 }
 
@@ -77,12 +55,7 @@ pub struct Recurrence {
 impl Recurrence {
     /// Where the rhythm continues after the last occurrence.
     pub fn schedule(&self) -> Schedule {
-        Schedule {
-            anchor: self.last,
-            every: self.cadence.every,
-            on: self.on,
-            until: None,
-        }
+        Schedule { anchor: self.last, every: self.cadence.every, on: self.on, until: None }
     }
 }
 
@@ -93,10 +66,7 @@ pub fn detect(occurrences: &[(Day, Qty)], today: Day) -> Option<Recurrence> {
     if occurrences.len() < MIN_OCCURRENCES {
         return None;
     }
-    let gaps: Vec<i32> = occurrences
-        .windows(2)
-        .map(|pair| pair[1].0.0 - pair[0].0.0)
-        .collect();
+    let gaps: Vec<i32> = occurrences.windows(2).map(|pair| pair[1].0.0 - pair[0].0.0).collect();
     let typical = median(&gaps);
     let cadence = Cadence::snap(typical)?;
     let deviations: Vec<i32> = gaps.iter().map(|gap| (gap - typical).abs()).collect();
@@ -115,12 +85,7 @@ pub fn detect(occurrences: &[(Day, Qty)], today: Day) -> Option<Recurrence> {
         let days_of_month: Vec<u32> = occurrences.iter().map(|&(day, _)| day.ymd().2).collect();
         On::MonthDay(median(&days_of_month) as u8)
     });
-    Some(Recurrence {
-        cadence,
-        amount: median(&amounts),
-        last,
-        on,
-    })
+    Some(Recurrence { cadence, amount: median(&amounts), last, on })
 }
 
 /// The middle value; of two middles, the upper, so it is one actually seen.
@@ -153,14 +118,7 @@ impl Schedule {
             .map(Day)
             .into_iter()
             .flat_map(move |first| Days::new(first, last))
-            .flat_map(|within| {
-                due(
-                    CalendarCadence::Every(self.every),
-                    self.on.as_slice(),
-                    self.anchor,
-                    within,
-                )
-            })
+            .flat_map(|within| due(CalendarCadence::Every(self.every), self.on.as_slice(), self.anchor, within))
     }
 }
 
@@ -178,43 +136,21 @@ mod tests {
 
     #[test]
     fn a_monthly_rhythm_is_found_despite_uneven_month_lengths() {
-        let rent = series(
-            &[
-                day(2026, 1, 1),
-                day(2026, 2, 1),
-                day(2026, 3, 1),
-                day(2026, 4, 1),
-                day(2026, 5, 1),
-            ],
-            1_800_00,
-        );
+        let rent =
+            series(&[day(2026, 1, 1), day(2026, 2, 1), day(2026, 3, 1), day(2026, 4, 1), day(2026, 5, 1)], 1_800_00);
         let found = detect(&rent, day(2026, 5, 20)).expect("rent recurs");
-        assert_eq!(
-            (found.cadence, found.amount, found.last),
-            (MONTHLY, Qty(1_800_00), day(2026, 5, 1))
-        );
+        assert_eq!((found.cadence, found.amount, found.last), (MONTHLY, Qty(1_800_00), day(2026, 5, 1)));
         assert_eq!(found.on, Some(On::MonthDay(1)));
         // Next comes June 1st, then July 1st.
         assert_eq!(
-            found
-                .schedule()
-                .days(day(2026, 5, 20), day(2026, 7, 31))
-                .collect::<Vec<_>>(),
+            found.schedule().days(day(2026, 5, 20), day(2026, 7, 31)).collect::<Vec<_>>(),
             [day(2026, 6, 1), day(2026, 7, 1)]
         );
     }
 
     #[test]
     fn irregular_or_stale_series_are_not_rhythms() {
-        let groceries = series(
-            &[
-                day(2026, 5, 1),
-                day(2026, 5, 6),
-                day(2026, 5, 16),
-                day(2026, 5, 19),
-            ],
-            84_20,
-        );
+        let groceries = series(&[day(2026, 5, 1), day(2026, 5, 6), day(2026, 5, 16), day(2026, 5, 19)], 84_20);
         assert_eq!(detect(&groceries, day(2026, 5, 20)), None);
         let two = series(&[day(2026, 1, 1), day(2026, 2, 1)], 10_00);
         assert_eq!(detect(&two, day(2026, 2, 2)), None);
@@ -236,15 +172,9 @@ mod tests {
 
     #[test]
     fn month_days_clamp_without_drifting() {
-        let schedule = Schedule {
-            anchor: day(2026, 1, 31),
-            every: Span::months(1),
-            on: Some(On::MonthDay(31)),
-            until: None,
-        };
-        let days = schedule
-            .days(day(2026, 1, 31), day(2026, 4, 30))
-            .collect::<Vec<_>>();
+        let schedule =
+            Schedule { anchor: day(2026, 1, 31), every: Span::months(1), on: Some(On::MonthDay(31)), until: None };
+        let days = schedule.days(day(2026, 1, 31), day(2026, 4, 30)).collect::<Vec<_>>();
         assert_eq!(days, [day(2026, 2, 28), day(2026, 3, 31), day(2026, 4, 30)]);
     }
 
@@ -258,9 +188,7 @@ mod tests {
             until: Some(day(2026, 1, 19)),
         };
         assert_eq!(
-            mondays
-                .days(day(2025, 12, 31), day(2026, 12, 31))
-                .collect::<Vec<_>>(),
+            mondays.days(day(2025, 12, 31), day(2026, 12, 31)).collect::<Vec<_>>(),
             [day(2026, 1, 5), day(2026, 1, 12), day(2026, 1, 19)]
         );
         let taxes = Schedule {
@@ -270,9 +198,7 @@ mod tests {
             until: None,
         };
         assert_eq!(
-            taxes
-                .days(day(2026, 6, 1), day(2028, 12, 31))
-                .collect::<Vec<_>>(),
+            taxes.days(day(2026, 6, 1), day(2028, 12, 31)).collect::<Vec<_>>(),
             [day(2027, 4, 15), day(2028, 4, 15)]
         );
         assert_eq!(taxes.days(Day::MAX, Day::MAX).next(), None);

@@ -35,23 +35,14 @@ impl Whose {
 
     /// One entity's, and its members' if it is a household.
     pub fn of(book: &Book, entity: Id<Entity>) -> Whose {
-        let members = book
-            .entities
-            .iter()
-            .filter(|(_, other)| other.member == Some(entity))
-            .map(|(id, _)| id);
+        let members = book.entities.iter().filter(|(_, other)| other.member == Some(entity)).map(|(id, _)| id);
         let mut owners: Vec<_> = iter::once(entity).chain(members).collect();
         owners.sort_unstable();
-        Whose {
-            owners: Some(owners),
-            label: Some(entity),
-        }
+        Whose { owners: Some(owners), label: Some(entity) }
     }
 
     pub fn includes(&self, entity: Id<Entity>) -> bool {
-        self.owners
-            .as_ref()
-            .is_none_or(|owners| owners.binary_search(&entity).is_ok())
+        self.owners.as_ref().is_none_or(|owners| owners.binary_search(&entity).is_ok())
     }
 
     /// Whether this lens covers every owner in the book.
@@ -66,8 +57,7 @@ impl Whose {
 
     /// The entity under which machine-readable facts are reported.
     pub fn label<'b>(&self, book: &'b Book<'_>) -> &'b str {
-        self.label
-            .map_or("everyone", |entity| book.name(book.entities[entity].path))
+        self.label.map_or("everyone", |entity| book.name(book.entities[entity].path))
     }
 
     /// Whether a law's subject is one of these owners': the entity itself, or
@@ -135,9 +125,7 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
 
     fn owns_shares(self, owners: &[OwnerShare]) -> bool {
         self.whose.is_everyone()
-            || owners
-                .iter()
-                .any(|owner| !owner.share.is_zero() && self.whose.includes(owner.owner))
+            || owners.iter().any(|owner| !owner.share.is_zero() && self.whose.includes(owner.owner))
     }
 
     pub fn governs(self, subject: Subject) -> bool {
@@ -154,9 +142,7 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
             Subject::Place(place) => self.place_qty(place, qty),
             Subject::Entity(entity) => self.entity_qty(entity, qty),
             Subject::Asset(asset) => self.entity_qty(self.book().assets[asset].owner, qty),
-            Subject::Contract(contract) => {
-                self.entity_qty(self.book().contracts[contract].owner, qty)
-            }
+            Subject::Contract(contract) => self.entity_qty(self.book().contracts[contract].owner, qty),
         }
     }
 
@@ -218,28 +204,15 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         if amount.unit == book.base || amount.qty.is_zero() {
             return Some(i128::from(amount.qty.0) * POW10[EXTRA_DIGITS]);
         }
-        let rate = book
-            .prices
-            .rate(amount.unit, book.base, self.day, book.base)?;
-        let (from, to) = (
-            book.commodities[amount.unit].scale,
-            book.commodities[book.base].scale,
-        );
+        let rate = book.prices.rate(amount.unit, book.base, self.day, book.base)?;
+        let (from, to) = (book.commodities[amount.unit].scale, book.commodities[book.base].scale);
         let numerator = i128::from(rate.num()) * POW10[usize::from(to) + EXTRA_DIGITS];
-        mul_div(
-            amount.qty.0.into(),
-            numerator,
-            i128::from(rate.den()) * POW10[usize::from(from)],
-        )
+        mul_div(amount.qty.0.into(), numerator, i128::from(rate.den()) * POW10[usize::from(from)])
     }
 
     fn is_currency(self, unit: Id<Commodity>) -> bool {
         let book = self.book();
-        unit == book.base
-            || self
-                .known()
-                .currency
-                .is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
+        unit == book.base || self.known().currency.is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
     }
 
     /// How spendable `unit` is in `place`, from what kind of place it is and
@@ -261,24 +234,12 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         // Whichever is slower, the place or the commodity, sets the pace.
         let span = |span: Option<Span>| span.unwrap_or_default();
         let (by_place, by_unit) = (span(place.liquidity), span(unit_span));
-        Some(Liquidity::Slow(
-            if self.day.add(by_place) >= self.day.add(by_unit) {
-                by_place
-            } else {
-                by_unit
-            },
-        ))
+        Some(Liquidity::Slow(if self.day.add(by_place) >= self.day.add(by_unit) { by_place } else { by_unit }))
     }
 
     /// What is in hand in a holding: its plain money and the parcels tied to no one.
     pub fn free(self, holding: &Holding) -> Qty {
-        holding.plain
-            + holding
-                .lots
-                .iter()
-                .filter(|lot| lot.tied.is_none())
-                .map(|lot| lot.qty)
-                .sum::<Qty>()
+        holding.plain + holding.lots.iter().filter(|lot| lot.tied.is_none()).map(|lot| lot.qty).sum::<Qty>()
     }
 }
 
@@ -288,9 +249,7 @@ const EXTRA_DIGITS: usize = 6;
 
 /// A value in millionths of a quantum, rounded half to even to whole quanta.
 fn rounded(exact: i128) -> Option<Qty> {
-    div_round(exact, POW10[EXTRA_DIGITS])
-        .and_then(|whole| i64::try_from(whole).ok())
-        .map(Qty)
+    div_round(exact, POW10[EXTRA_DIGITS]).and_then(|whole| i64::try_from(whole).ok()).map(Qty)
 }
 
 /// Only owned assets and debts form the balance sheet; purpose-classified
@@ -320,10 +279,7 @@ impl Basket {
 
     /// The commodities held, without those that net to nothing.
     pub fn amounts(&self) -> impl Iterator<Item = Amount> + '_ {
-        self.0
-            .iter()
-            .filter(|(_, held)| !held.qty.is_zero())
-            .map(|(&unit, held)| Amount::new(held.qty, unit))
+        self.0.iter().filter(|(_, held)| !held.qty.is_zero()).map(|(&unit, held)| Amount::new(held.qty, unit))
     }
 
     /// Everything priceable summed in the base currency, each commodity priced
@@ -333,11 +289,7 @@ impl Basket {
         let (mut valued, mut exact) = (Valued::default(), 0);
         for amount in self.amounts() {
             let booked = i128::from(self.0[&amount.unit].booked.0) * POW10[EXTRA_DIGITS];
-            match if on_balance_sheet(class) {
-                lens.exact(amount)
-            } else {
-                Some(booked)
-            } {
+            match if on_balance_sheet(class) { lens.exact(amount) } else { Some(booked) } {
                 Some(worth) => {
                     exact += worth;
                     valued.priced += 1;

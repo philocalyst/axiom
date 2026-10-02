@@ -4,7 +4,7 @@
 //! clippy reads as inconsistent digit grouping.
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use axiom_core::{Day, Diagnostic, Disposition, Dim, Days, FileId, Groups, Id, Loc, Qty, Ratio, Severity, Tree};
+use axiom_core::{Day, Days, Diagnostic, Dim, Disposition, FileId, Groups, Id, Loc, Qty, Ratio, Severity, Tree};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
@@ -40,24 +40,11 @@ fn dimensional_prices_apply_the_result_commodity_scale_once() {
     let distance_ty = Ty::Amount(Dim::Of(mile));
     let money_ty = Ty::Amount(Dim::Of(usd));
 
-    let money = calc.binary_typed(
-        BinOp::Mul,
-        Value::Amount(Amount::new(Qty(44), mile)),
-        price,
-        distance_ty,
-        rate_ty,
-        money_ty,
-    );
+    let money =
+        calc.binary_typed(BinOp::Mul, Value::Amount(Amount::new(Qty(44), mile)), price, distance_ty, rate_ty, money_ty);
     assert_eq!(money, Value::Amount(Amount::new(Qty(3_080), usd)));
 
-    let distance = calc.binary_typed(
-        BinOp::Div,
-        money,
-        price,
-        money_ty,
-        rate_ty,
-        distance_ty,
-    );
+    let distance = calc.binary_typed(BinOp::Div, money, price, money_ty, rate_ty, distance_ty);
     assert_eq!(distance, Value::Amount(Amount::new(Qty(44), mile)));
 
     assert_eq!(
@@ -149,8 +136,7 @@ fn effective_owners_compose_place_shares_through_nested_entities() {
     let share = |entity, rate| Share { entity, rate, measure: None, loc: Loc::default() };
     f.entities[grant].owned_by =
         vec![share(me, Ratio::new(1, 4).unwrap()), share(household, Ratio::new(3, 4).unwrap())].into();
-    f.places[place].shares =
-        vec![share(me, Ratio::new(3, 5).unwrap()), share(grant, Ratio::new(2, 5).unwrap())].into();
+    f.places[place].shares = vec![share(me, Ratio::new(3, 5).unwrap()), share(grant, Ratio::new(2, 5).unwrap())].into();
 
     let book = f.book();
     let plan = Plan::new(&book);
@@ -334,11 +320,56 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
     ];
     let names = roots.map(|root| book.purposes[root].name);
     let purposes = vec![
-        Purpose { name: names[0], root: PurposeRoot::Income, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: names[1], root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: purpose_name, root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: names[2], root: PurposeRoot::Capital, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: names[3], root: PurposeRoot::Transfer, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose {
+            name: names[0],
+            root: PurposeRoot::Income,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: names[1],
+            root: PurposeRoot::Spending,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: purpose_name,
+            root: PurposeRoot::Spending,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: names[2],
+            root: PurposeRoot::Capital,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: names[3],
+            root: PurposeRoot::Transfer,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
     ];
     let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None, None]).unwrap();
     book.purposes = tree;
@@ -356,18 +387,13 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
 #[test]
 fn purpose_rules_use_each_flows_owner_for_scope_and_sparse_totals() {
     let mut f = Fixture::new();
-    let (salary, checking, grants, savings, me, grant) =
-        (f.salary, f.checking, f.grants, f.savings, f.me, f.grant);
+    let (salary, checking, grants, savings, me, grant) = (f.salary, f.checking, f.grants, f.savings, f.me, f.grant);
     f.places[savings].owner = grant;
     let from_me = f.flow(10, salary, checking, 80_00);
     let from_grant = f.flow(11, grants, savings, 150_00);
     let purpose = Id::new(2);
     for flow in [from_me, from_grant] {
-        f.flows[flow.index()].purpose = Some(Purposed {
-            purpose,
-            of: None,
-            source: Provenance::Written,
-        });
+        f.flows[flow.index()].purpose = Some(Purposed { purpose, of: None, source: Provenance::Written });
     }
     f.flows[from_grant.index()].owner = grant;
 
@@ -393,18 +419,10 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     let (checking, market, me) = (f.checking, f.market, f.me);
     let purpose = Id::new(1);
     let mut builder = LawBuilder::new(f.sym("monthly-purpose-cap"), Trigger::Flow);
-    let total = builder.call(
-        Func::PurposeTotal { purpose: Some(purpose), window: Window::Month },
-        &[],
-        Ty::AMOUNT,
-    );
+    let total = builder.call(Func::PurposeTotal { purpose: Some(purpose), window: Window::Month }, &[], Ty::AMOUNT);
     let limit = builder.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
     let within = builder.bin(BinOp::Le, total, limit, Ty::Bool);
-    let year_total = builder.call(
-        Func::PurposeTotal { purpose: Some(purpose), window: Window::Year },
-        &[],
-        Ty::AMOUNT,
-    );
+    let year_total = builder.call(Func::PurposeTotal { purpose: Some(purpose), window: Window::Year }, &[], Ty::AMOUNT);
     let year_limit = builder.konst(Value::Amount(f.usd(500_00)), Ty::AMOUNT);
     let year_within = builder.bin(BinOp::Le, year_total, year_limit, Ty::Bool);
     let both_within = builder.bin(BinOp::And, within, year_within, Ty::Bool);
@@ -420,11 +438,8 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     f.laws[law].owner = Owner::Purpose(purpose);
     let mut flow_only = LawBuilder::new(f.sym("purpose-flow-only"), Trigger::Flow);
     // Even an orphaned PurposeTotal node is not a window requirement.
-    let _unreferenced = flow_only.call(
-        Func::PurposeTotal { purpose: Some(purpose), window: Window::Month },
-        &[],
-        Ty::AMOUNT,
-    );
+    let _unreferenced =
+        flow_only.call(Func::PurposeTotal { purpose: Some(purpose), window: Window::Month }, &[], Ty::AMOUNT);
     let amount = flow_only.var(Var::Amount, Ty::AMOUNT);
     let maximum = flow_only.konst(Value::Amount(f.usd(1_000_00)), Ty::AMOUNT);
     let accepted = flow_only.bin(BinOp::Le, amount, maximum, Ty::Bool);
@@ -437,20 +452,26 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     let mut book = f.book();
     let rule = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
     let flow_rule = Rule { law: flow_only, ..rule };
-    book.rules.purposes =
-        Groups::build(book.purposes.len(), [(purpose, rule), (purpose, flow_rule)].into_iter());
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule), (purpose, flow_rule)].into_iter());
     let run = run(&book, Options { today: Day(date(2026, 2, 28)), relaxed: false });
 
     assert_eq!(run.violations.len(), 1, "only January's recognized share exceeds the monthly cap");
     assert_eq!(run.violations[0].day, Day(date(2026, 1, 1)));
     assert_eq!(run.violations[0].cause, Cause::Time, "the limit breaks as the prepaid window opens");
-    assert_eq!(run.checks[law.index()], 3, "the flow and both future months are evaluated once, despite reading two windows");
+    assert_eq!(
+        run.checks[law.index()],
+        3,
+        "the flow and both future months are evaluated once, despite reading two windows"
+    );
     assert_eq!(run.checks[flow_only.index()], 1, "an amount-only flow law does not run at month or year openings");
     let counted: Vec<_> = run.effects.iter().filter(|effect| effect.law == law).collect();
     assert_eq!(counted.len(), 2, "the recognized span contributes one tally entry per year");
     assert_eq!(counted.iter().map(|effect| effect.amount.qty).sum::<Qty>(), Qty(300_00));
     assert!(counted.iter().all(|effect| effect.cause == Cause::Flow(prepaid)));
-    assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "arithmetic"), "the flow-only count expression must not be evaluated at a window opening");
+    assert!(
+        run.diagnostics.iter().all(|diagnostic| diagnostic.code != "arithmetic"),
+        "the flow-only count expression must not be evaluated at a window opening"
+    );
 }
 
 #[test]
@@ -461,19 +482,11 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
     let charge = f.flow(2, card, food, 84_00);
     let refund = f.flow(3, food, card, 40_00);
     for flow in [charge, refund] {
-        f.flows[flow.index()].purpose = Some(Purposed {
-            purpose,
-            of: None,
-            source: Provenance::Written,
-        });
+        f.flows[flow.index()].purpose = Some(Purposed { purpose, of: None, source: Provenance::Written });
     }
 
     let mut law = LawBuilder::new(f.sym("net-spending"), Trigger::Flow);
-    let total = law.call(
-        Func::PurposeTotal { purpose: Some(purpose), window: Window::Ever },
-        &[],
-        Ty::AMOUNT,
-    );
+    let total = law.call(Func::PurposeTotal { purpose: Some(purpose), window: Window::Ever }, &[], Ty::AMOUNT);
     let expected = law.konst(Value::Amount(f.usd(44_00)), Ty::AMOUNT);
     let matches = law.bin(BinOp::Eq, total, expected, Ty::Bool);
     let law = f.law(law.require(matches, None));
@@ -489,11 +502,56 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
     ];
     let names = roots.map(|root| book.purposes[root].name);
     let purposes = vec![
-        Purpose { name: names[0], root: PurposeRoot::Income, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: names[1], root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: spending_name, root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: names[2], root: PurposeRoot::Capital, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
-        Purpose { name: names[3], root: PurposeRoot::Transfer, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose {
+            name: names[0],
+            root: PurposeRoot::Income,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: names[1],
+            root: PurposeRoot::Spending,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: spending_name,
+            root: PurposeRoot::Spending,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: names[2],
+            root: PurposeRoot::Capital,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
+        Purpose {
+            name: names[3],
+            root: PurposeRoot::Transfer,
+            system: None,
+            of: None,
+            shares: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        },
     ];
     let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None, None]).unwrap();
     book.purposes = tree;
@@ -501,11 +559,10 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
     book.roots.purposes.spending = ids[1];
     book.roots.purposes.capital = ids[3];
     book.roots.purposes.transfer = ids[4];
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, Rule {
-        law,
-        subject: Subject::Entity(me),
-        days: span(3, 3),
-    })].into_iter());
+    book.rules.purposes = Groups::build(
+        book.purposes.len(),
+        [(purpose, Rule { law, subject: Subject::Entity(me), days: span(3, 3) })].into_iter(),
+    );
 
     let run = run(&book, options());
     assert!(run.violations.is_empty(), "84.00 charge less a 40.00 refund is 44.00");
@@ -774,10 +831,8 @@ fn kind_totals_use_descendants_and_only_the_subject_owners_places() {
         f.on_in.push((checking, f.rule(law, Subject::Place(checking))));
         law
     };
-    let (month, year) = (
-        add_limit(&mut f, Window::Month, "kind-month-limit"),
-        add_limit(&mut f, Window::Year, "kind-year-limit"),
-    );
+    let (month, year) =
+        (add_limit(&mut f, Window::Month, "kind-month-limit"), add_limit(&mut f, Window::Year, "kind-year-limit"));
 
     f.flow(date(2025, 1, 1), salary, checking, 40_00);
     f.flow(date(2025, 1, 2), salary, savings, 30_00);
@@ -812,17 +867,9 @@ fn kind_totals_use_descendants_and_only_the_subject_owners_places() {
     let plan = Plan::new(&book);
     assert_eq!(plan.kind_places.len(), 1, "repeated reads share one sparse index entry");
     let indexed = plan.kind_places.get(&bank).expect("the total reads its kind");
-    let scanned: Vec<_> = book
-        .places
-        .iter()
-        .filter(|(_, place)| book.is_a(place.kind, bank))
-        .map(|(place, _)| place)
-        .collect();
-    assert_eq!(
-        indexed.as_ref(),
-        scanned,
-        "the kind index includes the kind and its descendants"
-    );
+    let scanned: Vec<_> =
+        book.places.iter().filter(|(_, place)| book.is_a(place.kind, bank)).map(|(place, _)| place).collect();
+    assert_eq!(indexed.as_ref(), scanned, "the kind index includes the kind and its descendants");
     drop(plan);
 
     let run = run(&book, options());
@@ -835,25 +882,17 @@ fn kind_totals_use_descendants_and_only_the_subject_owners_places() {
     };
     assert_eq!(
         rows(month),
-        [
-            (Day(date(2025, 1, 1)), Qty(85_00)),
-            (Day(date(2025, 2, 1)), Qty(10_00)),
-        ],
+        [(Day(date(2025, 1, 1)), Qty(85_00)), (Day(date(2025, 2, 1)), Qty(10_00)),],
         "the bank parent includes its checking, savings and brokerage descendants; \
          cash and another owner's savings are excluded"
     );
-    assert_eq!(
-        rows(year),
-        [(Day(date(2025, 1, 1)), Qty(95_00))],
-        "the annual window includes January and February"
-    );
+    assert_eq!(rows(year), [(Day(date(2025, 1, 1)), Qty(95_00))], "the annual window includes January and February");
 }
 
 #[test]
 fn computed_kind_totals_index_every_kind_and_use_the_selected_kind() {
     let mut f = Fixture::new();
-    let (checking, savings, brokerage, salary, market) =
-        (f.checking, f.savings, f.brokerage, f.salary, f.market);
+    let (checking, savings, brokerage, salary, market) = (f.checking, f.savings, f.brokerage, f.salary, f.market);
     let mut law = LawBuilder::new(f.sym("computed-kind-total"), Trigger::In);
     let yes = law.konst(Value::Bool(true), Ty::Bool);
     let target = law.var(Var::To, Ty::Place);
@@ -895,12 +934,8 @@ fn computed_kind_totals_index_every_kind_and_use_the_selected_kind() {
     assert_eq!(plan.kind_places.len(), book.kinds.len(), "a computed kind may select every kind");
     for (candidate, _) in book.kinds.iter() {
         let indexed = plan.kind_places.get(&candidate).expect("the dynamic kind fallback indexes all kinds");
-        let scanned: Vec<_> = book
-            .places
-            .iter()
-            .filter(|(_, place)| book.is_a(place.kind, candidate))
-            .map(|(place, _)| place)
-            .collect();
+        let scanned: Vec<_> =
+            book.places.iter().filter(|(_, place)| book.is_a(place.kind, candidate)).map(|(place, _)| place).collect();
         assert_eq!(indexed.as_ref(), scanned, "candidate kind {candidate:?}");
     }
     drop(plan);
@@ -1104,7 +1139,10 @@ fn a_require_with_an_else_prices_the_violation_instead_of_failing() {
     assert_eq!(violation.verdict, Verdict::Priced { waived: false });
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((&*d.code, d.severity, d.disposition), ("early-withdrawal", Severity::Note, Disposition::Priced));
-    assert_eq!(d.message, "100.00 USD owed to nsf-grant as penalty, due 1970-01-03", "what is owed, to whom, and by when");
+    assert_eq!(
+        d.message, "100.00 USD owed to nsf-grant as penalty, due 1970-01-03",
+        "what is owed, to whom, and by when"
+    );
     assert!(run.diagnostics.iter().all(|d| !d.is_error()), "a priced violation is a price, not a failure");
 }
 
@@ -1139,10 +1177,7 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
         wash_matched: false,
         txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
         part: None,
-        codes: FlowCodes {
-            header: axiom_core::Run::new(Id::new(0), 0),
-            local: axiom_core::Run::new(Id::new(0), 0),
-        },
+        codes: FlowCodes { header: axiom_core::Run::new(Id::new(0), 0), local: axiom_core::Run::new(Id::new(0), 0) },
         tied: Some(nsf),
     };
     let checking_held = held(&run, checking, usd).unwrap();
@@ -1300,10 +1335,7 @@ fn each_lasting_step_is_deduplicated_and_persisted_in_a_checkpoint() {
     let mut resumed = plan.resume(&checkpoint, options());
     assert_eq!(resumed.record.failing.len(), 2, "forking preserves both active step identities");
     resumed.advance(Day(2));
-    assert!(
-        resumed.record.violations.is_empty(),
-        "a still-broken Always step is not reported again after resume"
-    );
+    assert!(resumed.record.violations.is_empty(), "a still-broken Always step is not reported again after resume");
 }
 
 #[test]
@@ -1510,7 +1542,10 @@ fn a_refold_resumes_from_a_checkpoint_and_stops_where_it_meets_the_old_fold() {
     assert_eq!(old_ends.iter().map(|c| c.day().ymd().1).collect::<Vec<_>>(), [1, 2, 3, 4], "one at each month's end");
 
     // An edit in March that nets out by month's end: 30 out to cash on the 12th, and back on the 25th.
-    let edited = four_months([100_00, 50_00, 20_00], &[(Day(date(2026, 3, 12)), true, 30_00), (Day(date(2026, 3, 25)), false, 30_00)]);
+    let edited = four_months(
+        [100_00, 50_00, 20_00],
+        &[(Day(date(2026, 3, 12)), true, 30_00), (Day(date(2026, 3, 25)), false, 30_00)],
+    );
     let plan = Plan::new(&edited);
     let before = old_ends.iter().rfind(|c| c.day() < Day(date(2026, 3, 12))).expect("a checkpoint before the edit");
     let mut ledger = plan.resume(before, options);
@@ -1577,30 +1612,36 @@ fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
             )
             .expect("a first asset part");
         let empty = axiom_core::Run::new(Id::new(0), 0);
-        ledger.world.holdings.entry(place, unit).land(Parcel {
-            qty: Qty(1),
-            basis: Qty(1),
-            acquired: Day(5),
-            held_since: Day(5),
-            wash_matched: matched,
-            txn: origin,
-            part: Some(part_id),
-            codes: FlowCodes { header: empty, local: empty },
-            tied: None,
-        }, false);
+        ledger.world.holdings.entry(place, unit).land(
+            Parcel {
+                qty: Qty(1),
+                basis: Qty(1),
+                acquired: Day(5),
+                held_since: Day(5),
+                wash_matched: matched,
+                txn: origin,
+                part: Some(part_id),
+                codes: FlowCodes { header: empty, local: empty },
+                tied: None,
+            },
+            false,
+        );
         assert_eq!(ledger.balance(place, unit), Qty(1), "matched metadata does not change the aggregate quantity");
         ledger.checkpoint().digest()
     };
 
     assert_ne!(digest(450_000, false), digest(440_000, false));
-    assert_ne!(digest(450_000, false), digest(450_000, true), "matched replacement capacity affects checkpoint identity");
+    assert_ne!(
+        digest(450_000, false),
+        digest(450_000, true),
+        "matched replacement capacity affects checkpoint identity"
+    );
 }
 
 #[test]
 fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
     let mut f = Fixture::new();
-    let (place, other_place, unit, owner, asset_name) =
-        (f.checking, f.savings, f.usd, f.me, f.sym("indexed asset"));
+    let (place, other_place, unit, owner, asset_name) = (f.checking, f.savings, f.usd, f.me, f.sym("indexed asset"));
     let mut book = f.book();
     let asset = book.assets.push(Asset {
         name: asset_name,
@@ -1634,24 +1675,34 @@ fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
     ledger.world.holdings.index_part_slot(place, unit, part);
     ledger.world.holdings.entry(other_place, unit).land(second, false);
     ledger.world.holdings.index_part_slot(other_place, unit, part);
-    ledger.world.assets.add_part(
-        asset,
-        crate::Part {
-            id: part,
-            flow: None,
-            kind: crate::PartKind::Acquisition,
-            recorded: crate::EventKey { day: Day(5), sequence: 0 },
-            day: Day(5),
-            cost: Qty(10),
-            basis: Qty(10),
-        },
-    ).unwrap();
+    ledger
+        .world
+        .assets
+        .add_part(
+            asset,
+            crate::Part {
+                id: part,
+                flow: None,
+                kind: crate::PartKind::Acquisition,
+                recorded: crate::EventKey { day: Day(5), sequence: 0 },
+                day: Day(5),
+                cost: Qty(10),
+                basis: Qty(10),
+            },
+        )
+        .unwrap();
 
     assert_eq!(ledger.carry_asset_basis(part, Some((asset, part)), Qty(1)), Err(crate::AssetError::Overflow));
     assert_eq!(ledger.world.assets.asset(asset).unwrap().basis(part), Ok(Qty(10)));
     assert_eq!(ledger.world.holdings.part_basis(part), Ok(Qty(10)));
-    let held_basis: i64 = ledger.world.holdings.iter().flat_map(|slot| &slot.holding.lots)
-        .filter(|parcel| parcel.part == Some(part)).map(|parcel| parcel.basis.0).sum();
+    let held_basis: i64 = ledger
+        .world
+        .holdings
+        .iter()
+        .flat_map(|slot| &slot.holding.lots)
+        .filter(|parcel| parcel.part == Some(part))
+        .map(|parcel| parcel.basis.0)
+        .sum();
     assert_eq!(held_basis, 10, "failed carry did not update any parcel slice");
 }
 
@@ -1695,7 +1746,11 @@ fn a_view_forks_the_ledger_the_run_stood_at_instead_of_folding_again() {
     let plan = Plan::new(&book);
     let (run, view) = plan.run_with_view(options);
     assert_eq!(held(&run, cash, usd).map(|h| h.qty().0), Some(100_00), "the run goes on to the journal's last fact");
-    assert_eq!((view.balance(checking, usd), view.balance(cash, usd)), (Qty(1_000_00), Qty::ZERO), "the view stands at today");
+    assert_eq!(
+        (view.balance(checking, usd), view.balance(cash, usd)),
+        (Qty(1_000_00), Qty::ZERO),
+        "the view stands at today"
+    );
     let mut fork = view.fork();
     fork.advance(Day(date(2026, 3, 31)));
     assert_eq!(fork.balance(cash, usd), Qty(100_00));
@@ -1990,7 +2045,11 @@ fn a_flow_recognized_for_last_year_counts_in_last_years_tally_and_a_closing_law_
         ],
         "the January payment counts for 2025, and the closing law for 2025 sees it"
     );
-    assert_eq!(run.effects[2].owed(), Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }), "due the day the year closes");
+    assert_eq!(
+        run.effects[2].owed(),
+        Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }),
+        "due the day the year closes"
+    );
     assert_eq!(run.checks[law.index()], 1, "2026 has not closed yet");
 }
 
@@ -2157,7 +2216,11 @@ fn stated_basis_overrides_the_purchase_price_of_arriving_lots() {
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(lots_of(&run, brokerage, vti), [(10, 1_150_00)], "the stated acquisition basis replaces the cash price");
-    assert!(run.gains.is_empty() && run.diagnostics.is_empty(), "an acquisition does not realize a gain: {:?}", run.diagnostics);
+    assert!(
+        run.gains.is_empty() && run.diagnostics.is_empty(),
+        "an acquisition does not realize a gain: {:?}",
+        run.diagnostics
+    );
     assert_eq!((qty(&run, checking, usd), qty(&run, brokerage, usd)), (4_000_00, 0));
 }
 

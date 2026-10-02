@@ -15,10 +15,7 @@ pub struct Group<'m> {
 impl Group<'_> {
     /// The pattern that would recognize the group: `"TRADER JOE'S"`.
     pub fn pattern(&self) -> String {
-        format!(
-            "\"{}\"",
-            self.stem.replace('\\', "\\\\").replace('"', "\\\"")
-        )
+        format!("\"{}\"", self.stem.replace('\\', "\\\\").replace('"', "\\\""))
     }
 
     /// The line that would recognize the group: `known-as "TRADER JOE'S"`.
@@ -35,14 +32,7 @@ pub fn group<'m>(memos: impl IntoIterator<Item = &'m str>) -> Vec<Group<'m>> {
         if stem.is_empty() {
             continue;
         }
-        groups
-            .entry(stem.to_uppercase())
-            .or_insert(Group {
-                stem,
-                count: 0,
-                example: memo,
-            })
-            .count += 1;
+        groups.entry(stem.to_uppercase()).or_insert(Group { stem, count: 0, example: memo }).count += 1;
     }
     let mut groups: Vec<Group<'m>> = groups.into_values().collect();
     groups.sort_by(|a, b| b.count.cmp(&a.count).then(a.stem.cmp(b.stem)));
@@ -85,10 +75,7 @@ mod tests {
             "AMAZON.COM*7H1XP AMZN.COM/BILL",
         ];
         let groups = group(memos);
-        let shown: Vec<(usize, String)> = groups
-            .iter()
-            .map(|group| (group.count, group.known_as()))
-            .collect();
+        let shown: Vec<(usize, String)> = groups.iter().map(|group| (group.count, group.known_as())).collect();
         assert_eq!(
             shown,
             [
@@ -104,32 +91,19 @@ mod tests {
     #[test]
     fn the_line_offered_parses_and_lowers_as_a_known_as_declaration() {
         use axiom_core::FileId;
-        use axiom_syntax::Folder;
         use axiom_model::Source;
+        use axiom_syntax::Folder;
 
-        let memos = [
-            "TRADER JOE'S #634 SAN FRANCISCO CA",
-            "Trader Joe's #12",
-            "SAY \"HI\" 5",
-            "BACK\\SLASH 7",
-        ];
+        let memos = ["TRADER JOE'S #634 SAN FRANCISCO CA", "Trader Joe's #12", "SAY \"HI\" 5", "BACK\\SLASH 7"];
         for group in group(memos) {
             let text = format!("base USD\nentity someone : org\n  {}\n", group.known_as());
             let system = include_str!("../../systems/src/std.ax");
-            let sources = [
-                ("std.ax", system, true),
-                ("axiom.ax", text.as_str(), false),
-            ]
-            .map(|(path, text, embedded)| {
-                let (file, problems) =
-                    axiom_syntax::parse(FileId(1), text, Folder::default());
-                assert!(problems.is_empty(), "{path}: {problems:?}");
-                Source {
-                    path,
-                    file,
-                    embedded,
-                }
-            });
+            let sources =
+                [("std.ax", system, true), ("axiom.ax", text.as_str(), false)].map(|(path, text, embedded)| {
+                    let (file, problems) = axiom_syntax::parse(FileId(1), text, Folder::default());
+                    assert!(problems.is_empty(), "{path}: {problems:?}");
+                    Source { path, file, embedded }
+                });
             let (book, problems) = axiom_model::build(&sources);
             assert!(problems.is_empty(), "{}: {problems:?}", group.known_as());
             let recognizer = crate::recognize::Recognizer::new(&book);

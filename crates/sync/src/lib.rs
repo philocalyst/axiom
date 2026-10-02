@@ -42,8 +42,8 @@ mod csv;
 mod date;
 mod diff;
 mod format;
-mod peg;
 mod paths;
+mod peg;
 mod planner;
 mod promise;
 mod recognize;
@@ -60,9 +60,7 @@ use axiom_core::{Day, FileId, Loc, Qty};
 
 pub use format::read_memos;
 pub use paths::matching_paths;
-pub use planner::{
-    GeneratedSource, PlanOutcome, SourceFailure, SourceRegistry, SourceResult, plan,
-};
+pub use planner::{GeneratedSource, PlanOutcome, SourceFailure, SourceRegistry, SourceResult, plan};
 pub use unknown::{Group, group as unrecognized};
 pub use write::Change;
 
@@ -131,15 +129,7 @@ impl<'t> Record<'t> {
     /// A record that says nothing but its day, amount and memo.
     #[cfg(test)]
     pub(crate) fn new(day: Day, qty: Qty, memo: impl Into<Cow<'t, str>>) -> Record<'t> {
-        Record {
-            day,
-            qty,
-            memo: memo.into(),
-            balance: None,
-            pending: false,
-            at: Loc::default(),
-            facts: None,
-        }
+        Record { day, qty, memo: memo.into(), balance: None, pending: false, at: Loc::default(), facts: None }
     }
 
     pub(crate) fn facts(&self) -> &Facts<'t> {

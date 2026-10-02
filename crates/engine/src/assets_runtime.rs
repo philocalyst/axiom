@@ -8,9 +8,7 @@ use axiom_model::Window;
 use axiom_model::{Asset, Flow, RuntimeTxn};
 
 use crate::Ledger;
-use crate::assets::{
-    AssetError, Assets, CarryUpdate, Consumption, DisposalBoundary, Part, PartKind,
-};
+use crate::assets::{AssetError, Assets, CarryUpdate, Consumption, DisposalBoundary, Part, PartKind};
 use crate::lots::{CarryLotAddition, PartBasisAdjustment};
 
 /// Returns one part's depreciation over a requested calendar window.
@@ -32,11 +30,7 @@ pub(crate) fn part_straight_line(
         PartKind::Acquisition => acquisition_in_service,
         PartKind::Improvement => part.day,
     };
-    let land = if part.kind == PartKind::Acquisition {
-        land
-    } else {
-        Qty::ZERO
-    };
+    let land = if part.kind == PartKind::Acquisition { land } else { Qty::ZERO };
     let cost = Qty(part.cost.0.checked_sub(land.0)?);
     if cost.is_negative() {
         return None;
@@ -53,12 +47,7 @@ struct AssetPartAddition<'a> {
 
 impl AssetPartAddition<'_> {
     fn apply(self) -> Result<(), AssetError> {
-        let Self {
-            assets,
-            parcels,
-            asset,
-            part,
-        } = self;
+        let Self { assets, parcels, asset, part } = self;
         // `validate_part` ran while this exclusive borrow was acquired, so a
         // second validation cannot fail before the parcel guard is applied.
         assets.add_part(asset, part)?;
@@ -71,31 +60,19 @@ impl AssetPartAddition<'_> {
 
 fn anchor_and_total(assets: &Assets, asset: Id<Asset>) -> Result<(crate::PartId, Qty), AssetError> {
     let state = assets.asset(asset).ok_or(AssetError::UnknownAsset)?;
-    let anchor = state
-        .parts()
-        .first()
-        .ok_or(AssetError::MissingAcquisition)?
-        .id;
+    let anchor = state.parts().first().ok_or(AssetError::MissingAcquisition)?.id;
     Ok((anchor, state.total_basis()?))
 }
 
 impl Ledger<'_, '_, '_> {
     /// Checks a part before the caller lands the corresponding asset parcel.
-    pub(crate) fn validate_asset_part(
-        &self,
-        asset: Id<Asset>,
-        part: &Part,
-    ) -> Result<(), AssetError> {
+    pub(crate) fn validate_asset_part(&self, asset: Id<Asset>, part: &Part) -> Result<(), AssetError> {
         self.world.assets.validate_part(asset, part)
     }
 
     /// Commits a part after its parcel is in the ledger. The basis check keeps
     /// the part table and holdings from starting out inconsistent.
-    pub(crate) fn add_asset_part(
-        &mut self,
-        asset: Id<Asset>,
-        part: Part,
-    ) -> Result<(), AssetError> {
+    pub(crate) fn add_asset_part(&mut self, asset: Id<Asset>, part: Part) -> Result<(), AssetError> {
         let world = &mut self.world;
         let (assets, holdings) = (&mut world.assets, &mut world.holdings);
         assets.validate_part(asset, &part)?;
@@ -113,13 +90,7 @@ impl Ledger<'_, '_, '_> {
             Some(holdings.prepare_part_basis_adjustment(anchor, part.basis)?)
         };
 
-        AssetPartAddition {
-            assets,
-            parcels,
-            asset,
-            part,
-        }
-        .apply()
+        AssetPartAddition { assets, parcels, asset, part }.apply()
     }
 
     /// Consumes basis on one part and the corresponding held parcels together.
@@ -197,10 +168,7 @@ impl Ledger<'_, '_, '_> {
     /// asset the lot is the acquisition anchor, while the asset table owns the
     /// selected part detail; both checked guards are held before either is
     /// applied. Ordinary security lots have only the holdings side.
-    pub(crate) fn carry_basis_to_parts(
-        &mut self,
-        additions: &[CarryLotAddition],
-    ) -> Result<(), AssetError> {
+    pub(crate) fn carry_basis_to_parts(&mut self, additions: &[CarryLotAddition]) -> Result<(), AssetError> {
         let world = &mut self.world;
         let (assets, holdings) = (&mut world.assets, &mut world.holdings);
         let mut asset_additions: Vec<(Id<Asset>, crate::PartId, Qty)> = Vec::new();
@@ -257,21 +225,12 @@ mod tests {
     fn part(kind: PartKind, day: Day, cost: i64, ordinal: u32) -> Part {
         Part {
             id: PartId {
-                origin: RuntimeTxn::contract_occurrence(
-                    Id::new(0),
-                    ScheduleKind::Regular,
-                    day,
-                    0,
-                    None,
-                ),
+                origin: RuntimeTxn::contract_occurrence(Id::new(0), ScheduleKind::Regular, day, 0, None),
                 ordinal,
             },
             flow: None,
             kind,
-            recorded: crate::EventKey {
-                day,
-                sequence: u64::from(ordinal),
-            },
+            recorded: crate::EventKey { day, sequence: u64::from(ordinal) },
             day,
             cost: Qty(cost),
             basis: Qty(cost),
@@ -320,15 +279,8 @@ mod tests {
         assert!(sep_2025_improvement > Qty::ZERO);
         assert_eq!(
             dec_2024_acquisition,
-            crate::calc::straight_line(
-                Qty(283_850_00),
-                life,
-                day(2024, 12, 18),
-                month(2024, 12),
-                Window::Month,
-                true,
-            )
-            .unwrap(),
+            crate::calc::straight_line(Qty(283_850_00), life, day(2024, 12, 18), month(2024, 12), Window::Month, true,)
+                .unwrap(),
             "land is excluded from the acquisition cost only"
         );
     }

@@ -14,12 +14,11 @@ use std::hash::{Hash, Hasher};
 use axiom_core::hash::FxHasher;
 use axiom_core::{Arena, Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
 use axiom_model::{
-    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow,
-    Subject, Value,
+    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Subject, Value,
 };
 
-use crate::eval::Outcome;
 use crate::assets::Assets;
+use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
 use crate::temporal::History as TemporalHistory;

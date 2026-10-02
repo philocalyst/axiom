@@ -27,24 +27,13 @@ pub struct Context<'b, 's> {
 impl<'b, 's> Context<'b, 's> {
     /// Builds a plan, run and pre-closing checkpoint together so a client
     /// cannot accidentally pair a checkpoint with a different run or book.
-    pub fn new(
-        book: &'b Book<'s>,
-        options: Options,
-        whose: Option<&str>,
-    ) -> Result<Context<'b, 's>, Diagnostic> {
+    pub fn new(book: &'b Book<'s>, options: Options, whose: Option<&str>) -> Result<Context<'b, 's>, Diagnostic> {
         let whose = Whose::resolve(book, whose)?;
         let plan = Plan::new(book);
         let (run, ledger, effects_prefix_len) = plan.run_with_view_and_effects_prefix(options);
         let checkpoint = ledger.checkpoint();
         drop(ledger);
-        Ok(Context {
-            plan,
-            run,
-            checkpoint,
-            effects_prefix_len,
-            whose,
-            relaxed: options.relaxed,
-        })
+        Ok(Context { plan, run, checkpoint, effects_prefix_len, whose, relaxed: options.relaxed })
     }
 
     /// The source book this context reads.
@@ -60,104 +49,44 @@ impl<'b, 's> Context<'b, 's> {
     /// Builds a report using the shared run state wherever possible.
     pub fn report(&self, query: &Query<'_>) -> Result<Report<'b>, Diagnostic> {
         match query {
-            Query::Balance {
-                globs,
-                at,
-                value,
-                monthly,
-            } => {
+            Query::Balance { globs, at, value, monthly } => {
                 let at = at.unwrap_or(self.run.today);
                 super::balance::view_with_lens(self.lens(at), &self.run, globs, *value, *monthly)
             }
-            Query::Register { place, from, to } => super::register::view_with_lens(
-                self.lens(to.unwrap_or(self.run.today)),
-                &self.run,
-                place,
-                *from,
-                *to,
-            ),
-            Query::Flow {
-                by: FlowBy::Period(by),
-                from,
-                to,
-            } => {
-                let to = to.unwrap_or(self.run.today);
-                Ok(super::flow::view_with_lens(
-                    self.lens(to),
-                    &self.run,
-                    *by,
-                    *from,
-                ))
+            Query::Register { place, from, to } => {
+                super::register::view_with_lens(self.lens(to.unwrap_or(self.run.today)), &self.run, place, *from, *to)
             }
-            Query::Flow {
-                by: FlowBy::Party,
-                from,
-                to,
-            } => {
+            Query::Flow { by: FlowBy::Period(by), from, to } => {
+                let to = to.unwrap_or(self.run.today);
+                Ok(super::flow::view_with_lens(self.lens(to), &self.run, *by, *from))
+            }
+            Query::Flow { by: FlowBy::Party, from, to } => {
                 let cutoff = to.unwrap_or(self.run.today);
-                Ok(super::flow::view_by_party_with_lens(
-                    self.lens(cutoff),
-                    &self.run,
-                    *from,
-                    cutoff,
-                ))
+                Ok(super::flow::view_by_party_with_lens(self.lens(cutoff), &self.run, *from, cutoff))
             }
             Query::Available { at } => {
                 let at = at.unwrap_or(self.run.today);
                 let horizon = closings::judged_through(self.plan.book(), at);
                 let ledger = self.ledger_at(at, horizon);
-                Ok(super::available::from_ledger(
-                    self.lens(at),
-                    &self.run,
-                    &ledger,
-                    horizon,
-                ))
+                Ok(super::available::from_ledger(self.lens(at), &self.run, &ledger, horizon))
             }
-            Query::Budget { at, by } => Ok(super::budget::view_with_lens(
-                self.lens(at.unwrap_or(self.run.today)),
-                &self.run,
-                *at,
-                *by,
-            )),
-            Query::Limits { year } => Ok(super::limits::view_with_lens(
-                self.lens(self.run.today),
-                &self.run,
-                *year,
-            )),
+            Query::Budget { at, by } => {
+                Ok(super::budget::view_with_lens(self.lens(at.unwrap_or(self.run.today)), &self.run, *at, *by))
+            }
+            Query::Limits { year } => Ok(super::limits::view_with_lens(self.lens(self.run.today), &self.run, *year)),
             Query::Claims { at } => {
                 let at = at.unwrap_or(self.run.today);
                 let ledger = self.ledger_at(at, self.run.today);
-                Ok(super::claims::view_from(
-                    self.lens(at),
-                    &self.run,
-                    ledger.holdings(),
-                ))
+                Ok(super::claims::view_from(self.lens(at), &self.run, ledger.holdings()))
             }
-            Query::Contracts => Ok(super::contracts::view_with_lens(
-                self.lens(self.run.today),
-                &self.run,
-            )),
-            Query::Tax { year } => Ok(super::tax::view_with_lens(
-                self.lens(self.run.today),
-                &self.run,
-                *year,
-            )),
-            Query::Gains { year } => Ok(super::gains::view_with_lens(
-                self.lens(self.run.today),
-                &self.run,
-                *year,
-            )),
+            Query::Contracts => Ok(super::contracts::view_with_lens(self.lens(self.run.today), &self.run)),
+            Query::Tax { year } => Ok(super::tax::view_with_lens(self.lens(self.run.today), &self.run, *year)),
+            Query::Gains { year } => Ok(super::gains::view_with_lens(self.lens(self.run.today), &self.run, *year)),
             Query::Lots { place, at } => {
-                let scope = place
-                    .map(|text| resolve::place(self.plan.book(), text))
-                    .transpose()?;
+                let scope = place.map(|text| resolve::place(self.plan.book(), text)).transpose()?;
                 let at = at.unwrap_or(self.run.today);
                 let ledger = self.ledger_at(at, self.run.today);
-                Ok(super::lots::view_from(
-                    self.lens(at),
-                    scope,
-                    ledger.holdings(),
-                ))
+                Ok(super::lots::view_from(self.lens(at), scope, ledger.holdings()))
             }
             Query::Forecast { until, paths } => Ok(super::forecast::view_from(
                 &self.plan,
@@ -169,16 +98,8 @@ impl<'b, 's> Context<'b, 's> {
                 *until,
                 *paths,
             )),
-            Query::Why { target } => super::why::target_with_lens(
-                self.lens(self.run.today),
-                &self.run,
-                target,
-            ),
-            Query::Line { loc } => Ok(super::why::line_with_lens(
-                self.lens(self.run.today),
-                &self.run,
-                *loc,
-            )),
+            Query::Why { target } => super::why::target_with_lens(self.lens(self.run.today), &self.run, target),
+            Query::Line { loc } => Ok(super::why::line_with_lens(self.lens(self.run.today), &self.run, *loc)),
         }
     }
 
@@ -204,10 +125,7 @@ impl<'b, 's> Context<'b, 's> {
     /// stored pre-close state; past views must replay because a later
     /// checkpoint cannot be moved backward.
     fn ledger_at(&self, day: Day, horizon: Day) -> Ledger<'_, 'b, 's> {
-        let options = Options {
-            today: horizon.max(self.run.today),
-            relaxed: self.relaxed,
-        };
+        let options = Options { today: horizon.max(self.run.today), relaxed: self.relaxed };
         let mut ledger = if day < self.checkpoint.day() {
             self.plan.start(options)
         } else {

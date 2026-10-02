@@ -13,8 +13,7 @@
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Span, Sym};
 use axiom_model::{
-    Amount, Cap, CapTarget, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind,
-    Subject, Trigger, Window,
+    Amount, Cap, CapTarget, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind, Subject, Trigger, Window,
 };
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
@@ -27,25 +26,22 @@ use crate::scope::owner_of;
 use crate::state::Missing;
 use crate::totals::{Reached, by_year};
 use crate::{
-    Adjustment, AdjustmentKind, Consequence, Effect, EventKey, Headroom, Owed, PartId,
-    Verdict, Violation, Waiver,
+    Adjustment, AdjustmentKind, Consequence, Effect, EventKey, Headroom, Owed, PartId, Verdict, Violation, Waiver,
 };
 
 /// Whether the rule is in force for some day of the occasion.
 fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
     let internal = on.skip_internal
-        && on
-            .motion
-            .is_some_and(|m| plan.inside(rule.subject, m.from) && plan.inside(rule.subject, m.to));
+        && on.motion.is_some_and(|m| plan.inside(rule.subject, m.from) && plan.inside(rule.subject, m.to));
     rule.days.overlaps(on.span) && !internal
 }
 
 fn law_consumes(book: &axiom_model::Book<'_>, law: Id<Law>) -> bool {
     book.laws[law].steps.iter().any(|step| match &step.kind {
         StepKind::Effect(LawEffect::Consume { .. }) => true,
-        StepKind::Require { otherwise, .. } => otherwise
-            .iter()
-            .any(|effect| matches!(effect, LawEffect::Consume { .. })),
+        StepKind::Require { otherwise, .. } => {
+            otherwise.iter().any(|effect| matches!(effect, LawEffect::Consume { .. }))
+        }
         _ => false,
     })
 }
@@ -86,10 +82,7 @@ impl Ledger<'_, '_, '_> {
         for written in rules {
             // Purpose rules use the flow owner at run time. It must govern
             // filtering, de-duplication, headroom and diagnostics alike.
-            let rule = Rule {
-                subject: subject.unwrap_or(written.subject),
-                ..*written
-            };
+            let rule = Rule { subject: subject.unwrap_or(written.subject), ..*written };
             if !applies(plan, &rule, &on) {
                 continue;
             }
@@ -109,29 +102,15 @@ impl Ledger<'_, '_, '_> {
     /// records nothing. It is the same evaluation the real firing will do.
     pub(crate) fn permits_spend(&mut self, entity: Id<Entity>, m: &Motion) -> bool {
         let (plan, book) = (self.plan, self.plan.book);
-        let on = Occasion {
-            amount: Some(m.out),
-            ..Occasion::flow(m)
-        };
-        book.rules.on_spend[entity]
-            .iter()
-            .filter(|rule| applies(plan, rule, &on))
-            .all(|rule| {
-                self.evaluate(
-                    rule.law,
-                    &Context::new(rule.subject, owner_of(book, rule.subject), &on),
-                );
-                let holds = !self.scratch.outcomes.iter().any(|o| {
-                    matches!(
-                        o,
-                        Outcome::Broken { warn: false, .. }
-                            | Outcome::Priced { .. }
-                            | Outcome::Faulted { .. }
-                    )
-                });
-                self.scratch.outcomes.clear();
-                holds
-            })
+        let on = Occasion { amount: Some(m.out), ..Occasion::flow(m) };
+        book.rules.on_spend[entity].iter().filter(|rule| applies(plan, rule, &on)).all(|rule| {
+            self.evaluate(rule.law, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
+            let holds = !self.scratch.outcomes.iter().any(|o| {
+                matches!(o, Outcome::Broken { warn: false, .. } | Outcome::Priced { .. } | Outcome::Faulted { .. })
+            });
+            self.scratch.outcomes.clear();
+            holds
+        })
     }
 
     /// Fires one `by` law whose date the journal has reached, or closes a
@@ -142,12 +121,7 @@ impl Ledger<'_, '_, '_> {
             let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
             let on = Occasion::time(day, period);
             for index in 0..count {
-                let Some(part) = self
-                    .world
-                    .assets
-                    .asset(asset)
-                    .and_then(|state| state.parts().get(index))
-                    .copied()
+                let Some(part) = self.world.assets.asset(asset).and_then(|state| state.parts().get(index)).copied()
                 else {
                     continue;
                 };
@@ -171,9 +145,7 @@ impl Ledger<'_, '_, '_> {
         }
         let mut rules = Vec::new();
         for rule in self.plan.book.rules.timed.iter().copied() {
-            if rule.subject != Subject::Asset(asset)
-                || !law_consumes(self.plan.book, rule.law)
-            {
+            if rule.subject != Subject::Asset(asset) || !law_consumes(self.plan.book, rule.law) {
                 continue;
             }
             let window = match self.plan.book.laws[rule.law].trigger {
@@ -195,13 +167,7 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         for index in 0..count {
-            let Some(part) = self
-                .world
-                .assets
-                .asset(asset)
-                .and_then(|state| state.parts().get(index))
-                .copied()
-            else {
+            let Some(part) = self.world.assets.asset(asset).and_then(|state| state.parts().get(index)).copied() else {
                 continue;
             };
             if !self.asset_part_held(asset, part.id, day) {
@@ -223,12 +189,7 @@ impl Ledger<'_, '_, '_> {
         let Some((owner, record)) = self.world.assets.part(part) else {
             return false;
         };
-        owner == asset
-            && record.recorded.day <= day
-            && state.held_at(EventKey {
-                day,
-                sequence: u64::MAX,
-            })
+        owner == asset && record.recorded.day <= day && state.held_at(EventKey { day, sequence: u64::MAX })
     }
 
     fn fire_asset_part(&mut self, rule: Rule, on: &Occasion<'_>, part: PartId) {
@@ -236,8 +197,7 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         let book = self.plan.book;
-        let context = Context::new(rule.subject, owner_of(book, rule.subject), on)
-            .for_asset_part(part);
+        let context = Context::new(rule.subject, owner_of(book, rule.subject), on).for_asset_part(part);
         self.enforce(&rule, &context);
     }
 
@@ -317,10 +277,7 @@ impl Ledger<'_, '_, '_> {
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {
-        let env = Env {
-            plan: self.plan,
-            world: &self.world,
-        };
+        let env = Env { plan: self.plan, world: &self.world };
         eval::run(
             env,
             &self.plan.book.laws[law],
@@ -343,20 +300,11 @@ impl Ledger<'_, '_, '_> {
             return false;
         }
         let read = match cap.target {
-            CapTarget::Total(dir) => self.world.totals.read(
-                &self.plan.watch,
-                rule.subject,
-                dir,
-                cap.window,
-                ctx.anchor(),
-            ),
+            CapTarget::Total(dir) => {
+                self.world.totals.read(&self.plan.watch, rule.subject, dir, cap.window, ctx.anchor())
+            }
             CapTarget::Purpose(purpose) => {
-                let (incoming, outgoing) = self.world.totals.read_purpose(
-                    ctx.owner,
-                    purpose,
-                    cap.window,
-                    ctx.anchor(),
-                );
+                let (incoming, outgoing) = self.world.totals.read_purpose(ctx.owner, purpose, cap.window, ctx.anchor());
                 match self.plan.book.purposes[purpose].root {
                     axiom_model::PurposeRoot::Income => incoming - outgoing,
                     axiom_model::PurposeRoot::Spending
@@ -366,11 +314,7 @@ impl Ledger<'_, '_, '_> {
             }
         };
         let counted = Amount::new(read, self.plan.book.base);
-        let holds = if cap.strict {
-            counted.qty < cap.limit.qty
-        } else {
-            counted.qty <= cap.limit.qty
-        };
+        let holds = if cap.strict { counted.qty < cap.limit.qty } else { counted.qty <= cap.limit.qty };
         if holds {
             self.record.checks[rule.law.index()] += 1;
             self.read(rule, ctx, 0, counted, cap.limit);
@@ -385,15 +329,7 @@ impl Ledger<'_, '_, '_> {
         };
         let book = self.plan.book;
         let Some(amount) = book.convert(amount, book.base, ctx.day) else {
-            self.fault(
-                rule,
-                ctx,
-                step as usize,
-                Fault::NoPrice {
-                    unit: amount.unit,
-                    quote: book.base,
-                },
-            );
+            self.fault(rule, ctx, step as usize, Fault::NoPrice { unit: amount.unit, quote: book.base });
             return;
         };
         match self.consume_asset_part(asset, part, amount.qty) {
@@ -421,11 +357,8 @@ impl Ledger<'_, '_, '_> {
             }
             Err(error) => {
                 self.record.report(
-                    Diagnostic::error(
-                        "asset-consume",
-                        format!("asset part basis could not be consumed: {error:?}"),
-                    )
-                    .label(book.laws[rule.law].loc, "basis update failed"),
+                    Diagnostic::error("asset-consume", format!("asset part basis could not be consumed: {error:?}"))
+                        .label(book.laws[rule.law].loc, "basis update failed"),
                 );
             }
         }
@@ -465,14 +398,9 @@ impl Ledger<'_, '_, '_> {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         }
-        let Some(sold) = ctx
-            .amount
-            .filter(|amount| amount.unit == unit)
-            .and_then(|_| ctx
-            .realized
-            .filter(|realized| realized.quantity > Qty::ZERO)
-            .map(|realized| realized.quantity))
-        else {
+        let Some(sold) = ctx.amount.filter(|amount| amount.unit == unit).and_then(|_| {
+            ctx.realized.filter(|realized| realized.quantity > Qty::ZERO).map(|realized| realized.quantity)
+        }) else {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         };
@@ -507,16 +435,18 @@ impl Ledger<'_, '_, '_> {
                     candidates.push((parcel.acquired, part, parcel.qty));
                 }
             }
-            if overflow { break; }
+            if overflow {
+                break;
+            }
         }
         if overflow {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         }
         candidates.sort_by_key(|(day, _, _)| std::cmp::Reverse(*day));
-        let Some(available) = candidates.iter().try_fold(Qty::ZERO, |sum, (_, _, qty)| {
-            sum.0.checked_add(qty.0).map(Qty)
-        }) else {
+        let Some(available) =
+            candidates.iter().try_fold(Qty::ZERO, |sum, (_, _, qty)| sum.0.checked_add(qty.0).map(Qty))
+        else {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         };
@@ -526,7 +456,9 @@ impl Ledger<'_, '_, '_> {
         let mut additions = Vec::new();
         let mut matched_amount = Qty::ZERO;
         for (acquired, part, available) in candidates {
-            if quantity_left.is_zero() { break; }
+            if quantity_left.is_zero() {
+                break;
+            }
             let quantity = available.min(quantity_left);
             let basis = shares.take(quantity);
             if !basis.is_zero() || !quantity.is_zero() {
@@ -603,9 +535,7 @@ impl Ledger<'_, '_, '_> {
         let holds = balance >= Qty::ZERO;
         if holds {
             self.record.checks[rule.law.index()] += 1;
-            self.record
-                .failing
-                .retain(|&(law, _, subject)| (law, subject) != (rule.law, rule.subject));
+            self.record.failing.retain(|&(law, _, subject)| (law, subject) != (rule.law, rule.subject));
         }
         holds
     }
@@ -627,65 +557,42 @@ impl Ledger<'_, '_, '_> {
         if law.trigger == Trigger::Always {
             self.record.failing.retain(|&(failed_law, step, subject)| {
                 (failed_law, subject) != (rule.law, rule.subject)
-                    || outcomes.iter().any(|outcome| {
-                        matches!(outcome, Outcome::Broken { step: failed_step, .. } if *failed_step == step)
-                    })
+                    || outcomes.iter().any(
+                        |outcome| matches!(outcome, Outcome::Broken { step: failed_step, .. } if *failed_step == step),
+                    )
             });
         }
         for outcome in outcomes.drain(..) {
             match outcome {
                 Outcome::Count { name, amount } if !ctx.checking => {
-                    for (day, part) in by_year(amount, ctx.over).filter(|(_, part)| !part.is_zero())
-                    {
+                    for (day, part) in by_year(amount, ctx.over).filter(|(_, part)| !part.is_zero()) {
                         self.world.tallies.add(ctx.owner, day.year(), name, part);
                         // What a member's own laws count is a line of the household's year too: the joint return
                         // reads it, and a limit that is the member's own reads only the member's.
-                        if let (Subject::Place(_), Some(house)) =
-                            (ctx.subject, book.entities[ctx.owner].member)
-                        {
+                        if let (Subject::Place(_), Some(house)) = (ctx.subject, book.entities[ctx.owner].member) {
                             self.world.tallies.add(house, day.year(), name, part);
                         }
                         self.sample_temporal(ctx.day);
                         let amount = Amount::new(part, book.base);
-                        let effect =
-                            self.effect(rule, ctx, (day, name, amount), Consequence::Count);
+                        let effect = self.effect(rule, ctx, (day, name, amount), Consequence::Count);
                         self.record.effects.push(effect);
                     }
                 }
                 Outcome::Owe { name, amount, owed } if !ctx.checking => {
-                    let effect = self.effect(
-                        rule,
-                        ctx,
-                        (ctx.over.first(), name, amount),
-                        Consequence::Owe(owed),
-                    );
+                    let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Owe(owed));
                     self.record.effects.push(effect);
                 }
                 Outcome::Count { .. } | Outcome::Owe { .. } => {}
                 Outcome::Consume { step, amount } => {
                     self.consume(rule, ctx, step, amount);
                 }
-                Outcome::Carry {
-                    step,
-                    amount,
-                    unit,
-                    within,
-                } => {
+                Outcome::Carry { step, amount, unit, within } => {
                     self.carry(rule, ctx, step, amount, unit, within);
                 }
-                Outcome::Priced {
-                    step,
-                    name,
-                    amount,
-                    owed,
-                } => self.charge(rule, ctx, step, (name, amount, owed)),
+                Outcome::Priced { step, name, amount, owed } => self.charge(rule, ctx, step, (name, amount, owed)),
                 Outcome::Broken { step, warn } => self.violate(rule, ctx, step, warn),
                 Outcome::Faulted { step, fault } => self.fault(rule, ctx, step as usize, fault),
-                Outcome::Read {
-                    step,
-                    counted,
-                    limit,
-                } => self.read(rule, ctx, step, counted, limit),
+                Outcome::Read { step, counted, limit } => self.read(rule, ctx, step, counted, limit),
             }
         }
         self.scratch.outcomes = outcomes;
@@ -701,19 +608,8 @@ impl Ledger<'_, '_, '_> {
         consequence: Consequence,
     ) -> Effect {
         let law = &self.plan.book.laws[rule.law];
-        let (law, subject, owner, system, cause) =
-            (rule.law, rule.subject, ctx.owner, law.system, ctx.cause);
-        Effect {
-            law,
-            subject,
-            owner,
-            system,
-            day,
-            name,
-            amount,
-            consequence,
-            cause,
-        }
+        let (law, subject, owner, system, cause) = (rule.law, rule.subject, ctx.owner, law.system, ctx.cause);
+        Effect { law, subject, owner, system, day, name, amount, consequence, cause }
     }
 
     /// The last reading of a limit in its window: updated in place while the
@@ -721,16 +617,10 @@ impl Ledger<'_, '_, '_> {
     fn read(&mut self, rule: &Rule, ctx: &Context, step: u32, counted: Amount, limit: Amount) {
         let key = (rule.law, step, rule.subject);
         let facts = self.plan.laws[rule.law.index()].steps[step as usize];
-        let window = facts
-            .reads
-            .map_or(Days::on(ctx.anchor()), |reads| reads.window(self.plan.book, ctx));
+        let window = facts.reads.map_or(Days::on(ctx.anchor()), |reads| reads.window(self.plan.book, ctx));
         if let Some(h) = self.record.headroom.get_mut(&key) {
             // The window of a tally is the year of what it counts, not the day a total is read.
-            let day = if matches!(facts.reads, Some(Reads::Tally(_))) {
-                ctx.over.first()
-            } else {
-                ctx.anchor()
-            };
+            let day = if matches!(facts.reads, Some(Reads::Tally(_))) { ctx.over.first() } else { ctx.anchor() };
             let same_budget_segment = matches!(facts.reads, Some(Reads::Budget(_))) && h.days == window;
             if same_budget_segment || (!matches!(facts.reads, Some(Reads::Budget(_))) && h.days.contains(day)) {
                 (h.counted, h.limit, h.day) = (counted, limit, ctx.day);
@@ -777,18 +667,16 @@ impl Ledger<'_, '_, '_> {
         let waiver = self.waiver(ctx);
         let fresh = match (law.trigger, facts.steps[step as usize].reads) {
             (Trigger::Always, _) => self.record.failing.insert((rule.law, step, rule.subject)),
-            (_, Some(reads)) => self.record.reported.insert((
-                rule.law,
-                step,
-                rule.subject,
-                reads.window(self.plan.book, ctx).first(),
-            )),
+            (_, Some(reads)) => {
+                self.record.reported.insert((rule.law, step, rule.subject, reads.window(self.plan.book, ctx).first()))
+            }
             _ => true,
         };
         if !fresh {
             return;
         }
-        let frame = Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame =
+            Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
         let verdict = match (waiver, warn) {
             (Some(waiver), _) => Verdict::Waived(waiver),
@@ -802,14 +690,7 @@ impl Ledger<'_, '_, '_> {
     fn violation(&mut self, rule: &Rule, ctx: &Context, diagnostic: Diagnostic, verdict: Verdict) {
         let diagnostic = self.record.report(diagnostic);
         let (law, subject, day, cause) = (rule.law, rule.subject, ctx.day, ctx.cause);
-        self.record.violations.push(Violation {
-            law,
-            subject,
-            day,
-            cause,
-            verdict,
-            diagnostic,
-        });
+        self.record.violations.push(Violation { law, subject, day, cause, verdict, diagnostic });
     }
 
     /// A `require … else owe …` that does not hold costs what the law says,
@@ -821,23 +702,12 @@ impl Ledger<'_, '_, '_> {
             self.record.waivers.insert(waive.loc, true);
         }
         let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame =
+            Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
-        self.violation(
-            rule,
-            ctx,
-            diagnostic,
-            Verdict::Priced {
-                waived: waive.is_some(),
-            },
-        );
+        self.violation(rule, ctx, diagnostic, Verdict::Priced { waived: waive.is_some() });
         if waive.is_none() {
-            let effect = self.effect(
-                rule,
-                ctx,
-                (ctx.over.first(), name, amount),
-                Consequence::Penalty(owed),
-            );
+            let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Penalty(owed));
             self.record.effects.push(effect);
         }
     }
@@ -848,15 +718,14 @@ impl Ledger<'_, '_, '_> {
     fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
         let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame =
+            Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
         let missing = match fault {
             Fault::NoPrice { unit, quote } => Missing::Price(unit, quote),
             Fault::Unset(name) => Missing::Property(holder, name),
-            Fault::NoRow(param) if book.params[param].system.is_some() => {
-                Missing::Figures(ctx.over.first().year())
-            }
+            Fault::NoRow(param) if book.params[param].system.is_some() => Missing::Figures(ctx.over.first().year()),
             Fault::NoRow(param) => Missing::Row(param),
             Fault::UnitMismatch { .. } => Missing::Arithmetic(rule.law, step as u32),
             Fault::InvalidProgram => Missing::Arithmetic(rule.law, step as u32),

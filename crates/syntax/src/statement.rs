@@ -75,20 +75,14 @@ impl<'s> Parser<'s> {
         match self.tok() {
             Tok::Punct(Punct::Eq) => {
                 self.bump();
-                if self.at(Punct::Minus)
-                    && matches!(self.lexer.peek_second().tok, Tok::Number(_))
-                {
+                if self.at(Punct::Minus) && matches!(self.lexer.peek_second().tok, Tok::Number(_)) {
                     self.signed_literal().map(|literal| Verb::Value(Amount::Literal(literal)))
                 } else if self.at(Punct::Minus) {
                     let start = self.peek().loc.start as usize;
                     self.bump();
                     let value = self.expression()?;
                     let first = self.expr(value).first;
-                    let root = self.node(
-                        ExprKind::Unary(UnOp::Neg, value),
-                        self.loc_from(start),
-                        first,
-                    );
+                    let root = self.node(ExprKind::Unary(UnOp::Neg, value), self.loc_from(start), first);
                     Ok(Verb::Value(Amount::Computed(root)))
                 } else {
                     self.amount(scope).map(Verb::Value)
@@ -109,9 +103,9 @@ impl<'s> Parser<'s> {
             "used" => self.then(Self::measured).map(Verb::Used),
             "waived" => Ok(self.bump_as(Verb::Waived)),
             "ends" => Ok(self.bump_as(Verb::Ends)),
-            "settled" | "void" | "returned" => {
-                self.choose(&EVENT_STATES, "unknown-event-state", "settlement state").map(|(state, _)| Verb::Event(state))
-            }
+            "settled" | "void" | "returned" => self
+                .choose(&EVENT_STATES, "unknown-event-state", "settlement state")
+                .map(|(state, _)| Verb::Event(state)),
             "split" => self.split(),
             "basis" => self.basis(scope),
             "filed" => self.filed(),
@@ -125,7 +119,11 @@ impl<'s> Parser<'s> {
             return Ok(Verb::Occurrence(None));
         }
         let token = self.peek();
-        let mut diag = self.unexpected(token, "expected-verb", "what the line says of it: `=`, `now`, `owes`, `ends` or another verb");
+        let mut diag = self.unexpected(
+            token,
+            "expected-verb",
+            "what the line says of it: `=`, `now`, `owes`, `ends` or another verb",
+        );
         if let Tok::Name(word) = token.tok {
             if let Some(near) = closest(word, VERBS) {
                 diag = diag.fix(format!("did you mean `{near}`?"), token.loc, near);
@@ -139,7 +137,9 @@ impl<'s> Parser<'s> {
         self.bump();
         let creditor = self.name("expected-name", "the party or owner it is owed to")?;
         let amount = match self.tok() {
-            Tok::Number(_) | Tok::Percent(_) | Tok::Fraction(..) | Tok::Name("empty") => Some(self.priced_amount(scope)?),
+            Tok::Number(_) | Tok::Percent(_) | Tok::Fraction(..) | Tok::Name("empty") => {
+                Some(self.priced_amount(scope)?)
+            }
             _ => None,
         };
         Ok(Verb::Owes { creditor, amount })
@@ -296,7 +296,10 @@ fn takes(verb: &Verb<'_>, clause: &ClauseKind<'_>) -> bool {
     use ClauseKind::*;
     match (verb, clause) {
         (_, Description(_) | Code(_)) => true,
-        (Verb::Occurrence(_) | Verb::Owes { .. }, Purpose(_) | For(_) | Due(_) | Against(_) | Via(_) | Basis(_) | Waive(_)) => true,
+        (
+            Verb::Occurrence(_) | Verb::Owes { .. },
+            Purpose(_) | For(_) | Due(_) | Against(_) | Via(_) | Basis(_) | Waive(_),
+        ) => true,
         (Verb::Value(_), Via(_) | Waive(_)) => true,
         (Verb::Now(_) | Verb::Waived, Until(_)) => true,
         (Verb::Waived, Purpose(_)) => true,

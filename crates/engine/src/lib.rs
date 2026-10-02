@@ -55,8 +55,8 @@ mod scope;
 mod show;
 mod sides;
 mod state;
-mod timeline;
 mod temporal;
+mod timeline;
 mod totals;
 
 #[cfg(test)]
@@ -70,13 +70,13 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
-    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot,
-    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
+    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, RuntimeDetail,
+    RuntimeFlow, RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
 };
 
 pub use assets::{
-    AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey,
-    Part, PartId, PartKind, PendingCarry,
+    AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId,
+    PartKind, PendingCarry,
 };
 pub use checkpoint::Checkpoint;
 pub use ledger::{Ledger, OccurrenceOutput, TemplateError};
@@ -233,18 +233,14 @@ impl Run {
     pub fn promise_flows(&self, promise: &Promise) -> &[RuntimeFlow] {
         let start = promise.flows.start as usize;
         let end = start + promise.flows.len as usize;
-        self.promised_flows
-            .get(start..end)
-            .expect("promise flow range belongs to this Run")
+        self.promised_flows.get(start..end).expect("promise flow range belongs to this Run")
     }
 
     /// Input declaration indices omitted from one expected occurrence.
     pub fn promise_missing_inputs(&self, promise: &Promise) -> &[u16] {
         let start = promise.missing_inputs.start as usize;
         let end = start + promise.missing_inputs.len as usize;
-        self.missing_inputs
-            .get(start..end)
-            .expect("promise input range belongs to this Run")
+        self.missing_inputs.get(start..end).expect("promise input range belongs to this Run")
     }
 }
 

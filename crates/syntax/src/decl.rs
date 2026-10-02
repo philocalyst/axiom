@@ -232,9 +232,7 @@ impl<'s> Parser<'s> {
             Tok::Date(day) => Key::Date(day, token.loc),
             Tok::Name(text) => Key::Name(Name(text)),
             Tok::Unit(text) => Key::Name(Name(text)),
-            Tok::Number(_) if first || !matches!(second.tok, Tok::Unit(_)) => {
-                Key::Year(self.year(token)?, token.loc)
-            }
+            Tok::Number(_) if first || !matches!(second.tok, Tok::Unit(_)) => Key::Year(self.year(token)?, token.loc),
             _ => return None,
         };
         self.bump();

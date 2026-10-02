@@ -30,12 +30,7 @@ pub(crate) fn declare_sites<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> NativePurposes {
     let root_names = ["income", "spending", "capital", "transfer"];
-    let root_kinds = [
-        PurposeRoot::Income,
-        PurposeRoot::Spending,
-        PurposeRoot::Capital,
-        PurposeRoot::Transfer,
-    ];
+    let root_kinds = [PurposeRoot::Income, PurposeRoot::Spending, PurposeRoot::Capital, PurposeRoot::Transfer];
     let mut drafts: Vec<Purpose> = root_names
         .iter()
         .zip(root_kinds)
@@ -77,18 +72,13 @@ pub(crate) fn declare_sites<'a, 's>(
                 // root may attach laws to that identity without creating a
                 // second tree node, just as a shared system may extend the
                 // built-in root with domain rules.
-                draft_of.push(
-                    root_ids[root_names.iter().position(|&name| name == text).unwrap()].index(),
-                );
+                draft_of.push(root_ids[root_names.iter().position(|&name| name == text).unwrap()].index());
                 continue;
             }
             if let Some(&first) = seen.get(&(site.home, text)) {
                 diags.push(duplicate(
                     "purpose",
-                    Word {
-                        text,
-                        loc: file.loc(text),
-                    },
+                    Word { text, loc: file.loc(text) },
                     drafts.get(first).and_then(|purpose| purpose.loc),
                     None,
                 ));
@@ -121,13 +111,7 @@ pub(crate) fn declare_sites<'a, 's>(
     let draft_names: Vec<_> = drafts
         .iter()
         .enumerate()
-        .map(|(at, purpose)| {
-            (
-                Id::<Purpose>::new(at as u32),
-                names.name(purpose.name),
-                homes[at],
-            )
-        })
+        .map(|(at, purpose)| (Id::<Purpose>::new(at as u32), names.name(purpose.name), homes[at]))
         .collect();
     let index = Scoped::build(names, draft_names);
 
@@ -138,12 +122,9 @@ pub(crate) fn declare_sites<'a, 's>(
         }
         let Some(parent) = decl.kind else {
             diags.push(
-                Diagnostic::error(
-                    "purpose-parent",
-                    format!("purpose `{}` needs a parent", decl.name.0),
-                )
-                .label(file.loc(decl.name.0), "what is this purpose a kind of?")
-                .help("give it a parent such as `income`, `spending`, `capital`, or `transfer`"),
+                Diagnostic::error("purpose-parent", format!("purpose `{}` needs a parent", decl.name.0))
+                    .label(file.loc(decl.name.0), "what is this purpose a kind of?")
+                    .help("give it a parent such as `income`, `spending`, `capital`, or `transfer`"),
             );
             parents[child] = Some(root_ids[3].index());
             continue;
@@ -156,25 +137,13 @@ pub(crate) fn declare_sites<'a, 's>(
                     crate::book::Miss::Unknown { suggestion } => unknown(
                         "unknown-purpose",
                         "purpose",
-                        Word {
-                            text: parent.0,
-                            loc: file.loc(parent.0),
-                        },
+                        Word { text: parent.0, loc: file.loc(parent.0) },
                         suggestion.map(|sym| names.name(sym)),
                     ),
                     crate::book::Miss::Ambiguous(ids) => {
-                        let candidates: Vec<_> = ids
-                            .iter()
-                            .map(|id| names.name(drafts[id.index()].name))
-                            .collect();
-                        Diagnostic::error(
-                            "ambiguous-purpose",
-                            format!("purpose `{}` is ambiguous", parent.0),
-                        )
-                        .label(
-                            file.loc(parent.0),
-                            format!("could name {}", candidates.join(" or ")),
-                        )
+                        let candidates: Vec<_> = ids.iter().map(|id| names.name(drafts[id.index()].name)).collect();
+                        Diagnostic::error("ambiguous-purpose", format!("purpose `{}` is ambiguous", parent.0))
+                            .label(file.loc(parent.0), format!("could name {}", candidates.join(" or ")))
                     }
                 };
                 diags.push(diagnostic);
@@ -184,17 +153,11 @@ pub(crate) fn declare_sites<'a, 's>(
     }
 
     for cycle in cycles(&parents) {
-        let route: Vec<&str> = cycle
-            .iter()
-            .map(|&at| names.name(drafts[at].name))
-            .collect();
+        let route: Vec<&str> = cycle.iter().map(|&at| names.name(drafts[at].name)).collect();
         let loc = drafts[cycle[0]].loc;
-        let mut diagnostic = Diagnostic::error(
-            "purpose-cycle",
-            format!("purpose `{}` inherits from itself", route[0]),
-        )
-        .note(format!("the chain is {}", route.join(" -> ")))
-        .help("give one of them a parent outside the loop");
+        let mut diagnostic = Diagnostic::error("purpose-cycle", format!("purpose `{}` inherits from itself", route[0]))
+            .note(format!("the chain is {}", route.join(" -> ")))
+            .help("give one of them a parent outside the loop");
         if let Some(loc) = loc {
             diagnostic = diagnostic.label(loc, "this parent chain never reaches a root");
         }
@@ -204,21 +167,12 @@ pub(crate) fn declare_sites<'a, 's>(
         }
     }
 
-    let (mut tree, remap) =
-        Tree::build(drafts, &parents).expect("purpose cycles were cut before freezing");
+    let (mut tree, remap) = Tree::build(drafts, &parents).expect("purpose cycles were cut before freezing");
     for id in tree.ids() {
         tree[id].root = tree.parent(id).map_or_else(
             || {
-                let at = root_ids
-                    .iter()
-                    .position(|&root| remap[root.index()] == id)
-                    .unwrap();
-                [
-                    PurposeRoot::Income,
-                    PurposeRoot::Spending,
-                    PurposeRoot::Capital,
-                    PurposeRoot::Transfer,
-                ][at]
+                let at = root_ids.iter().position(|&root| remap[root.index()] == id).unwrap();
+                [PurposeRoot::Income, PurposeRoot::Spending, PurposeRoot::Capital, PurposeRoot::Transfer][at]
             },
             |parent| tree[parent].root,
         );
@@ -243,27 +197,16 @@ pub(crate) fn declare_sites<'a, 's>(
             };
             let ExprKind::Name(kind_name) = file.exprs[*expr].kind else {
                 diags.push(
-                    Diagnostic::error("purpose-object", "`of` needs a kind name")
-                        .label(prop.loc, "write `of KIND`"),
+                    Diagnostic::error("purpose-object", "`of` needs a kind name").label(prop.loc, "write `of KIND`"),
                 );
                 continue;
             };
             let scope = scopes.of(*home);
-            match kinds::find(kind_index, names, systems, kind_name.0, |visible| {
-                scope.sees(visible)
-            }) {
-                Ok(kind) => {
-                    tree[id].of = Some(At {
-                        value: kind,
-                        loc: prop.loc,
-                    })
-                }
+            match kinds::find(kind_index, names, systems, kind_name.0, |visible| scope.sees(visible)) {
+                Ok(kind) => tree[id].of = Some(At { value: kind, loc: prop.loc }),
                 Err(_) => diags.push(
-                    Diagnostic::error(
-                        "unknown-kind",
-                        format!("kind `{}` is not known here", kind_name.0),
-                    )
-                    .label(file.loc(kind_name.0), "not a visible kind"),
+                    Diagnostic::error("unknown-kind", format!("kind `{}` is not known here", kind_name.0))
+                        .label(file.loc(kind_name.0), "not a visible kind"),
                 ),
             }
         }
@@ -273,10 +216,8 @@ pub(crate) fn declare_sites<'a, 's>(
     for (at, &home) in homes.iter().enumerate() {
         final_homes[remap[at].index()] = home;
     }
-    let final_names: Vec<_> = tree
-        .iter()
-        .map(|(id, purpose)| (id, names.name(purpose.name), final_homes[id.index()]))
-        .collect();
+    let final_names: Vec<_> =
+        tree.iter().map(|(id, purpose)| (id, names.name(purpose.name), final_homes[id.index()])).collect();
     let index = Scoped::build(names, final_names);
     NativePurposes {
         tree,

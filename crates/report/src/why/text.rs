@@ -11,10 +11,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, description: &str) -> O
     let ids = postings(book, run)
         .filter(|posting| {
             lens.owns(crate::flow::movement_place(lens, posting.flow))
-                && posting
-                    .flow
-                    .description
-                    .is_some_and(|text| book.text(text) == description)
+                && posting.flow.description.is_some_and(|text| book.text(text) == description)
         })
         .map(|posting| posting.id)
         .collect::<Vec<_>>();
@@ -22,25 +19,13 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, description: &str) -> O
         return None;
     }
 
-    let mut matches = Section::new([
-        Column::left("Date"),
-        Column::left("Description"),
-        Column::left("From"),
-    ]);
+    let mut matches = Section::new([Column::left("Date"), Column::left("Description"), Column::left("From")]);
     for &id in &ids {
         let flow = &book.flows[id];
         let Some(text) = flow.description else {
             continue;
         };
-        matches.push(Row::new([
-            Cell::Day(flow.day),
-            Cell::Text(book.text(text).into()),
-            Cell::Source(flow.loc),
-        ]));
+        matches.push(Row::new([Cell::Day(flow.day), Cell::Text(book.text(text).into()), Cell::Source(flow.loc)]));
     }
-    Some(
-        Report::new(format!("Why \"{description}\""))
-            .with(matches)
-            .with(flows_table(lens, run, &ids, "Flows")),
-    )
+    Some(Report::new(format!("Why \"{description}\"")).with(matches).with(flows_table(lens, run, &ids, "Flows")))
 }

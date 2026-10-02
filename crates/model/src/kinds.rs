@@ -94,12 +94,7 @@ pub(crate) fn declare_sites<'a, 's>(
             let name = decl.name.0;
             written.push((file, decl, site.home));
             if let Some(&first) = duplicate_of.get(&(site.home, name)) {
-                diags.push(duplicate(
-                    "kind",
-                    Word { text: name, loc: file.loc(name) },
-                    drafts[first].loc,
-                    None,
-                ));
+                diags.push(duplicate("kind", Word { text: name, loc: file.loc(name) }, drafts[first].loc, None));
                 draft_of.push(first);
                 continue;
             }
@@ -127,11 +122,8 @@ pub(crate) fn declare_sites<'a, 's>(
         }
     }
 
-    let draft_names: Vec<_> = drafts
-        .iter()
-        .enumerate()
-        .map(|(at, kind)| (Id::new(at as u32), names.name(kind.name), homes[at]))
-        .collect();
+    let draft_names: Vec<_> =
+        drafts.iter().enumerate().map(|(at, kind)| (Id::new(at as u32), names.name(kind.name), homes[at])).collect();
     let draft_index = Scoped::build(names, draft_names);
     for (at, &(file, decl, home)) in written.iter().enumerate() {
         let child = draft_of[at];
@@ -142,7 +134,9 @@ pub(crate) fn declare_sites<'a, 's>(
             diags.push(
                 Diagnostic::error("kind-parent", format!("kind `{}` needs a parent", decl.name.0))
                     .label(file.loc(decl.name.0), "what kind of thing is this?")
-                    .help("write `: asset`, `: debt`, `: thing`, `: commodity`, `: measure`, `: entity`, or another kind"),
+                    .help(
+                        "write `: asset`, `: debt`, `: thing`, `: commodity`, `: measure`, `: entity`, or another kind",
+                    ),
             );
             parents[child] = Some(ROOT_THING);
             broken[child] = true;
@@ -190,10 +184,8 @@ pub(crate) fn declare_sites<'a, 's>(
             unrooted[id.index()] |= unrooted[parent.index()];
         }
     }
-    let visible_names: Vec<_> = tree
-        .iter()
-        .map(|(id, kind)| (id, names.name(kind.name), final_homes[id.index()]))
-        .collect();
+    let visible_names: Vec<_> =
+        tree.iter().map(|(id, kind)| (id, names.name(kind.name), final_homes[id.index()])).collect();
     let index = Scoped::build(names, visible_names);
     let declarations = draft_of.into_iter().map(|draft| remap[draft]).collect();
     NativeKinds {
@@ -340,8 +332,8 @@ mod native_tests {
     use axiom_syntax::{Folder, parse};
 
     use super::*;
-    use crate::sources;
     use crate::Source;
+    use crate::sources;
 
     fn build_kinds<'s>(texts: &[(&'s str, &'s str, bool)]) -> (NativeKinds, Vec<Diagnostic>) {
         let sources: Vec<_> = texts

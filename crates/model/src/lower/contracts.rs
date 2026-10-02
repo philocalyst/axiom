@@ -8,16 +8,13 @@ use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, ItemKind, Name};
 
 use super::{JournalSurvey, compile_roots, contract_roots, inputs};
 use crate::book::{
-    AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input,
-    Loan,
-    Prepay, Relative, Reset, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
-    TemplateLeg, TemplateProgram, TemplateQuantity, Terms, TermsState,
+    AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Loan, Prepay,
+    Relative, Reset, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent, TemplateLeg,
+    TemplateProgram, TemplateQuantity, Terms, TermsState,
 };
 use crate::declare::World;
 use crate::errors::{Word, duplicate};
-use crate::journal::{
-    Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive,
-};
+use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
 use crate::scope::Home;
 use crate::sources::Site;
@@ -52,27 +49,15 @@ pub(crate) fn contracts<'a, 's>(
             if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
                 diags.push(duplicate(
                     "contract",
-                    Word {
-                        text: node.name.0,
-                        loc: file.loc(node.name.0),
-                    },
+                    Word { text: node.name.0, loc: file.loc(node.name.0) },
                     Some(world.book.contracts[first].loc),
                     None,
                 ));
                 continue;
             }
-            let id = world
-                .book
-                .contracts
-                .push(empty_contract(name, item.loc, world.book.roots.me));
+            let id = world.book.contracts.push(empty_contract(name, item.loc, world.book.roots.me));
             world.book.lookup.contracts.insert(name, id);
-            written.push(WrittenContract {
-                site,
-                node,
-                id,
-                name,
-                loc: item.loc,
-            });
+            written.push(WrittenContract { site, node, id, name, loc: item.loc });
         }
     }
 
@@ -135,14 +120,8 @@ fn lower_contract<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Contract> {
     let node = written.node;
-    let name_word = Word {
-        text: node.name.0,
-        loc: file.loc(node.name.0),
-    };
-    let party_word = node.party.map_or(name_word, |party| Word {
-        text: party.0,
-        loc: file.loc(party.0),
-    });
+    let name_word = Word { text: node.name.0, loc: file.loc(node.name.0) };
+    let party_word = node.party.map_or(name_word, |party| Word { text: party.0, loc: file.loc(party.0) });
     let party = match world.entity(written.site.home, party_word) {
         Ok(party) => party,
         Err(problem) => {
@@ -157,17 +136,12 @@ fn lower_contract<'a, 's>(
     };
     let anchor = days.first();
     let purpose = if let Some(purpose) = node.purpose {
-        let purpose_word = Word {
-            text: purpose.name.0,
-            loc: file.loc(purpose.name.0),
-        };
+        let purpose_word = Word { text: purpose.name.0, loc: file.loc(purpose.name.0) };
         match world.purpose(written.site.home, purpose_word) {
             Ok(id) => Some(At {
                 value: Purposed {
                     purpose: id,
-                    of: purpose.of.and_then(|object| {
-                        resolve_object(world, written.site.home, file, object, diags)
-                    }),
+                    of: purpose.of.and_then(|object| resolve_object(world, written.site.home, file, object, diags)),
                     source: Provenance::Contract(written.id),
                 },
                 loc: purpose_word.loc,
@@ -180,32 +154,12 @@ fn lower_contract<'a, 's>(
     } else {
         None
     };
-    let description = node
-        .description
-        .map(|description| world.book.quoted_text(description.0));
+    let description = node.description.map(|description| world.book.quoted_text(description.0));
     let contract_inputs = inputs(world, file, node.props, diags);
     let roots = contract_roots(file, node);
     let (regular, standing) = (
-        compile_roots(
-            world,
-            file,
-            written.site.home,
-            Ty::Flow,
-            written.name,
-            &contract_inputs,
-            &roots.regular,
-            diags,
-        ),
-        compile_roots(
-            world,
-            file,
-            written.site.home,
-            Ty::Flow,
-            written.name,
-            &contract_inputs,
-            &roots.standing,
-            diags,
-        ),
+        compile_roots(world, file, written.site.home, Ty::Flow, written.name, &contract_inputs, &roots.regular, diags),
+        compile_roots(world, file, written.site.home, Ty::Flow, written.name, &contract_inputs, &roots.standing, diags),
     );
 
     let owner = match node.schedule.or(node.standing) {
@@ -218,12 +172,9 @@ fn lower_contract<'a, 's>(
         node.props,
         written.site.home,
         owner,
-        node.schedule.or(node.standing).and_then(|schedule| {
-            schedule
-                .terms
-                .holding
-                .map(|holding| (holding.name, schedule.at))
-        }),
+        node.schedule
+            .or(node.standing)
+            .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at))),
         diags,
     )
     .ok()?;
@@ -238,20 +189,8 @@ fn lower_contract<'a, 's>(
         &contract_inputs,
         world.book.entities[owner].currency,
     );
-    let loan = contract_loan(
-        world,
-        file,
-        node.props,
-        party,
-        owner,
-        written.site.home,
-        diags,
-    )?;
-    let mut contract = empty_contract(
-        written.name,
-        written.site.source.file.loc(node.name.0),
-        owner,
-    );
+    let loan = contract_loan(world, file, node.props, party, owner, written.site.home, diags)?;
+    let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
     contract.party = party;
     contract.owner = owner;
     contract.days = days;
@@ -265,12 +204,10 @@ fn lower_contract<'a, 's>(
     contract.loan = loan.map(|(loan, _)| loan);
     contract.doc = node_doc(world, written.site, written.loc);
     contract.loc = written.loc;
-    contract.buys = node
-        .standing
-        .and_then(|schedule| match schedule.terms.payment {
-            Some(ast::Payment::Buy { unit, .. }) => resolve_commodity(world, file, unit, diags),
-            _ => None,
-        });
+    contract.buys = node.standing.and_then(|schedule| match schedule.terms.payment {
+        Some(ast::Payment::Buy { unit, .. }) => resolve_commodity(world, file, unit, diags),
+        _ => None,
+    });
 
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
         let terms = lower_terms(
@@ -343,9 +280,7 @@ fn contract_loan<'s>(
 
     let args = &file[prop.args];
     let keyword = |index: usize, expected: &str| {
-        args.get(index).is_some_and(|&id| {
-            matches!(file.exprs[id].kind, ExprKind::Name(name) if name.0 == expected)
-        })
+        args.get(index).is_some_and(|&id| matches!(file.exprs[id].kind, ExprKind::Name(name) if name.0 == expected))
     };
     let Some(&principal_expr) = args.first() else {
         diags.push(
@@ -357,10 +292,7 @@ fn contract_loan<'s>(
     let principal = match file.exprs[principal_expr].kind {
         ExprKind::Amount(literal) => {
             let unit = match literal.unit() {
-                Some(unit) => match world.commodity_of(Word {
-                    text: unit.0,
-                    loc: file.loc(unit.0),
-                }) {
+                Some(unit) => match world.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) }) {
                     Ok(unit) => unit,
                     Err(problem) => {
                         diags.push(problem);
@@ -503,18 +435,7 @@ fn contract_loan<'s>(
         }
     }
     let debt = world.tab(party, owner, Class::Debt, prop.loc).map_err(|problem| diags.push(problem)).ok()?;
-    Some(Some((
-        Loan {
-            principal,
-            on,
-            term,
-            asset,
-            debt,
-            resets,
-            prepay,
-        },
-        rate,
-    )))
+    Some(Some((Loan { principal, on, term, asset, debt, resets, prepay }, rate)))
 }
 
 fn loan_resets<'s>(
@@ -586,10 +507,7 @@ fn loan_resets<'s>(
     if margin.is_negative() {
         return invalid_reset(diags, file.exprs[margin_expr].loc, "the reset margin cannot be negative");
     }
-    let word = Word {
-        text: index_name.0,
-        loc: file.loc(index_name.0),
-    };
+    let word = Word { text: index_name.0, loc: file.loc(index_name.0) };
     let index = match world.seek_param(home, word) {
         Ok(Some(index)) => index,
         Ok(None) => {
@@ -615,7 +533,13 @@ fn loan_resets<'s>(
         let clause_expr = args[cursor];
         let clause = match file.exprs[clause_expr].kind {
             ExprKind::Name(name) if name.0 == "cap" || name.0 == "life" => name.0,
-            _ => return invalid_reset(diags, file.exprs[clause_expr].loc, "only `cap PERCENT` and `life PERCENT` follow the margin"),
+            _ => {
+                return invalid_reset(
+                    diags,
+                    file.exprs[clause_expr].loc,
+                    "only `cap PERCENT` and `life PERCENT` follow the margin",
+                );
+            }
         };
         cursor += 1;
         let Some(&value_expr) = args.get(cursor) else {
@@ -634,14 +558,7 @@ fn loan_resets<'s>(
         cursor += 1;
     }
 
-    Some(Some(Reset {
-        every,
-        from,
-        index,
-        margin,
-        cap,
-        life,
-    }))
+    Some(Some(Reset { every, from, index, margin, cap, life }))
 }
 
 fn reset_keyword(file: &ast::File<'_>, args: &[ast::ExprId], at: usize, expected: &str) -> bool {
@@ -691,14 +608,7 @@ fn lower_terms<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let hold = schedule.terms.holding?;
-    let holding = resolve_endpoint(
-        world,
-        written.site.home,
-        file,
-        hold.name,
-        schedule.at,
-        diags,
-    )?;
+    let holding = resolve_endpoint(world, written.site.home, file, hold.name, schedule.at, diags)?;
     let Some(party_place) = world.book.entities[party].place else {
         diags.push(
             Diagnostic::error("contract-party-place", "the contract party has no usable place")
@@ -711,8 +621,7 @@ fn lower_terms<'a, 's>(
         Direction::Into => (party_place, holding, FlowSide::Out),
     };
     let owner = world.book.places[holding].owner;
-    let ((out_quantity, arrive_quantity), header_amount, buys) =
-        schedule_amount(world, file, schedule, &roots, diags)?;
+    let ((out_quantity, arrive_quantity), header_amount, buys) = schedule_amount(world, file, schedule, &roots, diags)?;
     let mut header_flow = template_flow(
         anchor,
         from,
@@ -741,16 +650,14 @@ fn lower_terms<'a, 's>(
     .ok()?;
     let mut legs = Vec::new();
     for leg in &file[body.legs] {
-        let endpoint =
-            resolve_endpoint(world, written.site.home, file, leg.end.name, leg.loc, diags)?;
+        let endpoint = resolve_endpoint(world, written.site.home, file, leg.end.name, leg.loc, diags)?;
         // A promised split leg names the recipient. Keep the source end of
         // the scheduled header and send that portion to the named endpoint:
         // an employer's paycheck leg is `lumen -> retirement`, and an owner
         // payment leg is `checking -> escrow`.
         let leg_from = from;
         let leg_to = endpoint;
-        let (quantity, amount) =
-            template_quantity(world, file, leg.amount, &roots, header_amount.unit, diags)?;
+        let (quantity, amount) = template_quantity(world, file, leg.amount, &roots, header_amount.unit, diags)?;
         let mut flow = template_flow(
             anchor,
             leg_from,
@@ -774,19 +681,13 @@ fn lower_terms<'a, 's>(
             from_party,
             leg_to,
             None,
-            leg_purpose
-                .or_else(|| purpose.map(|at| At { value: at.value, loc: at.loc }))
-                .map(|at| (at.value, at.loc)),
+            leg_purpose.or_else(|| purpose.map(|at| At { value: at.value, loc: at.loc })).map(|at| (at.value, at.loc)),
             leg.loc,
             diags,
         )
         .ok()?;
         flow.description = leg_description.or(flow.description);
-        legs.push(TemplateLeg {
-            flow,
-            side,
-            quantity,
-        });
+        legs.push(TemplateLeg { flow, side, quantity });
     }
     let mut items = Vec::new();
     for item in &file[body.items] {
@@ -851,17 +752,8 @@ fn lower_terms<'a, 's>(
         covers: coverage_property(file, written.node.props, diags),
         prorated: has_property(file, written.node.props, "prorated"),
         escalation: escalation_property(world, written.site.home, file, written.node.props, diags),
-        shares: shares(
-            world,
-            written.site.home,
-            file,
-            written.node.props,
-            purpose,
-            contract_area,
-            anchor,
-            diags,
-        )
-        .into_boxed_slice(),
+        shares: shares(world, written.site.home, file, written.node.props, purpose, contract_area, anchor, diags)
+            .into_boxed_slice(),
         also: also.to_vec().into_boxed_slice(),
         rate: loan_rate,
         change: None,
@@ -874,28 +766,18 @@ fn schedule_amount<'s>(
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<(
-    (TemplateQuantity, TemplateQuantity),
-    Amount,
-    Option<Id<crate::book::Commodity>>,
-)> {
+) -> Option<((TemplateQuantity, TemplateQuantity), Amount, Option<Id<crate::book::Commodity>>)> {
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
-            let (quantity, amount) =
-                template_amount(world, file, amount, roots, world.book.base, diags)?;
+            let (quantity, amount) = template_amount(world, file, amount, roots, world.book.base, diags)?;
             (quantity, amount, None)
         }
         Some(ast::Payment::Buy { unit, spend }) => {
             let buy_unit = resolve_commodity(world, file, unit, diags)?;
-            let (quantity, amount) =
-                template_amount(world, file, spend, roots, world.book.base, diags)?;
+            let (quantity, amount) = template_amount(world, file, spend, roots, world.book.base, diags)?;
             (quantity, amount, Some(buy_unit))
         }
-        None => (
-            TemplateQuantity::Derived,
-            Amount::zero(world.book.base),
-            None,
-        ),
+        None => (TemplateQuantity::Derived, Amount::zero(world.book.base), None),
     };
     Some(((quantity, quantity), amount, buys))
 }
@@ -955,11 +837,8 @@ fn template_quantity<'s>(
         };
         if rate.is_negative() || rate > Ratio::ONE {
             diags.push(
-                Diagnostic::error(
-                    "contract-percentage-range",
-                    "a split percentage must be between 0% and 100%",
-                )
-                .label(file.exprs[expr].loc, "this share would exceed the parent amount"),
+                Diagnostic::error("contract-percentage-range", "a split percentage must be between 0% and 100%")
+                    .label(file.exprs[expr].loc, "this share would exceed the parent amount"),
             );
             return None;
         }
@@ -987,10 +866,7 @@ fn template_quantity<'s>(
                 Some(unit) => Some(resolve_commodity(world, file, unit, diags)?),
                 None => None,
             };
-            (
-                TemplateQuantity::All(unit),
-                Amount::zero(unit.unwrap_or(fallback)),
-            )
+            (TemplateQuantity::All(unit), Amount::zero(unit.unwrap_or(fallback)))
         }
         ast::Quantity::Rest => (TemplateQuantity::Rest, Amount::zero(fallback)),
         ast::Quantity::Whole => (TemplateQuantity::Whole, Amount::new(Qty(1), fallback)),
@@ -1019,26 +895,16 @@ fn template_amount<'s>(
 ) -> Option<(TemplateQuantity, Amount)> {
     match amount {
         ast::Amount::Literal(literal) => {
-            let unit = literal.unit().map_or(Some(fallback), |unit| {
-                resolve_commodity(world, file, unit, diags)
-            })?;
-            let amount = world
-                .amount(literal.num(), unit, file.loc(literal.0))
-                .map_err(|problem| diags.push(problem))
-                .ok()?;
+            let unit = literal.unit().map_or(Some(fallback), |unit| resolve_commodity(world, file, unit, diags))?;
+            let amount =
+                world.amount(literal.num(), unit, file.loc(literal.0)).map_err(|problem| diags.push(problem)).ok()?;
             Some((TemplateQuantity::Amount(None), amount))
         }
         ast::Amount::Computed(root) => {
             let Some(&node) = roots.get(&root) else {
                 diags.push(
-                    Diagnostic::error(
-                        "template-root",
-                        "a computed template amount was not compiled",
-                    )
-                    .label(
-                        file.exprs[root].loc,
-                        "this amount has no typed program node",
-                    ),
+                    Diagnostic::error("template-root", "a computed template amount was not compiled")
+                        .label(file.exprs[root].loc, "this amount has no typed program node"),
                 );
                 return None;
             };
@@ -1063,9 +929,7 @@ fn lower_item<'s>(
         TemplateQuantity::Amount(Some(root)) => (TemplateAmount::Computed(root), ()),
         _ => (
             TemplateAmount::Literal(match item.amount {
-                ast::Amount::Literal(literal) => {
-                    resolve_amount(world, file, literal, fallback, diags)?
-                }
+                ast::Amount::Literal(literal) => resolve_amount(world, file, literal, fallback, diags)?,
                 ast::Amount::Computed(_) => return None,
             }),
             (),
@@ -1099,14 +963,7 @@ fn lower_tail<'s>(
     tail: axiom_syntax::Many<ast::Clause<'s>>,
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
-) -> (
-    Run<Sym>,
-    Run<Select>,
-    Option<Id<Detail>>,
-    Option<Waive>,
-    Option<At<Purposed>>,
-    Option<crate::book::Text>,
-) {
+) -> (Run<Sym>, Run<Select>, Option<Id<Detail>>, Option<Waive>, Option<At<Purposed>>, Option<crate::book::Text>) {
     let code_start = world.book.codes.len();
     let mut details = Detail::NONE;
     let (mut purpose, mut description, mut waive) = (None, None, None);
@@ -1117,18 +974,13 @@ fn lower_tail<'s>(
                 world.book.codes.push(sym);
             }
             ClauseKind::Purpose(purpose_ast) => {
-                let word = Word {
-                    text: purpose_ast.name.0,
-                    loc: file.loc(purpose_ast.name.0),
-                };
+                let word = Word { text: purpose_ast.name.0, loc: file.loc(purpose_ast.name.0) };
                 match world.purpose(home, word) {
                     Ok(id) => {
                         purpose = Some(At {
                             value: Purposed {
                                 purpose: id,
-                                of: purpose_ast
-                                    .of
-                                    .and_then(|name| resolve_object(world, home, file, name, diags)),
+                                of: purpose_ast.of.and_then(|name| resolve_object(world, home, file, name, diags)),
                                 source: Provenance::Written,
                             },
                             loc: clause.at,
@@ -1139,23 +991,15 @@ fn lower_tail<'s>(
             }
             ClauseKind::Description(text) => description = Some(world.book.quoted_text(text.0)),
             ClauseKind::Waive(written) => {
-                waive = Some(Waive {
-                    loc: written.at,
-                    reason: written.reason.map(|text| world.book.quoted_text(text.0)),
-                });
+                waive =
+                    Some(Waive { loc: written.at, reason: written.reason.map(|text| world.book.quoted_text(text.0)) });
             }
             ClauseKind::Due(_) => details.due = None,
-            ClauseKind::For(_)
-            | ClauseKind::Via(_)
-            | ClauseKind::Basis(_)
-            | ClauseKind::Since(_) => {}
+            ClauseKind::For(_) | ClauseKind::Via(_) | ClauseKind::Basis(_) | ClauseKind::Since(_) => {}
             ClauseKind::Against(_) | ClauseKind::Price(_) | ClauseKind::Until(_) => {}
         }
     }
-    let codes = Run::new(
-        Id::new(code_start as u32),
-        (world.book.codes.len() - code_start) as u32,
-    );
+    let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
     let select = Run::new(Id::new(world.book.selectors.len() as u32), 0);
     let detail = (details != Detail::NONE).then(|| world.book.details.push(details));
     (codes, select, detail, waive, purpose, description)
@@ -1168,13 +1012,8 @@ fn resolve_amount<'s>(
     fallback: Id<crate::book::Commodity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Amount> {
-    let unit = literal.unit().map_or(Some(fallback), |unit| {
-        resolve_commodity(world, file, unit, diags)
-    })?;
-    world
-        .amount(literal.num(), unit, file.loc(literal.0))
-        .map_err(|problem| diags.push(problem))
-        .ok()
+    let unit = literal.unit().map_or(Some(fallback), |unit| resolve_commodity(world, file, unit, diags))?;
+    world.amount(literal.num(), unit, file.loc(literal.0)).map_err(|problem| diags.push(problem)).ok()
 }
 
 fn resolve_commodity<'s>(
@@ -1183,13 +1022,7 @@ fn resolve_commodity<'s>(
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Commodity>> {
-    world
-        .commodity_of(Word {
-            text: name.0,
-            loc: file.loc(name.0),
-        })
-        .map_err(|problem| diags.push(problem))
-        .ok()
+    world.commodity_of(Word { text: name.0, loc: file.loc(name.0) }).map_err(|problem| diags.push(problem)).ok()
 }
 
 fn resolve_endpoint<'s>(
@@ -1247,22 +1080,17 @@ fn contract_days(
             continue;
         }
         let args = &file[prop.args];
-        let value = (args.len() == 1)
-            .then(|| args[0])
-            .and_then(|id| match file.exprs[id].kind {
-                ExprKind::Date(day) => Some(day),
-                _ => None,
-            });
+        let value = (args.len() == 1).then(|| args[0]).and_then(|id| match file.exprs[id].kind {
+            ExprKind::Date(day) => Some(day),
+            _ => None,
+        });
         if let Some(day) = value {
             *target = day;
         } else {
             valid = false;
             diags.push(
-                Diagnostic::error(
-                    "contract-date",
-                    "a contract's `from` and `until` need a date",
-                )
-                .label(prop.loc, "write exactly one date here"),
+                Diagnostic::error("contract-date", "a contract's `from` and `until` need a date")
+                    .label(prop.loc, "write exactly one date here"),
             );
         }
     }
@@ -1271,10 +1099,8 @@ fn contract_days(
     }
     Days::new(first, last).or_else(|| {
         diags.push(
-            Diagnostic::error("contract-range", "a contract ends before it begins").label(
-                file[props].first().map_or(Loc::default(), |prop| prop.loc),
-                "these dates do not overlap",
-            ),
+            Diagnostic::error("contract-range", "a contract ends before it begins")
+                .label(file[props].first().map_or(Loc::default(), |prop| prop.loc), "these dates do not overlap"),
         );
         None
     })
@@ -1293,13 +1119,7 @@ fn resolve_object<'s>(
     {
         return Some(crate::journal::Object::Asset(asset));
     }
-    match world.entity(
-        home,
-        Word {
-            text: name.0,
-            loc: file.loc(name.0),
-        },
-    ) {
+    match world.entity(home, Word { text: name.0, loc: file.loc(name.0) }) {
         Ok(entity) => Some(crate::journal::Object::Entity(entity)),
         Err(problem) => {
             diags.push(problem);
@@ -1362,11 +1182,7 @@ fn grace_property(
     Some(Some(span))
 }
 
-fn has_property(
-    file: &ast::File<'_>,
-    props: axiom_syntax::Many<ast::Prop<'_>>,
-    name: &str,
-) -> bool {
+fn has_property(file: &ast::File<'_>, props: axiom_syntax::Many<ast::Prop<'_>>, name: &str) -> bool {
     file[props].iter().any(|prop| prop.name.0 == name)
 }
 
@@ -1378,9 +1194,7 @@ fn relative_property(
     let property = file[props].iter().find(|prop| prop.name.0 == "for")?;
     let args = &file[property.args];
     let period = match args {
-        [first, second]
-            if matches!(&file.exprs[*first].kind, ExprKind::Name(Name("last"))) =>
-        {
+        [first, second] if matches!(&file.exprs[*first].kind, ExprKind::Name(Name("last"))) => {
             match &file.exprs[*second].kind {
                 ExprKind::Name(Name("month")) => Some(Relative::Last(axiom_core::Period::Month)),
                 ExprKind::Name(Name("quarter")) => Some(Relative::LastQuarter),
@@ -1392,8 +1206,11 @@ fn relative_property(
     };
     if period.is_none() {
         diags.push(
-            Diagnostic::error("contract-period", "a contract recognition period must be `last month`, `last quarter` or `last year`")
-                .label(property.loc, "write one of the supported periods"),
+            Diagnostic::error(
+                "contract-period",
+                "a contract recognition period must be `last month`, `last quarter` or `last year`",
+            )
+            .label(property.loc, "write one of the supported periods"),
         );
     }
     period
@@ -1465,18 +1282,13 @@ fn escalation_property<'s>(
                     );
                     continue;
                 };
-                let rate = percent
-                    .to_ratio()
-                    .and_then(|rate| rate.checked_div(Ratio::new(100, 1)?));
+                let rate = percent.to_ratio().and_then(|rate| rate.checked_div(Ratio::new(100, 1)?));
                 if let Some(rate) = rate.filter(|rate| !rate.is_negative()) {
                     return Some(Escalation::Rising(rate));
                 }
                 diags.push(
-                    Diagnostic::error(
-                        "contract-rate",
-                        "a contract's yearly rise must be a finite percentage",
-                    )
-                    .label(file.exprs[first].loc, "this rate cannot be represented"),
+                    Diagnostic::error("contract-rate", "a contract's yearly rise must be a finite percentage")
+                        .label(file.exprs[first].loc, "this rate cannot be represented"),
                 );
             }
             "indexed" => {
@@ -1485,17 +1297,14 @@ fn escalation_property<'s>(
                         if matches!(&file.exprs[args[2]].kind, ExprKind::Name(Name("yearly"))) =>
                     {
                         match &file.exprs[args[1]].kind {
-                        ExprKind::Name(name) => Some(*name),
-                        _ => None,
+                            ExprKind::Name(name) => Some(*name),
+                            _ => None,
                         }
                     }
                     _ => None,
                 };
                 if let Some(name) = index {
-                    let word = Word {
-                        text: name.0,
-                        loc: file.loc(name.0),
-                    };
+                    let word = Word { text: name.0, loc: file.loc(name.0) };
                     match world.seek_param(home, word) {
                         Ok(Some(param)) => return Some(Escalation::Indexed(param)),
                         Ok(None) => diags.push(world.missing_param(home, word)),
@@ -1558,10 +1367,7 @@ fn contract_area<'s>(
             );
             return Err(());
         };
-        let unit = match world.commodity_of(Word {
-            text: unit_name.0,
-            loc: file.loc(unit_name.0),
-        }) {
+        let unit = match world.commodity_of(Word { text: unit_name.0, loc: file.loc(unit_name.0) }) {
             Ok(unit) => unit,
             Err(problem) => {
                 diags.push(problem);
@@ -1633,13 +1439,7 @@ fn contract_deposit<'s>(
             );
             return Err(());
         };
-        let amount = match resolve_amount(
-            world,
-            file,
-            literal,
-            world.book.entities[owner].currency,
-            diags,
-        ) {
+        let amount = match resolve_amount(world, file, literal, world.book.entities[owner].currency, diags) {
             Some(amount) if amount.qty.0 > 0 => amount,
             Some(_) => {
                 diags.push(
@@ -1695,11 +1495,7 @@ fn contract_deposit<'s>(
             );
             return Err(());
         }
-        if world.book.places[place]
-            .holds
-            .as_ref()
-            .is_some_and(|units| !units.contains(&amount.unit))
-        {
+        if world.book.places[place].holds.as_ref().is_some_and(|units| !units.contains(&amount.unit)) {
             diags.push(
                 Diagnostic::error("contract-deposit-unit", "the deposit holding does not accept this unit")
                     .label(file.exprs[args[0]].loc, "choose a unit the holding can keep"),
@@ -1742,20 +1538,13 @@ fn shares<'s>(
             at += 1;
             let (rate, measure) = match file.exprs[written_amount].kind {
                 ExprKind::Pct(percent) => {
-                    let rate = percent
-                        .to_ratio()
-                        .and_then(|rate| rate.checked_div(Ratio::new(100, 1)?));
+                    let rate = percent.to_ratio().and_then(|rate| rate.checked_div(Ratio::new(100, 1)?));
                     (rate, None)
                 }
-                ExprKind::Fraction(top, bottom) => {
-                    (Ratio::new(i128::from(top), i128::from(bottom)), None)
-                }
+                ExprKind::Fraction(top, bottom) => (Ratio::new(i128::from(top), i128::from(bottom)), None),
                 ExprKind::Amount(literal) => {
                     let numerator = literal.unit().and_then(|name| {
-                        let unit = match world.commodity_of(Word {
-                            text: name.0,
-                            loc: file.loc(name.0),
-                        }) {
+                        let unit = match world.commodity_of(Word { text: name.0, loc: file.loc(name.0) }) {
                             Ok(unit) => unit,
                             Err(problem) => {
                                 diags.push(problem);
@@ -1775,12 +1564,10 @@ fn shares<'s>(
                             .ok()
                     });
                     let denominator = contract_area.or_else(|| {
-                        purpose
-                            .and_then(|at| at.value.of)
-                            .and_then(|object| match object {
-                                crate::journal::Object::Asset(asset) => asset_area(world, asset, anchor),
-                                _ => None,
-                            })
+                        purpose.and_then(|at| at.value.of).and_then(|object| match object {
+                            crate::journal::Object::Asset(asset) => asset_area(world, asset, anchor),
+                            _ => None,
+                        })
                     });
                     let ratio = match (numerator, denominator) {
                         (Some(numerator), Some(denominator))
@@ -1858,19 +1645,8 @@ fn shares<'s>(
                 break;
             }
             total = next_total;
-            match world.entity(
-                home,
-                Word {
-                    text: owner_name.0,
-                    loc: file.loc(owner_name.0),
-                },
-            ) {
-                Ok(entity) => shares.push(Share {
-                    rate,
-                    entity,
-                    measure,
-                    loc: prop.loc,
-                }),
+            match world.entity(home, Word { text: owner_name.0, loc: file.loc(owner_name.0) }) {
+                Ok(entity) => shares.push(Share { rate, entity, measure, loc: prop.loc }),
                 Err(problem) => diags.push(problem),
             }
         }
@@ -1887,11 +1663,9 @@ fn asset_area(world: &World<'_>, asset: Id<crate::book::Asset>, day: Day) -> Opt
     });
     own.or_else(|| {
         world.book.kinds.lineage(asset.kind).find_map(|kind| {
-            crate::book::prop(&world.book.kinds[kind].props, area, day).and_then(|property| {
-                match property.value {
-                    crate::law::Value::Amount(amount) => Some(amount),
-                    _ => None,
-                }
+            crate::book::prop(&world.book.kinds[kind].props, area, day).and_then(|property| match property.value {
+                crate::law::Value::Amount(amount) => Some(amount),
+                _ => None,
             })
         })
     })
@@ -1907,13 +1681,7 @@ mod tests {
         assert!(positive_loan_term(Span::months(360)));
         assert!(positive_loan_term(Span::days(30)));
         assert!(!positive_loan_term(Span::default()));
-        assert!(!positive_loan_term(Span {
-            months: 1,
-            days: -2,
-        }));
-        assert!(!positive_loan_term(Span {
-            months: -1,
-            days: 32,
-        }));
+        assert!(!positive_loan_term(Span { months: 1, days: -2 }));
+        assert!(!positive_loan_term(Span { months: -1, days: 32 }));
     }
 }

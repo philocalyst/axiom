@@ -44,14 +44,7 @@ pub fn project<'p, 'b, 's>(
     checkpoints: &[Day],
 ) -> Trace<'p, 'b, 's> {
     let details = Arena::default();
-    project_runtime(
-        plan,
-        lens,
-        today,
-        flows.into_iter().map(RuntimeFlow::source).collect(),
-        &details,
-        checkpoints,
-    )
+    project_runtime(plan, lens, today, flows.into_iter().map(RuntimeFlow::source).collect(), &details, checkpoints)
 }
 
 /// Projects typed runtime flows using the detail arena that owns their
@@ -67,10 +60,7 @@ pub(crate) fn project_runtime<'p, 'b, 's>(
 ) -> Trace<'p, 'b, 's> {
     let book = lens.book();
     let horizon = checkpoints.last().copied().unwrap_or(today);
-    let mut ledger = plan.start(Options {
-        today: horizon,
-        relaxed: book.relaxed,
-    });
+    let mut ledger = plan.start(Options { today: horizon, relaxed: book.relaxed });
     ledger.advance(today);
 
     trace_from(ledger, lens, today, flows, details, checkpoints)
@@ -118,15 +108,9 @@ pub(crate) fn project_runtime_from<'p, 'b, 's>(
     details: &Arena<RuntimeDetail>,
     checkpoints: &[Day],
 ) -> Trace<'p, 'b, 's> {
-    debug_assert!(
-        checkpoint.day() <= today,
-        "projection cannot rewind its view checkpoint"
-    );
+    debug_assert!(checkpoint.day() <= today, "projection cannot rewind its view checkpoint");
     let horizon = checkpoints.last().copied().unwrap_or(today);
-    let options = Options {
-        today: horizon,
-        relaxed,
-    };
+    let options = Options { today: horizon, relaxed };
     let mut ledger = plan.resume(checkpoint, options);
     ledger.advance(today);
 
@@ -159,12 +143,7 @@ fn trace_from<'p, 'b, 's>(
         liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
         worth.push(position(&|holding| holding.qty()));
     }
-    Trace {
-        ledger,
-        liquid,
-        worth,
-        overdrafts: overdrawn.into_values().collect(),
-    }
+    Trace { ledger, liquid, worth, overdrafts: overdrawn.into_values().collect() }
 }
 
 /// What a holding adds to what can be spent: its free money, less what is
@@ -172,12 +151,10 @@ fn trace_from<'p, 'b, 's>(
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
     let place = &lens.book().places[holding.place];
-    let has_term = lens.known().maturity.is_some_and(|name| {
-        place
-            .props
-            .iter()
-            .any(|prop| prop.name == name && matches!(prop.value, Value::Day(_)))
-    });
+    let has_term = lens
+        .known()
+        .maturity
+        .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),
         _ if place.class == Class::Debt && !has_term => holding.qty(),
@@ -190,35 +167,16 @@ fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
 fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
     for holding in ledger.holdings() {
-        if !matches!(
-            lens.book().places[holding.place].class,
-            Class::Asset | Class::Debt
-        ) {
+        if !matches!(lens.book().places[holding.place].class, Class::Asset | Class::Debt) {
             continue;
         }
         let qty = lens.place_qty(holding.place, pick(holding));
         if qty.is_zero() {
             continue;
         }
-        basket.add(
-            holding.unit,
-            Held {
-                qty,
-                booked: Qty::ZERO,
-            },
-        );
+        basket.add(holding.unit, Held { qty, booked: Qty::ZERO });
     }
-    basket
-        .amounts()
-        .filter_map(|amount| {
-            Some(compound(
-                lens.book(),
-                amount.unit,
-                lens.value(amount)?,
-                months,
-            ))
-        })
-        .sum()
+    basket.amounts().filter_map(|amount| Some(compound(lens.book(), amount.unit, lens.value(amount)?, months))).sum()
 }
 
 /// A flow that cannot move more than its ends hold: what leaves an account
@@ -226,19 +184,10 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
 /// what is owed. `None` when there is nothing to move.
 fn within_means(lens: Lens, ledger: &Ledger, mut flow: RuntimeFlow) -> Option<RuntimeFlow> {
     let movement = &flow.flow;
-    let (from, to, out_unit, arrive_unit, exchange, amount) = (
-        movement.from,
-        movement.to,
-        movement.out.unit,
-        movement.arrive.unit,
-        movement.is_exchange(),
-        movement.out.qty,
-    );
+    let (from, to, out_unit, arrive_unit, exchange, amount) =
+        (movement.from, movement.to, movement.out.unit, movement.arrive.unit, movement.is_exchange(), movement.out.qty);
     // Slow holdings and claims cannot move more than they currently hold.
-    let held_back = matches!(
-        lens.liquidity(from, out_unit),
-        Some(Liquidity::Slow(_) | Liquidity::Claim)
-    );
+    let held_back = matches!(lens.liquidity(from, out_unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
     let room = if held_back {
         Some(ledger.balance(from, out_unit))
     } else if lens.book().places[to].class == Class::Debt {
@@ -261,22 +210,13 @@ fn within_means(lens: Lens, ledger: &Ledger, mut flow: RuntimeFlow) -> Option<Ru
 }
 
 /// Records where a flow left a cash place below zero.
-fn note_overdrafts(
-    lens: Lens,
-    ledger: &Ledger,
-    flow: &Flow,
-    overdrawn: &mut BTreeMap<Id<Place>, Overdraft>,
-) {
+fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
     let book = lens.book();
     let cash = |&place: &Id<Place>| lens.liquidity(place, book.base) == Some(Liquidity::Cash);
     for place in [flow.from, flow.to].into_iter().filter(cash) {
         let balance = ledger.balance(place, book.base);
         if balance.is_negative() {
-            let overdraft = overdrawn.entry(place).or_insert(Overdraft {
-                place,
-                first: flow.day,
-                lowest: balance,
-            });
+            let overdraft = overdrawn.entry(place).or_insert(Overdraft { place, first: flow.day, lowest: balance });
             overdraft.lowest = overdraft.lowest.min(balance);
         }
     }
@@ -287,11 +227,8 @@ fn note_overdrafts(
 /// the yardstick and does not grow.
 fn compound(book: &Book, unit: Id<Commodity>, value: Qty, months: i32) -> Qty {
     let yearly = book.commodities[unit].growth.filter(|_| unit != book.base);
-    let monthly =
-        yearly.and_then(|yearly| Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?));
-    monthly.map_or(value, |factor| {
-        (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth))
-    })
+    let monthly = yearly.and_then(|yearly| Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?));
+    monthly.map_or(value, |factor| (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth)))
 }
 
 #[cfg(test)]
@@ -307,18 +244,9 @@ mod tests {
         let (usd, vti) = (house.book.base, Id::new(1));
         house.book.commodities[vti].growth = Ratio::percent(5, 0);
         // 100,000.00 at 241/240 a month for a year, rounded half-even each month.
-        assert_eq!(
-            compound(&house.book, vti, Qty(10_000_000), 12),
-            Qty(10_511_619)
-        );
-        assert_eq!(
-            compound(&house.book, usd, Qty(10_000_000), 12),
-            Qty(10_000_000)
-        );
-        assert_eq!(
-            compound(&house.book, vti, Qty(10_000_000), 0),
-            Qty(10_000_000)
-        );
+        assert_eq!(compound(&house.book, vti, Qty(10_000_000), 12), Qty(10_511_619));
+        assert_eq!(compound(&house.book, usd, Qty(10_000_000), 12), Qty(10_000_000));
+        assert_eq!(compound(&house.book, vti, Qty(10_000_000), 0), Qty(10_000_000));
     }
 
     #[test]
@@ -326,10 +254,7 @@ mod tests {
         let house = household();
         let plan = Plan::new(&house.book);
         let today = house.run.today;
-        let options = Options {
-            today,
-            relaxed: false,
-        };
+        let options = Options { today, relaxed: false };
         let (_, mut view) = plan.run_with_view(options);
 
         // Add a hypothetical salary to the checkpoint. A fresh fold of the
@@ -348,15 +273,7 @@ mod tests {
 
         let whose = crate::lens::Whose::default();
         let lens = Lens::new(&plan, &whose, tomorrow);
-        let resumed = project_from(
-            &plan,
-            &checkpoint,
-            lens,
-            tomorrow,
-            false,
-            Vec::new(),
-            &[tomorrow],
-        );
+        let resumed = project_from(&plan, &checkpoint, lens, tomorrow, false, Vec::new(), &[tomorrow]);
         let folded = project(&plan, lens, tomorrow, Vec::new(), &[tomorrow]);
 
         assert_eq!(resumed.liquid[0] - folded.liquid[0], Qty(1_000));
@@ -385,11 +302,7 @@ opening 2026-01-01
                 .map(|(id, _)| id)
                 .unwrap();
             let owner = |name| {
-                book.entities
-                    .iter()
-                    .find(|(_, entity)| book.name(entity.path) == name)
-                    .map(|(id, _)| id)
-                    .unwrap()
+                book.entities.iter().find(|(_, entity)| book.name(entity.path) == name).map(|(id, _)| id).unwrap()
             };
             let forecast_for = |name| {
                 let whose = crate::lens::Whose::of(book, owner(name));
@@ -402,16 +315,8 @@ opening 2026-01-01
 
             let everyone = crate::lens::Whose::default();
             let lens = Lens::new(&plan, &everyone, run.today);
-            assert_eq!(
-                project(&plan, lens, run.today, Vec::new(), &[run.today]).worth[0],
-                Qty(10_000)
-            );
-            assert_eq!(
-                plan.allocate(place, Qty(10_000))
-                    .map(|(_, amount)| amount)
-                    .sum::<Qty>(),
-                Qty(10_000)
-            );
+            assert_eq!(project(&plan, lens, run.today, Vec::new(), &[run.today]).worth[0], Qty(10_000));
+            assert_eq!(plan.allocate(place, Qty(10_000)).map(|(_, amount)| amount).sum::<Qty>(), Qty(10_000));
         });
     }
 }

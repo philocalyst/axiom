@@ -38,8 +38,8 @@ use axiom_core::calendar::Window;
 use axiom_core::{Day, Days, Id, Period};
 use axiom_model::{Book, Closing, Flow, Law, Mode, Rule, Subject, Trigger, Txn, Value};
 
-use crate::checkpoint::CheckpointPhase;
 use crate::State;
+use crate::checkpoint::CheckpointPhase;
 use crate::eval::{self, Env, Occasion};
 use crate::events::Events;
 use crate::plan::Plan;
@@ -89,10 +89,7 @@ impl Moment {
     pub fn after_flows(day: Day) -> Moment {
         Moment {
             day,
-            fact: Fact::Source(
-                SourceOrder { txn: u32::MAX, flow: u32::MAX },
-                SourceFact::Flow(Id::new(u32::MAX)),
-            ),
+            fact: Fact::Source(SourceOrder { txn: u32::MAX, flow: u32::MAX }, SourceFact::Flow(Id::new(u32::MAX))),
         }
     }
 
@@ -113,9 +110,7 @@ pub(crate) fn start(book: &Book, events: &Events) -> Option<Day> {
             .then_some(flow.day)
     };
     let flow = book.flows.iter().find_map(real);
-    let occurrences = book.txns.iter().filter_map(|(_, txn)| {
-        txn.occurrence.map(|_| txn.day)
-    });
+    let occurrences = book.txns.iter().filter_map(|(_, txn)| txn.occurrence.map(|_| txn.day));
     let others = [
         book.asserts.first().map(|a| a.day),
         events.changes.first().map(|&(day, _)| day),
@@ -136,10 +131,7 @@ pub(crate) fn last_fact(book: &Book, events: &Events) -> Option<Day> {
     let last_change = events.changes.last().map(|&(day, _)| day);
     let last_occurrence = book.txns.iter().filter_map(|(_, txn)| txn.occurrence.map(|_| txn.day)).max();
     let last_claim_change = book.claim_changes.last().map(|change| change.day);
-    [last_flow, last_assert, last_change, last_occurrence, last_claim_change]
-        .into_iter()
-        .flatten()
-        .max()
+    [last_flow, last_assert, last_change, last_occurrence, last_claim_change].into_iter().flatten().max()
 }
 
 /// A `by` law's date for one subject, or the day an `each` law closes a period.
@@ -328,12 +320,12 @@ impl Timeline {
         let mut timeline = Timeline::new(plan);
         timeline.done[Stream::Split as usize] = book.splits.partition_point(|split| split.day <= day);
         timeline.done[Stream::Flow as usize] = book.flows.as_slice().partition_point(|flow| flow.day <= day);
-        timeline.done[Stream::Occurrence as usize] = plan.occurrence_txns.partition_point(|&id| book.txns[id].day <= day);
+        timeline.done[Stream::Occurrence as usize] =
+            plan.occurrence_txns.partition_point(|&id| book.txns[id].day <= day);
         timeline.done[Stream::Change as usize] = changes.partition_point(|&(when, _)| when <= day);
         timeline.done[Stream::ClaimChange as usize] = book.claim_changes.partition_point(|change| change.day <= day);
-        timeline.done[Stream::Assert as usize] = book.asserts.partition_point(|assert| {
-            assert.day < day || (assertions && assert.day == day)
-        });
+        timeline.done[Stream::Assert as usize] =
+            book.asserts.partition_point(|assert| assert.day < day || (assertions && assert.day == day));
         while timeline.due.peek().is_some_and(|&Reverse(due)| due.day < day || (closings && due.day == day)) {
             timeline.close(plan);
         }
@@ -374,10 +366,8 @@ impl Timeline {
                         return None;
                     }
                     let local = id.index().checked_sub(txn.flows.start().index())?;
-                    let source = SourceOrder {
-                        txn: u32::try_from(flow.txn.index()).ok()?,
-                        flow: u32::try_from(local).ok()?,
-                    };
+                    let source =
+                        SourceOrder { txn: u32::try_from(flow.txn.index()).ok()?, flow: u32::try_from(local).ok()? };
                     Some(Moment { day: flow.day, fact: Fact::Source(source, SourceFact::Flow(id)) })
                 })
             }
@@ -392,7 +382,10 @@ impl Timeline {
                 })
             }),
             Stream::Change => plan.events.changes.get(at()).map(|&(day, id)| Moment { day, fact: Fact::Settle(id) }),
-            Stream::ClaimChange => book.claim_changes.get(at()).map(|change| Moment { day: change.day, fact: Fact::ClaimChange(at() as u32) }),
+            Stream::ClaimChange => book
+                .claim_changes
+                .get(at())
+                .map(|change| Moment { day: change.day, fact: Fact::ClaimChange(at() as u32) }),
             Stream::Assert => book.asserts.get(at()).map(|a| Moment { day: a.day, fact: Fact::Assert(at() as u32) }),
             Stream::Deadline => {
                 let next = self.due.peek();
@@ -472,20 +465,10 @@ mod tests {
     #[test]
     fn source_transactions_interleave_by_transaction_before_claim_changes() {
         let day = Day(100);
-        let first = Moment {
-            day,
-            fact: Fact::Source(
-                SourceOrder { txn: 4, flow: 0 },
-                SourceFact::Occurrence(Id::new(4)),
-            ),
-        };
-        let next_flow = Moment {
-            day,
-            fact: Fact::Source(
-                SourceOrder { txn: 5, flow: 0 },
-                SourceFact::Flow(Id::new(9)),
-            ),
-        };
+        let first =
+            Moment { day, fact: Fact::Source(SourceOrder { txn: 4, flow: 0 }, SourceFact::Occurrence(Id::new(4))) };
+        let next_flow =
+            Moment { day, fact: Fact::Source(SourceOrder { txn: 5, flow: 0 }, SourceFact::Flow(Id::new(9))) };
         let claim = Moment { day, fact: Fact::ClaimChange(0) };
         let assertion = Moment { day, fact: Fact::Assert(0) };
         assert!(first < next_flow && next_flow < claim && claim < assertion);

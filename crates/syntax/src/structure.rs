@@ -168,7 +168,10 @@ impl<'s> Parser<'s> {
             Keyword::System if !first => self.fail(system_not_first(keyword.loc)),
             Keyword::System | Keyword::Use => {
                 let path = self.name("expected-path", "a system path such as `us/401k`")?;
-                self.setting(line, if matches!(kind, Keyword::System) { Setting::System(path) } else { Setting::Use(path) })
+                self.setting(
+                    line,
+                    if matches!(kind, Keyword::System) { Setting::System(path) } else { Setting::Use(path) },
+                )
             }
             Keyword::Base => {
                 let unit = self.unit("expected-commodity", "the base commodity, such as `USD`")?;
@@ -212,8 +215,12 @@ impl<'s> Parser<'s> {
         let diag = Diagnostic::error("unknown-keyword", format!("unknown keyword `{word}`"))
             .label(keyword.loc, "a line starts with a date or a keyword");
         let indent = self.point(line.start as u32);
-        let looks_like_leg =
-            matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct(Punct::Ellipsis | Punct::Eq | Punct::LParen | Punct::Question));
+        let looks_like_leg = matches!(
+            self.tok(),
+            Tok::Number(_)
+                | Tok::Percent(_)
+                | Tok::Punct(Punct::Ellipsis | Punct::Eq | Punct::LParen | Punct::Question)
+        );
         let near = closest(word, KEYWORDS.iter().map(|(known, _)| *known));
         let diag = if let Some(near) = near {
             diag.fix(format!("did you mean `{near}`?"), keyword.loc, near)

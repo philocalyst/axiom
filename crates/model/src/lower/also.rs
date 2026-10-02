@@ -42,23 +42,15 @@ pub(crate) fn tail<'s>(
                 world.book.codes.push(world.book.names.intern(code.name()));
             }
             ClauseKind::Purpose(written) => {
-                let word = Word {
-                    text: written.name.0,
-                    loc: file.loc(written.name.0),
-                };
+                let word = Word { text: written.name.0, loc: file.loc(written.name.0) };
                 match world.purpose(home, word) {
                     Ok(id) => {
-                        let of = written.of.and_then(|name| {
-                            super::record::resolve_object(world, home, file, name, diags)
-                        });
+                        let of =
+                            written.of.and_then(|name| super::record::resolve_object(world, home, file, name, diags));
                         if written.of.is_some() && of.is_none() {
                             continue;
                         }
-                        purpose = Some(Purposed {
-                            purpose: id,
-                            of,
-                            source: Provenance::Written,
-                        });
+                        purpose = Some(Purposed { purpose: id, of, source: Provenance::Written });
                     }
                     Err(problem) => diags.push(problem),
                 }
@@ -67,95 +59,59 @@ pub(crate) fn tail<'s>(
                 description = Some(world.book.quoted_text(text.0));
             }
             ClauseKind::Waive(written) => {
-                waive = Some(Waive {
-                    loc: written.at,
-                    reason: written.reason.map(|text| world.book.quoted_text(text.0)),
-                });
+                waive =
+                    Some(Waive { loc: written.at, reason: written.reason.map(|text| world.book.quoted_text(text.0)) });
             }
-            ClauseKind::For(ast::For::Whom(name)) => match world.entity(
-                home,
-                Word {
-                    text: name.0,
-                    loc: file.loc(name.0),
-                },
-            ) {
-                Ok(entity) => detail.hold = Some(entity),
-                Err(problem) => diags.push(problem),
-            },
+            ClauseKind::For(ast::For::Whom(name)) => {
+                match world.entity(home, Word { text: name.0, loc: file.loc(name.0) }) {
+                    Ok(entity) => detail.hold = Some(entity),
+                    Err(problem) => diags.push(problem),
+                }
+            }
             ClauseKind::Since(day) => detail.since = Some(day),
             ClauseKind::Due(ast::Due::On(day)) => detail.due = Some(day),
             ClauseKind::Due(ast::Due::After(_)) => diags.push(
-                Diagnostic::error(
-                    "also-relative-due",
-                    "a derived flow's due date must be absolute",
-                )
-                .label(clause.at, "write `due YYYY-MM-DD` on an implied line"),
+                Diagnostic::error("also-relative-due", "a derived flow's due date must be absolute")
+                    .label(clause.at, "write `due YYYY-MM-DD` on an implied line"),
             ),
             ClauseKind::Basis(ast::Amount::Literal(literal)) => {
                 let Some(unit) = literal.unit().and_then(|unit| {
                     world
-                        .commodity_of(Word {
-                            text: unit.0,
-                            loc: file.loc(unit.0),
-                        })
+                        .commodity_of(Word { text: unit.0, loc: file.loc(unit.0) })
                         .map_err(|problem| diags.push(problem))
                         .ok()
                 }) else {
                     diags.push(
-                        Diagnostic::error(
-                            "basis-unit",
-                            "basis needs an explicit base-currency unit",
-                        )
-                        .label(file.loc(literal.0), "write the unit"),
+                        Diagnostic::error("basis-unit", "basis needs an explicit base-currency unit")
+                            .label(file.loc(literal.0), "write the unit"),
                     );
                     continue;
                 };
                 match world.amount(literal.num(), unit, file.loc(literal.0)) {
                     Ok(amount) if amount.unit == world.book.base => detail.basis = Some(amount.qty),
                     Ok(_) => diags.push(
-                        Diagnostic::error(
-                            "basis-unit",
-                            "basis must be stated in the base currency",
-                        )
-                        .label(file.loc(literal.0), "another unit is not the base currency"),
+                        Diagnostic::error("basis-unit", "basis must be stated in the base currency")
+                            .label(file.loc(literal.0), "another unit is not the base currency"),
                     ),
                     Err(problem) => diags.push(problem),
                 }
             }
             ClauseKind::Basis(ast::Amount::Computed(_)) => diags.push(
-                Diagnostic::error("computed-also-basis", "an implied basis must be literal").label(
-                    clause.at,
-                    "this metadata field has no computed root in the Book",
-                ),
+                Diagnostic::error("computed-also-basis", "an implied basis must be literal")
+                    .label(clause.at, "this metadata field has no computed root in the Book"),
             ),
             ClauseKind::For(ast::For::Period(..) | ast::For::Last(_))
             | ClauseKind::Via(_)
             | ClauseKind::Price(_)
             | ClauseKind::Against(_)
             | ClauseKind::Until(_) => diags.push(
-                Diagnostic::error(
-                    "also-tail",
-                    "this clause is not retained on an implied line",
-                )
-                .label(
-                    clause.at,
-                    "remove it or write the metadata on the source flow",
-                ),
+                Diagnostic::error("also-tail", "this clause is not retained on an implied line")
+                    .label(clause.at, "remove it or write the metadata on the source flow"),
             ),
         }
     }
 
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
-    let codes = Run::new(
-        Id::new(code_start as u32),
-        (world.book.codes.len() - code_start) as u32,
-    );
-    AlsoMetadata {
-        codes,
-        select,
-        detail,
-        waive,
-        purpose,
-        description,
-    }
+    let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
+    AlsoMetadata { codes, select, detail, waive, purpose, description }
 }

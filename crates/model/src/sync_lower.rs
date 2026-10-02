@@ -10,8 +10,7 @@ use crate::declare::World;
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
 use crate::sync::{
-    Capture, CharClass, Column, Fetch, Field, Format, Op, Pattern, Rule, Shape, Sink, Source,
-    Spec, Text,
+    Capture, CharClass, Column, Fetch, Field, Format, Op, Pattern, Rule, Shape, Sink, Source, Spec, Text,
 };
 
 #[derive(Clone, Copy)]
@@ -32,11 +31,7 @@ struct NamedFormat {
 
 /// Builds the book's canonical patterns, formats, code rules and sources.
 /// Called after base declarations exist so sync names can bind to typed ids.
-pub(crate) fn declare<'s>(
-    world: &mut World<'s>,
-    sites: &[Site<'_, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
     let mut named = Vec::new();
     let mut by_name: Map<(Home, Sym), Named> = Map::default();
 
@@ -52,28 +47,16 @@ pub(crate) fn declare<'s>(
             let name = world.book.names.intern(source.name.0);
             if let Some(first) = by_name.get(&(site.home, name)) {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-pattern",
-                        format!("pattern `{}` is declared twice", source.name.0),
-                    )
-                    .label(file.loc(source.name.0), "declared again here")
-                    .context(first.loc, "first declared here"),
+                    Diagnostic::error("duplicate-pattern", format!("pattern `{}` is declared twice", source.name.0))
+                        .label(file.loc(source.name.0), "declared again here")
+                        .context(first.loc, "first declared here"),
                 );
                 continue;
             }
             let loc = file.loc(source.name.0);
-            let model = Pattern {
-                name: Some(name),
-                program: Box::default(),
-                loc,
-            };
+            let model = Pattern { name: Some(name), program: Box::default(), loc };
             let id = world.book.patterns.push(model);
-            let entry = Named {
-                name,
-                home: site.home,
-                id,
-                loc,
-            };
+            let entry = Named { name, home: site.home, id, loc };
             by_name.insert((site.home, name), entry);
             named.push(entry);
         }
@@ -87,25 +70,15 @@ pub(crate) fn declare<'s>(
                 continue;
             };
             let source = &file[ref_id];
-            let sym = world
-                .book
-                .names
-                .get(source.name.0)
-                .expect("the pattern name was reserved");
+            let sym = world.book.names.get(source.name.0).expect("the pattern name was reserved");
             let Some(entry) = by_name.get(&(site.home, sym)).copied() else {
                 continue;
             };
             if entry.loc != file.loc(source.name.0) {
                 continue;
             }
-            let program = match compile_pattern(
-                file,
-                source.pattern,
-                &mut world.book,
-                &named,
-                &world.scopes,
-                site.home,
-            ) {
+            let program = match compile_pattern(file, source.pattern, &mut world.book, &named, &world.scopes, site.home)
+            {
                 Ok(program) => program,
                 Err(problem) => {
                     diags.push(problem);
@@ -125,11 +98,7 @@ pub(crate) fn declare<'s>(
     lower_sources(world, sites, &formats, diags);
 }
 
-fn validate_pattern_calls(
-    arena: &axiom_core::Arena<Pattern>,
-    named: &[Named],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn validate_pattern_calls(arena: &axiom_core::Arena<Pattern>, named: &[Named], diags: &mut Vec<Diagnostic>) {
     const MAX_CALL_DEPTH: usize = 32;
     let mut state = vec![0u8; arena.len()];
     let mut height = vec![0usize; arena.len()];
@@ -146,15 +115,10 @@ fn validate_pattern_calls(
                 stack.pop();
                 continue;
             };
-            let call = pattern
-                .program
-                .iter()
-                .enumerate()
-                .skip(next)
-                .find_map(|(offset, op)| match op {
-                    Op::Call(callee) => Some((offset + 1, *callee)),
-                    _ => None,
-                });
+            let call = pattern.program.iter().enumerate().skip(next).find_map(|(offset, op)| match op {
+                Op::Call(callee) => Some((offset + 1, *callee)),
+                _ => None,
+            });
             if let Some((after, callee)) = call {
                 stack.last_mut().unwrap().1 = after;
                 match state.get(callee.index()).copied().unwrap_or(2) {
@@ -190,11 +154,8 @@ fn validate_pattern_calls(
             height[at.index()] = longest;
             if longest > MAX_CALL_DEPTH && deep.insert(at.index()) {
                 diags.push(
-                    Diagnostic::error(
-                        "pattern-too-deep",
-                        "named pattern calls may nest at most 32 patterns",
-                    )
-                    .label(pattern.loc, "this call chain exceeds the runtime nesting bound"),
+                    Diagnostic::error("pattern-too-deep", "named pattern calls may nest at most 32 patterns")
+                        .label(pattern.loc, "this call chain exceeds the runtime nesting bound"),
                 );
             }
             state[at.index()] = 2;
@@ -215,18 +176,12 @@ fn resolve_named(
     let Some(sym) = names.get(name.0) else {
         let suggestion = axiom_core::diag::closest(
             name.0,
-            named
-                .iter()
-                .filter(|candidate| scope.sees(candidate.home))
-                .map(|candidate| names.name(candidate.name)),
+            named.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
         );
         return Err(crate::errors::unknown(
             "unknown-pattern",
             "pattern",
-            crate::errors::Word {
-                text: name.0,
-                loc: file.loc(name.0),
-            },
+            crate::errors::Word { text: name.0, loc: file.loc(name.0) },
             suggestion,
         ));
     };
@@ -237,24 +192,15 @@ fn resolve_named(
         .min_by_key(|(rank, _)| *rank)
         .map(|(rank, id)| (rank, id));
     let Some((rank, id)) = nearest else {
-        return Err(Diagnostic::error(
-            "unknown-pattern",
-            format!("there is no pattern named `{}`", name.0),
-        )
-        .label(file.loc(name.0), "not a visible pattern"));
+        return Err(Diagnostic::error("unknown-pattern", format!("there is no pattern named `{}`", name.0))
+            .label(file.loc(name.0), "not a visible pattern"));
     };
     if named.iter().any(|candidate| {
-        candidate.name == sym
-            && scope.sees(candidate.home)
-            && scope.rank(candidate.home) == rank
-            && candidate.id != id
+        candidate.name == sym && scope.sees(candidate.home) && scope.rank(candidate.home) == rank && candidate.id != id
     }) {
         return Err(Diagnostic::error(
             "ambiguous-pattern",
-            format!(
-                "pattern `{}` is declared more than once at this scope",
-                name.0
-            ),
+            format!("pattern `{}` is declared more than once at this scope", name.0),
         )
         .label(file.loc(name.0), "which declaration is meant?"));
     }
@@ -282,10 +228,8 @@ fn compile_pattern_at<'s>(
     depth: u8,
 ) -> Result<Vec<Op>, Diagnostic> {
     if depth > 32 {
-        return Err(
-            Diagnostic::error("pattern-too-deep", "a pattern may nest at most 32 groups")
-                .label(file.loc(file.src), "this pattern is nested too deeply"),
-        );
+        return Err(Diagnostic::error("pattern-too-deep", "a pattern may nest at most 32 groups")
+            .label(file.loc(file.src), "this pattern is nested too deeply"));
     }
     let mut choices = Vec::new();
     for choice in &file[pattern.choices] {
@@ -303,23 +247,15 @@ fn compile_pattern_at<'s>(
                     ast::Class::Start => CharClass::Start,
                     ast::Class::End => CharClass::End,
                 })],
-                ast::PatternAtom::Named(reference) => vec![Op::Call(resolve_named(
-                    file, &book.names, named, scopes, home, reference,
-                )?)],
+                ast::PatternAtom::Named(reference) => {
+                    vec![Op::Call(resolve_named(file, &book.names, named, scopes, home, reference)?)]
+                }
                 ast::PatternAtom::Group(group) => {
                     let choices = file[group.choices].len();
-                    let mut program =
-                        compile_pattern_at(file, group, book, named, scopes, home, depth + 1)?;
+                    let mut program = compile_pattern_at(file, group, book, named, scopes, home, depth + 1)?;
                     if choices > 1 {
                         let len = op_len(file, file.loc(file.src), program.len())?;
-                        program.insert(
-                            0,
-                            Op::Repeat {
-                                min: 1,
-                                max: Some(1),
-                                len,
-                            },
-                        );
+                        program.insert(0, Op::Repeat { min: 1, max: Some(1), len });
                     }
                     program
                 }
@@ -364,20 +300,12 @@ fn compile_pattern_at<'s>(
 
 fn op_len(_file: &ast::File<'_>, loc: Loc, len: usize) -> Result<u16, Diagnostic> {
     u16::try_from(len).map_err(|_| {
-        Diagnostic::error(
-            "pattern-too-large",
-            "a pattern branch exceeds the runtime's 65,535 operation limit",
-        )
-        .label(loc, "this pattern is too large")
+        Diagnostic::error("pattern-too-large", "a pattern branch exceeds the runtime's 65,535 operation limit")
+            .label(loc, "this pattern is too large")
     })
 }
 
-fn lower_known_as<'s>(
-    world: &mut World<'s>,
-    sites: &[Site<'_, 's>],
-    named: &[Named],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Named], diags: &mut Vec<Diagnostic>) {
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -397,30 +325,16 @@ fn lower_known_as<'s>(
                                 site.home,
                                 diags,
                             );
-                            match world.entity(
-                                site.home,
-                                Word {
-                                    text: decl.name.0,
-                                    loc: file.loc(decl.name.0),
-                                },
-                            ) {
+                            match world.entity(site.home, Word { text: decl.name.0, loc: file.loc(decl.name.0) }) {
                                 Ok(id) => {
                                     let path = world.book.entities[id].path;
-                                    add_name_patterns(
-                                        &mut world.book,
-                                        &mut patterns,
-                                        path,
-                                        file.loc(decl.name.0),
-                                    );
+                                    add_name_patterns(&mut world.book, &mut patterns, path, file.loc(decl.name.0));
                                     world.book.entities[id].known_as = patterns.into_boxed_slice();
                                 }
                                 Err(_) if !patterns.is_empty() => diags.push(
                                     Diagnostic::error(
                                         "sync-binding",
-                                        format!(
-                                            "could not bind known-as patterns for `{}`",
-                                            decl.name.0
-                                        ),
+                                        format!("could not bind known-as patterns for `{}`", decl.name.0),
                                     )
                                     .label(file.loc(decl.name.0), "this entity did not resolve"),
                                 ),
@@ -439,27 +353,16 @@ fn lower_known_as<'s>(
                                 site.home,
                                 diags,
                             );
-                            match world.place(Word {
-                                text: decl.name.0,
-                                loc: file.loc(decl.name.0),
-                            }) {
+                            match world.place(Word { text: decl.name.0, loc: file.loc(decl.name.0) }) {
                                 Ok(id) => {
                                     let path = world.book.places[id].path;
-                                    add_name_patterns(
-                                        &mut world.book,
-                                        &mut patterns,
-                                        path,
-                                        file.loc(decl.name.0),
-                                    );
+                                    add_name_patterns(&mut world.book, &mut patterns, path, file.loc(decl.name.0));
                                     world.book.places[id].known_as = patterns.into_boxed_slice();
                                 }
                                 Err(_) if !patterns.is_empty() => diags.push(
                                     Diagnostic::error(
                                         "sync-binding",
-                                        format!(
-                                            "could not bind known-as patterns for `{}`",
-                                            decl.name.0
-                                        ),
+                                        format!("could not bind known-as patterns for `{}`", decl.name.0),
                                     )
                                     .label(file.loc(decl.name.0), "this account did not resolve"),
                                 ),
@@ -471,10 +374,7 @@ fn lower_known_as<'s>(
                                 "unsupported-known-as",
                                 "`known-as` is supported on entities and accounts",
                             )
-                            .label(
-                                file.loc(decl.name.0),
-                                "this declaration is not a matchable party or account",
-                            ),
+                            .label(file.loc(decl.name.0), "this declaration is not a matchable party or account"),
                         ),
                         _ => {}
                     }
@@ -495,19 +395,14 @@ fn lower_known_as<'s>(
                     let mut on = Vec::new();
                     for name in &file[rule.on] {
                         let text = name.0;
-                        let word = crate::errors::Word {
-                            text,
-                            loc: file.loc(text),
-                        };
+                        let word = crate::errors::Word { text, loc: file.loc(text) };
                         if axiom_core::glob::is_pattern(text) {
                             on.push(CodeScope::Places(world.book.names.intern(text)));
                         } else {
                             match world.kind(site.home, word) {
                                 Ok(kind) => on.push(CodeScope::Kind(kind)),
                                 Err(kind_error) => match world.seek_place(word) {
-                                    Ok(Some(_)) => {
-                                        on.push(CodeScope::Places(world.book.names.intern(text)))
-                                    }
+                                    Ok(Some(_)) => on.push(CodeScope::Places(world.book.names.intern(text))),
                                     Ok(None) | Err(_) => diags.push(kind_error),
                                 },
                             }
@@ -528,37 +423,20 @@ fn lower_known_as<'s>(
     }
 }
 
-fn add_name_patterns<'s>(
-    book: &mut crate::book::Book<'s>,
-    patterns: &mut Vec<Id<Pattern>>,
-    path: Sym,
-    loc: Loc,
-) {
+fn add_name_patterns<'s>(book: &mut crate::book::Book<'s>, patterns: &mut Vec<Id<Pattern>>, path: Sym, loc: Loc) {
     let text = book.names.name(path);
-    let own_names =
-        std::iter::once(text).chain(text.match_indices('/').map(|(at, _)| &text[at + 1..]));
+    let own_names = std::iter::once(text).chain(text.match_indices('/').map(|(at, _)| &text[at + 1..]));
     for own_name in own_names {
         let name = book.names.intern(own_name);
         let op = Op::Name(name);
-        if patterns
-            .iter()
-            .any(|&id| book.patterns[id].program.as_ref() == [op])
-        {
+        if patterns.iter().any(|&id| book.patterns[id].program.as_ref() == [op]) {
             continue;
         }
-        patterns.push(book.patterns.push(Pattern {
-            name: None,
-            program: Box::new([op]),
-            loc,
-        }));
+        patterns.push(book.patterns.push(Pattern { name: None, program: Box::new([op]), loc }));
     }
 }
 
-fn lower_formats<'s>(
-    world: &mut World<'s>,
-    sites: &[Site<'_, 's>],
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<NamedFormat> {
+fn lower_formats<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) -> Vec<NamedFormat> {
     let mut named = Vec::new();
     let mut by_name: Map<(Home, Sym), NamedFormat> = Map::default();
     for site in sites {
@@ -571,12 +449,9 @@ fn lower_formats<'s>(
             let name = world.book.names.intern(source.name.0);
             if let Some(first) = by_name.get(&(site.home, name)) {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-format",
-                        format!("format `{}` is declared twice", source.name.0),
-                    )
-                    .label(file.loc(source.name.0), "declared again here")
-                    .context(first.loc, "first declared here"),
+                    Diagnostic::error("duplicate-format", format!("format `{}` is declared twice", source.name.0))
+                        .label(file.loc(source.name.0), "declared again here")
+                        .context(first.loc, "first declared here"),
                 );
                 continue;
             }
@@ -588,12 +463,7 @@ fn lower_formats<'s>(
                 categories: Box::default(),
                 loc,
             });
-            let entry = NamedFormat {
-                name,
-                home: site.home,
-                id,
-                loc,
-            };
+            let entry = NamedFormat { name, home: site.home, id, loc };
             by_name.insert((site.home, name), entry);
             named.push(entry);
         }
@@ -606,11 +476,7 @@ fn lower_formats<'s>(
                 continue;
             };
             let source = &file[ref_id];
-            let sym = world
-                .book
-                .names
-                .get(source.name.0)
-                .expect("the format name was reserved");
+            let sym = world.book.names.get(source.name.0).expect("the format name was reserved");
             let Some(entry) = by_name.get(&(site.home, sym)).copied() else {
                 continue;
             };
@@ -618,13 +484,7 @@ fn lower_formats<'s>(
                 continue;
             }
             let category_purposes = format_purposes(world, file, source, site.home, diags);
-            let format = match lower_format(
-                file,
-                source,
-                &mut world.book,
-                &category_purposes,
-                diags,
-            ) {
+            let format = match lower_format(file, source, &mut world.book, &category_purposes, diags) {
                 Some(format) => format,
                 None => continue,
             };
@@ -644,24 +504,14 @@ fn format_args<'s>(file: &ast::File<'s>, line: &ast::FormatLine<'s>) -> Vec<Form
     file[line.args]
         .iter()
         .map(|arg| match *arg {
-            ast::FormatArg::Word(text) => FormatArg {
-                text: text.0,
-                quoted: false,
-            },
-            ast::FormatArg::Quoted(text) => FormatArg {
-                text: text.0,
-                quoted: true,
-            },
+            ast::FormatArg::Word(text) => FormatArg { text: text.0, quoted: false },
+            ast::FormatArg::Quoted(text) => FormatArg { text: text.0, quoted: true },
         })
         .collect()
 }
 
 fn format_text<'a>(book: &mut Book<'a>, arg: FormatArg<'a>) -> Text {
-    if arg.quoted {
-        book.quoted_text(arg.text)
-    } else {
-        book.intern_text(arg.text)
-    }
+    if arg.quoted { book.quoted_text(arg.text) } else { book.intern_text(arg.text) }
 }
 
 fn decode_quoted(raw: &str) -> Result<std::borrow::Cow<'_, str>, usize> {
@@ -707,9 +557,7 @@ fn lower_format<'s>(
             );
             continue;
         }
-        shape = Shape::Tagged {
-            records: book.names.intern(args[0].text),
-        };
+        shape = Shape::Tagged { records: book.names.intern(args[0].text) };
     }
     let mut specs = Vec::new();
     let mut categories: Vec<(Text, Id<crate::book::Purpose>)> = Vec::new();
@@ -717,17 +565,9 @@ fn lower_format<'s>(
     for (line_at, line) in lines.iter().enumerate() {
         let key = line.key.0;
         let args = format_args(file, line);
-        let fail = |code, message: String| {
-            Diagnostic::error(code, message).label(line.loc, "this format line")
-        };
-        if args
-            .iter()
-            .any(|arg| arg.quoted && decode_quoted(arg.text).is_err())
-        {
-            diags.push(fail(
-                "bad-string-escape",
-                "a quoted format value has an invalid escape".into(),
-            ));
+        let fail = |code, message: String| Diagnostic::error(code, message).label(line.loc, "this format line");
+        if args.iter().any(|arg| arg.quoted && decode_quoted(arg.text).is_err()) {
+            diags.push(fail("bad-string-escape", "a quoted format value has an invalid escape".into()));
             continue;
         }
         if key == "records" {
@@ -735,10 +575,7 @@ fn lower_format<'s>(
         }
         if key == "category" {
             if args.len() != 3 || args[1].text != "is" || !args[2].text.starts_with('#') {
-                diags.push(fail(
-                    "bad-format",
-                    "a category line is `category VALUE is #purpose`".into(),
-                ));
+                diags.push(fail("bad-format", "a category line is `category VALUE is #purpose`".into()));
                 continue;
             }
             let Some(Some(purpose)) = category_purposes.get(line_at).copied() else {
@@ -748,25 +585,16 @@ fn lower_format<'s>(
             continue;
         }
         let Some(field) = field(key) else {
-            diags.push(fail(
-                "unknown-format-field",
-                format!("`{key}` is not a field of a format"),
-            ));
+            diags.push(fail("unknown-format-field", format!("`{key}` is not a field of a format")));
             continue;
         };
         if seen[field as usize] {
-            diags.push(fail(
-                "duplicate-format-field",
-                format!("`{key}` is given twice"),
-            ));
+            diags.push(fail("duplicate-format-field", format!("`{key}` is given twice")));
             continue;
         }
         seen[field as usize] = true;
         if args.is_empty() {
-            diags.push(fail(
-                "bad-format",
-                format!("`{key}` needs a column or field path"),
-            ));
+            diags.push(fail("bad-format", format!("`{key}` needs a column or field path")));
             continue;
         }
         let column = |arg: FormatArg<'s>, book: &mut Book<'s>| -> Result<Column, Diagnostic> {
@@ -793,19 +621,13 @@ fn lower_format<'s>(
         match field {
             Field::Date if args.len() > 1 => {
                 if args.len() != 2 {
-                    diags.push(fail(
-                        "bad-format",
-                        "`date` takes a column and one date layout".into(),
-                    ));
+                    diags.push(fail("bad-format", "`date` takes a column and one date layout".into()));
                     continue;
                 }
                 let text = format_text(book, args[1]);
                 layout = DateLayout::parse(book.text(text));
                 if layout.is_none() {
-                    diags.push(fail(
-                        "bad-date-layout",
-                        format!("`{}` is not a date layout", book.text(text)),
-                    ));
+                    diags.push(fail("bad-date-layout", format!("`{}` is not a date layout", book.text(text))));
                     continue;
                 }
             }
@@ -821,16 +643,10 @@ fn lower_format<'s>(
                         }
                     };
                     let into = format_text(book, args[3]);
-                    rule = Rule::Sign {
-                        place: marker,
-                        into,
-                    };
+                    rule = Rule::Sign { place: marker, into };
                 }
                 Some(_) => {
-                    diags.push(fail(
-                        "bad-format",
-                        "amount takes `flipped` or `sign COLUMN VALUE`".into(),
-                    ));
+                    diags.push(fail("bad-format", "amount takes `flipped` or `sign COLUMN VALUE`".into()));
                     continue;
                 }
             },
@@ -843,9 +659,7 @@ fn lower_format<'s>(
             _ => {}
         }
         let places = if field == Field::Memo {
-            args.iter()
-                .map(|arg| column(*arg, book))
-                .collect::<Result<Vec<_>, _>>()
+            args.iter().map(|arg| column(*arg, book)).collect::<Result<Vec<_>, _>>()
         } else {
             Ok(vec![place])
         };
@@ -856,13 +670,7 @@ fn lower_format<'s>(
                 continue;
             }
         };
-        specs.push(Spec {
-            field,
-            places: places.into_boxed_slice(),
-            layout,
-            rule,
-            loc: line.loc,
-        });
+        specs.push(Spec { field, places: places.into_boxed_slice(), layout, rule, loc: line.loc });
     }
     if !seen[Field::Date as usize] {
         diags.push(
@@ -875,11 +683,8 @@ fn lower_format<'s>(
         && !seen[Field::Gross as usize]
     {
         diags.push(
-            Diagnostic::error(
-                "bad-format",
-                "a record format needs `amount`, both `debit` and `credit`, or `gross`",
-            )
-            .label(file.loc(source.name.0), "this format"),
+            Diagnostic::error("bad-format", "a record format needs `amount`, both `debit` and `credit`, or `gross`")
+                .label(file.loc(source.name.0), "this format"),
         );
     }
     Some(Format {
@@ -915,11 +720,8 @@ fn format_purposes<'s>(
                     Ok(text) => text,
                     Err(_) => {
                         diags.push(
-                            Diagnostic::error(
-                                "bad-string-escape",
-                                "a quoted category has an invalid escape",
-                            )
-                            .label(line.loc, "this format line"),
+                            Diagnostic::error("bad-string-escape", "a quoted category has an invalid escape")
+                                .label(line.loc, "this format line"),
                         );
                         return None;
                     }
@@ -929,13 +731,7 @@ fn format_purposes<'s>(
             let Some(text) = decoded.strip_prefix('#') else {
                 return None;
             };
-            match world.purpose(
-                home,
-                Word {
-                    text,
-                    loc,
-                },
-            ) {
+            match world.purpose(home, Word { text, loc }) {
                 Ok(purpose) => Some(purpose),
                 Err(problem) => {
                     diags.push(problem);
@@ -987,12 +783,9 @@ fn lower_sources<'s>(
             let name = world.book.names.intern(sync.name.0);
             if let Some(first) = declared.get(&(site.home, name)) {
                 diags.push(
-                    Diagnostic::error(
-                        "duplicate-sync",
-                        format!("sync `{}` is declared twice", sync.name.0),
-                    )
-                    .label(file.loc(sync.name.0), "declared again here")
-                    .context(*first, "first declared here"),
+                    Diagnostic::error("duplicate-sync", format!("sync `{}` is declared twice", sync.name.0))
+                        .label(file.loc(sync.name.0), "declared again here")
+                        .context(*first, "first declared here"),
                 );
                 continue;
             }
@@ -1003,11 +796,8 @@ fn lower_sources<'s>(
                 (None, Some(command)) => Fetch::Run(world.book.intern_text(command.0)),
                 _ => {
                     diags.push(
-                        Diagnostic::error(
-                            "sync-fetch",
-                            "a sync source needs exactly one `read` or `run` line",
-                        )
-                        .label(item.loc, "this source has no usable input"),
+                        Diagnostic::error("sync-fetch", "a sync source needs exactly one `read` or `run` line")
+                            .label(item.loc, "this source has no usable input"),
                     );
                     continue;
                 }
@@ -1018,14 +808,7 @@ fn lower_sources<'s>(
                 Some(reference) => {
                     let written = &file[reference];
                     if file[written.lines].is_empty() {
-                        match resolve_format(
-                            file,
-                            &world.book.names,
-                            formats,
-                            &world.scopes,
-                            site.home,
-                            written.name,
-                        ) {
+                        match resolve_format(file, &world.book.names, formats, &world.scopes, site.home, written.name) {
                             Ok(id) => Some(id),
                             Err(problem) => {
                                 diags.push(problem);
@@ -1033,15 +816,8 @@ fn lower_sources<'s>(
                             }
                         }
                     } else {
-                        let category_purposes =
-                            format_purposes(world, file, written, site.home, diags);
-                        match lower_format(
-                            file,
-                            written,
-                            &mut world.book,
-                            &category_purposes,
-                            diags,
-                        ) {
+                        let category_purposes = format_purposes(world, file, written, site.home, diags);
+                        match lower_format(file, written, &mut world.book, &category_purposes, diags) {
                             Some(format) => Some(world.book.formats.push(format)),
                             None => continue,
                         }
@@ -1054,10 +830,7 @@ fn lower_sources<'s>(
                     let mut words = into.0.split_whitespace();
                     match (words.next(), words.next(), words.next()) {
                         (Some("param"), Some(param), None) => {
-                            let word = Word {
-                                text: param,
-                                loc: file.loc(into.0),
-                            };
+                            let word = Word { text: param, loc: file.loc(into.0) };
                             match world.seek_param(site.home, word) {
                                 Ok(Some(param)) => Sink::Param(param),
                                 Ok(None) => {
@@ -1072,11 +845,8 @@ fn lower_sources<'s>(
                         }
                         (Some("param"), _, _) => {
                             diags.push(
-                                Diagnostic::error(
-                                    "sync-sink",
-                                    "`into param` needs one parameter name",
-                                )
-                                .label(file.loc(into.0), "this sink is malformed"),
+                                Diagnostic::error("sync-sink", "`into param` needs one parameter name")
+                                    .label(file.loc(into.0), "this sink is malformed"),
                             );
                             continue;
                         }
@@ -1084,20 +854,14 @@ fn lower_sources<'s>(
                     }
                 }
                 None => {
-                    let word = Word {
-                        text: sync.name.0,
-                        loc: file.loc(sync.name.0),
-                    };
+                    let word = Word { text: sync.name.0, loc: file.loc(sync.name.0) };
                     match world.seek_place(word) {
                         Ok(Some(account)) => match world.book.places[account].role {
                             Role::Account { .. } => {
                                 if format.is_none() {
                                     diags.push(
-                                        Diagnostic::error(
-                                            "sync-format",
-                                            "a feed needs a record format",
-                                        )
-                                        .label(item.loc, "this account source has no format"),
+                                        Diagnostic::error("sync-format", "a feed needs a record format")
+                                            .label(item.loc, "this account source has no format"),
                                     );
                                     continue;
                                 }
@@ -1105,11 +869,8 @@ fn lower_sources<'s>(
                             }
                             _ => {
                                 diags.push(
-                                    Diagnostic::error(
-                                        "sync-feed",
-                                        format!("`{}` is not an account", sync.name.0),
-                                    )
-                                    .label(file.loc(sync.name.0), "a feed must name an account"),
+                                    Diagnostic::error("sync-feed", format!("`{}` is not an account", sync.name.0))
+                                        .label(file.loc(sync.name.0), "a feed must name an account"),
                                 );
                                 continue;
                             }
@@ -1151,18 +912,12 @@ fn resolve_format(
     let Some(sym) = names.get(name.0) else {
         let suggestion = axiom_core::diag::closest(
             name.0,
-            formats
-                .iter()
-                .filter(|candidate| scope.sees(candidate.home))
-                .map(|candidate| names.name(candidate.name)),
+            formats.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
         );
         return Err(crate::errors::unknown(
             "unknown-format",
             "format",
-            crate::errors::Word {
-                text: name.0,
-                loc: file.loc(name.0),
-            },
+            crate::errors::Word { text: name.0, loc: file.loc(name.0) },
             suggestion,
         ));
     };
@@ -1174,32 +929,21 @@ fn resolve_format(
     let Some(rank) = candidates.iter().map(|(rank, _, _)| *rank).min() else {
         let suggestion = axiom_core::diag::closest(
             name.0,
-            formats
-                .iter()
-                .filter(|candidate| scope.sees(candidate.home))
-                .map(|candidate| names.name(candidate.name)),
+            formats.iter().filter(|candidate| scope.sees(candidate.home)).map(|candidate| names.name(candidate.name)),
         );
         return Err(crate::errors::unknown(
             "unknown-format",
             "visible format",
-            crate::errors::Word {
-                text: name.0,
-                loc: file.loc(name.0),
-            },
+            crate::errors::Word { text: name.0, loc: file.loc(name.0) },
             suggestion,
         ));
     };
-    let mut best = candidates
-        .iter()
-        .filter(|(other_rank, _, _)| *other_rank == rank);
+    let mut best = candidates.iter().filter(|(other_rank, _, _)| *other_rank == rank);
     let (_, id, first_loc) = *best.next().expect("the minimum rank came from a candidate");
     if let Some((_, _, second_loc)) = best.next() {
         return Err(Diagnostic::error(
             "ambiguous-format",
-            format!(
-                "format `{}` is declared more than once at this scope",
-                name.0
-            ),
+            format!("format `{}` is declared more than once at this scope", name.0),
         )
         .label(file.loc(name.0), "which declaration is meant?")
         .context(first_loc, "one format is declared here")
@@ -1220,19 +964,13 @@ fn anonymous_patterns<'s>(
 ) -> Vec<Id<Pattern>> {
     file[*patterns]
         .iter()
-        .filter_map(
-            |pattern| match compile_pattern(file, *pattern, book, named, scopes, home) {
-                Ok(program) => Some(book.patterns.push(Pattern {
-                    name: None,
-                    program: program.into_boxed_slice(),
-                    loc,
-                })),
-                Err(problem) => {
-                    diags.push(problem);
-                    None
-                }
-            },
-        )
+        .filter_map(|pattern| match compile_pattern(file, *pattern, book, named, scopes, home) {
+            Ok(program) => Some(book.patterns.push(Pattern { name: None, program: program.into_boxed_slice(), loc })),
+            Err(problem) => {
+                diags.push(problem);
+                None
+            }
+        })
         .collect()
 }
 
@@ -1250,64 +988,31 @@ mod tests {
 
     fn book() -> Book<'static> {
         let path = "axiom.ax";
-        let (file, diagnostics) = axiom_syntax::parse(
-            FileId(0),
-            "base USD\ncommodity USD\n",
-            Folder::default(),
-        );
+        let (file, diagnostics) = axiom_syntax::parse(FileId(0), "base USD\ncommodity USD\n", Folder::default());
         assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
-        let (book, diagnostics) = crate::build(&[crate::Source {
-            path,
-            file,
-            embedded: false,
-        }]);
-        assert!(
-            diagnostics.is_empty(),
-            "minimal model fixture failed to build: {diagnostics:?}"
-        );
+        let (book, diagnostics) = crate::build(&[crate::Source { path, file, embedded: false }]);
+        assert!(diagnostics.is_empty(), "minimal model fixture failed to build: {diagnostics:?}");
         book
     }
 
     #[test]
     fn group_choices_are_fenced_and_sequences_keep_their_order() {
         let file = source("pattern ach = \"ACH \" (\"DEBIT\" / \"CREDIT\") space+\n");
-        let ItemKind::Pattern(id) = file.items[0].kind else {
-            panic!("expected a pattern")
-        };
+        let ItemKind::Pattern(id) = file.items[0].kind else { panic!("expected a pattern") };
         let tree: Tree<crate::book::System> = Tree::default();
         let scopes = Scopes::new(&tree, |_| Vec::new());
         let mut book = book();
-        let program = compile_pattern(
-            &file,
-            file[id].pattern,
-            &mut book,
-            &[],
-            &scopes,
-            Home::Project,
-        )
-        .unwrap();
-        let (ach, debit, credit) = (
-            book.intern_text("ACH "),
-            book.intern_text("DEBIT"),
-            book.intern_text("CREDIT"),
-        );
+        let program = compile_pattern(&file, file[id].pattern, &mut book, &[], &scopes, Home::Project).unwrap();
+        let (ach, debit, credit) = (book.intern_text("ACH "), book.intern_text("DEBIT"), book.intern_text("CREDIT"));
         assert_eq!(
             program,
             [
                 Op::Literal(ach),
-                Op::Repeat {
-                    min: 1,
-                    max: Some(1),
-                    len: 3,
-                },
+                Op::Repeat { min: 1, max: Some(1), len: 3 },
                 Op::Choice { len: 1 },
                 Op::Literal(debit),
                 Op::Literal(credit),
-                Op::Repeat {
-                    min: 1,
-                    max: None,
-                    len: 1,
-                },
+                Op::Repeat { min: 1, max: None, len: 1 },
                 Op::Class(CharClass::Space),
             ]
         );
@@ -1321,20 +1026,10 @@ mod tests {
             let name = names.intern("chain");
             let count = 40usize;
             for at in 0..count {
-                let callee = if reverse {
-                    at.checked_sub(1)
-                } else {
-                    (at + 1 < count).then_some(at + 1)
-                };
-                let program = callee.map_or_else(
-                    || Box::<[Op]>::default(),
-                    |callee| Box::new([Op::Call(Id::new(callee as u32))]),
-                );
-                arena.push(Pattern {
-                    name: None,
-                    program,
-                    loc: Loc::new(FileId(0), at as u32, at as u32 + 1),
-                });
+                let callee = if reverse { at.checked_sub(1) } else { (at + 1 < count).then_some(at + 1) };
+                let program = callee
+                    .map_or_else(|| Box::<[Op]>::default(), |callee| Box::new([Op::Call(Id::new(callee as u32))]));
+                arena.push(Pattern { name: None, program, loc: Loc::new(FileId(0), at as u32, at as u32 + 1) });
             }
             let named = (0..count)
                 .map(|at| Named {
@@ -1351,9 +1046,7 @@ mod tests {
 
         for reverse in [false, true] {
             assert!(
-                diagnostics(reverse)
-                    .iter()
-                    .any(|problem| problem.code == "pattern-too-deep"),
+                diagnostics(reverse).iter().any(|problem| problem.code == "pattern-too-deep"),
                 "chain orientation reverse={reverse} must exceed the 32-call limit"
             );
         }
@@ -1364,47 +1057,29 @@ mod tests {
         let file = source(
             "format camt\n  records Ntry\n  date BookgDt/Dt\n  amount Amt sign CdtDbtInd CRDT\n  memo AddtlNtryInf, RmtInf/Ustrd\n",
         );
-        let ItemKind::Format(id) = file.items[0].kind else {
-            panic!("expected a format")
-        };
+        let ItemKind::Format(id) = file.items[0].kind else { panic!("expected a format") };
         let mut book = book();
         let format = lower_format(&file, &file[id], &mut book, &[], &mut Vec::new()).unwrap();
-        assert_eq!(
-            format.shape,
-            Shape::Tagged {
-                records: book.names.intern("Ntry")
-            }
-        );
+        assert_eq!(format.shape, Shape::Tagged { records: book.names.intern("Ntry") });
         assert_eq!(format.specs.len(), 3);
         assert_eq!(format.specs[0].field, Field::Date);
-        assert_eq!(
-            format.specs[0].places.as_ref(),
-            [Column::Path(book.intern_text("BookgDt/Dt"))]
-        );
+        assert_eq!(format.specs[0].places.as_ref(), [Column::Path(book.intern_text("BookgDt/Dt"))]);
         assert_eq!(format.specs[1].field, Field::Amount);
         assert_eq!(
             format.specs[1].rule,
-            Rule::Sign {
-                place: Column::Path(book.intern_text("CdtDbtInd")),
-                into: book.intern_text("CRDT"),
-            }
+            Rule::Sign { place: Column::Path(book.intern_text("CdtDbtInd")), into: book.intern_text("CRDT") }
         );
         assert_eq!(format.specs[2].field, Field::Memo);
         assert_eq!(
             format.specs[2].places.as_ref(),
-            [
-                Column::Path(book.intern_text("AddtlNtryInf")),
-                Column::Path(book.intern_text("RmtInf/Ustrd"))
-            ]
+            [Column::Path(book.intern_text("AddtlNtryInf")), Column::Path(book.intern_text("RmtInf/Ustrd"))]
         );
     }
 
     #[test]
     fn gross_is_a_valid_record_amount_source() {
         let file = source("format payout\n  date Date\n  gross Gross\n  memo Memo\n");
-        let ItemKind::Format(id) = file.items[0].kind else {
-            panic!("expected a format")
-        };
+        let ItemKind::Format(id) = file.items[0].kind else { panic!("expected a format") };
         let mut book = book();
         let mut diagnostics = Vec::new();
         let format = lower_format(&file, &file[id], &mut book, &[], &mut diagnostics).unwrap();

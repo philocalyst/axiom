@@ -8,8 +8,8 @@ use axiom_core::{Day, Days, Diagnostic, FileId, Ratio};
 use axiom_syntax::{Folder, parse};
 
 use crate::{
-    Amount, Book, Conversion, ConversionError, PurposeRoot, RatePolicy, RateSource, Residence,
-    Role, Sort, Source, Value, build, prop,
+    Amount, Book, Conversion, ConversionError, PurposeRoot, RatePolicy, RateSource, Residence, Role, Sort, Source,
+    Value, build, prop,
 };
 
 const STD: &str = "\
@@ -25,22 +25,12 @@ purpose wages : income
 
 fn parsed_source<'s>(id: u16, path: &'s str, text: &'s str, embedded: bool) -> Source<'s> {
     let (file, diagnostics) = parse(FileId(id), text, Folder::default());
-    assert!(
-        diagnostics.is_empty(),
-        "{path} should parse: {diagnostics:?}"
-    );
-    Source {
-        path,
-        file,
-        embedded,
-    }
+    assert!(diagnostics.is_empty(), "{path} should parse: {diagnostics:?}");
+    Source { path, file, embedded }
 }
 
 fn build_book<'s>(std: &'s str, project: &'s str) -> (Book<'s>, Vec<Diagnostic>) {
-    let sources = [
-        parsed_source(0, "std.ax", std, true),
-        parsed_source(1, "axiom.ax", project, false),
-    ];
+    let sources = [parsed_source(0, "std.ax", std, true), parsed_source(1, "axiom.ax", project, false)];
     build(&sources)
 }
 
@@ -49,10 +39,7 @@ fn build_project(project: &str) -> (Book<'_>, Vec<Diagnostic>) {
 }
 
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
-    diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.code.as_ref())
-        .collect()
+    diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect()
 }
 
 #[test]
@@ -70,14 +57,8 @@ asset condo : property
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.commodities[book.commodity("USD").unwrap()].scale, 2);
-    assert_eq!(
-        book.kinds[book.roots.kinds.asset].sort,
-        Sort::Place(crate::Class::Asset)
-    );
-    assert_eq!(
-        book.kinds[book.roots.kinds.debt].sort,
-        Sort::Place(crate::Class::Debt)
-    );
+    assert_eq!(book.kinds[book.roots.kinds.asset].sort, Sort::Place(crate::Class::Asset));
+    assert_eq!(book.kinds[book.roots.kinds.debt].sort, Sort::Place(crate::Class::Debt));
     assert_eq!(book.kinds[book.kind("property").unwrap()].sort, Sort::Thing);
     assert_eq!(
         [
@@ -86,22 +67,14 @@ asset condo : property
             book.purposes[book.roots.purposes.capital].root,
             book.purposes[book.roots.purposes.transfer].root,
         ],
-        [
-            PurposeRoot::Income,
-            PurposeRoot::Spending,
-            PurposeRoot::Capital,
-            PurposeRoot::Transfer
-        ],
+        [PurposeRoot::Income, PurposeRoot::Spending, PurposeRoot::Capital, PurposeRoot::Transfer],
     );
 
     let me = book.entity("me").unwrap();
     let checking = book.place("checking").unwrap();
     let condo = book.asset("condo").unwrap();
     assert_eq!(book.places[checking].owner, me);
-    assert!(matches!(
-        book.places[checking].role,
-        Role::Account { institution: None }
-    ));
+    assert!(matches!(book.places[checking].role, Role::Account { institution: None }));
     assert_eq!(book.assets[condo].kind, book.kind("property").unwrap());
 }
 
@@ -140,14 +113,9 @@ asset condo : rental-home
     assert_eq!(parent_default.value, Value::Num(Ratio::int(30)));
     assert_eq!(middle_default.value, Value::Num(Ratio::int(24)));
     assert_eq!(child_default.value, Value::Num(Ratio::int(18)));
-    assert!(
-        parent_default.loc.is_some() && middle_default.loc.is_some() && child_default.loc.is_some()
-    );
+    assert!(parent_default.loc.is_some() && middle_default.loc.is_some() && child_default.loc.is_some());
     assert!(book.kinds[child].has.iter().any(|has| has.name == name));
-    assert!(
-        book.assets[asset].props.is_empty(),
-        "defaults stay on their kinds"
-    );
+    assert!(book.assets[asset].props.is_empty(), "defaults stay on their kinds");
 }
 
 #[test]
@@ -212,10 +180,7 @@ commodity USD : currency
     let (book, diagnostics) = build_book(std, project);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let payroll = book.kinds[book.kind("payroll").unwrap()]
-        .purpose
-        .unwrap()
-        .value;
+    let payroll = book.kinds[book.kind("payroll").unwrap()].purpose.unwrap().value;
     assert_eq!(book.name(book.purposes[payroll].name), "wages");
     let retirement = book.kind("retirement").unwrap();
     let roth = book.kind("roth").unwrap();
@@ -226,13 +191,7 @@ commodity USD : currency
     assert_eq!(book.kinds[retirement].takes.len(), 1);
     assert_eq!(book.kinds[retirement].takes[0].value.to, transfer);
     assert_eq!(book.kinds[roth].takes.len(), 1);
-    assert_eq!(
-        book.kinds[roth].takes[0].value,
-        crate::Take {
-            to: groceries,
-            from: wages
-        }
-    );
+    assert_eq!(book.kinds[roth].takes[0].value, crate::Take { to: groceries, from: wages });
     assert_eq!(book.kinds[college].pays.unwrap().value, groceries);
 }
 
@@ -255,22 +214,10 @@ account plan : 401k
     let (book, diagnostics) = build_book(std, project);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert_eq!(
-        book.name(book.commodities[book.commodity("USD").unwrap()].symbol),
-        "USD"
-    );
-    assert_eq!(
-        book.name(book.commodities[book.commodity("EUR").unwrap()].symbol),
-        "EUR"
-    );
-    assert_eq!(
-        book.name(book.kinds[book.kind("401k").unwrap()].name),
-        "401k"
-    );
-    assert_eq!(
-        book.places[book.place("plan").unwrap()].kind,
-        book.kind("401k").unwrap()
-    );
+    assert_eq!(book.name(book.commodities[book.commodity("USD").unwrap()].symbol), "USD");
+    assert_eq!(book.name(book.commodities[book.commodity("EUR").unwrap()].symbol), "EUR");
+    assert_eq!(book.name(book.kinds[book.kind("401k").unwrap()].name), "401k");
+    assert_eq!(book.places[book.place("plan").unwrap()].kind, book.kind("401k").unwrap());
     assert_eq!(book.base, book.commodity("USD").unwrap());
 }
 
@@ -287,9 +234,7 @@ kind distributed : entity
 
     assert_eq!(codes(&diagnostics), ["share-rate-range"], "{diagnostics:?}");
     let diagnostic = &diagnostics[0];
-    let loc = diagnostic
-        .anchor()
-        .expect("the invalid rate is source anchored");
+    let loc = diagnostic.anchor().expect("the invalid rate is source anchored");
     assert_eq!(&project[loc.start as usize..loc.end as usize], "120%");
 }
 
@@ -307,13 +252,7 @@ asset south : property
     let (book, diagnostics) = build_project(project);
 
     assert_eq!(codes(&diagnostics), ["asset-part-cycle"], "{diagnostics:?}");
-    assert_eq!(
-        book.assets
-            .iter()
-            .filter(|(_, asset)| asset.part_of.is_none())
-            .count(),
-        1
-    );
+    assert_eq!(book.assets.iter().filter(|(_, asset)| asset.part_of.is_none()).count(), 1);
 }
 
 #[test]
@@ -360,11 +299,7 @@ entity studio : employer
     assert_eq!(owners[0].rate, Ratio::new(3, 5).unwrap());
     assert_eq!(owners[1].entity, book.entity("jo").unwrap());
     assert_eq!(owners[1].rate, Ratio::new(2, 5).unwrap());
-    assert!(
-        owners
-            .iter()
-            .all(|share| share.loc != axiom_core::Loc::default())
-    );
+    assert!(owners.iter().all(|share| share.loc != axiom_core::Loc::default()));
 }
 
 #[test]
@@ -396,10 +331,7 @@ account business/checking : bank
     let (book, diagnostics) = build_project(project);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert!(matches!(
-        book.place("checking"),
-        Err(crate::Miss::Ambiguous(_))
-    ));
+    assert!(matches!(book.place("checking"), Err(crate::Miss::Ambiguous(_))));
     let business = book.place("business/checking").unwrap();
     assert_eq!(book.name(book.places[business].path), "business/checking");
 }
@@ -416,10 +348,7 @@ kind deferred-account : missing-kind
 
     assert_eq!(codes(&diagnostics), ["unknown-kind"], "{diagnostics:?}");
     let loc = diagnostics[0].anchor().unwrap();
-    assert_eq!(
-        &project[loc.start as usize..loc.end as usize],
-        "missing-kind"
-    );
+    assert_eq!(&project[loc.start as usize..loc.end as usize], "missing-kind");
 }
 
 #[test]
@@ -434,15 +363,9 @@ kind checking : bankk
 
     assert_eq!(codes(&diagnostics), ["unknown-kind"], "{diagnostics:?}");
     let diagnostic = &diagnostics[0];
-    let edit = diagnostic
-        .help
-        .iter()
-        .find_map(|help| help.edit.as_ref())
-        .expect("near miss should have an exact source edit");
-    assert_eq!(
-        &project[edit.0.start as usize..edit.0.end as usize],
-        "bankk"
-    );
+    let edit =
+        diagnostic.help.iter().find_map(|help| help.edit.as_ref()).expect("near miss should have an exact source edit");
+    assert_eq!(&project[edit.0.start as usize..edit.0.end as usize], "bankk");
     assert_eq!(edit.1, "bank");
 }
 
@@ -456,11 +379,7 @@ entity opening : person
 ";
     let (_, diagnostics) = build_project(project);
 
-    assert_eq!(
-        codes(&diagnostics),
-        ["reserved-entity-name"],
-        "{diagnostics:?}"
-    );
+    assert_eq!(codes(&diagnostics), ["reserved-entity-name"], "{diagnostics:?}");
     let loc = diagnostics[0].anchor().unwrap();
     assert_eq!(&project[loc.start as usize..loc.end as usize], "opening");
 }
@@ -474,11 +393,7 @@ commodity GBP : currency
 ";
     let (_, diagnostics) = build_project(project);
 
-    assert_eq!(
-        codes(&diagnostics),
-        ["base-currency-required"],
-        "{diagnostics:?}"
-    );
+    assert_eq!(codes(&diagnostics), ["base-currency-required"], "{diagnostics:?}");
 }
 
 #[test]
@@ -496,10 +411,7 @@ account savings : bank
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     for code in ["unlisted-flow-code", "unlisted-event-code"] {
-        let symbol = book
-            .names
-            .get(code)
-            .expect("the native record interns its code");
+        let symbol = book.names.get(code).expect("the native record interns its code");
         assert_eq!(book.name(symbol), code);
     }
     assert_eq!(book.events.len(), 1);
@@ -544,34 +456,18 @@ entity jo : person
     assert_eq!(residences.len(), 2);
     assert_eq!(book.name(book.systems[residences[0].system].path), "us/ca");
     assert_eq!(book.name(book.systems[residences[1].system].path), "us/ny");
-    assert_eq!(
-        book.systems[residences[0].system].currency,
-        book.commodity("CAD")
-    );
-    assert_eq!(
-        book.systems[residences[1].system].currency,
-        book.commodity("USD")
-    );
-    assert_eq!(
-        residences[0].days.first(),
-        Day::from_ymd(2025, 1, 1).unwrap()
-    );
-    assert_eq!(
-        residences[0].days.last(),
-        Day::from_ymd(2025, 12, 31).unwrap()
-    );
-    assert_eq!(
-        residences[1].days.first(),
-        Day::from_ymd(2025, 7, 1).unwrap()
-    );
+    assert_eq!(book.systems[residences[0].system].currency, book.commodity("CAD"));
+    assert_eq!(book.systems[residences[1].system].currency, book.commodity("USD"));
+    assert_eq!(residences[0].days.first(), Day::from_ymd(2025, 1, 1).unwrap());
+    assert_eq!(residences[0].days.last(), Day::from_ymd(2025, 12, 31).unwrap());
+    assert_eq!(residences[1].days.first(), Day::from_ymd(2025, 7, 1).unwrap());
     assert_eq!(residences[1].days.last(), Day::MAX);
 }
 
 fn build_rate_book<'s>(project: &'s str) -> (Book<'s>, Vec<Diagnostic>) {
     const US: &str = "system us\nuse std\ncurrency USD\nrates spot\n";
     const US_CA: &str = "system us/ca\nuse std\n";
-    const DE: &str =
-        "system de\nuse std\ncurrency EUR\nrates param fx\nparam fx\n  2026 EUR USD 1.1\n";
+    const DE: &str = "system de\nuse std\ncurrency EUR\nrates param fx\nparam fx\n  2026 EUR USD 1.1\n";
     let sources = [
         parsed_source(0, "std.ax", STD, true),
         parsed_source(1, "us.ax", US, true),
@@ -610,9 +506,7 @@ entity me : person
     let converted = book.convert_for(amount, usd, owner, day, None).unwrap();
     assert_eq!(converted.amount(), Amount::new(axiom_core::Qty(1_100), usd));
     assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()));
-    let Some(path) = converted.path() else {
-        panic!("a table conversion has rate evidence")
-    };
+    let Some(path) = converted.path() else { panic!("a table conversion has rate evidence") };
     let (first, second) = (path.first, path.second);
     assert_eq!(second, None);
     assert_eq!((first.from, first.to), (eur, usd));
@@ -629,21 +523,10 @@ entity me : person
         }
     );
 
-    let inverse = book
-        .convert_for(
-            Amount::new(axiom_core::Qty(1_000), usd),
-            eur,
-            owner,
-            day,
-            None,
-        )
-        .unwrap();
+    let inverse = book.convert_for(Amount::new(axiom_core::Qty(1_000), usd), eur, owner, day, None).unwrap();
     assert_eq!(inverse.amount(), Amount::new(axiom_core::Qty(909), eur));
     assert_eq!(inverse.rate(), Some(Ratio::new(10, 11).unwrap()));
-    assert!(matches!(
-        inverse.path().unwrap().first.source,
-        RateSource::Param { inverted: true, .. }
-    ));
+    assert!(matches!(inverse.path().unwrap().first.source, RateSource::Param { inverted: true, .. }));
 
     // Dimensionless tables still carry an explicit unit declaration.
     book.params[param_id].unit = Some(axiom_core::Dim::Number);
@@ -669,9 +552,7 @@ entity me : person
             loc: axiom_core::Loc::default(),
         },
     ]);
-    let cross = book
-        .convert_for(amount, gbp, owner, day, Some(RatePolicy::Spot))
-        .unwrap();
+    let cross = book.convert_for(amount, gbp, owner, day, Some(RatePolicy::Spot)).unwrap();
     assert_eq!(cross.amount(), Amount::new(axiom_core::Qty(960), gbp));
     let cross_path = cross.path().unwrap();
     assert_eq!(cross_path.first.to, usd);
@@ -685,17 +566,10 @@ entity me : person
             day,
             Some(RatePolicy::Spot),
         ),
-        Err(ConversionError::Missing {
-            from: book.commodity("CAD").unwrap(),
-            to: gbp,
-            day,
-            policy: RatePolicy::Spot,
-        })
+        Err(ConversionError::Missing { from: book.commodity("CAD").unwrap(), to: gbp, day, policy: RatePolicy::Spot })
     );
 
-    let zero = book
-        .convert_for(Amount::new(axiom_core::Qty(0), eur), usd, owner, day, None)
-        .unwrap();
+    let zero = book.convert_for(Amount::new(axiom_core::Qty(0), eur), usd, owner, day, None).unwrap();
     assert_eq!(zero.amount(), Amount::new(axiom_core::Qty(0), usd));
     assert_eq!(zero.rate(), None);
     assert!(matches!(zero, Conversion::Zero { .. }));
@@ -709,9 +583,7 @@ entity me : person
         implied: false,
         loc: axiom_core::Loc::default(),
     }]);
-    let explicit = book
-        .convert_for(amount, usd, owner, day, Some(RatePolicy::Spot))
-        .unwrap();
+    let explicit = book.convert_for(amount, usd, owner, day, Some(RatePolicy::Spot)).unwrap();
     assert_eq!(explicit.amount(), Amount::new(axiom_core::Qty(1_200), usd));
     assert!(matches!(
         explicit.path().unwrap().first.source,
@@ -741,36 +613,22 @@ entity me : person
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let owner = book.roots.me;
     let system = |book: &Book<'_>, path| {
-        book.systems
-            .iter()
-            .find_map(|(id, node)| (book.name(node.path) == path).then_some(id))
-            .unwrap()
+        book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap()
     };
     let (us, de) = (system(&book, "us"), system(&book, "de"));
     let child = system(&book, "us/ca");
     let param = book.params.iter().next().unwrap().0;
     book.systems[child].rates = Some(RatePolicy::Param(param));
     let residences = [
-        Residence {
-            days: Days::ALWAYS,
-            system: de,
-        },
-        Residence {
-            days: Days::ALWAYS,
-            system: us,
-        },
-        Residence {
-            days: Days::ALWAYS,
-            system: child,
-        },
+        Residence { days: Days::ALWAYS, system: de },
+        Residence { days: Days::ALWAYS, system: us },
+        Residence { days: Days::ALWAYS, system: child },
     ];
     let day = Day::from_ymd(2026, 6, 30).unwrap();
     let amount = Amount::new(axiom_core::Qty(1_000), book.commodity("EUR").unwrap());
     for lives in [residences, [residences[2], residences[0], residences[1]]] {
         book.entities[owner].lives = lives.into();
-        let converted = book
-            .convert_for(amount, book.base, owner, day, None)
-            .unwrap();
+        let converted = book.convert_for(amount, book.base, owner, day, None).unwrap();
         assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()));
     }
 }
@@ -791,39 +649,17 @@ entity me : person
     let (mut book, diagnostics) = build_rate_book(project);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let owner = book.roots.me;
-    let system = |path| {
-        book.systems
-            .iter()
-            .find_map(|(id, node)| (book.name(node.path) == path).then_some(id))
-            .unwrap()
-    };
+    let system =
+        |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
     let (us, de) = (system("us"), system("de"));
-    book.entities[owner].lives = vec![
-        Residence {
-            days: Days::ALWAYS,
-            system: us,
-        },
-        Residence {
-            days: Days::ALWAYS,
-            system: de,
-        },
-    ]
-    .into();
+    book.entities[owner].lives =
+        vec![Residence { days: Days::ALWAYS, system: us }, Residence { days: Days::ALWAYS, system: de }].into();
     let amount = Amount::new(axiom_core::Qty(100), book.commodity("EUR").unwrap());
     let day = Day::from_ymd(2026, 6, 30).unwrap();
-    let expected = Err(ConversionError::PolicyConflict {
-        first: us.min(de),
-        second: us.max(de),
-    });
-    assert_eq!(
-        book.convert_for(amount, book.base, owner, day, None),
-        expected
-    );
+    let expected = Err(ConversionError::PolicyConflict { first: us.min(de), second: us.max(de) });
+    assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected);
     book.entities[owner].lives.reverse();
-    assert_eq!(
-        book.convert_for(amount, book.base, owner, day, None),
-        expected
-    );
+    assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected);
 }
 
 #[test]
@@ -852,19 +688,8 @@ account brokerage : bank
         .expect("a known actual exchange records an implied quote");
     assert!(quote.implied);
     assert_eq!(quote.rate, Ratio::new(2857, 10).unwrap());
-    let conversion = book
-        .convert_for(
-            Amount::new(axiom_core::Qty(7), vti),
-            usd,
-            book.roots.me,
-            day,
-            None,
-        )
-        .unwrap();
-    assert_eq!(
-        conversion.amount(),
-        Amount::new(axiom_core::Qty(199_990), usd)
-    );
+    let conversion = book.convert_for(Amount::new(axiom_core::Qty(7), vti), usd, book.roots.me, day, None).unwrap();
+    assert_eq!(conversion.amount(), Amount::new(axiom_core::Qty(199_990), usd));
 }
 
 #[test]
@@ -892,26 +717,13 @@ account brokerage : bank
         .iter()
         .filter(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
         .collect();
-    assert_eq!(
-        pair.len(),
-        2,
-        "the written quote and implied evidence are both retained"
-    );
+    assert_eq!(pair.len(), 2, "the written quote and implied evidence are both retained");
     assert!(pair[0].implied);
     let quote = pair[1];
     assert!(!quote.implied);
     assert_eq!(quote.rate, Ratio::new(300, 1).unwrap());
     let conversion = book
-        .convert_for(
-            Amount::new(axiom_core::Qty(7), vti),
-            usd,
-            book.roots.me,
-            day,
-            Some(RatePolicy::Spot),
-        )
+        .convert_for(Amount::new(axiom_core::Qty(7), vti), usd, book.roots.me, day, Some(RatePolicy::Spot))
         .unwrap();
-    assert_eq!(
-        conversion.amount(),
-        Amount::new(axiom_core::Qty(210_000), usd)
-    );
+    assert_eq!(conversion.amount(), Amount::new(axiom_core::Qty(210_000), usd));
 }

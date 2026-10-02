@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use axiom_core::{Days, Id, Qty};
 use axiom_engine::Run;
 use axiom_model::{
-    Book, Cadence, Contract, FlowSide, On, TemplateAmount, TemplateFlow, TemplateItem,
-    TemplateItemParent, TemplateQuantity, Terms, TermsState,
+    Book, Cadence, Contract, FlowSide, On, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
+    TemplateQuantity, Terms, TermsState,
 };
 
 use crate::lens::Lens;
@@ -34,23 +34,16 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
             .days
             .intersect(Days::new(run.today, contract.days.last()).unwrap_or(Days::on(run.today)))
             .and_then(|days| {
-                contract
-                    .occurrences(days)
-                    .map(|occurrence| occurrence.day)
-                    .find(|due| {
-                        !run.promises.iter().any(|promise| {
-                            promise.contract == id && promise.due == *due && promise.kept.is_some()
-                        })
-                    })
+                contract.occurrences(days).map(|occurrence| occurrence.day).find(|due| {
+                    !run.promises
+                        .iter()
+                        .any(|promise| promise.contract == id && promise.due == *due && promise.kept.is_some())
+                })
             });
         let promises = run.promises.iter().filter(|promise| promise.contract == id);
         let (kept, late, age) = promises.fold((0, 0, 0i64), |(kept, late, age), promise| {
             let late_days = promise.late(run.today);
-            (
-                kept + usize::from(promise.kept.is_some()),
-                late + usize::from(late_days > 0),
-                age + i64::from(late_days),
-            )
+            (kept + usize::from(promise.kept.is_some()), late + usize::from(late_days > 0), age + i64::from(late_days))
         });
         let loan_balance = loan_balance(lens, run, contract);
         let cells = [
@@ -59,18 +52,10 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
             terms.map_or(Cell::Blank, |terms| terms_cell(lens, contract, terms)),
             next.map_or(Cell::Blank, Cell::Day),
             Cell::Count(kept, "kept"),
-            if late == 0 {
-                Cell::Blank
-            } else {
-                Cell::text(format!("{late} occurrences, {age} days"))
-            },
+            if late == 0 { Cell::Blank } else { Cell::text(format!("{late} occurrences, {age} days")) },
             loan_balance,
         ];
-        section.push(Row::new(cells).style(if late > 0 {
-            Style::Alert
-        } else {
-            Style::Normal
-        }));
+        section.push(Row::new(cells).style(if late > 0 { Style::Alert } else { Style::Normal }));
     }
     if section.rows.is_empty() {
         section.note("No contracts are declared.");
@@ -78,11 +63,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
     Report::new("Contracts").with(section)
 }
 
-pub(crate) fn terms_cell<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    contract: &'s Contract,
-    terms: &'s Terms,
-) -> Cell<'s> {
+pub(crate) fn terms_cell<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract, terms: &'s Terms) -> Cell<'s> {
     let book = lens.book();
     if terms.state == TermsState::Waived {
         return Cell::Word("waived");
@@ -90,25 +71,15 @@ pub(crate) fn terms_cell<'s>(
     let mut parts: Vec<Cell<'s>> = vec![cadence(terms.every)];
     parts.extend(terms.on.iter().map(on_day));
     if let Some(purpose) = contract.purpose {
-        parts.push(Cell::Purpose(
-            book.name(book.purposes[purpose.value.purpose].name),
-        ));
+        parts.push(Cell::Purpose(book.name(book.purposes[purpose.value.purpose].name)));
     }
     if let Some(description) = contract.description {
         parts.push(Cell::text(book.text(description)));
     }
-    parts.extend(terms.inputs.iter().map(|input| {
-        Cell::list(
-            " ",
-            [Cell::Word("input"), Cell::Name(book.name(input.name))],
-        )
-    }));
     parts.extend(
-        terms
-            .template
-            .iter()
-            .map(|flow| template_flow_cell(lens, flow)),
+        terms.inputs.iter().map(|input| Cell::list(" ", [Cell::Word("input"), Cell::Name(book.name(input.name))])),
     );
+    parts.extend(terms.template.iter().map(|flow| template_flow_cell(lens, flow)));
     Cell::list(" ", parts)
 }
 
@@ -119,13 +90,8 @@ fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) 
     };
     let sign = lens.display_sign(loan.debt);
     let mut balances = BTreeMap::<Id<axiom_model::Commodity>, Qty>::new();
-    for holding in run
-        .holdings
-        .iter()
-        .filter(|holding| holding.place == loan.debt)
-    {
-        *balances.entry(holding.unit).or_default() +=
-            Qty(lens.place_qty(loan.debt, holding.qty()).0 * sign);
+    for holding in run.holdings.iter().filter(|holding| holding.place == loan.debt) {
+        *balances.entry(holding.unit).or_default() += Qty(lens.place_qty(loan.debt, holding.qty()).0 * sign);
     }
     let cells = balances
         .into_iter()
@@ -136,10 +102,7 @@ fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) 
 
 /// Never render placeholder values for a term expression that the engine must
 /// evaluate at the occurrence date.
-pub(crate) fn template_flow_cell<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    template: &'s TemplateFlow,
-) -> Cell<'s> {
+pub(crate) fn template_flow_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s TemplateFlow) -> Cell<'s> {
     let book = lens.book();
     let flow = &template.flow;
     let header = Cell::list(
@@ -152,10 +115,7 @@ pub(crate) fn template_flow_cell<'s>(
                 .unwrap_or(Cell::Blank),
         ]
         .into_iter()
-        .chain(crate::table::code_labels(
-            book,
-            book.flow_view(flow).codes(),
-        )),
+        .chain(crate::table::code_labels(book, book.flow_view(flow).codes())),
     );
     let legs = template.legs.iter().map(|leg| {
         let side = match leg.side {
@@ -180,10 +140,7 @@ pub(crate) fn template_flow_cell<'s>(
             ],
         )
     });
-    let items = template
-        .items
-        .iter()
-        .map(|item| template_item_cell(lens, template, item));
+    let items = template.items.iter().map(|item| template_item_cell(lens, template, item));
     Cell::list("; ", std::iter::once(header).chain(legs).chain(items))
 }
 
@@ -197,10 +154,7 @@ fn template_quantity<'s>(
     match quantity {
         TemplateQuantity::Amount(None) => Cell::amount(
             book,
-            axiom_model::Amount::new(
-                crate::flow::scoped_movement_qty(lens, flow, literal.qty),
-                literal.unit,
-            ),
+            axiom_model::Amount::new(crate::flow::scoped_movement_qty(lens, flow, literal.qty), literal.unit),
         ),
         TemplateQuantity::Amount(Some(_)) => Cell::Word("computed per occurrence"),
         TemplateQuantity::Pending(None) => Cell::Word("pending amount"),
@@ -208,21 +162,11 @@ fn template_quantity<'s>(
         TemplateQuantity::Target(None) => Cell::Word("target amount"),
         TemplateQuantity::Target(Some(_)) => Cell::Word("computed target amount"),
         TemplateQuantity::Percent(rate) => Cell::Percent(rate),
-        TemplateQuantity::Unknown(unit) => Cell::list(
-            " ",
-            [
-                Cell::Word("unknown"),
-                Cell::Name(book.name(book.commodities[unit].symbol)),
-            ],
-        ),
+        TemplateQuantity::Unknown(unit) => {
+            Cell::list(" ", [Cell::Word("unknown"), Cell::Name(book.name(book.commodities[unit].symbol))])
+        }
         TemplateQuantity::All(unit) => unit.map_or(Cell::Word("all"), |unit| {
-            Cell::list(
-                " ",
-                [
-                    Cell::Word("all"),
-                    Cell::Name(book.name(book.commodities[unit].symbol)),
-                ],
-            )
+            Cell::list(" ", [Cell::Word("all"), Cell::Name(book.name(book.commodities[unit].symbol))])
         }),
         TemplateQuantity::Rest => Cell::Word("rest"),
         TemplateQuantity::Whole => Cell::Word("whole"),
@@ -230,11 +174,7 @@ fn template_quantity<'s>(
     }
 }
 
-fn template_item_cell<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    template: &'s TemplateFlow,
-    item: &'s TemplateItem,
-) -> Cell<'s> {
+fn template_item_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s TemplateFlow, item: &'s TemplateItem) -> Cell<'s> {
     let book = lens.book();
     let sign = match item.sign {
         axiom_model::Sign::Carve => "carves",
@@ -251,36 +191,23 @@ fn template_item_cell<'s>(
     };
     let flow = match item.parent {
         TemplateItemParent::Header => &template.flow,
-        TemplateItemParent::Leg(index) => template
-            .legs
-            .get(usize::from(index))
-            .map_or(&template.flow, |leg| &leg.flow),
+        TemplateItemParent::Leg(index) => template.legs.get(usize::from(index)).map_or(&template.flow, |leg| &leg.flow),
     };
     let amount = match item.amount {
         TemplateAmount::Literal(amount) => Cell::amount(
             book,
-            axiom_model::Amount::new(
-                crate::flow::scoped_movement_qty(lens, flow, amount.qty),
-                amount.unit,
-            ),
+            axiom_model::Amount::new(crate::flow::scoped_movement_qty(lens, flow, amount.qty), amount.unit),
         ),
         TemplateAmount::Computed(_) => Cell::Word("computed per occurrence"),
     };
-    let purpose = item.purpose.map_or(Cell::Blank, |purpose| {
-        Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
-    });
+    let purpose =
+        item.purpose.map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)));
     Cell::list(
         " ",
         [Cell::Word(sign), parent, Cell::Word(side), amount, purpose]
             .into_iter()
-            .chain(
-                item.description
-                    .map(|description| Cell::text(book.text(description))),
-            )
-            .chain(crate::table::code_labels(
-                book,
-                book.codes[item.codes].iter().copied(),
-            ))
+            .chain(item.description.map(|description| Cell::text(book.text(description))))
+            .chain(crate::table::code_labels(book, book.codes[item.codes].iter().copied()))
             .chain(std::iter::once(Cell::Source(item.loc))),
     )
 }
@@ -299,15 +226,7 @@ fn on_day<'s>(on: &On) -> Cell<'s> {
         On::YearDay { month, day } => Cell::text(format!("on {month:02}-{day:02}")),
         On::Weekday(day) => Cell::text(format!(
             "on {}",
-            [
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday"
-            ][usize::from(day).min(6)]
+            ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][usize::from(day).min(6)]
         )),
     }
 }

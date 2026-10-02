@@ -33,11 +33,7 @@ pub struct Ink {
 }
 
 impl Ink {
-    pub const PLAIN: Ink = Ink {
-        color: None,
-        bold: false,
-        dim: false,
-    };
+    pub const PLAIN: Ink = Ink { color: None, bold: false, dim: false };
     pub const BOLD: Ink = Ink::PLAIN.bold();
     pub const DIM: Ink = Ink::PLAIN.dim();
     pub const RED: Ink = Ink::color(31);
@@ -48,10 +44,7 @@ impl Ink {
     pub const CYAN: Ink = Ink::color(36);
 
     const fn color(code: u8) -> Ink {
-        Ink {
-            color: Some(code),
-            ..Ink::PLAIN
-        }
+        Ink { color: Some(code), ..Ink::PLAIN }
     }
 
     /// The same ink, in bold.
@@ -66,10 +59,7 @@ impl Ink {
 
     /// The same ink in the colour of `other`.
     pub const fn colored(self, other: Ink) -> Ink {
-        Ink {
-            color: other.color,
-            ..self
-        }
+        Ink { color: other.color, ..self }
     }
 }
 
@@ -111,10 +101,7 @@ impl Painter {
         }
         out.push_str("\x1b[");
         let mut separator = "";
-        for code in [ink.bold.then_some(1), ink.dim.then_some(2), ink.color]
-            .into_iter()
-            .flatten()
-        {
+        for code in [ink.bold.then_some(1), ink.dim.then_some(2), ink.color].into_iter().flatten() {
             let _ = write!(out, "{separator}{code}");
             separator = ";";
         }
@@ -136,39 +123,26 @@ impl Terminal {
     pub fn detect(choice: ColorChoice, stream: &impl IsTerminal) -> Terminal {
         let is_terminal = stream.is_terminal();
         let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
-        let columns = std::env::var("COLUMNS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok());
-        let width = columns
-            .filter(|&columns| is_terminal && columns >= MIN_WIDTH)
-            .unwrap_or(DEFAULT_WIDTH);
+        let columns = std::env::var("COLUMNS").ok().and_then(|value| value.parse::<usize>().ok());
+        let width = columns.filter(|&columns| is_terminal && columns >= MIN_WIDTH).unwrap_or(DEFAULT_WIDTH);
         let enabled = match choice {
             ColorChoice::Auto => is_terminal && !no_color,
             ColorChoice::Always => true,
             ColorChoice::Never => false,
         };
-        Terminal {
-            painter: Painter { enabled },
-            width,
-        }
+        Terminal { painter: Painter { enabled }, width }
     }
 
     /// No colour, whatever the stream.
     #[cfg(test)]
     pub fn plain(width: usize) -> Terminal {
-        Terminal {
-            painter: Painter { enabled: false },
-            width,
-        }
+        Terminal { painter: Painter { enabled: false }, width }
     }
 
     /// Colour, whatever the stream.
     #[cfg(test)]
     pub fn colored(width: usize) -> Terminal {
-        Terminal {
-            painter: Painter { enabled: true },
-            width,
-        }
+        Terminal { painter: Painter { enabled: true }, width }
     }
 }
 
@@ -207,9 +181,7 @@ impl Line {
 
     /// An empty line with room for the expected display columns.
     pub fn with_capacity(columns: usize) -> Line {
-        Line {
-            cells: Vec::with_capacity(columns),
-        }
+        Line { cells: Vec::with_capacity(columns) }
     }
 
     /// A line of `text` in one ink.
@@ -250,13 +222,8 @@ impl Line {
     /// The columns `from..to` of `text`, without laying out what is outside
     /// them: a line of two megabytes has no business being copied whole.
     pub fn excerpt(text: &str, from: usize, to: usize, ink: Ink) -> Line {
-        let cells = columns(text)
-            .skip(from)
-            .take(to.saturating_sub(from))
-            .map(|ch| Cell { ch, ink });
-        Line {
-            cells: cells.collect(),
-        }
+        let cells = columns(text).skip(from).take(to.saturating_sub(from)).map(|ch| Cell { ch, ink });
+        Line { cells: cells.collect() }
     }
 
     /// Writes `text` starting at `column`, over whatever is there and padding
@@ -264,50 +231,25 @@ impl Line {
     pub fn put(&mut self, column: usize, text: &str, ink: Ink) {
         let written = Line::text(text, ink);
         self.pad_to(column + written.width());
-        self.cells
-            .splice(column..column + written.width(), written.cells);
+        self.cells.splice(column..column + written.width(), written.cells);
     }
 
     /// Pads on the right with spaces to `width`.
     pub fn pad_to(&mut self, width: usize) {
         let padding = width.saturating_sub(self.width());
-        self.cells.extend(std::iter::repeat_n(
-            Cell {
-                ch: ' ',
-                ink: Ink::PLAIN,
-            },
-            padding,
-        ));
+        self.cells.extend(std::iter::repeat_n(Cell { ch: ' ', ink: Ink::PLAIN }, padding));
     }
 
     /// Pads on the left with spaces to `width`.
     pub fn right_align(&mut self, width: usize) {
         let padding = width.saturating_sub(self.width());
-        self.cells.splice(
-            0..0,
-            std::iter::repeat_n(
-                Cell {
-                    ch: ' ',
-                    ink: Ink::PLAIN,
-                },
-                padding,
-            ),
-        );
+        self.cells.splice(0..0, std::iter::repeat_n(Cell { ch: ' ', ink: Ink::PLAIN }, padding));
     }
 
     /// Inserts plain spaces at one display column, keeping the existing
     /// characters and styles after them.
     pub fn insert_spaces(&mut self, column: usize, count: usize) {
-        self.cells.splice(
-            column..column,
-            std::iter::repeat_n(
-                Cell {
-                    ch: ' ',
-                    ink: Ink::PLAIN,
-                },
-                count,
-            ),
-        );
+        self.cells.splice(column..column, std::iter::repeat_n(Cell { ch: ' ', ink: Ink::PLAIN }, count));
     }
 
     /// Adds `other` after the last column.
@@ -323,11 +265,7 @@ impl Line {
     }
 
     fn write_into(&self, out: &mut String, painter: Painter) {
-        let end = self
-            .cells
-            .iter()
-            .rposition(|cell| cell.ch != ' ')
-            .map_or(0, |last| last + 1);
+        let end = self.cells.iter().rposition(|cell| cell.ch != ' ').map_or(0, |last| last + 1);
         if !painter.enabled {
             out.extend(self.cells[..end].iter().map(|cell| cell.ch));
             return;
@@ -367,19 +305,13 @@ mod tests {
     fn tabs_and_control_characters_keep_columns_honest() {
         let line = Line::text("\ta\r\nb", Ink::PLAIN);
         assert_eq!(line.width(), TAB_WIDTH + 4);
-        assert_eq!(
-            Line::text("a\tb", Ink::PLAIN).render(Terminal::plain(80).painter),
-            "a⇥   b"
-        );
+        assert_eq!(Line::text("a\tb", Ink::PLAIN).render(Terminal::plain(80).painter), "a⇥   b");
     }
 
     #[test]
     fn an_excerpt_takes_the_columns_asked_for() {
         let plain = Terminal::plain(80).painter;
-        assert_eq!(
-            Line::excerpt("hello world", 3, 8, Ink::PLAIN).render(plain),
-            "lo wo"
-        );
+        assert_eq!(Line::excerpt("hello world", 3, 8, Ink::PLAIN).render(plain), "lo wo");
         assert_eq!(Line::excerpt("a\tb", 1, 3, Ink::PLAIN).render(plain), "⇥");
         assert_eq!(Line::excerpt("short", 9, 20, Ink::PLAIN).width(), 0);
     }

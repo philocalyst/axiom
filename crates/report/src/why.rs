@@ -24,8 +24,8 @@ use std::borrow::Cow;
 use axiom_core::{Diagnostic, Id, Sym};
 use axiom_engine::{Effect, Run, State};
 use axiom_model::{
-    Amount, Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period,
-    Place, StepKind, System, Trigger,
+    Amount, Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System,
+    Trigger,
 };
 
 use crate::history::Posting;
@@ -45,12 +45,7 @@ fn recent<T>(items: &[T]) -> (&[T], usize) {
 }
 
 /// Flows, dated, with where each stands.
-fn flows_table<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    ids: &[Id<Flow>],
-    heading: &str,
-) -> Section<'s> {
+fn flows_table<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
     let book = lens.book();
     let columns = [
         Column::left("Date"),
@@ -69,10 +64,7 @@ fn flows_table<'s>(
             Cell::text(route(book, flow)),
             Cell::amount(
                 book,
-                Amount::new(
-                    crate::flow::scoped_movement_qty(lens, flow, posting.out().qty),
-                    posting.out().unit,
-                ),
+                Amount::new(crate::flow::scoped_movement_qty(lens, flow, posting.out().qty), posting.out().unit),
             ),
             Cell::text(state_words(posting.posted.state)),
             Cell::Source(flow.loc),
@@ -99,17 +91,12 @@ fn state_words(state: State) -> Cow<'static, str> {
 /// What laws counted or owed, when, and for whom.
 fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> Section<'s> {
     let columns = ["Date", "Effect", "Owner"].map(Column::left).into_iter();
-    let mut section = Section::new(
-        columns
-            .chain([Column::right("Amount")])
-            .chain(["Owed to", "From"].map(Column::left)),
-    );
+    let mut section =
+        Section::new(columns.chain([Column::right("Amount")]).chain(["Owed to", "From"].map(Column::left)));
     section.heading = Some(Cell::Said(Cow::Owned(heading.to_owned())));
     let (shown, left_out) = recent(effects);
     for effect in shown {
-        let owed = effect
-            .owed()
-            .map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
+        let owed = effect.owed().map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
         let cells = [
             Cell::Day(effect.day),
             Cell::text(book.name(effect.name)),
@@ -156,10 +143,7 @@ pub(crate) fn target_with_lens<'s>(
     if let Some(contract) = book.contract(text) {
         return Ok(contract::report(lens, run, contract));
     }
-    let quoted = text
-        .strip_prefix('"')
-        .and_then(|text| text.strip_suffix('"'))
-        .unwrap_or(text);
+    let quoted = text.strip_prefix('"').and_then(|text| text.strip_suffix('"')).unwrap_or(text);
     if let Some(report) = self::text::report(lens, run, quoted) {
         return Ok(report);
     }
@@ -178,11 +162,7 @@ pub(crate) enum Found<'a> {
     TaxLine(&'a str),
 }
 
-pub(crate) fn explain_with_lens<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    found: Found,
-) -> Report<'s> {
+pub(crate) fn explain_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, found: Found) -> Report<'s> {
     let book = lens.book();
     match found {
         Found::Place(place) => place::report(lens, run, place),
@@ -194,11 +174,7 @@ pub(crate) fn explain_with_lens<'s>(
     }
 }
 
-pub(crate) fn line_with_lens<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    at: axiom_core::Loc,
-) -> Report<'s> {
+pub(crate) fn line_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: axiom_core::Loc) -> Report<'s> {
     line::line(lens, run, at)
 }
 
@@ -223,10 +199,7 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
     }
     let named = |system: &System| {
         let path = book.name(system.path);
-        path == text
-            || path
-                .strip_suffix(text)
-                .is_some_and(|before| before.ends_with('/'))
+        path == text || path.strip_suffix(text).is_some_and(|before| before.ends_with('/'))
     };
     if let Some((system, _)) = book.systems.iter().find(|(_, system)| named(system)) {
         return Ok(Found::System(system));
@@ -236,11 +209,7 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
         Err(Miss::Ambiguous(candidates)) => return Ok(Found::Laws(candidates)),
         Err(Miss::Unknown { .. }) => {}
     }
-    if run
-        .effects
-        .iter()
-        .any(|effect| book.name(effect.name) == text)
-    {
+    if run.effects.iter().any(|effect| book.name(effect.name) == text) {
         return Ok(Found::TaxLine(text));
     }
     let laws = book.laws.values().map(|law| book.name(law.name));
@@ -252,17 +221,9 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
         things
             .chain(laws)
             .chain(tallies)
-            .chain(
-                book.purposes
-                    .values()
-                    .map(|purpose| book.name(purpose.name)),
-            )
+            .chain(book.purposes.values().map(|purpose| book.name(purpose.name)))
             .chain(book.assets.values().map(|asset| book.name(asset.name)))
-            .chain(
-                book.contracts
-                    .values()
-                    .map(|contract| book.name(contract.name)),
-            ),
+            .chain(book.contracts.values().map(|contract| book.name(contract.name))),
     ))
 }
 
@@ -299,12 +260,7 @@ fn counted(law: &Law) -> impl Iterator<Item = Sym> + '_ {
 /// The laws as one table, grouped by what they do: limits, prices, and the
 /// tallies, which are one line however many laws there are.
 fn laws_table<'s>(book: &'s Book<'_>, ids: &[Id<Law>]) -> Section<'s> {
-    let columns = [
-        Column::left("Law"),
-        Column::left("When"),
-        Column::left("Explains"),
-        Column::left("Written"),
-    ];
+    let columns = [Column::left("Law"), Column::left("When"), Column::left("Explains"), Column::left("Written")];
     let mut section = Section::new(columns).headed("Governed by");
     let mut unique: Vec<Id<Law>> = Vec::new();
     for &id in ids {
@@ -313,10 +269,7 @@ fn laws_table<'s>(book: &'s Book<'_>, ids: &[Id<Law>]) -> Section<'s> {
         }
     }
     for (wanted, heading) in [(Role::Limit, "Limits"), (Role::Price, "Prices")] {
-        let group: Vec<&Id<Law>> = unique
-            .iter()
-            .filter(|&&id| role(&book.laws[id]) == wanted)
-            .collect();
+        let group: Vec<&Id<Law>> = unique.iter().filter(|&&id| role(&book.laws[id]) == wanted).collect();
         if group.is_empty() {
             continue;
         }
@@ -333,24 +286,12 @@ fn laws_table<'s>(book: &'s Book<'_>, ids: &[Id<Law>]) -> Section<'s> {
             section.push(Row::new(cells).depth(1));
         }
     }
-    let tallies: Vec<&Law> = unique
-        .iter()
-        .map(|&id| &book.laws[id])
-        .filter(|law| role(law) == Role::Tally)
-        .collect();
+    let tallies: Vec<&Law> = unique.iter().map(|&id| &book.laws[id]).filter(|law| role(law) == Role::Tally).collect();
     if !tallies.is_empty() {
-        let mut names: Vec<&str> = tallies
-            .iter()
-            .flat_map(|law| counted(law))
-            .map(|name| book.name(name))
-            .collect();
+        let mut names: Vec<&str> = tallies.iter().flat_map(|law| counted(law)).map(|name| book.name(name)).collect();
         names.sort_unstable();
         names.dedup();
-        section.note(format!(
-            "{} only count, into {}.",
-            plural(tallies.len(), "more law"),
-            names.join(", ")
-        ));
+        section.note(format!("{} only count, into {}.", plural(tallies.len(), "more law"), names.join(", ")));
     }
     section
 }

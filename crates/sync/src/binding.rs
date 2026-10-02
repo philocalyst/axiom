@@ -5,12 +5,12 @@ use axiom_core::{Diagnostic, Id, Map, Qty};
 use axiom_engine::{Run, State};
 use axiom_model::{Book, Commodity, Flow, Place, Role};
 
-use crate::reconcile::{Batch, Existing};
-use crate::world::{Account, World};
+use crate::Unit;
 use crate::promise::Due;
 use crate::recognize::Recognizer;
+use crate::reconcile::{Batch, Existing};
+use crate::world::{Account, World};
 use crate::write::Layout;
-use crate::Unit;
 
 /// Build the part of the sync world that is directly backed by the canonical
 /// book and run. Contract occurrences and open claims are intentionally left
@@ -27,14 +27,8 @@ pub(crate) fn world<'b, 's>(
         ));
     }
 
-    let units: Vec<Unit<'s>> = book
-        .commodities
-        .iter()
-        .map(|(_, unit)| Unit {
-            name: book.name(unit.symbol),
-            scale: unit.scale,
-        })
-        .collect();
+    let units: Vec<Unit<'s>> =
+        book.commodities.iter().map(|(_, unit)| Unit { name: book.name(unit.symbol), scale: unit.scale }).collect();
     let mut accounts: Map<&'s str, Account<'s>> = Map::default();
     for (place_id, place) in book.places.iter() {
         if !matches!(place.role, Role::Account { .. }) {
@@ -54,11 +48,8 @@ pub(crate) fn world<'b, 's>(
                 continue;
             }
             let view = book.flow(flow_id);
-            let settle = if posted.state == State::Pending {
-                view.codes().next().map(|code| book.name(code))
-            } else {
-                None
-            };
+            let settle =
+                if posted.state == State::Pending { view.codes().next().map(|code| book.name(code)) } else { None };
             account.flows.push(Existing {
                 day: flow.day,
                 qty,
@@ -69,12 +60,9 @@ pub(crate) fn world<'b, 's>(
             flow_ids.push(flow_id);
         }
         assign_batches(book, place_id, &flow_ids, &mut account.flows)?;
-        account.asserted.extend(
-            book.asserts
-                .iter()
-                .filter(|assertion| assertion.place == place_id)
-                .map(|assertion| assertion.day),
-        );
+        account
+            .asserted
+            .extend(book.asserts.iter().filter(|assertion| assertion.place == place_id).map(|assertion| assertion.day));
     }
 
     Ok(World {
@@ -126,17 +114,14 @@ fn assign_batches<'s>(
                 continue;
             }
             let first_codes = book.flow(flow_ids[members[0]]).codes();
-            let shares_code = first_codes.into_iter().any(|code| {
-                members[1..]
-                    .iter()
-                    .all(|&at| book.flow(flow_ids[at]).codes().any(|other| other == code))
-            });
+            let shares_code = first_codes
+                .into_iter()
+                .any(|code| members[1..].iter().all(|&at| book.flow(flow_ids[at]).codes().any(|other| other == code)));
             if !shares_code {
                 continue;
             }
-            let batch = u32::try_from(next_batch).map_err(|_| {
-                Diagnostic::error("sync-batch-limit", "too many coded flow batches")
-            })?;
+            let batch = u32::try_from(next_batch)
+                .map_err(|_| Diagnostic::error("sync-batch-limit", "too many coded flow batches"))?;
             next_batch += 1;
             let mut total = 0i128;
             for &at in &members {
@@ -144,10 +129,7 @@ fn assign_batches<'s>(
                 total += existing[at].qty.0 as i128;
             }
             let total = i64::try_from(total).map_err(|_| {
-                Diagnostic::error(
-                    "sync-batch-overflow",
-                    "the coded flow total is outside the supported quantity range",
-                )
+                Diagnostic::error("sync-batch-overflow", "the coded flow total is outside the supported quantity range")
             })?;
             let day = existing[members[0]].day;
             totals.push(Existing {
@@ -165,11 +147,7 @@ fn assign_batches<'s>(
 }
 
 fn unit_on(flow: &Flow, place: Id<Place>) -> Id<Commodity> {
-    if flow.from == place {
-        flow.out.unit
-    } else {
-        flow.arrive.unit
-    }
+    if flow.from == place { flow.out.unit } else { flow.arrive.unit }
 }
 
 fn account_side(
@@ -186,10 +164,7 @@ fn account_side(
     } else {
         Err(Diagnostic::error(
             "sync-flow-index",
-            format!(
-                "the book says flow #{} touches an account that is not one of its ends",
-                flow_id.index()
-            ),
+            format!("the book says flow #{} touches an account that is not one of its ends", flow_id.index()),
         ))
     }
 }

@@ -25,10 +25,7 @@ use crate::state::unordered;
 pub(crate) fn by_year(amount: Qty, over: Days) -> impl Iterator<Item = (Day, Qty)> {
     // A flow that belongs to one day belongs to one year: no calendar to consult.
     let one_day = over.single().map(|day| (day, amount));
-    let years = one_day.map_or_else(
-        || Some(calendar::Window::covering(Period::Year, over)),
-        |_| None,
-    );
+    let years = one_day.map_or_else(|| Some(calendar::Window::covering(Period::Year, over)), |_| None);
     let cut = years.into_iter().flatten().map(move |year| {
         let part = year.days();
         (part.first().max(over.first()), spread(amount, over, part))
@@ -62,13 +59,8 @@ struct Rolling {
 impl Rolling {
     /// The window before the first: no day a flow can be on is in it, so the
     /// first flow rolls the subject into a real one.
-    const NEVER: Rolling = Rolling {
-        days: Days::on(Day::MIN),
-        flowed: Flowed {
-            incoming: Qty::ZERO,
-            outgoing: Qty::ZERO,
-        },
-    };
+    const NEVER: Rolling =
+        Rolling { days: Days::on(Day::MIN), flowed: Flowed { incoming: Qty::ZERO, outgoing: Qty::ZERO } };
 
     /// The window `days`, holding what earlier flows recognized into it.
     fn of(days: Days, ahead: &[Accrual]) -> Rolling {
@@ -106,10 +98,7 @@ impl Windows {
         month: Rolling::NEVER,
         year: Rolling::NEVER,
         closed: Rolling::NEVER,
-        ever: Flowed {
-            incoming: Qty::ZERO,
-            outgoing: Qty::ZERO,
-        },
+        ever: Flowed { incoming: Qty::ZERO, outgoing: Qty::ZERO },
         ahead: Vec::new(),
         reaching: false,
     };
@@ -126,14 +115,9 @@ impl Windows {
         if !self.year.days.contains(day) {
             let year = Rolling::of(Window::Year.around(day), &self.ahead);
             let old = std::mem::replace(&mut self.year, year);
-            self.closed = if old.days.last().add_days(1) == year.days.first() {
-                old
-            } else {
-                Rolling::NEVER
-            };
+            self.closed = if old.days.last().add_days(1) == year.days.first() { old } else { Rolling::NEVER };
         }
-        self.ahead
-            .retain(|accrual| accrual.over.last() >= self.month.days.first());
+        self.ahead.retain(|accrual| accrual.over.last() >= self.month.days.first());
     }
 
     /// Counts a flow. Returns whether some of it was recognized after the
@@ -205,17 +189,14 @@ pub(crate) struct Watch {
 
 impl Watch {
     pub fn of(book: &Book, laws: &[LawFacts]) -> Watch {
-        let (places, entities, assets, contracts) = (
-            book.places.len(),
-            book.entities.len(),
-            book.assets.len(),
-            book.contracts.len(),
-        );
+        let (places, entities, assets, contracts) =
+            (book.places.len(), book.entities.len(), book.assets.len(), book.contracts.len());
         let budget_reads_total = book.laws.values().any(|law| {
             law.budget.is_some()
-                && law.nodes.values().any(|node| {
-                    matches!(node.op, axiom_model::Op::Call(axiom_model::Func::Total(..), _))
-                })
+                && law
+                    .nodes
+                    .values()
+                    .any(|node| matches!(node.op, axiom_model::Op::Call(axiom_model::Func::Total(..), _)))
         });
         let mut watched = vec![false; places + entities + assets + contracts];
         for rule in book.rules.all() {
@@ -272,18 +253,12 @@ impl Watch {
             while let Some(current) = part {
                 let subject = Subject::Asset(current);
                 if watched[slot(places, entities, assets, subject)] {
-                    within.extend(
-                        book.places
-                            .subtree(book.assets[asset].place)
-                            .map(|place| (place, subject)),
-                    );
+                    within.extend(book.places.subtree(book.assets[asset].place).map(|place| (place, subject)));
                 }
                 part = book.assets[current].part_of.map(|part| part.value);
             }
         }
-        within.sort_unstable_by_key(|&(place, subject)| {
-            (place, subject_key(places, entities, assets, subject))
-        });
+        within.sort_unstable_by_key(|&(place, subject)| (place, subject_key(places, entities, assets, subject)));
         within.dedup();
         let through = Groups::build(places, within.iter().copied());
         drop(within);
@@ -300,9 +275,7 @@ impl Watch {
         purpose_reads.extend(budget_purposes.iter().copied());
         for law in book.laws.values() {
             for node in law.nodes.values() {
-                let axiom_model::Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) =
-                    &node.op
-                else {
+                let axiom_model::Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) = &node.op else {
                     continue;
                 };
                 let purpose = purpose.or_else(|| match law.owner {
@@ -353,9 +326,7 @@ impl Watch {
     }
 
     fn slot(&self, subject: Subject) -> Option<usize> {
-        let slot = *self
-            .slots
-            .get(slot(self.places, self.entities, self.assets, subject))?;
+        let slot = *self.slots.get(slot(self.places, self.entities, self.assets, subject))?;
         (slot != u32::MAX).then_some(slot as usize)
     }
 
@@ -368,28 +339,20 @@ impl Watch {
     }
 
     pub(crate) fn reads_purpose(&self, purpose: Id<Purpose>) -> bool {
-        self.purpose_through
-            .as_ref()
-            .is_some_and(|through| !through[purpose].is_empty())
+        self.purpose_through.as_ref().is_some_and(|through| !through[purpose].is_empty())
     }
 
     /// The watched subjects that contain `here` but not `there`: a flow from
     /// `here` to `there` leaves them, and one from `there` to `here` enters them.
     fn crossed(&self, here: Id<Place>, there: Id<Place>) -> impl Iterator<Item = Subject> + '_ {
         let beyond = &self.through[there];
-        self.through[here]
-            .iter()
-            .copied()
-            .filter(move |subject| !beyond.contains(subject))
+        self.through[here].iter().copied().filter(move |subject| !beyond.contains(subject))
     }
 
     /// Whether a flow from `from` to `to` leaves, and whether it enters, any
     /// subject a law reads: only then is its value worth computing.
     pub fn sides(&self, from: Id<Place>, to: Id<Place>) -> (bool, bool) {
-        (
-            self.crossed(from, to).next().is_some(),
-            self.crossed(to, from).next().is_some(),
-        )
+        (self.crossed(from, to).next().is_some(), self.crossed(to, from).next().is_some())
     }
 }
 
@@ -616,10 +579,7 @@ pub(crate) enum Reached {
 
 impl Reaching {
     fn new() -> Reaching {
-        Reaching {
-            months: BinaryHeap::new(),
-            soonest: Day::MAX,
-        }
+        Reaching { months: BinaryHeap::new(), soonest: Day::MAX }
     }
 
     /// Notes that one sparse subject or purpose enters the month beginning on `from`.
@@ -630,16 +590,9 @@ impl Reaching {
 
     /// The earliest month that begins by `day`, and whose subject it is for.
     fn pop(&mut self, day: Day) -> Option<(Day, ReachKey)> {
-        let Reverse(next) = self
-            .months
-            .peek()
-            .copied()
-            .filter(|&Reverse((from, _))| from <= day)?;
+        let Reverse(next) = self.months.peek().copied().filter(|&Reverse((from, _))| from <= day)?;
         self.months.pop();
-        self.soonest = self
-            .months
-            .peek()
-            .map_or(Day::MAX, |&Reverse((from, _))| from);
+        self.soonest = self.months.peek().map_or(Day::MAX, |&Reverse((from, _))| from);
         Some(next)
     }
 }
@@ -675,18 +628,12 @@ impl Totals {
                     continue;
                 };
                 if watch.stores_budget_total(at) && !value.is_zero() {
-                    self.budget_total_history
-                        .entry((subject, dir))
-                        .or_default()
-                        .record(over, dir, value);
+                    self.budget_total_history.entry((subject, dir)).or_default().record(over, dir, value);
                 }
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
                     windows.reaching = true;
-                    self.reaching.push(
-                        windows.month.days.last().add_days(1),
-                        ReachKey::Subject(at as u32),
-                    );
+                    self.reaching.push(windows.month.days.last().add_days(1), ReachKey::Subject(at as u32));
                 }
             }
         }
@@ -716,10 +663,7 @@ impl Totals {
         let windows = &mut self.windows[at];
         if windows.add(day, dir, amount, over) && !windows.reaching {
             windows.reaching = true;
-            self.reaching.push(
-                windows.month.days.last().add_days(1),
-                ReachKey::Subject(at as u32),
-            );
+            self.reaching.push(windows.month.days.last().add_days(1), ReachKey::Subject(at as u32));
         }
     }
 
@@ -743,10 +687,7 @@ impl Totals {
         };
         for &purpose in &purpose_through[actual] {
             let from = {
-                let windows = self
-                    .purpose
-                    .entry((owner, purpose))
-                    .or_insert_with(|| Windows::NONE.clone());
+                let windows = self.purpose.entry((owner, purpose)).or_insert_with(|| Windows::NONE.clone());
                 if windows.add(day, dir, amount, over) && !windows.reaching {
                     windows.reaching = true;
                     Some(windows.month.days.last().add_days(1))
@@ -755,38 +696,21 @@ impl Totals {
                 }
             };
             if let Some(from) = from {
-                self.reaching.push(
-                    from,
-                    ReachKey::Purpose(owner.index() as u32, purpose.index() as u32),
-                );
+                self.reaching.push(from, ReachKey::Purpose(owner.index() as u32, purpose.index() as u32));
             }
         }
         if let Some(budget_through) = watch.budget_through.as_ref() {
             for &purpose in &budget_through[actual] {
-                self.budget_history
-                    .entry((owner, purpose))
-                    .or_default()
-                    .record(over, dir, amount);
+                self.budget_history.entry((owner, purpose)).or_default().record(over, dir, amount);
             }
         }
     }
 
     /// The amount of this purpose that entered and left the owner's boundary.
-    pub fn read_purpose(
-        &self,
-        owner: Id<Entity>,
-        purpose: Id<Purpose>,
-        window: Window,
-        day: Day,
-    ) -> (Qty, Qty) {
-        self.purpose
-            .get(&(owner, purpose))
-            .map_or((Qty::ZERO, Qty::ZERO), |windows| {
-                (
-                    windows.read(Dir::In, window, day),
-                    windows.read(Dir::Out, window, day),
-                )
-            })
+    pub fn read_purpose(&self, owner: Id<Entity>, purpose: Id<Purpose>, window: Window, day: Day) -> (Qty, Qty) {
+        self.purpose.get(&(owner, purpose)).map_or((Qty::ZERO, Qty::ZERO), |windows| {
+            (windows.read(Dir::In, window, day), windows.read(Dir::Out, window, day))
+        })
     }
 
     /// Recognized purpose movement intersecting an arbitrary budget span.
@@ -798,22 +722,18 @@ impl Totals {
         purpose: Id<Purpose>,
         span: Days,
     ) -> Result<(Qty, Qty), Fault> {
-        self.budget_history
-            .get(&(owner, purpose))
-            .map_or(Ok((Qty::ZERO, Qty::ZERO)), |history| history.read(span))
+        self.budget_history.get(&(owner, purpose)).map_or(Ok((Qty::ZERO, Qty::ZERO)), |history| history.read(span))
     }
 
     /// Flow through a single watched subject over a historical span. This is
     /// retained only for a computed budget formula that reads entity totals.
     pub fn read_subject_between(&self, subject: Subject, dir: Dir, span: Days) -> Result<Qty, Fault> {
-        self.budget_total_history
-            .get(&(subject, dir))
-            .map_or(Ok(Qty::ZERO), |history| history.read(span).map(|(incoming, outgoing)| {
-                match dir {
-                    Dir::In => incoming,
-                    Dir::Out => outgoing,
-                }
-            }))
+        self.budget_total_history.get(&(subject, dir)).map_or(Ok(Qty::ZERO), |history| {
+            history.read(span).map(|(incoming, outgoing)| match dir {
+                Dir::In => incoming,
+                Dir::Out => outgoing,
+            })
+        })
     }
 
     /// Whether some month begins by `day` with value recognized into it ahead of time.
@@ -831,10 +751,7 @@ impl Totals {
         match key {
             ReachKey::Subject(at) => {
                 let windows = &mut self.windows[at as usize];
-                windows.reaching = windows
-                    .ahead
-                    .iter()
-                    .any(|accrual| accrual.over.last() > month.last());
+                windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.last() > month.last());
                 if windows.reaching {
                     self.reaching.push(month.last().add_days(1), key);
                 }
@@ -843,10 +760,7 @@ impl Totals {
             ReachKey::Purpose(owner, purpose) => {
                 let (owner, purpose) = (Id::new(owner), Id::new(purpose));
                 let windows = self.purpose.get_mut(&(owner, purpose))?;
-                windows.reaching = windows
-                    .ahead
-                    .iter()
-                    .any(|accrual| accrual.over.last() > month.last());
+                windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.last() > month.last());
                 if windows.reaching {
                     self.reaching.push(month.last().add_days(1), key);
                 }
@@ -857,9 +771,7 @@ impl Totals {
 
     /// What entered or left `subject` in the window containing `day`.
     pub fn read(&self, watch: &Watch, subject: Subject, dir: Dir, window: Window, day: Day) -> Qty {
-        watch
-            .slot(subject)
-            .map_or(Qty::ZERO, |at| self.windows[at].read(dir, window, day))
+        watch.slot(subject).map_or(Qty::ZERO, |at| self.windows[at].read(dir, window, day))
     }
 }
 
@@ -878,9 +790,7 @@ fn subject_at(places: usize, entities: usize, assets: usize, slot: usize) -> Sub
     match slot {
         at if at < places => Subject::Place(Id::new(at as u32)),
         at if at < places + entities => Subject::Entity(Id::new((at - places) as u32)),
-        at if at < places + entities + assets => {
-            Subject::Asset(Id::new((at - places - entities) as u32))
-        }
+        at if at < places + entities + assets => Subject::Asset(Id::new((at - places - entities) as u32)),
         at => Subject::Contract(Id::new((at - places - entities - assets) as u32)),
     }
 }
@@ -909,10 +819,7 @@ impl Tallies {
     }
 
     pub fn read(&self, owner: Id<Entity>, year: i32, name: Sym) -> Qty {
-        self.sums
-            .get(&(owner, year, name))
-            .copied()
-            .unwrap_or_default()
+        self.sums.get(&(owner, year, name)).copied().unwrap_or_default()
     }
 }
 
@@ -931,9 +838,7 @@ mod tests {
     #[test]
     fn a_range_is_cut_by_the_years_it_touches() {
         let over = days(day(2025, 11, 1), day(2026, 1, 31));
-        let years: Vec<_> = by_year(Qty(120_00), over)
-            .map(|(from, part)| (from.ymd(), part.0))
-            .collect();
+        let years: Vec<_> = by_year(Qty(120_00), over).map(|(from, part)| (from.ymd(), part.0)).collect();
         assert_eq!(years, [((2025, 11, 1), 7_957), ((2026, 1, 1), 4_043)]);
         let once: Vec<_> = by_year(Qty(120_00), Days::on(day(2026, 3, 9))).collect();
         assert_eq!(once, [(day(2026, 3, 9), Qty(120_00))]);
@@ -945,39 +850,22 @@ mod tests {
         // 71 days: 12 in December, 31 in January, 28 in February.
         let prepaid = days(day(2025, 12, 20), day(2026, 2, 28));
         windows.add(day(2025, 12, 20), Dir::In, Qty(70_00), prepaid);
-        windows.add(
-            day(2025, 12, 21),
-            Dir::In,
-            Qty(5_00),
-            Days::on(day(2025, 12, 21)),
-        );
+        windows.add(day(2025, 12, 21), Dir::In, Qty(5_00), Days::on(day(2025, 12, 21)));
         let read = |windows: &Windows, window, d| windows.read(Dir::In, window, d).0;
-        assert_eq!(
-            read(&windows, Window::Month, day(2025, 12, 31)),
-            5_00 + 11_83
-        );
+        assert_eq!(read(&windows, Window::Month, day(2025, 12, 31)), 5_00 + 11_83);
         assert_eq!(
             read(&windows, Window::Month, day(2026, 1, 20)),
             30_56,
             "January is empty so far: only what was recognized ahead of it"
         );
         assert_eq!(read(&windows, Window::Year, day(2026, 3, 1)), 58_17);
-        windows.add(
-            day(2026, 1, 5),
-            Dir::In,
-            Qty(1_00),
-            Days::on(day(2026, 1, 5)),
-        );
+        windows.add(day(2026, 1, 5), Dir::In, Qty(1_00), Days::on(day(2026, 1, 5)));
         assert_eq!(
             read(&windows, Window::Month, day(2026, 1, 20)),
             31_56,
             "the accrual joined the month that rolled in"
         );
-        assert_eq!(
-            read(&windows, Window::Year, day(2025, 12, 31)),
-            16_83,
-            "the year that just closed stays readable"
-        );
+        assert_eq!(read(&windows, Window::Year, day(2025, 12, 31)), 16_83, "the year that just closed stays readable");
         assert_eq!(read(&windows, Window::Year, day(2026, 6, 1)), 59_17);
         assert_eq!(read(&windows, Window::Ever, day(2026, 1, 20)), 76_00);
     }
@@ -985,20 +873,9 @@ mod tests {
     #[test]
     fn a_flow_recognized_entirely_in_a_closed_window_counts_in_no_current_one() {
         let mut windows = Windows::NONE;
-        windows.add(
-            day(2026, 1, 15),
-            Dir::Out,
-            Qty(3_000_00),
-            days(day(2025, 1, 1), day(2025, 12, 31)),
-        );
-        assert_eq!(
-            windows.read(Dir::Out, Window::Year, day(2026, 1, 15)),
-            Qty::ZERO
-        );
-        assert_eq!(
-            windows.read(Dir::Out, Window::Ever, day(2026, 1, 15)),
-            Qty(3_000_00)
-        );
+        windows.add(day(2026, 1, 15), Dir::Out, Qty(3_000_00), days(day(2025, 1, 1), day(2025, 12, 31)));
+        assert_eq!(windows.read(Dir::Out, Window::Year, day(2026, 1, 15)), Qty::ZERO);
+        assert_eq!(windows.read(Dir::Out, Window::Ever, day(2026, 1, 15)), Qty(3_000_00));
     }
 
     #[test]
@@ -1013,11 +890,7 @@ mod tests {
             let offset = if step > 13 && step % 23 == 0 { step - 13 } else { step };
             let first = Day(origin.0 + offset);
             let is_range = step % 7 == 0;
-            let over = if is_range {
-                days(first, Day(first.0 + 1 + step % 5))
-            } else {
-                Days::on(first)
-            };
+            let over = if is_range { days(first, Day(first.0 + 1 + step % 5)) } else { Days::on(first) };
             let dir = if step % 3 == 0 { Dir::In } else { Dir::Out };
             let magnitude = i64::from((step % 97) + 1) * 37;
             let amount = Qty(if step % 11 == 0 { -magnitude } else { magnitude });
@@ -1039,7 +912,11 @@ mod tests {
                     Dir::Out => outgoing += amount,
                 }
             }
-            assert_eq!(history.read(span), Ok((qty(incoming).unwrap(), qty(outgoing).unwrap())), "all facts span={span:?}");
+            assert_eq!(
+                history.read(span),
+                Ok((qty(incoming).unwrap(), qty(outgoing).unwrap())),
+                "all facts span={span:?}"
+            );
         }
     }
 

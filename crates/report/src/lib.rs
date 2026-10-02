@@ -52,24 +52,11 @@ use crate::lens::{Lens, Whose};
 pub enum Query<'a> {
     /// Balances per place and commodity, optionally at market value, optionally
     /// with a column per month.
-    Balance {
-        globs: Vec<&'a str>,
-        at: Option<Day>,
-        value: bool,
-        monthly: bool,
-    },
+    Balance { globs: Vec<&'a str>, at: Option<Day>, value: bool, monthly: bool },
     /// A place, `entity:NAME`, asset or contract's register.
-    Register {
-        place: &'a str,
-        from: Option<Day>,
-        to: Option<Day>,
-    },
+    Register { place: &'a str, from: Option<Day>, to: Option<Day> },
     /// Income and spending by period; spread flows recognized per day.
-    Flow {
-        by: FlowBy,
-        from: Option<Day>,
-        to: Option<Day>,
-    },
+    Flow { by: FlowBy, from: Option<Day>, to: Option<Day> },
     /// What can be spent now, and what drawing on each other place would net.
     Available { at: Option<Day> },
     /// Each budget (a `warn` law over a window total): spent against limit,
@@ -88,10 +75,7 @@ pub enum Query<'a> {
     /// Every disposal in a year: acquired, sold, proceeds, basis, gain, term.
     Gains { year: Option<i32> },
     /// Parcels with basis and unrealized gain, as of a day (default: today).
-    Lots {
-        place: Option<&'a str>,
-        at: Option<Day>,
-    },
+    Lots { place: Option<&'a str>, at: Option<Day> },
     /// Plans, inferred recurrences, obligations and growth, run forward
     /// through the laws, with bands from bootstrapped spending.
     Forecast { until: Option<Day>, paths: u32 },
@@ -254,12 +238,7 @@ pub trait ReportRenderer {
 
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
 /// entity, a household including its members; default everything).
-pub fn report<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    query: &Query,
-    whose: Option<&str>,
-) -> Result<Report<'s>, Diagnostic> {
+pub fn report<'s>(book: &'s Book<'_>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
     let plan = Plan::new(book);
     let whose = Whose::resolve(book, whose)?;
     views(Lens::new(&plan, &whose, run.today), run, query)
@@ -302,42 +281,23 @@ pub fn resolve_source_line(query: &Query<'_>, sources: &dyn SourceProvider) -> O
 }
 
 /// The view `query` asks for, about the money of `whose`.
-fn views<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    query: &Query,
-) -> Result<Report<'s>, Diagnostic> {
+fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Report<'s>, Diagnostic> {
     let book = lens.book();
     match query {
-        Query::Balance {
-            globs,
-            at,
-            value,
-            monthly,
-        } => balance::view_with_lens(lens.on(at.unwrap_or(run.today)), run, globs, *value, *monthly),
-        Query::Register { place, from, to } => register::view_with_lens(
-            lens.on(to.unwrap_or(run.today)), run, place, *from, *to,
-        ),
-        Query::Flow {
-            by: FlowBy::Period(by),
-            from,
-            to,
-        } => Ok(flow::view_with_lens(
-            lens.on(to.unwrap_or(run.today)), run, *by, *from,
-        )),
-        Query::Flow {
-            by: FlowBy::Party,
-            from,
-            to,
-        } => Ok(flow::view_by_party_with_lens(
-            lens.on(to.unwrap_or(run.today)), run, *from, to.unwrap_or(run.today),
-        )),
-        Query::Available { at } => Ok(available::view_with_lens(
-            lens.on(at.unwrap_or(run.today)), run,
-        )),
-        Query::Budget { at, by } => Ok(budget::view_with_lens(
-            lens.on(at.unwrap_or(run.today)), run, *at, *by,
-        )),
+        Query::Balance { globs, at, value, monthly } => {
+            balance::view_with_lens(lens.on(at.unwrap_or(run.today)), run, globs, *value, *monthly)
+        }
+        Query::Register { place, from, to } => {
+            register::view_with_lens(lens.on(to.unwrap_or(run.today)), run, place, *from, *to)
+        }
+        Query::Flow { by: FlowBy::Period(by), from, to } => {
+            Ok(flow::view_with_lens(lens.on(to.unwrap_or(run.today)), run, *by, *from))
+        }
+        Query::Flow { by: FlowBy::Party, from, to } => {
+            Ok(flow::view_by_party_with_lens(lens.on(to.unwrap_or(run.today)), run, *from, to.unwrap_or(run.today)))
+        }
+        Query::Available { at } => Ok(available::view_with_lens(lens.on(at.unwrap_or(run.today)), run)),
+        Query::Budget { at, by } => Ok(budget::view_with_lens(lens.on(at.unwrap_or(run.today)), run, *at, *by)),
         Query::Limits { year } => Ok(limits::view_with_lens(lens, run, *year)),
         Query::Claims { at } => {
             let at = at.unwrap_or(run.today);
@@ -348,16 +308,12 @@ fn views<'s>(
         Query::Tax { year } => Ok(tax::view_with_lens(lens, run, *year)),
         Query::Gains { year } => Ok(gains::view_with_lens(lens, run, *year)),
         Query::Lots { place, at } => {
-            let scope = place
-                .map(|text| resolve::place(book, text))
-                .transpose()?;
+            let scope = place.map(|text| resolve::place(book, text)).transpose()?;
             let at = at.unwrap_or(run.today);
             let holdings = claims::holdings_at(book, run, at);
             Ok(lots::view_from(lens.on(at), scope, holdings.iter()))
         }
-        Query::Forecast { until, paths } => Ok(forecast::view_with_lens(
-            lens, run, *until, *paths,
-        )),
+        Query::Forecast { until, paths } => Ok(forecast::view_with_lens(lens, run, *until, *paths)),
         Query::Why { target } => why::target_with_lens(lens, run, target),
         Query::Line { loc } => Ok(why::line_with_lens(lens, run, *loc)),
     }
@@ -383,15 +339,10 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
     // Built-in place rows exist in every book: only declared or used places
     // contribute to the summary.
     let used = |place: Id<Place>| {
-        let held = run
-            .holdings
-            .partition_point(|holding| holding.place < place);
+        let held = run.holdings.partition_point(|holding| holding.place < place);
         book.places[place].loc.is_some()
             || !book.touching[place].is_empty()
-            || run
-                .holdings
-                .get(held)
-                .is_some_and(|holding| holding.place == place)
+            || run.holdings.get(held).is_some_and(|holding| holding.place == place)
     };
     Summary {
         flows: book.flows.len(),

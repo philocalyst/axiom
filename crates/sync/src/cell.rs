@@ -4,10 +4,7 @@ use std::borrow::Cow;
 
 use crate::Span;
 
-pub(crate) const ABSENT: Span = Span {
-    start: usize::MAX,
-    end: usize::MAX,
-};
+pub(crate) const ABSENT: Span = Span { start: usize::MAX, end: usize::MAX };
 
 pub(crate) struct Cell<'t> {
     pub text: Cow<'t, str>,
@@ -59,18 +56,9 @@ mod tests {
     #[test]
     fn memo_join_keeps_all_cells_after_promoting_an_owned_first_cell() {
         let mut joined = MemoJoin::default();
-        joined.push(&Cell {
-            text: Cow::Owned("Remit".to_string()),
-            span: Span { start: 4, end: 9 },
-        });
-        joined.push(&Cell {
-            text: Cow::Borrowed("Card"),
-            span: Span { start: 10, end: 14 },
-        });
-        joined.push(&Cell {
-            text: Cow::Borrowed("credit"),
-            span: Span { start: 15, end: 21 },
-        });
+        joined.push(&Cell { text: Cow::Owned("Remit".to_string()), span: Span { start: 4, end: 9 } });
+        joined.push(&Cell { text: Cow::Borrowed("Card"), span: Span { start: 10, end: 14 } });
+        joined.push(&Cell { text: Cow::Borrowed("credit"), span: Span { start: 15, end: 21 } });
         let (memo, span) = joined.finish().unwrap();
         assert_eq!(memo, "Remit Card credit");
         assert_eq!(span, Span { start: 4, end: 9 });
@@ -79,10 +67,7 @@ mod tests {
     #[test]
     fn a_single_borrowed_memo_stays_borrowed() {
         let mut joined = MemoJoin::default();
-        joined.push(&Cell {
-            text: Cow::Borrowed("Refund"),
-            span: Span { start: 8, end: 14 },
-        });
+        joined.push(&Cell { text: Cow::Borrowed("Refund"), span: Span { start: 8, end: 14 } });
         let (memo, span) = joined.finish().unwrap();
         assert!(matches!(memo, Cow::Borrowed("Refund")));
         assert_eq!(span, Span { start: 8, end: 14 });

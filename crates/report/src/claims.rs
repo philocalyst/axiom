@@ -54,35 +54,23 @@ pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]
         return Cow::Borrowed(&run.holdings);
     }
     let plan = Plan::new(book);
-    let mut ledger = plan.start(Options {
-        today: day,
-        relaxed: book.relaxed,
-    });
+    let mut ledger = plan.start(Options { today: day, relaxed: book.relaxed });
     ledger.advance(day);
     Cow::Owned(ledger.holdings().cloned().collect())
 }
 
 /// Every claim open on the lens's day, for its owners, given the holdings on
 /// that day: soonest due first, what is owed to you before what you owe.
-pub fn open<'h>(
-    lens: Lens,
-    run: &Run,
-    holdings: impl IntoIterator<Item = &'h Holding>,
-) -> Vec<Claim> {
+pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
     let book = lens.book();
-    let claimed = holdings
-        .into_iter()
-        .filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
+    let claimed = holdings.into_iter().filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
         holding.lots.iter().filter_map(move |lot| {
             let left = lens.place_qty(holding.place, lot.qty);
             if left.is_zero() {
                 return None;
             }
-            let made = lot
-                .txn
-                .source_txn()
-                .and_then(|txn| book.paid_into(txn, holding.place));
+            let made = lot.txn.source_txn().and_then(|txn| book.paid_into(txn, holding.place));
             Some(Claim {
                 mine: true,
                 place: holding.place,
@@ -96,13 +84,9 @@ pub fn open<'h>(
     });
     let payable = book.kind("payable").ok();
     let payables = book.places.iter().filter(|&(id, place)| {
-        place.class == Class::Debt
-            && lens.owns(id)
-            && payable.is_some_and(|kind| book.is_a(place.kind, kind))
+        place.class == Class::Debt && lens.owns(id) && payable.is_some_and(|kind| book.is_a(place.kind, kind))
     });
-    let mut claims: Vec<Claim> = parcels
-        .chain(payables.flat_map(|(place, _)| owed_by_you(lens, run, place)))
-        .collect();
+    let mut claims: Vec<Claim> = parcels.chain(payables.flat_map(|(place, _)| owed_by_you(lens, run, place))).collect();
     claims.sort_by_key(|claim| (!claim.mine, claim.due.unwrap_or(Day::MAX), claim.made));
     claims
 }
@@ -133,9 +117,8 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
                 due: book.flow_view(flow).detail().due,
             });
             debt.left.qty += posting.out().qty;
-        } else if let Some(debt) = settled_codes(book, flow)
-            .find(|code| debts.contains_key(code))
-            .and_then(|code| debts.get_mut(&code))
+        } else if let Some(debt) =
+            settled_codes(book, flow).find(|code| debts.contains_key(code)).and_then(|code| debts.get_mut(&code))
         {
             debt.left.qty -= posting.arrive().qty;
         }
@@ -153,13 +136,8 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
 /// The codes a flow carries, and those it settles with `for #code`.
 fn settled_codes<'a>(book: &'a Book, flow: &'a Flow) -> impl Iterator<Item = Sym> + 'a {
     let view = book.flow_view(flow);
-    let selected = view.select().iter().filter_map(|select| {
-        if let Select::Code(code) = select {
-            Some(*code)
-        } else {
-            None
-        }
-    });
+    let selected =
+        view.select().iter().filter_map(|select| if let Select::Code(code) = select { Some(*code) } else { None });
     view.codes().chain(selected)
 }
 
@@ -187,9 +165,7 @@ pub(crate) fn view_from<'h, 's>(
 pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Claim]) -> Section<'s> {
     let (book, at) = (lens.book(), lens.day);
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
-    let columns = columns
-        .chain([Column::right("Left")])
-        .chain(["Made", "Age", "Due", "Status"].map(Column::left));
+    let columns = columns.chain([Column::right("Left")]).chain(["Made", "Age", "Due", "Status"].map(Column::left));
     let mut section = Section::new(columns).headed(Cell::text(heading));
     let (mut total, mut unpriced) = (Qty::ZERO, 0);
     for claim in claims {
@@ -208,13 +184,7 @@ pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Clai
             Cell::list(" · ", what)
         };
         let days_left = claim.due.map(|due| due.0 - at.0);
-        let status = days_left.map(|days| {
-            if days < 0 {
-                format!("overdue {}d", -days)
-            } else {
-                format!("in {days}d")
-            }
-        });
+        let status = days_left.map(|days| if days < 0 { format!("overdue {}d", -days) } else { format!("in {days}d") });
         match lens.value(claim.left) {
             Some(qty) => total += qty,
             None => unpriced += 1,
@@ -228,27 +198,17 @@ pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Clai
             claim.due.map_or(Cell::Blank, Cell::Day),
             status.map_or(Cell::Blank, Cell::text),
         ];
-        section.push(
-            Row::new(cells).style(if days_left.is_some_and(|days| days < 0) {
-                Style::Alert
-            } else {
-                Style::Normal
-            }),
-        );
+        section.push(Row::new(cells).style(if days_left.is_some_and(|days| days < 0) {
+            Style::Alert
+        } else {
+            Style::Normal
+        }));
     }
     if !claims.is_empty() {
-        section.push(
-            Row::padded(
-                [Cell::text("Total"), Cell::Blank, Cell::base(book, total)],
-                7,
-            )
-            .style(Style::Total),
-        );
+        section.push(Row::padded([Cell::text("Total"), Cell::Blank, Cell::base(book, total)], 7).style(Style::Total));
     }
     if unpriced > 0 {
-        section.note(format!(
-            "{unpriced} claims have no price and are left out of the total."
-        ));
+        section.note(format!("{unpriced} claims have no price and are left out of the total."));
     }
     section
 }

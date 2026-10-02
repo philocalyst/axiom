@@ -5,8 +5,8 @@
 //! language or semantic representation.
 
 use axiom_core::Id;
-use axiom_model::sync::{Capture, CharClass, Op, Pattern};
 use axiom_model::Book;
+use axiom_model::sync::{Capture, CharClass, Op, Pattern};
 use memchr::memmem;
 
 const MAX_DEPTH: usize = 64;
@@ -55,20 +55,10 @@ pub struct Run {
 
 impl Run {
     pub fn capture(&self, name: Capture) -> Option<(usize, usize)> {
-        self.captures
-            .iter()
-            .rev()
-            .find(|(found, _, _)| *found == name)
-            .map(|(_, start, end)| (*start, *end))
+        self.captures.iter().rev().find(|(found, _, _)| *found == name).map(|(_, start, end)| (*start, *end))
     }
 
-    pub fn matches_at(
-        &mut self,
-        id: Id<Pattern>,
-        hay: &[u8],
-        at: usize,
-        patterns: &Patterns<'_, '_>,
-    ) -> Option<Found> {
+    pub fn matches_at(&mut self, id: Id<Pattern>, hay: &[u8], at: usize, patterns: &Patterns<'_, '_>) -> Option<Found> {
         std::str::from_utf8(hay).ok()?;
         self.matches_at_valid(id, hay, at, patterns)
     }
@@ -95,20 +85,10 @@ impl Run {
             self.captures.clear();
             return None;
         }
-        Some(Found {
-            start: at,
-            end,
-            literal: self.literal,
-        })
+        Some(Found { start: at, end, literal: self.literal })
     }
 
-    pub fn find(
-        &mut self,
-        id: Id<Pattern>,
-        hay: &[u8],
-        from: usize,
-        patterns: &Patterns<'_, '_>,
-    ) -> Option<Found> {
+    pub fn find(&mut self, id: Id<Pattern>, hay: &[u8], from: usize, patterns: &Patterns<'_, '_>) -> Option<Found> {
         let text = std::str::from_utf8(hay).ok()?;
         let prefix = match patterns.starts(id) {
             Some([only]) => only.as_slice(),
@@ -135,19 +115,11 @@ impl Run {
 }
 
 fn boundary(hay: &[u8], at: usize) -> bool {
-    at <= hay.len()
-        && (at == 0
-            || at == hay.len()
-            || hay.get(at).is_some_and(|byte| byte & 0b1100_0000 != 0b1000_0000))
+    at <= hay.len() && (at == 0 || at == hay.len() || hay.get(at).is_some_and(|byte| byte & 0b1100_0000 != 0b1000_0000))
 }
 
 /// The fixed-start literals for a pattern, or `None` if it may start anywhere.
-fn starts_of(
-    book: &Book<'_>,
-    id: Id<Pattern>,
-    visiting: &mut [bool],
-    depth: usize,
-) -> Option<Vec<Vec<u8>>> {
+fn starts_of(book: &Book<'_>, id: Id<Pattern>, visiting: &mut [bool], depth: usize) -> Option<Vec<Vec<u8>>> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -156,20 +128,12 @@ fn starts_of(
         return None;
     }
     *visiting.get_mut(index)? = true;
-    let result = book
-        .patterns
-        .get(id)
-        .and_then(|pattern| starts_in(&pattern.program, book, visiting, depth));
+    let result = book.patterns.get(id).and_then(|pattern| starts_in(&pattern.program, book, visiting, depth));
     visiting[index] = false;
     result
 }
 
-fn starts_in(
-    program: &[Op],
-    book: &Book<'_>,
-    visiting: &mut [bool],
-    depth: usize,
-) -> Option<Vec<Vec<u8>>> {
+fn starts_in(program: &[Op], book: &Book<'_>, visiting: &mut [bool], depth: usize) -> Option<Vec<Vec<u8>>> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -180,12 +144,7 @@ fn starts_in(
     let (first, rest) = ops.split_first()?;
     match first {
         Op::Literal(sym) => {
-            let bytes = book
-                .text(*sym)
-                .as_bytes()
-                .iter()
-                .map(u8::to_ascii_lowercase)
-                .collect::<Vec<_>>();
+            let bytes = book.text(*sym).as_bytes().iter().map(u8::to_ascii_lowercase).collect::<Vec<_>>();
             (!bytes.is_empty()).then(|| vec![bytes])
         }
         Op::Name(sym) => {
@@ -194,10 +153,7 @@ fn starts_in(
             // the full generated name without allocating.
             let name = book.name(*sym);
             let first = name.split(['-', '/']).next().unwrap_or(name);
-            let bytes: Vec<u8> = first
-                .bytes()
-                .map(|byte| byte.to_ascii_lowercase())
-                .collect();
+            let bytes: Vec<u8> = first.bytes().map(|byte| byte.to_ascii_lowercase()).collect();
             (!bytes.is_empty()).then(|| vec![bytes])
         }
         Op::Choice { len } => {
@@ -214,32 +170,15 @@ fn starts_in(
                 }
             }
         }
-        Op::Capture { len, .. } => starts_in(
-            rest.get(..usize::from(*len))?,
-            book,
-            visiting,
-            depth + 1,
-        ),
-        Op::Repeat { min, len, .. } if *min > 0 => starts_in(
-            rest.get(..usize::from(*len))?,
-            book,
-            visiting,
-            depth + 1,
-        ),
+        Op::Capture { len, .. } => starts_in(rest.get(..usize::from(*len))?, book, visiting, depth + 1),
+        Op::Repeat { min, len, .. } if *min > 0 => starts_in(rest.get(..usize::from(*len))?, book, visiting, depth + 1),
         Op::Call(callee) => starts_of(book, *callee, visiting, depth + 1),
         Op::Class(_) | Op::Repeat { .. } => None,
     }
 }
 
 /// A body either succeeds wholly or leaves the scratch state as it found it.
-fn body(
-    ops: &[Op],
-    hay: &[u8],
-    pos: usize,
-    run: &mut Run,
-    patterns: &Patterns<'_, '_>,
-    depth: usize,
-) -> Option<usize> {
+fn body(ops: &[Op], hay: &[u8], pos: usize, run: &mut Run, patterns: &Patterns<'_, '_>, depth: usize) -> Option<usize> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -348,12 +287,7 @@ fn match_name(name: &[u8], hay: &[u8], at: usize) -> Option<usize> {
 }
 
 fn step(class: CharClass, hay: &[u8], at: usize) -> Option<usize> {
-    let one = |fits: fn(u8) -> bool| {
-        hay.get(at)
-            .copied()
-            .filter(|&byte| fits(byte))
-            .map(|_| at + 1)
-    };
+    let one = |fits: fn(u8) -> bool| hay.get(at).copied().filter(|&byte| fits(byte)).map(|_| at + 1);
     match class {
         CharClass::Digit => one(|byte| byte.is_ascii_digit()),
         CharClass::Letter | CharClass::Alnum => {
@@ -398,25 +332,16 @@ mod tests {
     use axiom_syntax::Folder;
 
     fn book() -> Book<'static> {
-        let (file, diagnostics) =
-            axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+        let (file, diagnostics) = axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
         assert!(diagnostics.is_empty(), "axiom.ax: {diagnostics:?}");
-        let sources = [axiom_model::Source {
-            path: "axiom.ax",
-            file,
-            embedded: false,
-        }];
+        let sources = [axiom_model::Source { path: "axiom.ax", file, embedded: false }];
         let (book, diagnostics) = axiom_model::build(&sources);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         book
     }
 
     fn add(book: &mut Book<'static>, program: Vec<Op>) -> Id<Pattern> {
-        book.patterns.push(Pattern {
-            name: None,
-            program: program.into_boxed_slice(),
-            loc: Loc::default(),
-        })
+        book.patterns.push(Pattern { name: None, program: program.into_boxed_slice(), loc: Loc::default() })
     }
 
     #[test]
@@ -429,23 +354,12 @@ mod tests {
             &mut book,
             vec![
                 Op::Call(called),
-                Op::Capture {
-                    name: Capture::Original,
-                    len: 6,
-                },
+                Op::Capture { name: Capture::Original, len: 6 },
                 Op::Class(CharClass::Digit),
-                Op::Repeat {
-                    min: 0,
-                    max: None,
-                    len: 1,
-                },
+                Op::Repeat { min: 0, max: None, len: 1 },
                 Op::Class(CharClass::Digit),
                 Op::Literal(point),
-                Op::Repeat {
-                    min: 1,
-                    max: Some(2),
-                    len: 1,
-                },
+                Op::Repeat { min: 1, max: Some(2), len: 1 },
                 Op::Class(CharClass::Digit),
             ],
         );
@@ -453,10 +367,7 @@ mod tests {
         let mut run = Run::default();
         let hay = b"memo ach 3290.00 next";
         let found = run.find(amount, hay, 0, &patterns).unwrap();
-        assert_eq!(
-            std::str::from_utf8(&hay[found.start..found.end]).unwrap(),
-            "ach 3290.00"
-        );
+        assert_eq!(std::str::from_utf8(&hay[found.start..found.end]).unwrap(), "ach 3290.00");
         let (start, end) = run.capture(Capture::Original).unwrap();
         assert_eq!(std::str::from_utf8(&hay[start..end]).unwrap(), "3290.00");
     }
@@ -466,10 +377,7 @@ mod tests {
         let mut book = book();
         let a = book.intern_text("A");
         let b = book.intern_text("B");
-        let id = add(
-            &mut book,
-            vec![Op::Choice { len: 1 }, Op::Literal(a), Op::Literal(b)],
-        );
+        let id = add(&mut book, vec![Op::Choice { len: 1 }, Op::Literal(a), Op::Literal(b)]);
         let patterns = Patterns::new(&book);
         let mut run = Run::default();
         assert_eq!(run.find(id, b"B", 0, &patterns).unwrap().end, 1);
@@ -482,10 +390,7 @@ mod tests {
         let id = add(
             &mut book,
             vec![
-                Op::Capture {
-                    name: Capture::Code,
-                    len: 1,
-                },
+                Op::Capture { name: Capture::Code, len: 1 },
                 Op::Class(CharClass::Letter),
                 Op::Class(CharClass::Alnum),
                 Op::Class(CharClass::Any),

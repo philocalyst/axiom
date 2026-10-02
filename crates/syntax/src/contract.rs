@@ -243,7 +243,10 @@ impl<'s> Parser<'s> {
         self.bump();
         let scope = Scope::Undated;
         if self.at_eol() {
-            return Err(self.expected("expected-also", "an item or a flow to add: `+ 2% of amount #fee` or `-> escrow 410 USD #escrow`"));
+            return Err(self.expected(
+                "expected-also",
+                "an item or a flow to add: `+ 2% of amount #fee` or `-> escrow 410 USD #escrow`",
+            ));
         }
         let added = if self.at_item() {
             AlsoLine::Item(self.item_body(None, self.peek().loc.start as usize, scope)?)

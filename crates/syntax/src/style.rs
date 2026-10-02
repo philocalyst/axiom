@@ -179,18 +179,21 @@ impl<'a, 's> Reader<'a, 's> {
         let tokens = self.lex(start..end);
         let Some(arrow) = tokens.iter().position(|token| matches!(token.tok, Tok::Punct(Punct::Arrow))) else { return };
         // A range after the date is written with it: the clause it makes is not in the tail.
-        let date_last = if matches!(tokens.get(1).map(|token| token.tok), Some(Tok::Punct(Punct::DotDot))) { 2 } else { 0 };
+        let date_last =
+            if matches!(tokens.get(1).map(|token| token.tok), Some(Tok::Punct(Punct::DotDot))) { 2 } else { 0 };
         if arrow <= date_last || tokens.len() <= date_last {
             return;
         }
-        let clauses: Vec<&Clause> = self.file[flow.tail].iter().filter(|clause| clause.at.start >= tokens[arrow].loc.end).collect();
+        let clauses: Vec<&Clause> =
+            self.file[flow.tail].iter().filter(|clause| clause.at.start >= tokens[arrow].loc.end).collect();
         let (tail, head_end) = self.tail(&clauses, end);
         let date = self.between(start, tokens[date_last].loc.end as usize);
         let from = match arrow > date_last + 1 {
             true => self.between(tokens[date_last + 1].loc.start as usize, tokens[arrow - 1].loc.end as usize),
             false => String::new(),
         };
-        let after: Vec<&Token> = tokens[arrow + 1..].iter().filter(|token| (token.loc.start as usize) < head_end).collect();
+        let after: Vec<&Token> =
+            tokens[arrow + 1..].iter().filter(|token| (token.loc.start as usize) < head_end).collect();
         let (object, amount) = match (flow.to.end, after.first()) {
             (Some(_), Some(first)) => {
                 let last = self.end_of(&after, 0);
@@ -207,7 +210,17 @@ impl<'a, 's> Reader<'a, 's> {
         let cells = vec![date, from, "->".to_string(), object, amount.trim_end().to_string(), tail];
         let (line, after) = self.line_of(start);
         let comment = self.comment(&line, end);
-        self.push(Row { line, after, kind: Kind::Header, group: TOP, indent: 0, cells, spill: None, literal: false, comment });
+        self.push(Row {
+            line,
+            after,
+            kind: Kind::Header,
+            group: TOP,
+            indent: 0,
+            cells,
+            spill: None,
+            literal: false,
+            comment,
+        });
     }
 
     /// The index of the last token of the end that starts at `tokens[first]`: a
@@ -236,7 +249,11 @@ impl<'a, 's> Reader<'a, 's> {
         let text = |token: &Token| self.between(token.loc.start as usize, token.loc.end as usize);
         let date = text(&tokens[0]);
         let subject = text(&tokens[1]);
-        let verb = if occurrence { String::new() } else { self.between(tokens[2].loc.start as usize, tokens[2].loc.end as usize) };
+        let verb = if occurrence {
+            String::new()
+        } else {
+            self.between(tokens[2].loc.start as usize, tokens[2].loc.end as usize)
+        };
         let (object, rest) = match (&statement.verb, tokens.get(words)) {
             (Verb::Owes { .. }, Some(creditor)) => (text(creditor), words + 1),
             _ => (String::new(), words),
@@ -256,7 +273,17 @@ impl<'a, 's> Reader<'a, 's> {
         let spill = spill.filter(|amount| !amount.is_empty());
         let (line, after) = self.line_of(start);
         let comment = self.comment(&line, end);
-        self.push(Row { line, after, kind: Kind::Header, group: TOP, indent: 0, cells, spill, literal: false, comment });
+        self.push(Row {
+            line,
+            after,
+            kind: Kind::Header,
+            group: TOP,
+            indent: 0,
+            cells,
+            spill,
+            literal: false,
+            comment,
+        });
     }
 
     /// The legs and items under one header.
@@ -384,7 +411,8 @@ fn width(text: &str) -> usize {
 fn number_of(cell: &str) -> Option<(&str, &str)> {
     let (number, rest) = cell.split_once(' ').unwrap_or((cell, ""));
     let digits = number.strip_prefix('-').unwrap_or(number);
-    let numeric = digits.starts_with(|c: char| c.is_ascii_digit()) && digits.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'_' | b'.'));
+    let numeric = digits.starts_with(|c: char| c.is_ascii_digit())
+        && digits.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'_' | b'.'));
     numeric.then_some((number, rest))
 }
 
@@ -424,12 +452,17 @@ fn lay_out(rows: &[Row], edits: &mut HashMap<usize, String>) {
 
 /// Rows as columns of cells: each cell as wide as the widest of its column,
 /// and, with `numbers`, the numbers of the amount column ending together.
-fn columns<'r>(rows: &[&'r Row], indent: impl Fn(&Row) -> usize, numbers: bool) -> Vec<(usize, String, Option<&'r Comment>)> {
+fn columns<'r>(
+    rows: &[&'r Row],
+    indent: impl Fn(&Row) -> usize,
+    numbers: bool,
+) -> Vec<(usize, String, Option<&'r Comment>)> {
     let count = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
     let amount = if rows[0].kind == Kind::Header { 4 } else { 1 };
     let mut cells: Vec<Vec<String>> = rows.iter().map(|row| row.cells.clone()).collect();
     if numbers {
-        let longest = cells.iter().filter_map(|row| number_of(&row[amount])).map(|(number, _)| width(number)).max().unwrap_or(0);
+        let longest =
+            cells.iter().filter_map(|row| number_of(&row[amount])).map(|(number, _)| width(number)).max().unwrap_or(0);
         for row in &mut cells {
             if let Some((number, rest)) = number_of(&row[amount]) {
                 let pad = " ".repeat(longest - width(number));
@@ -437,7 +470,8 @@ fn columns<'r>(rows: &[&'r Row], indent: impl Fn(&Row) -> usize, numbers: bool) 
             }
         }
     }
-    let widths: Vec<usize> = (0..count).map(|column| cells.iter().map(|row| width(&row[column])).max().unwrap_or(0)).collect();
+    let widths: Vec<usize> =
+        (0..count).map(|column| cells.iter().map(|row| width(&row[column])).max().unwrap_or(0)).collect();
     rows.iter()
         .zip(&cells)
         .map(|(row, cells)| {
@@ -496,7 +530,12 @@ fn items<'r>(block: &[Row], items: &[&'r Row]) -> Vec<(usize, String, Option<&'r
     }
     let prefixes: Vec<usize> = items.iter().zip(&extra).map(|(row, extra)| base + extra + width(&left(row))).collect();
     // Literals' tails line up; another amount's tail follows it.
-    let tails = prefixes.iter().zip(items).filter(|(_, row)| row.literal && !row.cells[2].is_empty()).map(|(prefix, _)| *prefix).max();
+    let tails = prefixes
+        .iter()
+        .zip(items)
+        .filter(|(_, row)| row.literal && !row.cells[2].is_empty())
+        .map(|(prefix, _)| *prefix)
+        .max();
     items
         .iter()
         .zip(&extra)

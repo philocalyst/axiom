@@ -16,17 +16,9 @@ account assets/checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert!(
-        book.codes
-            .iter()
-            .any(|(_, code)| book.name(*code) == "wire-code")
-    );
+    assert!(book.codes.iter().any(|(_, code)| book.name(*code) == "wire-code"));
     assert_eq!(book.name(book.events[0].code), "event-code");
     let (flow_id, flow) = book.flows.iter().next().unwrap();
     assert!(book.touching[flow.from].contains(&flow_id));
@@ -48,19 +40,12 @@ opening 2026-01-01
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let asset = book.asset("condo").unwrap();
     let (_, flow) = book.flows.iter().next().unwrap();
     assert_eq!(flow.to, book.assets[asset].place);
-    assert_eq!(
-        flow.arrive,
-        axiom_model::Amount::new(axiom_core::Qty(1), book.assets[asset].unit)
-    );
+    assert_eq!(flow.arrive, axiom_model::Amount::new(axiom_core::Qty(1), book.assets[asset].unit));
     assert_eq!(flow.mode, axiom_model::Mode::Opening);
     let detail = &book.details[flow.detail.unwrap()];
     assert_eq!(detail.basis, Some(axiom_core::Qty(402_000)));
@@ -82,11 +67,7 @@ opening 2026-01-01
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.txns.len(), 2);
     let (_, flow) = book.flows.iter().next().unwrap();
@@ -117,11 +98,7 @@ entity delta-rugs : person
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.txns.len(), 1);
     assert_eq!(book.claim_changes.len(), 1);
@@ -143,10 +120,7 @@ entity delta-rugs : person
 fn invalid_claim_writeoffs_do_not_append_events_or_money_flows() {
     let path = "journal/2025/12.ax";
     let cases = [
-        (
-            "base USD\ncommodity USD\n2025-12-15 ^missing waived\n",
-            "unknown-claim-reference",
-        ),
+        ("base USD\ncommodity USD\n2025-12-15 ^missing waived\n", "unknown-claim-reference"),
         (
             "base USD\ncommodity USD\naccount checking\n2025-12-01 checking -> ? 5 USD ^cash\n2025-12-15 ^cash waived\n",
             "claim-writeoff-target",
@@ -155,11 +129,7 @@ fn invalid_claim_writeoffs_do_not_append_events_or_money_flows() {
     for (text, expected) in cases {
         let (file, syntax) = parse(FileId(0), text, Folder::of(path));
         assert!(syntax.is_empty(), "{syntax:?}");
-        let (book, diagnostics) = build(&[Source {
-            path,
-            file,
-            embedded: false,
-        }]);
+        let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(
             diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
             "expected {expected}, got {diagnostics:?}"
@@ -195,11 +165,7 @@ account assets/fidelity
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     let vti = book.commodity("VTI").unwrap();
@@ -252,11 +218,7 @@ account assets/fidelity
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
     assert!(book.flows.is_empty(), "a conflicting source purpose cannot be silently overridden");
 }
@@ -285,11 +247,7 @@ account checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let wages = book.purpose("wages").unwrap();
     let groceries = book.purpose("groceries").unwrap();
@@ -320,11 +278,7 @@ account checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
     assert_eq!(purpose.purpose, book.purpose("purchase").unwrap());
@@ -348,11 +302,7 @@ account checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
     assert_eq!(purpose.purpose, book.purpose("tax-paid").unwrap());
@@ -376,11 +326,7 @@ entity employer : entity
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
     assert!(book.flows.is_empty());
 }
@@ -404,15 +350,14 @@ account retirement : retirement-account
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let flow = book.flows.iter().next().unwrap().1;
     assert_eq!(flow.purpose.unwrap().purpose, book.purpose("pretax-deferral").unwrap());
-    assert_eq!(flow.purpose.unwrap().source, axiom_model::Provenance::Account(book.kind("retirement-account").unwrap()));
+    assert_eq!(
+        flow.purpose.unwrap().source,
+        axiom_model::Provenance::Account(book.kind("retirement-account").unwrap())
+    );
 }
 
 #[test]
@@ -436,11 +381,7 @@ contract deferral with acme
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[book.contract("deferral").unwrap()];
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
@@ -467,11 +408,7 @@ account checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
     assert_eq!(problem.labels.len(), 3);
     assert!(book.flows.is_empty());
@@ -496,15 +433,8 @@ account retirement : retirement-account
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
-    let problem = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "purpose-disagreement")
-        .unwrap();
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
     assert_eq!(problem.labels.len(), 3);
     assert!(book.flows.is_empty());
 }
@@ -526,11 +456,7 @@ account assets/brokerage
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
     let flow = flows[0];
@@ -559,11 +485,7 @@ account assets/brokerage
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "price-disagrees"), "{diagnostics:?}");
     assert_eq!(book.flows.len(), 1, "the invalid priced transaction is rolled back atomically");
 }
@@ -580,11 +502,7 @@ account assets/fidelity
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (_, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (_, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "commodity-endpoint"), "{diagnostics:?}");
 }
 
@@ -617,20 +535,13 @@ asset condo : property
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let asset = book.asset("condo").unwrap();
     let (_, flow) = book.flows.iter().next().unwrap();
     assert_eq!(flow.from, book.entities[book.roots.unknown].place.unwrap());
     assert_eq!(flow.to, book.assets[asset].place);
-    assert_eq!(
-        flow.arrive,
-        axiom_model::Amount::new(axiom_core::Qty(1), book.assets[asset].unit)
-    );
+    assert_eq!(flow.arrive, axiom_model::Amount::new(axiom_core::Qty(1), book.assets[asset].unit));
     assert_eq!(flow.mode, axiom_model::Mode::Actual);
     let detail = &book.details[flow.detail.unwrap()];
     assert_eq!(detail.basis, Some(axiom_core::Qty(402_000)));
@@ -653,11 +564,7 @@ account assets/checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let referenced = &book.details[book.flows[Id::new(1)].detail.unwrap()];
     assert_eq!(referenced.against, Some(Id::new(0)));
@@ -667,10 +574,7 @@ account assets/checking
 #[test]
 fn against_rejects_unknown_and_ambiguous_transaction_codes() {
     let cases = [
-        (
-            "2026-01-01 checking -> ? 3 USD against ^missing\n",
-            "unknown-against",
-        ),
+        ("2026-01-01 checking -> ? 3 USD against ^missing\n", "unknown-against"),
         (
             "2026-01-01 checking -> ? 1 USD ^invoice\n2026-01-02 checking -> ? 2 USD ^invoice\n2026-01-03 checking -> ? 3 USD against ^invoice\n",
             "ambiguous-against",
@@ -681,22 +585,13 @@ fn against_rejects_unknown_and_ambiguous_transaction_codes() {
         let text = format!("base USD\ncommodity USD\naccount assets/checking\n{records}");
         let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
         assert!(syntax.is_empty(), "{syntax:?}");
-        let (_, diagnostics) = build(&[Source {
-            path,
-            file,
-            embedded: false,
-        }]);
+        let (_, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(
-            diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == expected),
+            diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
             "expected {expected}, got {diagnostics:?}"
         );
         if expected == "ambiguous-against" {
-            let diagnostic = diagnostics
-                .iter()
-                .find(|diagnostic| diagnostic.code == expected)
-                .unwrap();
+            let diagnostic = diagnostics.iter().find(|diagnostic| diagnostic.code == expected).unwrap();
             assert_eq!(diagnostic.labels.len(), 3, "{diagnostic:?}");
             assert!(diagnostic.labels[1].text.contains("matching transaction"));
             assert!(diagnostic.labels[2].text.contains("matching transaction"));
@@ -714,15 +609,8 @@ account assets/checking
 2026-01-01 checking -> ? 1 USD ^still-lowerable ^
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
-    assert!(
-        !syntax.is_empty(),
-        "the malformed trailing code needs a syntax diagnostic"
-    );
-    let (book, _diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    assert!(!syntax.is_empty(), "the malformed trailing code needs a syntax diagnostic");
+    let (book, _diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(book.txns.len() <= 1);
 }
 
@@ -742,34 +630,12 @@ contract c with p
     let (file, syntax) = parse(FileId(0), text, Folder::of("contracts.ax"));
     assert!(syntax.is_empty(), "{syntax:?}");
     assert_eq!(file.items.len(), 5);
-    let (book, diagnostics) = build(&[Source {
-        path: "contracts.ax",
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path: "contracts.ax", file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let day = Day::from_ymd(2026, 1, 1).unwrap();
-    assert!(
-        !contract
-            .terms
-            .as_ref()
-            .unwrap()
-            .at(day)
-            .program
-            .nodes
-            .is_empty()
-    );
-    assert!(
-        !contract
-            .standing
-            .as_ref()
-            .unwrap()
-            .at(day)
-            .program
-            .nodes
-            .is_empty()
-    );
+    assert!(!contract.terms.as_ref().unwrap().at(day).program.nodes.is_empty());
+    assert!(!contract.standing.as_ref().unwrap().at(day).program.nodes.is_empty());
 }
 
 #[test]
@@ -789,11 +655,7 @@ contract c with p
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract_id = book.contract("c").unwrap();
     let contract = &book.contracts[contract_id];
@@ -808,11 +670,8 @@ contract c with p
     let also = &book.also[regular.also[0]];
     assert_eq!(also.on, axiom_model::AlsoOn::Contract(contract_id));
     assert_eq!(book.name(book.codes[also.codes.start()]), "match");
-    let axiom_model::Implied::Flow {
-        to: Some(to),
-        amount: axiom_model::TemplateAmount::Computed(root),
-        ..
-    } = also.what
+    let axiom_model::Implied::Flow { to: Some(to), amount: axiom_model::TemplateAmount::Computed(root), .. } =
+        also.what
     else {
         panic!("contract also should retain the typed implied flow")
     };
@@ -840,11 +699,7 @@ contract flat with greystar
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let area = contract.area.expect("contract retains its typed area");
@@ -853,10 +708,7 @@ contract flat with greystar
     assert_eq!(share.rate, axiom_core::Ratio::new(3, 25).unwrap());
     assert_eq!(
         share.measure,
-        Some((
-            axiom_model::Amount::new(axiom_core::Qty(120), book.commodity("SQFT").unwrap()),
-            area,
-        ))
+        Some((axiom_model::Amount::new(axiom_core::Qty(120), book.commodity("SQFT").unwrap()), area,))
     );
 }
 
@@ -879,11 +731,7 @@ contract flat with greystar
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-area-positive"), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     assert!(contract.terms.is_none(), "an invalid area must not produce an active schedule");
@@ -911,11 +759,7 @@ contract lease with dana
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     assert_eq!(contract.deposit, Some(axiom_model::Amount::new(axiom_core::Qty(2_350), book.base)));
@@ -941,11 +785,7 @@ contract lease with dana
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     assert_eq!(contract.deposit, Some(axiom_model::Amount::new(axiom_core::Qty(2_350), book.base)));
@@ -966,11 +806,7 @@ fn invalid_contract_deposits_do_not_leave_active_terms() {
         );
         let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
         assert!(syntax.is_empty(), "{syntax:?}");
-        let (book, diagnostics) = build(&[Source {
-            path,
-            file,
-            embedded: false,
-        }]);
+        let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(
             diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
             "expected {expected}, got {diagnostics:?}"
@@ -995,15 +831,8 @@ fn measured_shares_reject_missing_and_mismatched_denominators() {
         let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
         assert!(syntax.is_empty(), "{syntax:?}");
 
-        let (book, diagnostics) = build(&[Source {
-            path,
-            file,
-            embedded: false,
-        }]);
-        assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-share-measure"),
-            "{diagnostics:?}"
-        );
+        let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-share-measure"), "{diagnostics:?}");
         let contract = &book.contracts[Id::new(0)];
         let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
         assert!(terms.shares.is_empty(), "an invalid measured share must not be retained");
@@ -1029,11 +858,7 @@ contract flat with greystar
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     let contract_id = book.contract("flat").unwrap();
     let contract = &book.contracts[contract_id];
     let due_window = axiom_core::Days::new(
@@ -1041,10 +866,7 @@ contract flat with greystar
         axiom_core::Day::from_ymd(2026, 2, 6).unwrap(),
     )
     .unwrap();
-    assert_eq!(
-        contract.terms.as_ref().unwrap().at(due_window.first()).grace,
-        Some(axiom_core::Span::days(3))
-    );
+    assert_eq!(contract.terms.as_ref().unwrap().at(due_window.first()).grace, Some(axiom_core::Span::days(3)));
     let terms = contract.terms.as_ref().unwrap().at(due_window.first());
     assert_eq!(terms.anchor, axiom_core::Day::MIN);
     assert_eq!(terms.every, axiom_model::Cadence::Every(axiom_core::Span::months(1)));
@@ -1065,10 +887,7 @@ contract flat with greystar
     assert_eq!(txn.1.flows.len(), 0, "the occurrence marker does not invent actual flows");
     assert_eq!(
         book.txn_inputs(txn.0),
-        &[Some(axiom_model::Amount::new(
-            axiom_core::Qty(155),
-            book.commodity("USD").unwrap(),
-        ))]
+        &[Some(axiom_model::Amount::new(axiom_core::Qty(155), book.commodity("USD").unwrap(),))]
     );
 }
 
@@ -1086,11 +905,7 @@ account assets/checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let flow = &book.flows[Id::new(0)];
     assert_eq!(flow.day, Day::from_ymd(2025, 12, 12).unwrap());
@@ -1116,11 +931,7 @@ contract invest with broker
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (_book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (_book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "ambiguous-contract-occurrence"), "{diagnostics:?}");
 }
 
@@ -1138,18 +949,17 @@ contract rent with landlord
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let txn = &book.txns[Id::new(0)];
     let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
     assert_eq!(occurrence.due, Day::from_ymd(2026, 1, 1).unwrap());
     assert_eq!(occurrence.schedule, axiom_model::ScheduleKind::Regular);
     let usd = book.commodity("USD").unwrap();
-    assert_eq!(occurrence.amount, Some(axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(3_000), usd))));
+    assert_eq!(
+        occurrence.amount,
+        Some(axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(3_000), usd)))
+    );
     assert!(occurrence.program.is_none());
     assert_eq!(book.name(book.codes[txn.codes.start()]), "paid");
     assert_eq!(book.text(occurrence.tail.description.unwrap()), "January rent");
@@ -1171,11 +981,7 @@ contract invest with broker
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let txn = &book.txns[Id::new(0)];
     let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
@@ -1200,11 +1006,7 @@ account assets/checking
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.assertion_programs.len(), 1);
     let assertion = &book.asserts[0];
@@ -1216,11 +1018,7 @@ account assets/checking
         panic!("the computed amount should retain a program root");
     };
     assert_eq!(assertion.amount.unit, book.base);
-    assert!(
-        book.assertion_programs[program].nodes[root]
-            .typed_ty()
-            .is_some()
-    );
+    assert!(book.assertion_programs[program].nodes[root].typed_ty().is_some());
     assert_record_indices(&book);
 }
 
@@ -1237,33 +1035,19 @@ asset condo : property
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let assertion = &book.asserts[0];
-    assert!(matches!(
-        assertion.subject,
-        axiom_model::law::Subject::Asset(_)
-    ));
+    assert!(matches!(assertion.subject, axiom_model::law::Subject::Asset(_)));
     let Some((program, root)) = assertion.computed else {
         panic!("the computed amount should retain a program root");
     };
-    assert!(matches!(
-        book.assertion_programs[program].nodes[root].typed_ty(),
-        Some(axiom_model::law::Ty::Amount(_))
-    ));
+    assert!(matches!(book.assertion_programs[program].nodes[root].typed_ty(), Some(axiom_model::law::Ty::Amount(_))));
 }
 
 #[test]
 fn filed_returns_keep_reported_tallies_and_events() {
-    let (system_file, system_errors) = parse(
-        FileId(1),
-        "system us\ncurrency USD\n",
-        Folder::of("systems/us.ax"),
-    );
+    let (system_file, system_errors) = parse(FileId(1), "system us\ncurrency USD\n", Folder::of("systems/us.ax"));
     assert!(system_errors.is_empty(), "{system_errors:?}");
     let path = "journal/2026/04.ax";
     let (file, syntax) = parse(
@@ -1274,16 +1058,8 @@ fn filed_returns_keep_reported_tallies_and_events() {
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[
-        Source {
-            path: "systems/us.ax",
-            file: system_file,
-            embedded: false,
-        },
-        Source {
-            path,
-            file,
-            embedded: false,
-        },
+        Source { path: "systems/us.ax", file: system_file, embedded: false },
+        Source { path, file, embedded: false },
     ]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.filed.len(), 1);
@@ -1312,36 +1088,20 @@ contract phone with carrier
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let regular = contract.terms.as_ref().unwrap();
     let waived = Day::from_ymd(2026, 1, 20).unwrap();
     let restored = Day::from_ymd(2026, 2, 16).unwrap();
-    assert_eq!(
-        regular.at(waived).state,
-        axiom_model::book::TermsState::Waived
-    );
-    assert_eq!(
-        regular.at(restored).state,
-        axiom_model::book::TermsState::Active
-    );
+    assert_eq!(regular.at(waived).state, axiom_model::book::TermsState::Waived);
+    assert_eq!(regular.at(restored).state, axiom_model::book::TermsState::Active);
     assert_eq!(contract.days.last(), Day::from_ymd(2026, 2, 20).unwrap());
     assert!(contract.ended.is_some());
-    assert_eq!(
-        book.name(regular.at(waived).change.unwrap().code.unwrap()),
-        "pause"
-    );
+    assert_eq!(book.name(regular.at(waived).change.unwrap().code.unwrap()), "pause");
     assert_eq!(book.endings.len(), 1);
     assert_eq!(book.endings[0].day, Day::from_ymd(2026, 2, 20).unwrap());
-    assert_eq!(
-        book.endings[0].target,
-        axiom_model::journal::EndTarget::Contract(Id::new(0))
-    );
+    assert_eq!(book.endings[0].target, axiom_model::journal::EndTarget::Contract(Id::new(0)));
 }
 
 #[test]
@@ -1359,31 +1119,18 @@ asset condo : property
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.endings.len(), 2);
     let ending = book.endings[0];
-    assert_eq!(
-        ending.target,
-        axiom_model::journal::EndTarget::Place(book.place("checking").unwrap())
-    );
+    assert_eq!(ending.target, axiom_model::journal::EndTarget::Place(book.place("checking").unwrap()));
     assert_eq!(book.name(book.codes[ending.codes.start()]), "closed");
     assert_eq!(book.text(ending.description.unwrap()), "retired");
     let disposal = book.endings[1];
-    assert_eq!(
-        disposal.target,
-        axiom_model::journal::EndTarget::Asset(book.asset("condo").unwrap())
-    );
+    assert_eq!(disposal.target, axiom_model::journal::EndTarget::Asset(book.asset("condo").unwrap()));
     assert_eq!(book.name(book.codes[disposal.codes.start()]), "disposed");
     assert_eq!(book.text(disposal.description.unwrap()), "given away");
-    assert!(
-        book.flows.is_empty(),
-        "an ending does not invent a monetary flow"
-    );
+    assert!(book.flows.is_empty(), "an ending does not invent a monetary flow");
 }
 
 #[test]
@@ -1402,27 +1149,16 @@ fn rejected_waiver_and_early_end_do_not_change_contract_terms() {
     for (text, expected) in cases {
         let (file, syntax) = parse(FileId(0), text, Folder::of(path));
         assert!(syntax.is_empty(), "{syntax:?}");
-        let (book, diagnostics) = build(&[Source {
-            path,
-            file,
-            embedded: false,
-        }]);
+        let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(
-            diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == expected),
+            diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
             "expected {expected}, got {diagnostics:?}"
         );
         let contract = &book.contracts[Id::new(0)];
         assert_eq!(contract.days.first(), Day::from_ymd(2026, 1, 1).unwrap());
         assert_eq!(contract.days.last(), Day::MAX);
         assert_eq!(
-            contract
-                .terms
-                .as_ref()
-                .unwrap()
-                .at(Day::from_ymd(2026, 1, 15).unwrap())
-                .state,
+            contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap()).state,
             axiom_model::book::TermsState::Active
         );
         assert!(contract.ended.is_none());
@@ -1447,11 +1183,7 @@ contract flat with landlord
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let txn = &book.txns[Id::new(0)];
     let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
@@ -1463,10 +1195,7 @@ contract flat with landlord
     let usd = book.commodity("USD").unwrap();
     assert_eq!(
         overlay.group.leg_quantities[0],
-        axiom_model::JournalQuantity::Amount(
-            axiom_model::Amount::new(axiom_core::Qty(200), usd),
-            None,
-        ),
+        axiom_model::JournalQuantity::Amount(axiom_model::Amount::new(axiom_core::Qty(200), usd), None,),
     );
     assert_eq!(overlay.group.items.len(), 1);
     assert_eq!(overlay.group.items[0].sign, axiom_model::Sign::Add);
@@ -1474,11 +1203,7 @@ contract flat with landlord
         overlay.group.items[0].amount,
         axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(25), usd)),
     );
-    assert_eq!(
-        txn.flows.len(),
-        2,
-        "override offsets point into the occurrence transaction"
-    );
+    assert_eq!(txn.flows.len(), 2, "override offsets point into the occurrence transaction");
     assert_eq!(book.name(book.codes[txn.codes.start()]), "fee");
 }
 
@@ -1499,11 +1224,7 @@ contract job with lumen
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap());
@@ -1514,10 +1235,7 @@ contract job with lumen
     assert_eq!(leg.flow.from, book.entities[employer].place.unwrap());
     assert_eq!(leg.flow.to, retirement);
     assert_eq!(leg.flow.payee, Some(contract.party));
-    assert_eq!(
-        leg.quantity,
-        axiom_model::TemplateQuantity::Percent(axiom_core::Ratio::percent(6, 0).unwrap())
-    );
+    assert_eq!(leg.quantity, axiom_model::TemplateQuantity::Percent(axiom_core::Ratio::percent(6, 0).unwrap()));
     assert!(terms.program.nodes.is_empty(), "a literal percent needs no expression program");
 }
 
@@ -1543,11 +1261,7 @@ contract job with lumen
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     let employer = book.entity("lumen").unwrap();
@@ -1588,18 +1302,11 @@ contract mortgage with rocket
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let loan = contract.loan.expect("the loan declaration is retained");
-    assert_eq!(
-        loan.principal,
-        axiom_model::Amount::new(axiom_core::Qty(320_000), book.base)
-    );
+    assert_eq!(loan.principal, axiom_model::Amount::new(axiom_core::Qty(320_000), book.base));
     assert_eq!(loan.on, Day::from_ymd(2024, 2, 20).unwrap());
     assert_eq!(loan.term, axiom_core::Span::months(360));
     assert_eq!(loan.asset, book.asset("condo"));
@@ -1634,10 +1341,7 @@ contract mortgage with rocket
     ));
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
     assert_eq!(terms.rate, Some(axiom_core::Ratio::percent(5_875, 3).unwrap()));
-    assert!(matches!(
-        terms.template[0].out,
-        axiom_model::TemplateQuantity::Derived
-    ));
+    assert!(matches!(terms.template[0].out, axiom_model::TemplateQuantity::Derived));
 }
 
 #[test]
@@ -1659,11 +1363,7 @@ contract mortgage with rocket
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let reset = book.contracts[Id::new(0)].loan.unwrap().resets.unwrap();
     assert_eq!(reset.every, axiom_core::Span::months(12));
@@ -1693,15 +1393,8 @@ contract mortgage with rocket
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-loan-resets"),
-        "{diagnostics:?}"
-    );
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-loan-resets"), "{diagnostics:?}");
     assert!(book.contracts[Id::new(0)].loan.is_none());
     assert!(book.flows.is_empty(), "invalid loan terms cannot lower origination flows");
 }
@@ -1724,16 +1417,9 @@ contract mortgage with rocket
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source {
-        path,
-        file,
-        embedded: false,
-    }]);
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert_eq!(
-        diagnostics
-            .iter()
-            .map(|diagnostic| diagnostic.code.clone())
-            .collect::<Vec<_>>(),
+        diagnostics.iter().map(|diagnostic| diagnostic.code.clone()).collect::<Vec<_>>(),
         ["loan-origination-shape"]
     );
     assert!(book.txns.is_empty());
@@ -1744,10 +1430,7 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
     for (txn_id, txn) in book.txns.iter() {
         let first = txn.flows.start().index();
         let end = first + txn.flows.len() as usize;
-        assert!(
-            end <= book.flows.len(),
-            "transaction {txn_id:?} exceeds the flow arena"
-        );
+        assert!(end <= book.flows.len(), "transaction {txn_id:?} exceeds the flow arena");
         for flow_id in txn.flows.ids() {
             assert_eq!(book.flows[flow_id].txn, txn_id);
         }
@@ -1782,31 +1465,16 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
     }
 
     for (place, ids) in book.touching.iter() {
-        assert!(
-            ids.windows(2)
-                .all(|pair| pair[0].index() <= pair[1].index())
-        );
+        assert!(ids.windows(2).all(|pair| pair[0].index() <= pair[1].index()));
         for &flow_id in ids {
             let flow = &book.flows[flow_id];
             assert!(flow.from == place || flow.to == place);
         }
     }
     for (flow_id, flow) in book.flows.iter() {
-        assert_eq!(
-            book.touching[flow.from]
-                .iter()
-                .filter(|&&id| id == flow_id)
-                .count(),
-            1
-        );
+        assert_eq!(book.touching[flow.from].iter().filter(|&&id| id == flow_id).count(), 1);
         if flow.from != flow.to {
-            assert_eq!(
-                book.touching[flow.to]
-                    .iter()
-                    .filter(|&&id| id == flow_id)
-                    .count(),
-                1
-            );
+            assert_eq!(book.touching[flow.to].iter().filter(|&&id| id == flow_id).count(), 1);
         }
     }
 }

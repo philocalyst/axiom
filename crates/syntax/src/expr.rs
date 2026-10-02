@@ -7,8 +7,8 @@
 
 use axiom_core::{Dec, Diagnostic, Loc};
 
-use crate::ast::*;
 use crate::amount::zero_fraction;
+use crate::ast::*;
 use crate::lex::{Punct, Tok, Token};
 use crate::parser::{Parse, Parser};
 

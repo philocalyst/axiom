@@ -71,14 +71,18 @@ impl<'s> Parser<'s> {
             "read" => {
                 self.bump();
                 let Tok::Str(text) = self.tok() else {
-                    return Err(self.expected("expected-string", "the files to read, a glob in quotes: `\"imports/*.csv\"`"));
+                    return Err(
+                        self.expected("expected-string", "the files to read, a glob in quotes: `\"imports/*.csv\"`")
+                    );
                 };
                 self.bump();
                 self.expect_eol()?;
                 self.once(&mut found.read, "read", Text(text), self.loc_from(line.body))
             }
             "run" => self.raw_line(&mut found.run, "run", "expected-command", "the command to run"),
-            "into" => self.raw_line(&mut found.into, "into", "expected-path", "where to write, like `prices/{year}.ax`"),
+            "into" => {
+                self.raw_line(&mut found.into, "into", "expected-path", "where to write, like `prices/{year}.ax`")
+            }
             "format" => {
                 self.bump();
                 let name = self.name("expected-name", "the format's name, such as `csv`")?;
@@ -108,7 +112,13 @@ impl<'s> Parser<'s> {
     }
 
     /// A sync line that is a word and the raw text after it.
-    fn raw_line(&mut self, slot: &mut Option<(Text<'s>, Loc)>, word: &str, code: &'static str, what: &str) -> Parse<()> {
+    fn raw_line(
+        &mut self,
+        slot: &mut Option<(Text<'s>, Loc)>,
+        word: &str,
+        code: &'static str,
+        what: &str,
+    ) -> Parse<()> {
         let keyword = self.bump().loc;
         let Some(text) = self.lexer.raw_rest() else { return Err(self.expected(code, what)) };
         let at = keyword.to(self.loc_of(&text));
@@ -119,14 +129,19 @@ impl<'s> Parser<'s> {
     /// named for what it feeds now, and says where it writes with `into`.
     fn sync_file(&self, name: Name<'s>) -> Diagnostic {
         let start = self.loc_of(&name);
-        let len = self.src[start.start as usize..].find([' ', '\t', '\r', '\n']).unwrap_or(self.src.len() - start.start as usize);
+        let len = self.src[start.start as usize..]
+            .find([' ', '\t', '\r', '\n'])
+            .unwrap_or(self.src.len() - start.start as usize);
         let file = Loc::new(self.id, start.start, start.start + len as u32);
         let written = self.text(file);
         let feeds = name.split('/').next().unwrap_or(&name);
-        Diagnostic::error("sync-file", format!("a sync is named for what it feeds, not for the file `{written}` it writes"))
-            .label(file, "a file is `into`, on a line of its own")
-            .note("`sync prices` names the source, and its lines say `run` a command and `into` a file")
-            .fix(format!("name it `{feeds}` and say where it writes"), file, format!("{feeds}\n  into {written}"))
+        Diagnostic::error(
+            "sync-file",
+            format!("a sync is named for what it feeds, not for the file `{written}` it writes"),
+        )
+        .label(file, "a file is `into`, on a line of its own")
+        .note("`sync prices` names the source, and its lines say `run` a command and `into` a file")
+        .fix(format!("name it `{feeds}` and say where it writes"), file, format!("{feeds}\n  into {written}"))
     }
 
     // ─── Formats ────────────────────────────────────────────────────────────
@@ -298,7 +313,11 @@ impl<'s> Parser<'s> {
             let spaced = base.replace('/', " / ");
             let diag = Diagnostic::error("pattern-slash", "a choice is written with a blank on each side of `/`")
                 .label(token.loc, "this reads as one name")
-                .fix("write the choice apart", Loc::new(self.id, token.loc.start, token.loc.start + base.len() as u32), spaced);
+                .fix(
+                    "write the choice apart",
+                    Loc::new(self.id, token.loc.start, token.loc.start + base.len() as u32),
+                    spaced,
+                );
             return self.fail(diag);
         }
         let atom = match Class::WORDS.iter().find(|(known, _)| *known == base) {
@@ -310,7 +329,8 @@ impl<'s> Parser<'s> {
 
     fn pattern_expected(&mut self) -> Reported {
         let token = self.peek();
-        let mut diag = self.unexpected(token, "expected-pattern", "a string, a class such as `digit`, a pattern's name or `(`");
+        let mut diag =
+            self.unexpected(token, "expected-pattern", "a string, a class such as `digit`, a pattern's name or `(`");
         if let Tok::Unit(_) = token.tok {
             diag = diag.help("text is written in quotes: `\"INV-\"`");
         }

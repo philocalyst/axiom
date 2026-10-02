@@ -36,16 +36,10 @@ impl Variable {
 /// offsets its purpose in the month it is recognized.
 fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
     let book = lens.book();
-    let none = Variable {
-        amounts: Vec::new(),
-        categories: Vec::new(),
-        months: 0,
-    };
+    let none = Variable { amounts: Vec::new(), categories: Vec::new(), months: 0 };
     let first = postings(book, run)
         .filter(|posting| posting.is_real_on(run.today) && !explained(posting.flow))
-        .filter_map(|posting| {
-            spending_category(lens, posting.flow).map(|_| posting.flow.recognized.first())
-        })
+        .filter_map(|posting| spending_category(lens, posting.flow).map(|_| posting.flow.recognized.first()))
         .min();
     let Some(first) = first else { return none };
     let last_full_month = run.today.month_start().add_days(-1);
@@ -57,27 +51,18 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     let mut categories: BTreeMap<Id<Purpose>, usize> = BTreeMap::new();
     let mut amounts = Vec::new();
     let mut shares = crate::flow::MovementShares::default();
-    for posting in postings(book, run)
-        .filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow))
+    for posting in postings(book, run).filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow))
     {
         let Some(category) = spending_category(lens, posting.flow) else {
             continue;
         };
-        let Some(amount) = crate::flow::movement_in_base_with(
-            lens,
-            posting,
-            Some(PurposeRoot::Spending),
-            &mut shares,
-        ) else {
+        let Some(amount) = crate::flow::movement_in_base_with(lens, posting, Some(PurposeRoot::Spending), &mut shares)
+        else {
             continue;
         };
-        for month in months.overlapping(
-            posting.flow.recognized.first(),
-            posting.flow.recognized.last(),
-        ) {
+        for month in months.overlapping(posting.flow.recognized.first(), posting.flow.recognized.last()) {
             let window = months.window(month).days();
-            let Some(happened) = Days::new(window.first(), window.last().min(last_full_month))
-            else {
+            let Some(happened) = Days::new(window.first(), window.last().min(last_full_month)) else {
                 continue;
             };
             let part = spread(amount, posting.flow.recognized, happened);
@@ -89,11 +74,7 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
             amounts[index * months.len() + month] += part.0;
         }
     }
-    Variable {
-        amounts,
-        categories: categories.into_values().collect(),
-        months: months.len(),
-    }
+    Variable { amounts, categories: categories.into_values().collect(), months: months.len() }
 }
 
 /// The first purpose beneath `spending`, if the flow moves through an owned
@@ -149,8 +130,7 @@ opening 2026-01-01
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
             let whose = Whose::default();
             let plan = axiom_engine::Plan::new(book);
-            let variable =
-                Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
+            let variable = Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [10_000; 4]);
             assert_eq!(variable.months, 4);
@@ -184,8 +164,7 @@ opening 2026-01-01
             let theo = book.entity("theo").unwrap();
             let whose = Whose::of(book, theo);
             let plan = axiom_engine::Plan::new(book);
-            let variable =
-                Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
+            let variable = Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [1, 1, 0, 1]);
             assert_eq!(variable.months, 4);

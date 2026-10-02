@@ -104,23 +104,12 @@ pub fn plan<'b, 's>(
     let selected = selected_sources(book, wanted)?;
     let mut world = binding::world(book, run, project_paths)?;
     let mut base_files: Map<String, Result<Option<FileId>, Diagnostic>> = Map::default();
-    let mut work: Vec<WorkSource> = selected
-        .iter()
-        .map(|&index| WorkSource {
-            index,
-            items: Vec::new(),
-        })
-        .collect();
+    let mut work: Vec<WorkSource> = selected.iter().map(|&index| WorkSource { index, items: Vec::new() }).collect();
 
     let mut commands = Vec::new();
     let mut command_for_work = Vec::new();
     let units = command_units(book, run);
-    let first = book
-        .flows
-        .iter()
-        .map(|(_, flow)| flow.day)
-        .min()
-        .unwrap_or(today);
+    let first = book.flows.iter().map(|(_, flow)| flow.day).min().unwrap_or(today);
 
     for (work_index, current) in work.iter_mut().enumerate() {
         let source = &book.sources[current.index];
@@ -132,30 +121,25 @@ pub fn plan<'b, 's>(
                         path: pattern.to_string(),
                         input: InputText::Failed(SourceFailure::Read(problem)),
                     }),
-                    Ok(paths) if paths.is_empty() => current.items.push(WorkItem {
-                        path: pattern.to_string(),
-                        input: InputText::Missing,
-                    }),
+                    Ok(paths) if paths.is_empty() => {
+                        current.items.push(WorkItem { path: pattern.to_string(), input: InputText::Missing })
+                    }
                     Ok(paths) => {
                         for path in paths {
                             match cached_read(&path, &mut base_files, registry) {
-                                Ok(Some(file)) => current.items.push(WorkItem {
-                                    path,
-                                    input: InputText::Local { file },
-                                }),
+                                Ok(Some(file)) => {
+                                    current.items.push(WorkItem { path, input: InputText::Local { file } })
+                                }
                                 Ok(None) => current.items.push(WorkItem {
                                     path: path.clone(),
-                                    input: InputText::Failed(SourceFailure::Read(
-                                        Diagnostic::error(
-                                            "sync-read-file",
-                                            format!("could not read `{path}`"),
-                                        ),
-                                    )),
+                                    input: InputText::Failed(SourceFailure::Read(Diagnostic::error(
+                                        "sync-read-file",
+                                        format!("could not read `{path}`"),
+                                    ))),
                                 }),
-                                Err(problem) => current.items.push(WorkItem {
-                                    path,
-                                    input: InputText::Failed(SourceFailure::Read(problem)),
-                                }),
+                                Err(problem) => current
+                                    .items
+                                    .push(WorkItem { path, input: InputText::Failed(SourceFailure::Read(problem)) }),
                             }
                         }
                     }
@@ -182,10 +166,7 @@ pub fn plan<'b, 's>(
         let input = match result {
             Ok(text) => match registry.generated(&path, text) {
                 Ok(file) => {
-                    generated.push(GeneratedSource {
-                        file,
-                        path: path.clone(),
-                    });
+                    generated.push(GeneratedSource { file, path: path.clone() });
                     InputText::Local { file }
                 }
                 Err(problem) => InputText::Failed(SourceFailure::Generated(problem)),
@@ -272,9 +253,8 @@ pub fn plan<'b, 's>(
                 }
             };
 
-            if let Some(problem) = sink_target_paths(book, source, text, file_paths, &world.layout)
-                .into_iter()
-                .find_map(|path| {
+            if let Some(problem) =
+                sink_target_paths(book, source, text, file_paths, &world.layout).into_iter().find_map(|path| {
                     if overlay.contains_key(&path) {
                         return None;
                     }
@@ -294,17 +274,8 @@ pub fn plan<'b, 's>(
             }
 
             let is_feed = matches!(&source.sink, ModelSink::Feed { .. });
-            let planned = source_inserts(
-                book,
-                &mut world,
-                source,
-                text,
-                file,
-                file_paths,
-                &overlay,
-                &base_files,
-                registry,
-            );
+            let planned =
+                source_inserts(book, &mut world, source, text, file, file_paths, &overlay, &base_files, registry);
             match planned {
                 Err(problems) => results[source_index].push(SourceResult {
                     source: source_name.clone(),
@@ -316,19 +287,18 @@ pub fn plan<'b, 's>(
                     if is_feed {
                         let mut targets: Map<&str, ()> = Map::default();
                         for insert in &inserts {
-                            if !overlay.contains_key(&insert.path)
-                                && targets.insert(insert.path.as_str(), ()).is_none()
+                            if !overlay.contains_key(&insert.path) && targets.insert(insert.path.as_str(), ()).is_none()
                             {
                                 let _ = cached_read(&insert.path, &mut base_files, registry);
                             }
                         }
                     }
-                    if let Some(problem) = inserts
-                        .iter()
-                        .filter(|insert| !overlay.contains_key(&insert.path))
-                        .find_map(|insert| match base_files.get(&insert.path) {
-                            Some(Err(problem)) => Some(problem.clone()),
-                            _ => None,
+                    if let Some(problem) =
+                        inserts.iter().filter(|insert| !overlay.contains_key(&insert.path)).find_map(|insert| {
+                            match base_files.get(&insert.path) {
+                                Some(Err(problem)) => Some(problem.clone()),
+                                _ => None,
+                            }
                         })
                     {
                         results[source_index].push(SourceResult {
@@ -347,9 +317,7 @@ pub fn plan<'b, 's>(
                     };
                     let previewed = preview(&inserts, &mut read_virtual);
                     drop(read_virtual);
-                    match previewed
-                        .and_then(|updates| validate_updates(updates, registry, &mut generated))
-                    {
+                    match previewed.and_then(|updates| validate_updates(updates, registry, &mut generated)) {
                         Err(problems) => {
                             results[source_index].push(SourceResult {
                                 source: source_name.clone(),
@@ -386,30 +354,23 @@ pub fn plan<'b, 's>(
     let mut read_base = |path: &str| cached_text(path, &base_files, registry).map(Cow::Borrowed);
     let previewed = preview(&all_inserts, &mut read_base);
     drop(read_base);
-    let (changes, problems) =
-        match previewed.and_then(|updates| validate_updates(updates, registry, &mut generated)) {
-            Ok(updates) => (
-                updates
-                    .into_iter()
-                    .map(|update| Change {
-                        before: cached_text(&update.path, &base_files, registry).map(str::to_owned),
-                        path: update.path,
-                        after: update.after,
-                    })
-                    .collect(),
-                Vec::new(),
-            ),
-            Err(problems) => (Vec::new(), problems),
-        };
+    let (changes, problems) = match previewed.and_then(|updates| validate_updates(updates, registry, &mut generated)) {
+        Ok(updates) => (
+            updates
+                .into_iter()
+                .map(|update| Change {
+                    before: cached_text(&update.path, &base_files, registry).map(str::to_owned),
+                    path: update.path,
+                    after: update.after,
+                })
+                .collect(),
+            Vec::new(),
+        ),
+        Err(problems) => (Vec::new(), problems),
+    };
     let incomplete = monitor_gaps(book, run);
 
-    Ok(PlanOutcome {
-        sources: results.into_iter().flatten().collect(),
-        changes,
-        problems,
-        incomplete,
-        generated,
-    })
+    Ok(PlanOutcome { sources: results.into_iter().flatten().collect(), changes, problems, incomplete, generated })
 }
 
 fn selected_sources(book: &Book<'_>, wanted: &[&str]) -> Result<Vec<usize>, Diagnostic> {
@@ -418,10 +379,7 @@ fn selected_sources(book: &Book<'_>, wanted: &[&str]) -> Result<Vec<usize>, Diag
     }
     let mut selected = Vec::with_capacity(wanted.len());
     for &name in wanted {
-        let Some(index) = book
-            .sources
-            .iter()
-            .position(|source| book.name(source.name).eq_ignore_ascii_case(name))
+        let Some(index) = book.sources.iter().position(|source| book.name(source.name).eq_ignore_ascii_case(name))
         else {
             return Err(Diagnostic::error(
                 "sync-no-such-source",
@@ -436,12 +394,7 @@ fn selected_sources(book: &Book<'_>, wanted: &[&str]) -> Result<Vec<usize>, Diag
     Ok(selected)
 }
 
-fn queue_command(
-    commands: &mut Vec<String>,
-    command_for_work: &mut Vec<usize>,
-    work_index: usize,
-    command: String,
-) {
+fn queue_command(commands: &mut Vec<String>, command_for_work: &mut Vec<usize>, work_index: usize, command: String) {
     commands.push(command);
     command_for_work.push(work_index);
 }
@@ -477,9 +430,7 @@ fn validate_updates(
     for update in &updates {
         if let Err(unlocated) = validate_text_at(&update.path, &update.after, FileId(0)) {
             let path = format!("<sync planned {}>", update.path);
-            let file = registry
-                .generated(&path, update.after.clone())
-                .map_err(|problem| vec![problem])?;
+            let file = registry.generated(&path, update.after.clone()).map_err(|problem| vec![problem])?;
             generated.push(GeneratedSource { file, path });
             match validate_text_at(&update.path, &update.after, file) {
                 Ok(()) => unreachable!("the same planned text was just validated"),
@@ -490,19 +441,12 @@ fn validate_updates(
             }
         }
     }
-    if problems.is_empty() {
-        Ok(updates)
-    } else {
-        Err(problems)
-    }
+    if problems.is_empty() { Ok(updates) } else { Err(problems) }
 }
 
 fn command_units<'s>(book: &Book<'s>, run: &EngineRun) -> Vec<&'s str> {
-    let mut units: Vec<_> = run
-        .holdings
-        .iter()
-        .map(|holding| book.name(book.commodities[holding.unit].symbol))
-        .collect();
+    let mut units: Vec<_> =
+        run.holdings.iter().map(|holding| book.name(book.commodities[holding.unit].symbol)).collect();
     units.sort_unstable();
     units.dedup();
     units
@@ -513,10 +457,7 @@ fn source_since(book: &Book<'_>, world: &World<'_, '_>, source: &ModelSource, fi
         return first;
     };
     let name = book.name(book.places[*account].path);
-    world
-        .accounts
-        .get(name)
-        .map_or(first, |account| account.since(first))
+    world.accounts.get(name).map_or(first, |account| account.since(first))
 }
 
 fn sink_target_paths(
@@ -536,14 +477,7 @@ fn sink_target_paths(
                 return Vec::new();
             };
             if crate::paths::is_project_path(path) {
-                sink::target_paths(
-                    Sink::Param {
-                        name: book.name(value.name),
-                        path,
-                    },
-                    output,
-                    layout,
-                )
+                sink::target_paths(Sink::Param { name: book.name(value.name), path }, output, layout)
             } else {
                 Vec::new()
             }
@@ -573,10 +507,7 @@ fn source_inserts<'b, 's>(
             let Some(format) = book.formats.get(format_id) else {
                 return Err(vec![Diagnostic::error(
                     "sync-no-format",
-                    format!(
-                        "`{}` refers to a format that is not in the book",
-                        book.name(source.name)
-                    ),
+                    format!("`{}` refers to a format that is not in the book", book.name(source.name)),
                 )]);
             };
             let place = &book.places[*account];
@@ -590,64 +521,34 @@ fn source_inserts<'b, 's>(
             let commodity = &book.commodities[owner.currency];
             let feed = Feed {
                 account: book.name(place.path),
-                unit: Unit {
-                    name: book.name(commodity.symbol),
-                    scale: commodity.scale,
-                },
+                unit: Unit { name: book.name(commodity.symbol), scale: commodity.scale },
                 format,
             };
-            world
-                .plan_feed_at(&feed, text, file)
-                .map(|(inserts, delta)| (inserts, Some(delta)))
+            world.plan_feed_at(&feed, text, file).map(|(inserts, delta)| (inserts, Some(delta)))
         }
-        ModelSink::Journal => merge(Sink::Journal, text, file, world, overlay, cache, registry)
-            .map(|inserts| (inserts, None)),
+        ModelSink::Journal => {
+            merge(Sink::Journal, text, file, world, overlay, cache, registry).map(|inserts| (inserts, None))
+        }
         ModelSink::File(path) => {
             let path = book.text(*path);
-            merge(
-                Sink::File(path),
-                text,
-                file,
-                world,
-                overlay,
-                cache,
-                registry,
-            )
-            .map(|inserts| (inserts, None))
+            merge(Sink::File(path), text, file, world, overlay, cache, registry).map(|inserts| (inserts, None))
         }
         ModelSink::Param(param) => {
             let value = &book.params[*param];
             let Some(path) = file_paths.get(value.loc.file.0 as usize).copied() else {
                 return Err(vec![Diagnostic::error(
                     "sync-param-file",
-                    format!(
-                        "the declaration for `param {}` has no project source path",
-                        book.name(value.name)
-                    ),
+                    format!("the declaration for `param {}` has no project source path", book.name(value.name)),
                 )]);
             };
             if !crate::paths::is_project_path(path) {
                 return Err(vec![Diagnostic::error(
                     "sync-param-file",
-                    format!(
-                        "`param {}` is declared in a non-project file",
-                        book.name(value.name)
-                    ),
+                    format!("`param {}` is declared in a non-project file", book.name(value.name)),
                 )]);
             }
-            merge(
-                Sink::Param {
-                    name: book.name(value.name),
-                    path,
-                },
-                text,
-                file,
-                world,
-                overlay,
-                cache,
-                registry,
-            )
-            .map(|inserts| (inserts, None))
+            merge(Sink::Param { name: book.name(value.name), path }, text, file, world, overlay, cache, registry)
+                .map(|inserts| (inserts, None))
         }
     }
 }
@@ -697,9 +598,9 @@ mod tests {
     use std::path::Path;
 
     use axiom_core::{Day, Diagnostic, FileId};
-    use axiom_syntax::Folder;
     use axiom_engine::{Options, Plan};
     use axiom_model::Source;
+    use axiom_syntax::Folder;
 
     use super::{SourceRegistry, plan};
 
@@ -715,16 +616,12 @@ mod tests {
         }
 
         fn text(&self, file: FileId) -> Option<&str> {
-            self.files
-                .iter()
-                .find(|(id, _, _)| *id == file)
-                .map(|(_, _, text)| text.as_str())
+            self.files.iter().find(|(id, _, _)| *id == file).map(|(_, _, text)| text.as_str())
         }
 
         fn generated(&mut self, path: &str, text: String) -> Result<FileId, Diagnostic> {
             let file = FileId(
-                u16::try_from(self.next)
-                    .map_err(|_| Diagnostic::error("sync-file-limit", "too many source files"))?,
+                u16::try_from(self.next).map_err(|_| Diagnostic::error("sync-file-limit", "too many source files"))?,
             );
             self.next += 1;
             self.files.push((file, path.to_string(), text));
@@ -752,28 +649,14 @@ mod tests {
         let (axiom_file, diagnostics) = axiom_syntax::parse(FileId(1), axiom, Folder::default());
         assert!(diagnostics.is_empty(), "axiom.ax: {diagnostics:?}");
         let sources = [
-            Source {
-                path: "std.ax",
-                file: std_file,
-                embedded: true,
-            },
-            Source {
-                path: "axiom.ax",
-                file: axiom_file,
-                embedded: false,
-            },
+            Source { path: "std.ax", file: std_file, embedded: true },
+            Source { path: "axiom.ax", file: axiom_file, embedded: false },
         ];
         let (book, diagnostics) = axiom_model::build(&sources);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let today = Day::parse(b"2026-01-10").unwrap();
-        let run = Plan::new(&book).run(Options {
-            today,
-            relaxed: false,
-        });
-        let mut registry = Registry {
-            next: u32::try_from(sources.len()).unwrap(),
-            ..Registry::default()
-        };
+        let run = Plan::new(&book).run(Options { today, relaxed: false });
+        let mut registry = Registry { next: u32::try_from(sources.len()).unwrap(), ..Registry::default() };
         let outcome = plan(
             &book,
             &run,
@@ -790,44 +673,27 @@ mod tests {
             outcome.sources.len(),
             3,
             "{:?}",
-            outcome
-                .sources
-                .iter()
-                .map(|s| (&s.source, &s.path, s.added))
-                .collect::<Vec<_>>()
+            outcome.sources.iter().map(|s| (&s.source, &s.path, s.added)).collect::<Vec<_>>()
         );
         assert_eq!(outcome.sources[0].source, "first");
         assert_eq!(outcome.sources[0].added, 1);
         assert_eq!(outcome.sources[1].source, "second");
         assert_eq!(outcome.sources[1].added, 1);
         assert_eq!(outcome.sources[2].source, "bad");
-        assert!(matches!(
-            outcome.sources[2].failure.as_ref(),
-            Some(super::SourceFailure::Output(_))
-        ));
+        assert!(matches!(outcome.sources[2].failure.as_ref(), Some(super::SourceFailure::Output(_))));
         assert_eq!(outcome.generated.len(), 3);
         assert_ne!(outcome.generated[0].file, outcome.generated[1].file);
-        assert_eq!(
-            registry.text(outcome.generated[0].file),
-            Some("2026-01-02 checking -> food 10 USD\n")
-        );
-        assert_eq!(
-            registry.text(outcome.generated[1].file),
-            Some("2026-01-03 checking -> food 20 USD\n")
-        );
+        assert_eq!(registry.text(outcome.generated[0].file), Some("2026-01-02 checking -> food 10 USD\n"));
+        assert_eq!(registry.text(outcome.generated[1].file), Some("2026-01-03 checking -> food 20 USD\n"));
         assert_eq!(
             registry.text(outcome.generated[2].file),
             Some("2026-01-03 checking -> food 2 USD\n2026-01-04 checking -> food 1 USD )\n")
         );
-        let Some(super::SourceFailure::Output(problems)) = outcome.sources[2].failure.as_ref()
-        else {
+        let Some(super::SourceFailure::Output(problems)) = outcome.sources[2].failure.as_ref() else {
             panic!("the malformed output should retain its parser diagnostic")
         };
         let problem = problems.first().expect("a malformed item is diagnosed");
-        let label = problem
-            .labels
-            .first()
-            .expect("syntax diagnostics identify the offending text");
+        let label = problem.labels.first().expect("syntax diagnostics identify the offending text");
         assert_eq!(label.loc.file, outcome.generated[2].file);
         let output = registry.text(outcome.generated[2].file).unwrap();
         let slice = &output[label.loc.range()];
@@ -837,11 +703,7 @@ mod tests {
         );
         assert!(slice.contains(')'), "label {label:?} points to {slice:?}");
         assert_eq!(
-            outcome
-                .changes
-                .iter()
-                .map(|change| change.path.as_str())
-                .collect::<Vec<_>>(),
+            outcome.changes.iter().map(|change| change.path.as_str()).collect::<Vec<_>>(),
             ["first.ax", "second.ax"]
         );
     }

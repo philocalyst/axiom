@@ -3,7 +3,6 @@
 use axiom_core::Id;
 use axiom_model::{Book, Flow, Place};
 
-
 /// A place's full path.
 pub fn path<'s>(book: &'s Book<'_>, place: Id<Place>) -> &'s str {
     book.name(book.places[place].path)

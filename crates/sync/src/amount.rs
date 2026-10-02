@@ -14,17 +14,9 @@ pub enum Why {
 
 impl Why {
     /// The problem, in `place` (`row 3`): `text` is at `at`, and `label` says what it is.
-    pub fn diagnostic(
-        self,
-        place: &str,
-        at: Loc,
-        label: String,
-        text: &str,
-        unit: Unit,
-    ) -> Diagnostic {
-        let error = |headline: String| {
-            Diagnostic::error("bad-amount", format!("{place}: {headline}")).label(at, label.clone())
-        };
+    pub fn diagnostic(self, place: &str, at: Loc, label: String, text: &str, unit: Unit) -> Diagnostic {
+        let error =
+            |headline: String| Diagnostic::error("bad-amount", format!("{place}: {headline}")).label(at, label.clone());
         match self {
             Why::Malformed { comma_decimal } => {
                 let error = error(format!("`{text}` is not an amount"));
@@ -35,14 +27,8 @@ impl Why {
                     false => error,
                 }
             }
-            Why::Precision => error(format!(
-                "`{text}` has more decimal places than {} keeps",
-                unit.name
-            ))
-            .note(format!(
-                "{} is counted to {} decimal places",
-                unit.name, unit.scale
-            )),
+            Why::Precision => error(format!("`{text}` has more decimal places than {} keeps", unit.name))
+                .note(format!("{} is counted to {} decimal places", unit.name, unit.scale)),
             Why::Range => error(format!("`{text}` is too large to be an amount")),
         }
     }
@@ -69,10 +55,7 @@ pub fn amount(cell: &str, scale: u8) -> Result<Option<Qty>, Why> {
 /// parentheses make it so, and a currency sign is only decoration.
 fn sign(cell: &str) -> Result<(bool, &str), Why> {
     let cell = cell.trim();
-    let (parenthesized, mut rest) = match cell
-        .strip_prefix('(')
-        .and_then(|inner| inner.strip_suffix(')'))
-    {
+    let (parenthesized, mut rest) = match cell.strip_prefix('(').and_then(|inner| inner.strip_suffix(')')) {
         Some(inner) => (true, inner),
         None => (false, cell),
     };
@@ -82,9 +65,7 @@ fn sign(cell: &str) -> Result<(bool, &str), Why> {
             rest = rest[ch.len_utf8()..].trim_start();
         }
         if rest.starts_with(['+', '-', '$', '€', '£', '¥']) {
-            return Err(Why::Malformed {
-                comma_decimal: false,
-            });
+            return Err(Why::Malformed { comma_decimal: false });
         }
         return Ok((true, rest));
     }
@@ -105,9 +86,7 @@ fn sign(cell: &str) -> Result<(bool, &str), Why> {
         }
     }
     if rest.starts_with(['+', '-', '$', '€', '£', '¥']) {
-        return Err(Why::Malformed {
-            comma_decimal: false,
-        });
+        return Err(Why::Malformed { comma_decimal: false });
     }
     Ok((sign == Some('-'), rest))
 }
@@ -136,14 +115,9 @@ impl Digits {
             && !(whole.is_empty() && fraction.is_empty());
         if !sound {
             let tail = whole.rsplit_once(',').map_or(0, |(_, tail)| tail.len());
-            return Err(Why::Malformed {
-                comma_decimal: fraction.is_empty() && matches!(tail, 1 | 2),
-            });
+            return Err(Why::Malformed { comma_decimal: fraction.is_empty() && matches!(tail, 1 | 2) });
         }
-        let mut digits = Digits {
-            bytes: [0; 40],
-            len: 0,
-        };
+        let mut digits = Digits { bytes: [0; 40], len: 0 };
         if whole.is_empty() {
             digits.push(b'0')?;
         }
@@ -190,24 +164,13 @@ mod tests {
         assert_eq!(qty("1,234,567"), Some(123_456_700));
         assert_eq!(amount("", 2).ok(), Some(None));
         for bad in ["12,5", "1,23.00", "12.3.4", "abc", "$", "1 000", "1.234,56"] {
-            assert!(
-                matches!(amount(bad, 2), Err(Why::Malformed { .. })),
-                "{bad}"
-            );
+            assert!(matches!(amount(bad, 2), Err(Why::Malformed { .. })), "{bad}");
         }
         for bad in ["+-12", "-+12", "--12", "++12", "-$-12", "(-12)", "($-12)"] {
             assert!(matches!(amount(bad, 2), Err(Why::Malformed { .. })), "{bad}");
         }
         assert!(matches!(amount("0.005", 2), Err(Why::Precision)));
-        assert!(matches!(
-            amount("9".repeat(30).as_str(), 2),
-            Err(Why::Range)
-        ));
-        assert!(matches!(
-            amount("12,50", 2),
-            Err(Why::Malformed {
-                comma_decimal: true
-            })
-        ));
+        assert!(matches!(amount("9".repeat(30).as_str(), 2), Err(Why::Range)));
+        assert!(matches!(amount("12,50", 2), Err(Why::Malformed { comma_decimal: true })));
     }
 }

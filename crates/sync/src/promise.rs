@@ -50,11 +50,7 @@ fn keep_by(
     }
     let mut pairs = Vec::new();
     for (at, party) in parties.iter().enumerate() {
-        for &due_at in party
-            .and_then(|party| by_party.get(party))
-            .into_iter()
-            .flatten()
-        {
+        for &due_at in party.and_then(|party| by_party.get(party)).into_iter().flatten() {
             let (day, qty) = record_at(at);
             let due = &dues[due_at];
             let apart = (day.0 - due.day.0).abs();
@@ -83,43 +79,22 @@ mod tests {
     }
 
     fn due(party: &'static str, day: i32, cents: i64) -> Due<'static> {
-        Due {
-            contract: "flat",
-            party,
-            account: "checking",
-            day: Day(day),
-            qty: Qty(cents),
-            window: 15,
-        }
+        Due { contract: "flat", party, account: "checking", day: Day(day), qty: Qty(cents), window: 15 }
     }
 
     #[test]
     fn a_record_within_half_a_cadence_keeps_the_nearest_occurrence() {
         let dues = [due("greystar", 1, -290_000), due("greystar", 31, -290_000)];
         let parties = [Some("greystar"), Some("greystar"), Some("greystar")];
-        let records = [
-            record(3, -290_000),
-            record(28, -290_000),
-            record(60, -290_000),
-        ];
+        let records = [record(3, -290_000), record(28, -290_000), record(60, -290_000)];
         assert_eq!(keep(&records, &parties, &dues), [Some(0), Some(1), None]);
     }
 
     #[test]
     fn each_occurrence_is_kept_once_and_only_by_money_going_the_right_way() {
         let dues = [due("greystar", 1, -290_000)];
-        let parties = [
-            Some("greystar"),
-            Some("greystar"),
-            Some("greystar"),
-            Some("lumen"),
-        ];
-        let records = [
-            record(2, -290_000),
-            record(3, -290_000),
-            record(1, 290_000),
-            record(1, -290_000),
-        ];
+        let parties = [Some("greystar"), Some("greystar"), Some("greystar"), Some("lumen")];
+        let records = [record(2, -290_000), record(3, -290_000), record(1, 290_000), record(1, -290_000)];
         assert_eq!(keep(&records, &parties, &dues), [Some(0), None, None, None]);
     }
 
@@ -127,9 +102,6 @@ mod tests {
     fn a_different_amount_still_keeps_it_and_a_stranger_does_not() {
         let dues = [due("greystar", 1, -290_000)];
         let records = [record(1, -291_860), record(1, -290_000)];
-        assert_eq!(
-            keep(&records, &[Some("greystar"), None], &dues),
-            [Some(0), None]
-        );
+        assert_eq!(keep(&records, &[Some("greystar"), None], &dues), [Some(0), None]);
     }
 }

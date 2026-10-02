@@ -384,7 +384,6 @@ tables! {
     names: Name<'s>,
 }
 
-
 // ─── Items ──────────────────────────────────────────────────────────────────
 
 /// A top-level item: a column-0 line and the indented block under it.

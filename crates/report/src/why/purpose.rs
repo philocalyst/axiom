@@ -16,20 +16,10 @@ use crate::table::year_days;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Resolves a purpose and gathers its rules, budgets, year total and parties.
-pub fn report<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    target: &str,
-) -> Result<Report<'s>, axiom_core::Diagnostic> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, target: &str) -> Result<Report<'s>, axiom_core::Diagnostic> {
     let book = lens.book();
     let purpose = book.purpose(target).map_err(|_| {
-        resolve::nothing_named(
-            "purpose",
-            target,
-            book.purposes
-                .values()
-                .map(|purpose| book.name(purpose.name)),
-        )
+        resolve::nothing_named("purpose", target, book.purposes.values().map(|purpose| book.name(purpose.name)))
     })?;
     let year = run.today.year();
     let year_window = year_days(year).unwrap_or(Days::ALWAYS);
@@ -44,13 +34,9 @@ pub fn report<'s>(
     laws.sort_unstable();
     laws.dedup();
 
-    let mut about =
-        Section::new([Column::left("Purpose"), Column::left("Value")]).headed("Purpose");
+    let mut about = Section::new([Column::left("Purpose"), Column::left("Value")]).headed("Purpose");
     let item = &book.purposes[purpose];
-    about.push(Row::new([
-        Cell::Name(book.name(item.name)),
-        Cell::Word(root_name(item.root)),
-    ]));
+    about.push(Row::new([Cell::Name(book.name(item.name)), Cell::Word(root_name(item.root))]));
     if let Some(doc) = item.doc {
         for line in crate::table::doc_lines(book.name(doc)) {
             about.note(Cell::Said(std::borrow::Cow::Owned(line.to_owned())));
@@ -58,14 +44,9 @@ pub fn report<'s>(
     }
 
     let all_headroom = current(book, run, year_window.first(), cutoff);
-    let governing = laws
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
+    let governing = laws.iter().copied().collect::<std::collections::BTreeSet<_>>();
     let readings = latest(
-        all_headroom
-            .iter()
-            .filter(|reading| governing.contains(&reading.law) && lens.owns_entity(reading.owner)),
+        all_headroom.iter().filter(|reading| governing.contains(&reading.law) && lens.owns_entity(reading.owner)),
     );
     let mut limits = Section::new([
         Column::left("Law"),
@@ -84,12 +65,8 @@ pub fn report<'s>(
 
     let budgets = budget_section(lens, run, purpose, year_window);
     let (total, parties, unpriced) = totals(book, run, lens, purpose, period, cutoff);
-    let mut activity =
-        Section::new([Column::left("This year"), Column::right("Amount")]).headed("Activity");
-    activity.push(Row::new([
-        Cell::Name(book.name(item.name)),
-        Cell::base(book, total),
-    ]));
+    let mut activity = Section::new([Column::left("This year"), Column::right("Amount")]).headed("Activity");
+    activity.push(Row::new([Cell::Name(book.name(item.name)), Cell::base(book, total)]));
     activity.fact(
         root_fact(item.root),
         Some(book.name(item.name)),
@@ -97,8 +74,7 @@ pub fn report<'s>(
         crate::When::During(period.window(0).days()),
         crate::Money::base(book, total),
     );
-    let mut largest =
-        Section::new([Column::left("Party"), Column::right("Amount")]).headed("Largest parties");
+    let mut largest = Section::new([Column::left("Party"), Column::right("Amount")]).headed("Largest parties");
     for (name, amount) in parties.into_iter().take(10) {
         largest.push(Row::new([Cell::Name(name), Cell::base(book, amount)]));
     }
@@ -116,12 +92,7 @@ pub fn report<'s>(
         .with(largest))
 }
 
-fn budget_section<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    purpose: Id<Purpose>,
-    days: Days,
-) -> Section<'s> {
+fn budget_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, purpose: Id<Purpose>, days: Days) -> Section<'s> {
     let book = lens.book();
     let mut section = Section::new([
         Column::left("Purpose"),
@@ -133,29 +104,19 @@ fn budget_section<'s>(
     ])
     .headed("Budgets");
     let readings = current(book, run, days.first(), days.last());
-    let budgets = book
-        .budgets
-        .values()
-        .filter(|budget| book.purposes.covers(purpose, budget.purpose));
+    let budgets = book.budgets.values().filter(|budget| book.purposes.covers(purpose, budget.purpose));
     for budget in budgets {
         let Some(active_days) = Days::new(days.first().max(budget.starts), days.last()) else {
             continue;
         };
         for (stretch, terms) in budget.terms.within(active_days) {
-            let visible = Days::new(
-                stretch.first().max(active_days.first()),
-                stretch.last().min(active_days.last()),
-            )
-            .expect("the timeline stretch intersects the budget window");
+            let visible = Days::new(stretch.first().max(active_days.first()), stretch.last().min(active_days.last()))
+                .expect("the timeline stretch intersects the budget window");
             section.push(Row::new([
                 Cell::Name(book.name(book.purposes[budget.purpose].name)),
                 Cell::Period(visible),
                 budget_limit(book, terms.limit),
-                Cell::Word(if terms.carries {
-                    "carries"
-                } else {
-                    "within window"
-                }),
+                Cell::Word(if terms.carries { "carries" } else { "within window" }),
                 Cell::Blank,
                 Cell::Blank,
             ]));
@@ -163,9 +124,7 @@ fn budget_section<'s>(
         let mut matching = readings
             .iter()
             .filter(|reading| {
-                reading.law == budget.law
-                    && reading.day >= budget.starts
-                    && lens.owns_entity(reading.owner)
+                reading.law == budget.law && reading.day >= budget.starts && lens.owns_entity(reading.owner)
             })
             .collect::<Vec<_>>();
         matching.sort_by_key(|reading| reading.days.first());
@@ -174,11 +133,7 @@ fn budget_section<'s>(
                 Cell::Name(book.name(book.purposes[budget.purpose].name)),
                 Cell::text(window_words(reading)),
                 Cell::amount(book, reading.limit),
-                Cell::Word(if budget.terms.at(reading.day).carries {
-                    "carries"
-                } else {
-                    "within window"
-                }),
+                Cell::Word(if budget.terms.at(reading.day).carries { "carries" } else { "within window" }),
                 Cell::amount(book, reading.counted),
                 Cell::amount(book, Amount::new(room(reading), reading.limit.unit)),
             ]));
@@ -193,14 +148,9 @@ fn budget_section<'s>(
 fn budget_limit<'s>(book: &'s Book<'_>, limit: Limit) -> Cell<'s> {
     match limit {
         Limit::Amount(amount) => Cell::amount(book, amount),
-        Limit::Share { rate, of } => Cell::list(
-            " ",
-            [
-                Cell::Percent(rate),
-                Cell::Word("of"),
-                Cell::Purpose(book.name(book.purposes[of].name)),
-            ],
-        ),
+        Limit::Share { rate, of } => {
+            Cell::list(" ", [Cell::Percent(rate), Cell::Word("of"), Cell::Purpose(book.name(book.purposes[of].name))])
+        }
         Limit::Computed(_) => Cell::Word("calculated"),
     }
 }
@@ -213,11 +163,7 @@ fn headroom_row<'s>(book: &'s Book<'_>, reading: &Headroom) -> Row<'s> {
         Cell::amount(book, reading.limit),
         Cell::amount(book, Amount::new(room(reading), reading.limit.unit)),
     ])
-    .style(if room(reading).is_negative() {
-        Style::Alert
-    } else {
-        Style::Normal
-    })
+    .style(if room(reading).is_negative() { Style::Alert } else { Style::Normal })
 }
 
 fn totals<'s>(
@@ -243,44 +189,26 @@ fn totals<'s>(
         {
             continue;
         }
-        let Some(amount) = super::super::flow::movement_in_base_with(
-            lens,
-            posting,
-            Some(wanted_root),
-            &mut shares,
-        ) else {
+        let Some(amount) = super::super::flow::movement_in_base_with(lens, posting, Some(wanted_root), &mut shares)
+        else {
             unpriced += 1;
             continue;
         };
         let Some(happened) = Days::new(
-            periods
-                .window(0)
-                .days()
-                .first()
-                .max(flow.recognized.first()),
+            periods.window(0).days().first().max(flow.recognized.first()),
             cutoff.min(flow.recognized.last()),
         ) else {
             continue;
         };
         let amount = spread(amount, flow.recognized, happened);
         total += amount;
-        let other = if book.places[flow.from].class == axiom_model::Class::Outside {
-            flow.from
-        } else {
-            flow.to
-        };
-        let name = flow.payee.map_or_else(
-            || path(book, other),
-            |entity| book.name(book.entities[entity].path),
-        );
+        let other = if book.places[flow.from].class == axiom_model::Class::Outside { flow.from } else { flow.to };
+        let name = flow.payee.map_or_else(|| path(book, other), |entity| book.name(book.entities[entity].path));
         *parties.entry(name).or_default() += amount;
     }
     let mut parties = parties.into_iter().collect::<Vec<_>>();
     parties.sort_by(|(left_name, left), (right_name, right)| {
-        i128::from(right.0)
-            .abs()
-            .cmp(&i128::from(left.0).abs())
-            .then_with(|| left_name.cmp(right_name))
+        i128::from(right.0).abs().cmp(&i128::from(left.0).abs()).then_with(|| left_name.cmp(right_name))
     });
     (total, parties, unpriced)
 }

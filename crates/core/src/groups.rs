@@ -46,10 +46,7 @@ impl<K, V: Copy> Groups<K, V> {
     /// bucket and the second can fill the initialized output directly; callers
     /// with borrowed input can pass a cheap cloned iterator such as
     /// `items.iter().copied()`.
-    pub fn build(
-        keys: usize,
-        pairs: impl Iterator<Item = (Id<K>, V)> + Clone,
-    ) -> Groups<K, V> {
+    pub fn build(keys: usize, pairs: impl Iterator<Item = (Id<K>, V)> + Clone) -> Groups<K, V> {
         let mut starts = vec![0u32; keys + 1];
         let mut count = 0;
         let mut first = None;

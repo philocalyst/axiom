@@ -11,26 +11,17 @@ use crate::{Align, Cell, Column, Fact, Money, Report, Row, Section, Style, When}
 
 impl<'s> Column<'s> {
     pub fn left(title: impl Into<Cell<'s>>) -> Column<'s> {
-        Column {
-            title: title.into(),
-            align: Align::Left,
-        }
+        Column { title: title.into(), align: Align::Left }
     }
 
     pub fn right(title: impl Into<Cell<'s>>) -> Column<'s> {
-        Column {
-            title: title.into(),
-            align: Align::Right,
-        }
+        Column { title: title.into(), align: Align::Right }
     }
 }
 
 impl<'s> Report<'s> {
     pub fn new(title: impl Into<Cell<'s>>) -> Report<'s> {
-        Report {
-            title: title.into(),
-            sections: Vec::new(),
-        }
+        Report { title: title.into(), sections: Vec::new() }
     }
 
     /// Adds a section, skipping one that has nothing to show.
@@ -66,10 +57,7 @@ impl<'s> Section<'s> {
     }
 
     pub fn push(&mut self, row: Row<'s>) {
-        debug_assert!(
-            row.cells.len() <= self.columns.len(),
-            "a column for every cell"
-        );
+        debug_assert!(row.cells.len() <= self.columns.len(), "a column for every cell");
         let mut row = row;
         row.cells.resize_with(self.columns.len(), || Cell::Blank);
         self.rows.push(row);
@@ -84,41 +72,21 @@ impl<'s> Section<'s> {
         self.notes.push(note.into());
     }
 
-    pub fn fact(
-        &mut self,
-        concept: &'s str,
-        of: Option<&'s str>,
-        entity: &'s str,
-        when: When,
-        value: Money<'s>,
-    ) {
-        self.facts.push(Fact {
-            concept,
-            of,
-            entity,
-            when,
-            value,
-        });
+    pub fn fact(&mut self, concept: &'s str, of: Option<&'s str>, entity: &'s str, when: When, value: Money<'s>) {
+        self.facts.push(Fact { concept, of, entity, when, value });
     }
 
     /// Describes the count omitted from a total because no price was available.
     pub fn unpriced(&mut self, count: usize, noun: &'static str) {
         if count > 0 {
-            self.note([
-                Cell::Count(count, noun),
-                Cell::Word("left out for lack of a price."),
-            ]);
+            self.note([Cell::Count(count, noun), Cell::Word("left out for lack of a price.")]);
         }
     }
 }
 
 impl<'s> Row<'s> {
     pub fn new(cells: impl IntoIterator<Item = Cell<'s>>) -> Row<'s> {
-        Row {
-            depth: 0,
-            style: Style::Normal,
-            cells: cells.into_iter().collect(),
-        }
+        Row { depth: 0, style: Style::Normal, cells: cells.into_iter().collect() }
     }
 
     /// The leading cells, padded with blanks to `columns`.
@@ -146,11 +114,7 @@ impl<'s> Cell<'s> {
 
     pub fn amount(book: &'s Book<'_>, amount: Amount) -> Cell<'s> {
         let unit = &book.commodities[amount.unit];
-        Cell::Amount {
-            qty: amount.qty,
-            scale: unit.scale,
-            unit: book.name(unit.symbol),
-        }
+        Cell::Amount { qty: amount.qty, scale: unit.scale, unit: book.name(unit.symbol) }
     }
 
     /// An amount of the base currency.
@@ -160,22 +124,14 @@ impl<'s> Cell<'s> {
 
     /// The amount, or nothing for zero: statements read better without rows of `0.00`.
     pub fn base_or_blank(book: &'s Book<'_>, qty: Qty) -> Cell<'s> {
-        if qty.is_zero() {
-            Cell::Blank
-        } else {
-            Cell::base(book, qty)
-        }
+        if qty.is_zero() { Cell::Blank } else { Cell::base(book, qty) }
     }
 }
 
 impl<'s> Money<'s> {
     pub fn of(book: &'s Book<'_>, amount: Amount) -> Money<'s> {
         let unit = &book.commodities[amount.unit];
-        Money {
-            qty: amount.qty,
-            scale: unit.scale,
-            unit: book.name(unit.symbol),
-        }
+        Money { qty: amount.qty, scale: unit.scale, unit: book.name(unit.symbol) }
     }
 
     pub fn base(book: &'s Book<'_>, qty: Qty) -> Money<'s> {
@@ -220,16 +176,9 @@ impl<'s> Cell<'s> {
         Cell::Join(between, parts.into_iter().collect())
     }
 
-    pub fn list_or_blank(
-        between: &'static str,
-        parts: impl IntoIterator<Item = Cell<'s>>,
-    ) -> Cell<'s> {
+    pub fn list_or_blank(between: &'static str, parts: impl IntoIterator<Item = Cell<'s>>) -> Cell<'s> {
         let parts: Vec<Cell<'s>> = parts.into_iter().collect();
-        if parts.is_empty() {
-            Cell::Blank
-        } else {
-            Cell::Join(between, parts)
-        }
+        if parts.is_empty() { Cell::Blank } else { Cell::Join(between, parts) }
     }
 }
 
@@ -273,11 +222,7 @@ pub fn doc_headline(book: &Book, doc: Option<Sym>) -> Option<String> {
     let mut lines = doc_lines(book.name(doc?));
     let first = lines.next()?;
     let runs_on = lines.next().is_some_and(|next| !next.trim().is_empty());
-    Some(if runs_on {
-        format!("{first}…")
-    } else {
-        first.to_string()
-    })
+    Some(if runs_on { format!("{first}…") } else { first.to_string() })
 }
 
 /// Typed codes in source order. Renderers choose their native sigil (`^`).

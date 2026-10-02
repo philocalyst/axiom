@@ -157,17 +157,16 @@ impl Calc<'_, '_> {
         output: Option<Dim<Id<Commodity>>>,
     ) -> Result<Value, Fault> {
         match (left, right, ldim, rdim, output) {
-            (
-                Value::Amount(a),
-                Value::Amount(b),
-                Some(Dim::Of(from)),
-                Some(Dim::Of(by)),
-                Some(Dim::Per(out, over)),
-            ) if out == from && over == by => {
+            (Value::Amount(a), Value::Amount(b), Some(Dim::Of(from)), Some(Dim::Of(by)), Some(Dim::Per(out, over)))
+                if out == from && over == by =>
+            {
                 self.checked_amount_unit(a, from)?;
                 self.checked_amount_unit(b, by)?;
-                let ratio = Ratio::new(a.qty.0 as i128, b.qty.0 as i128)
-                    .ok_or(if b.qty.is_zero() { Fault::DivideByZero } else { Fault::Overflow })?;
+                let ratio = Ratio::new(a.qty.0 as i128, b.qty.0 as i128).ok_or(if b.qty.is_zero() {
+                    Fault::DivideByZero
+                } else {
+                    Fault::Overflow
+                })?;
                 Ok(Value::Num(ratio.checked_mul(self.unit_factor(from, by)?).ok_or(Fault::Overflow)?))
             }
             (Value::Amount(a), Value::Num(n), Some(Dim::Of(unit)), Some(Dim::Number), Some(Dim::Of(out)))
@@ -177,13 +176,9 @@ impl Calc<'_, '_> {
                 let by = n.recip().ok_or(Fault::DivideByZero)?;
                 Ok(Value::Amount(Amount::new(a.qty.scale(by).ok_or(Fault::Overflow)?, out)))
             }
-            (
-                Value::Amount(a),
-                Value::Num(rate),
-                Some(Dim::Of(from)),
-                Some(Dim::Per(per, to)),
-                Some(Dim::Of(out)),
-            ) if from == per && to == out => {
+            (Value::Amount(a), Value::Num(rate), Some(Dim::Of(from)), Some(Dim::Per(per, to)), Some(Dim::Of(out)))
+                if from == per && to == out =>
+            {
                 self.checked_amount_unit(a, from)?;
                 let inverse = rate.recip().ok_or(Fault::DivideByZero)?;
                 Ok(Value::Amount(Amount::new(self.scale_between(a.qty, inverse, from, to)?, to)))
@@ -195,11 +190,7 @@ impl Calc<'_, '_> {
     }
 
     fn checked_amount_unit(&self, amount: Amount, expected: Id<Commodity>) -> Result<(), Fault> {
-        if amount.unit == expected {
-            Ok(())
-        } else {
-            Err(Fault::UnitMismatch { found: amount.unit, expected })
-        }
+        if amount.unit == expected { Ok(()) } else { Err(Fault::UnitMismatch { found: amount.unit, expected }) }
     }
 
     fn scale_between(&self, qty: Qty, factor: Ratio, from: Id<Commodity>, to: Id<Commodity>) -> Result<Qty, Fault> {
@@ -324,7 +315,14 @@ pub(crate) fn progressive(brackets: &[Bracket], income: Qty) -> Option<Qty> {
 /// smaller windows cannot create or lose a cent. Mid-month lives have a
 /// half-month at each end and one extra calendar month to preserve the stated
 /// life.
-pub(crate) fn straight_line(cost: Qty, life: Span, from: Day, over: Days, period: Window, mid_month: bool) -> Option<Qty> {
+pub(crate) fn straight_line(
+    cost: Qty,
+    life: Span,
+    from: Day,
+    over: Days,
+    period: Window,
+    mid_month: bool,
+) -> Option<Qty> {
     straight_line_with_terminal(cost, life, from, over, period, mid_month, false)
 }
 
@@ -425,7 +423,8 @@ mod tests {
             straight_line(cost, life, day(2024, 3, 1), Days::new(first, last).unwrap(), Window::Month, true).unwrap()
         };
 
-        let before_2026: Qty = (3..=12).map(|month| part(2024, month)).chain((1..=12).map(|month| part(2025, month))).sum();
+        let before_2026: Qty =
+            (3..=12).map(|month| part(2024, month)).chain((1..=12).map(|month| part(2025, month))).sum();
         let first_quarter: Qty = (1..=3).map(|month| part(2026, month)).sum();
         assert_eq!(before_2026, Qty(1_837_273));
         assert_eq!(first_quarter, Qty(256_363));
@@ -452,16 +451,8 @@ mod tests {
         let life = Span::months(330);
         let february = Days::new(day(2026, 2, 1), day(2026, 2, 15)).unwrap();
         let ordinary = straight_line(cost, life, day(2024, 3, 1), february, Window::Month, true).unwrap();
-        let terminal = straight_line_with_terminal(
-            cost,
-            life,
-            day(2024, 3, 1),
-            february,
-            Window::Month,
-            true,
-            true,
-        )
-        .unwrap();
+        let terminal =
+            straight_line_with_terminal(cost, life, day(2024, 3, 1), february, Window::Month, true, true).unwrap();
         assert_eq!(ordinary, Qty(85_455));
         assert_eq!(terminal, Qty(42_728));
     }

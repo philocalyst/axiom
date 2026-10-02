@@ -12,27 +12,14 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<'s> {
     let book = lens.book();
     let law = &book.laws[id];
-    let violations: Vec<_> = run
-        .violations
-        .iter()
-        .filter(|violation| violation.law == id && lens.governs(violation.subject))
-        .collect();
-    let effects: Vec<_> = run
-        .effects
-        .iter()
-        .filter(|effect| effect.law == id && lens.owns_entity(effect.owner))
-        .collect();
+    let violations: Vec<_> =
+        run.violations.iter().filter(|violation| violation.law == id && lens.governs(violation.subject)).collect();
+    let effects: Vec<_> =
+        run.effects.iter().filter(|effect| effect.law == id && lens.owns_entity(effect.owner)).collect();
 
-    let mut about = Section::new([
-        Column::left("Law"),
-        Column::left(book.name(law.name).to_string()),
-    ]);
+    let mut about = Section::new([Column::left("Law"), Column::left(book.name(law.name).to_string())]);
     let ran = run.checks.get(id.index()).copied().unwrap_or(0) as usize;
-    let recorded = format!(
-        "{}, {}",
-        plural(violations.len(), "violation"),
-        plural(effects.len(), "effect")
-    );
+    let recorded = format!("{}, {}", plural(violations.len(), "violation"), plural(effects.len(), "effect"));
     let mut facts = vec![
         ("When", Cell::text(trigger_words(law.trigger))),
         ("Governs", Cell::text(governs(book, law.owner))),
@@ -49,31 +36,17 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<
         about.note(Cell::text(line));
     }
 
-    let mut broken = Section::new([
-        Column::left("Date"),
-        Column::left("Violation"),
-        Column::left("From"),
-    ])
-    .headed("Recent violations");
+    let mut broken = Section::new([Column::left("Date"), Column::left("Violation"), Column::left("From")])
+        .headed("Recent violations");
     for violation in recent(&violations).0 {
         let message = &run.diagnostics[violation.diagnostic as usize].message;
-        let style = if violation.verdict.is_waived() {
-            Style::Muted
-        } else {
-            Style::Alert
-        };
-        let cells = [
-            Cell::Day(violation.day),
-            Cell::text(headline(message).to_string()),
-            cause_cell(book, violation.cause),
-        ];
+        let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
+        let cells =
+            [Cell::Day(violation.day), Cell::text(headline(message).to_string()), cause_cell(book, violation.cause)];
         broken.push(Row::new(cells).style(style));
     }
     let caused = effects_table(book, &effects, "Recent effects");
-    Report::new(format!("Why {}", book.name(law.name)))
-        .with(about)
-        .with(broken)
-        .with(caused)
+    Report::new(format!("Why {}", book.name(law.name))).with(about).with(broken).with(caused)
 }
 
 /// Several laws answer to one name, in different systems or files: each one
@@ -90,9 +63,7 @@ pub fn which<'s>(book: &'s Book<'_>, candidates: &[Id<Law>]) -> Report<'s> {
     let mut section = Section::new(columns);
     for &id in candidates {
         let law = &book.laws[id];
-        let system = law
-            .system
-            .map_or("project", |system| book.name(book.systems[system].path));
+        let system = law.system.map_or("project", |system| book.name(book.systems[system].path));
         let explains = doc_headline(book, law.doc).map_or(Cell::Blank, Cell::text);
         let cells = [
             Cell::text(book.name(law.name)),
@@ -103,38 +74,23 @@ pub fn which<'s>(book: &'s Book<'_>, candidates: &[Id<Law>]) -> Report<'s> {
         ];
         section.push(Row::new(cells));
     }
-    section.note(
-        "Ask about the one you mean with `axiom why FILE:LINE`, using the location in Written.",
-    );
-    Report::new(format!(
-        "`{name}` is written in {}",
-        plural(candidates.len(), "place")
-    ))
-    .with(section)
+    section.note("Ask about the one you mean with `axiom why FILE:LINE`, using the location in Written.");
+    Report::new(format!("`{name}` is written in {}", plural(candidates.len(), "place"))).with(section)
 }
 
 /// Who a law governs, as the sentence that explains it.
 fn governs<'s>(book: &'s Book<'_>, owner: Owner) -> String {
     match owner {
         Owner::Kind(kind) => format!("every {}", book.name(book.kinds[kind].name)),
-        Owner::Place(place) => format!(
-            "{} and everything beneath it",
-            book.name(book.places[place].path)
-        ),
+        Owner::Place(place) => format!("{} and everything beneath it", book.name(book.places[place].path)),
         Owner::Entity(entity) => book.name(book.entities[entity].path).to_string(),
-        Owner::Purpose(purpose) => format!(
-            "every flow of {}, and beneath it",
-            book.name(book.purposes[purpose].name)
-        ),
+        Owner::Purpose(purpose) => format!("every flow of {}, and beneath it", book.name(book.purposes[purpose].name)),
         Owner::Asset(asset) => book.name(book.assets[asset].name).to_string(),
         Owner::Contract(contract) => {
             format!("every flow of {}", book.name(book.contracts[contract].name))
         }
         Owner::System(system) => {
-            format!(
-                "everyone living under {}, and all they own",
-                book.name(book.systems[system].path)
-            )
+            format!("everyone living under {}, and all they own", book.name(book.systems[system].path))
         }
         Owner::Book => "everything in this book".to_string(),
     }

@@ -31,11 +31,7 @@ type Governing = Vec<(Id<System>, Days)>;
 fn governing(book: &Book, entity: Id<Entity>) -> Governing {
     let mut spans: Governing = Vec::new();
     for residence in book.entities[entity].lives.iter() {
-        spans.extend(
-            book.systems
-                .lineage(residence.system)
-                .map(|system| (system, residence.days)),
-        );
+        spans.extend(book.systems.lineage(residence.system).map(|system| (system, residence.days)));
     }
     spans.sort();
     let mut merged: Governing = Vec::with_capacity(spans.len());
@@ -58,22 +54,12 @@ struct Residents {
 }
 
 fn always(law: Id<Law>, subject: Subject) -> Rule {
-    Rule {
-        law,
-        subject,
-        days: Days::ALWAYS,
-    }
+    Rule { law, subject, days: Days::ALWAYS }
 }
 
 impl Residents {
     fn of(book: &Book) -> Residents {
-        Residents {
-            governing: book
-                .entities
-                .ids()
-                .map(|entity| governing(book, entity))
-                .collect(),
-        }
+        Residents { governing: book.entities.ids().map(|entity| governing(book, entity)).collect() }
     }
 
     /// The top-level laws of the systems `entity` lives under, as the entity,
@@ -86,16 +72,12 @@ impl Residents {
     ) -> impl Iterator<Item = Rule> + 'b {
         let own = except.map_or(&[][..], |other| &self.governing[other.index()][..]);
         let spans = self.governing[entity.index()].iter();
-        spans
-            .filter(move |(system, ..)| !own.iter().any(|(theirs, ..)| theirs == system))
-            .flat_map(move |&(system, days)| {
+        spans.filter(move |(system, ..)| !own.iter().any(|(theirs, ..)| theirs == system)).flat_map(
+            move |&(system, days)| {
                 let laws = book.systems[system].laws.iter();
-                laws.map(move |&law| Rule {
-                    law,
-                    subject: Subject::Entity(entity),
-                    days,
-                })
-            })
+                laws.map(move |&law| Rule { law, subject: Subject::Entity(entity), days })
+            },
+        )
     }
 }
 
@@ -104,8 +86,7 @@ impl Rules {
         let auxiliary: Set<Id<Law>> = book.also.iter().map(|(_, also)| also.law).collect();
         let written = WrittenIn::of(book, &auxiliary);
         let residents = Residents::of(book);
-        let (mut on_in, mut on_out, mut on_gain, mut always_on) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut on_in, mut on_out, mut on_gain, mut always_on) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut watching = Vec::new();
         for place in book.places.ids() {
             watching.clear();
@@ -157,17 +138,7 @@ impl Rules {
         let contract_pairs = contracts;
         let contracts = Groups::build(book.contracts.len(), contract_pairs.iter().copied());
         drop(contract_pairs);
-        Rules {
-            on_in,
-            on_out,
-            on_gain,
-            always,
-            on_spend,
-            purposes,
-            about,
-            contracts,
-            timed,
-        }
+        Rules { on_in, on_out, on_gain, always, on_spend, purposes, about, contracts, timed }
     }
 }
 
@@ -225,29 +196,14 @@ impl WrittenIn {
 /// Whether a law is only an expression arena for an `also` line. Such a law
 /// is evaluated by that line and must not be registered as an event rule.
 /// Every rule that watches `place`.
-fn watching_place(
-    book: &Book,
-    written: &WrittenIn,
-    residents: &Residents,
-    place: Id<Place>,
-    out: &mut Vec<Rule>,
-) {
+fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place: Id<Place>, out: &mut Vec<Rule>) {
     let owner = book.places[place].owner;
     for governing in book.places.lineage(place) {
-        out.extend(
-            written.places[governing]
-                .iter()
-                .map(|&law| always(law, Subject::Place(governing))),
-        );
+        out.extend(written.places[governing].iter().map(|&law| always(law, Subject::Place(governing))));
     }
     for kind in book.kinds.lineage(book.places[place].kind) {
         if matches!(book.kinds[kind].sort, Sort::Place(_)) {
-            out.extend(
-                book.kinds[kind]
-                    .laws
-                    .iter()
-                    .map(|&law| always(law, Subject::Place(place))),
-            );
+            out.extend(book.kinds[kind].laws.iter().map(|&law| always(law, Subject::Place(place))));
         }
     }
     for &asset in written.assets[place].iter() {
@@ -275,22 +231,14 @@ fn watching_place(
         out.extend(residents.rules(book, household, Some(owner)));
     }
     let resident = household.unwrap_or(owner);
-    out.extend(
-        written
-            .project
-            .iter()
-            .map(|&law| always(law, Subject::Entity(resident))),
-    );
+    out.extend(written.project.iter().map(|&law| always(law, Subject::Entity(resident))));
 }
 
 /// A restricted entity's `on spend` laws: its kind chain's, then its own.
 fn spending(book: &Book, written: &WrittenIn) -> Vec<(Id<Entity>, Rule)> {
     let mut rules = Vec::new();
     for (id, entity) in book.entities.iter().filter(|(_, entity)| entity.restricted) {
-        let kind_laws = book
-            .kinds
-            .lineage(entity.kind)
-            .flat_map(|kind| book.kinds[kind].laws.iter().copied());
+        let kind_laws = book.kinds.lineage(entity.kind).flat_map(|kind| book.kinds[kind].laws.iter().copied());
         let laws = kind_laws.chain(written.entities[id].iter().copied());
         let spends = laws.filter(|&law| book.laws[law].trigger == Trigger::Spend);
         rules.extend(spends.map(|law| (id, always(law, Subject::Entity(id)))));
@@ -301,60 +249,38 @@ fn spending(book: &Book, written: &WrittenIn) -> Vec<(Id<Entity>, Rule)> {
 /// `each` and `by` laws, once for each subject they govern.
 fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
     let mut rules = Vec::new();
-    let timed_laws = book
-        .laws
-        .iter()
-        .filter(|(_, law)| matches!(law.trigger, Trigger::Each(..) | Trigger::By(_)));
+    let timed_laws = book.laws.iter().filter(|(_, law)| matches!(law.trigger, Trigger::Each(..) | Trigger::By(_)));
     for (id, law) in timed_laws {
         match law.owner {
             Owner::Place(place) => rules.push(always(id, Subject::Place(place))),
             Owner::Entity(entity) => rules.push(always(id, Subject::Entity(entity))),
-            Owner::Purpose(_) => rules.extend(
-                owners(book)
-                    .into_iter()
-                    .map(|entity| always(id, Subject::Entity(entity))),
-            ),
+            Owner::Purpose(_) => {
+                rules.extend(owners(book).into_iter().map(|entity| always(id, Subject::Entity(entity))))
+            }
             Owner::Asset(asset) => rules.push(always(id, Subject::Asset(asset))),
             Owner::Contract(contract) => rules.push(always(id, Subject::Contract(contract))),
             Owner::Kind(kind) => match book.kinds[kind].sort {
                 Sort::Place(_) => {
-                    let governed = book
-                        .places
-                        .iter()
-                        .filter(|(_, place)| book.kinds.covers(kind, place.kind));
+                    let governed = book.places.iter().filter(|(_, place)| book.kinds.covers(kind, place.kind));
                     rules.extend(governed.map(|(place, _)| always(id, Subject::Place(place))));
                 }
                 Sort::Entity => {
-                    let governed = book
-                        .entities
-                        .iter()
-                        .filter(|(_, entity)| book.kinds.covers(kind, entity.kind));
+                    let governed = book.entities.iter().filter(|(_, entity)| book.kinds.covers(kind, entity.kind));
                     rules.extend(governed.map(|(entity, _)| always(id, Subject::Entity(entity))));
                 }
                 Sort::Thing => {
-                    let governed = book
-                        .assets
-                        .iter()
-                        .filter(|(_, asset)| book.kinds.covers(kind, asset.kind));
+                    let governed = book.assets.iter().filter(|(_, asset)| book.kinds.covers(kind, asset.kind));
                     rules.extend(governed.map(|(asset, _)| always(id, Subject::Asset(asset))));
                 }
                 Sort::Commodity => {}
             },
             Owner::System(_) => {
                 for entity in book.entities.ids() {
-                    rules.extend(
-                        residents
-                            .rules(book, entity, None)
-                            .filter(|rule| rule.law == id),
-                    );
+                    rules.extend(residents.rules(book, entity, None).filter(|rule| rule.law == id));
                 }
             }
             Owner::Book => {
-                rules.extend(
-                    owners(book)
-                        .into_iter()
-                        .map(|owner| always(id, Subject::Entity(owner))),
-                );
+                rules.extend(owners(book).into_iter().map(|owner| always(id, Subject::Entity(owner))));
             }
         }
     }
@@ -363,11 +289,7 @@ fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
 
 /// Purpose laws are inherited by every descendant purpose. The placeholder
 /// subject is replaced with the moving flow's owner when the engine fires it.
-fn purpose_flows(
-    book: &Book,
-    written: &WrittenIn,
-    auxiliary: &Set<Id<Law>>,
-) -> Vec<(Id<crate::book::Purpose>, Rule)> {
+fn purpose_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Id<crate::book::Purpose>, Rule)> {
     let mut rules = Vec::new();
     for actual in book.purposes.ids() {
         for ancestor in book.purposes.lineage(actual) {
@@ -383,11 +305,7 @@ fn purpose_flows(
 
 /// An asset's kind laws and its own laws run when a flow is for that asset.
 /// The flow site is the asset's place; the rule subject is the identified asset.
-fn asset_flows(
-    book: &Book,
-    written: &WrittenIn,
-    auxiliary: &Set<Id<Law>>,
-) -> Vec<(Id<Place>, Rule)> {
+fn asset_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Id<Place>, Rule)> {
     let mut rules = Vec::new();
     for (asset, data) in book.assets.iter() {
         let place = data.place;
@@ -397,9 +315,7 @@ fn asset_flows(
                     .laws
                     .iter()
                     .copied()
-                    .filter(|&law| {
-                        book.laws[law].trigger == Trigger::Flow && !auxiliary.contains(&law)
-                    })
+                    .filter(|&law| book.laws[law].trigger == Trigger::Flow && !auxiliary.contains(&law))
                     .map(|law| (place, always(law, Subject::Asset(asset)))),
             );
         }
@@ -417,17 +333,11 @@ fn asset_flows(
 /// Contract laws are kept keyed by promise identity, never by the party shared
 /// by two different contracts. The engine selects these rules from the flow's
 /// contract provenance.
-fn contract_flows(
-    book: &Book,
-    written: &WrittenIn,
-    auxiliary: &Set<Id<Law>>,
-) -> Vec<(Id<Contract>, Rule)> {
+fn contract_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Id<Contract>, Rule)> {
     let mut rules = Vec::new();
     for contract in book.contracts.ids() {
         for &law in written.contracts[contract].iter() {
-            if !auxiliary.contains(&law)
-                && !matches!(book.laws[law].trigger, Trigger::Each(..) | Trigger::By(_))
-            {
+            if !auxiliary.contains(&law) && !matches!(book.laws[law].trigger, Trigger::Each(..) | Trigger::By(_)) {
                 rules.push((contract, always(law, Subject::Contract(contract))));
             }
         }
@@ -443,16 +353,8 @@ fn owners(book: &Book) -> Vec<Id<Entity>> {
         .values()
         .filter(|place| matches!(place.role, Role::Holding(_)))
         .map(|place| book.entities[place.owner].member.unwrap_or(place.owner))
-        .chain(
-            book.assets
-                .values()
-                .map(|asset| book.entities[asset.owner].member.unwrap_or(asset.owner)),
-        )
-        .chain(book.contracts.values().map(|contract| {
-            book.entities[contract.owner]
-                .member
-                .unwrap_or(contract.owner)
-        }))
+        .chain(book.assets.values().map(|asset| book.entities[asset.owner].member.unwrap_or(asset.owner)))
+        .chain(book.contracts.values().map(|contract| book.entities[contract.owner].member.unwrap_or(contract.owner)))
         .collect();
     owners.sort_unstable();
     owners.dedup();

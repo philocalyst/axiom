@@ -24,35 +24,14 @@ opening 2026-01-01
 ";
     let (file, parsed) = axiom_syntax::parse(FileId(0), source, axiom_syntax::Folder::default());
     assert!(parsed.is_empty(), "source parse failed: {parsed:?}");
-    let (book, diagnostics) = axiom_model::build(&[Source {
-        path: "owners.ax",
-        file,
-        embedded: false,
-    }]);
-    assert!(
-        diagnostics.iter().all(|diagnostic| !diagnostic.is_error()),
-        "book build failed: {diagnostics:?}"
-    );
-    let context = Context::new(
-        &book,
-        Options {
-            today: day(2026, 1, 4),
-            relaxed: false,
-        },
-        owner,
-    )
-    .unwrap();
+    let (book, diagnostics) = axiom_model::build(&[Source { path: "owners.ax", file, embedded: false }]);
+    assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "book build failed: {diagnostics:?}");
+    let context = Context::new(&book, Options { today: day(2026, 1, 4), relaxed: false }, owner).unwrap();
     then(&context)
 }
 
 fn register_steps(context: &Context<'_, '_>) -> Vec<(Qty, Qty)> {
-    let report = context
-        .report(&Query::Register {
-            place: "assets/shared",
-            from: None,
-            to: None,
-        })
-        .unwrap();
+    let report = context.report(&Query::Register { place: "assets/shared", from: None, to: None }).unwrap();
     report.sections[0]
         .rows
         .iter()

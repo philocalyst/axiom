@@ -25,11 +25,7 @@ pub(crate) struct Reader<'t> {
 impl<'t> Reader<'t> {
     pub fn new(text: &'t str) -> Reader<'t> {
         // Spreadsheet exports often start with a byte-order mark.
-        Reader {
-            text,
-            at: if text.starts_with('\u{feff}') { 3 } else { 0 },
-            row: 0,
-        }
+        Reader { text, at: if text.starts_with('\u{feff}') { 3 } else { 0 }, row: 0 }
     }
 
     /// The next row that is not blank, into `cells`.
@@ -49,11 +45,7 @@ impl<'t> Reader<'t> {
         cells.clear();
         let bytes = self.text.as_bytes();
         loop {
-            let cell = if bytes.get(self.at) == Some(&b'"') {
-                self.quoted()?
-            } else {
-                self.plain()
-            };
+            let cell = if bytes.get(self.at) == Some(&b'"') { self.quoted()? } else { self.plain() };
             cells.push(cell);
             match bytes.get(self.at) {
                 Some(b',') => self.at += 1,
@@ -69,19 +61,12 @@ impl<'t> Reader<'t> {
     /// Up to the next comma or line end, without the spaces around it.
     fn plain(&mut self) -> Cell<'t> {
         let bytes = self.text.as_bytes();
-        let end =
-            memchr2(b',', b'\n', &bytes[self.at..]).map_or(bytes.len(), |found| self.at + found);
+        let end = memchr2(b',', b'\n', &bytes[self.at..]).map_or(bytes.len(), |found| self.at + found);
         let raw = &self.text[self.at..end];
         let text = raw.trim();
         let start = self.at + raw.len() - raw.trim_start().len();
         self.at = end;
-        Cell {
-            text: Cow::Borrowed(text),
-            span: Span {
-                start,
-                end: start + text.len(),
-            },
-        }
+        Cell { text: Cow::Borrowed(text), span: Span { start, end: start + text.len() } }
     }
 
     /// A quoted cell, where `""` is one quote. Only such a cell is copied.
@@ -91,19 +76,11 @@ impl<'t> Reader<'t> {
         let (mut owned, mut copied, mut from) = (None::<String>, open + 1, open + 1);
         loop {
             let Some(found) = memchr(b'"', &bytes[from..]) else {
-                return Err(self.lose(
-                    Span {
-                        start: open,
-                        end: open + 1,
-                    },
-                    "the quote is never closed",
-                ));
+                return Err(self.lose(Span { start: open, end: open + 1 }, "the quote is never closed"));
             };
             let quote = from + found;
             if bytes.get(quote + 1) == Some(&b'"') {
-                owned
-                    .get_or_insert_with(String::new)
-                    .push_str(&self.text[copied..=quote]);
+                owned.get_or_insert_with(String::new).push_str(&self.text[copied..=quote]);
                 (copied, from) = (quote + 2, quote + 2);
                 continue;
             }
@@ -119,20 +96,8 @@ impl<'t> Reader<'t> {
                 self.at += 1;
             }
             return match bytes.get(self.at) {
-                None | Some(b',' | b'\n') => Ok(Cell {
-                    text,
-                    span: Span {
-                        start: open,
-                        end: quote + 1,
-                    },
-                }),
-                Some(_) => Err(self.lose(
-                    Span {
-                        start: quote + 1,
-                        end: quote + 2,
-                    },
-                    "text follows the closing quote",
-                )),
+                None | Some(b',' | b'\n') => Ok(Cell { text, span: Span { start: open, end: quote + 1 } }),
+                Some(_) => Err(self.lose(Span { start: quote + 1, end: quote + 2 }, "text follows the closing quote")),
             };
         }
     }
@@ -140,13 +105,8 @@ impl<'t> Reader<'t> {
     /// Gives up on the rest of this row, so that the next can be read.
     fn lose(&mut self, span: Span, what: &'static str) -> Broken {
         let bytes = self.text.as_bytes();
-        self.at =
-            memchr(b'\n', &bytes[span.start..]).map_or(bytes.len(), |found| span.start + found + 1);
-        Broken {
-            row: self.row,
-            span,
-            what,
-        }
+        self.at = memchr(b'\n', &bytes[span.start..]).map_or(bytes.len(), |found| span.start + found + 1);
+        Broken { row: self.row, span, what }
     }
 }
 
@@ -168,10 +128,7 @@ mod tests {
     #[test]
     fn quotes_crlf_the_byte_order_mark_and_blank_lines() {
         let text = "\u{feff}a,b\r\n\"x, \"\"y\"\"\" , z \r\n\r\n,\n1,2";
-        assert_eq!(
-            rows(text),
-            [["a", "b"], ["x, \"y\"", "z"], ["", ""], ["1", "2"]]
-        );
+        assert_eq!(rows(text), [["a", "b"], ["x, \"y\"", "z"], ["", ""], ["1", "2"]]);
     }
 
     #[test]
@@ -191,25 +148,15 @@ mod tests {
         let text = "ab, cd ,\"e\"";
         let (mut reader, mut cells) = (Reader::new(text), Vec::new());
         assert!(reader.next(&mut cells).unwrap().is_ok());
-        let spans: Vec<_> = cells
-            .iter()
-            .map(|cell| &text[cell.span.start..cell.span.end])
-            .collect();
+        let spans: Vec<_> = cells.iter().map(|cell| &text[cell.span.start..cell.span.end]).collect();
         assert_eq!(spans, ["ab", "cd", "\"e\""]);
     }
 
     #[test]
     fn garbage_never_panics() {
-        for text in [
-            "",
-            "\n\n",
-            "\"",
-            "A,B,C\n\"",
-            ",,,\n,,",
-            "A,B,C\n\u{0}\u{1},\u{ff}",
-            "\u{feff}",
-            "A\n,\"\"\"\"\"\n",
-        ] {
+        for text in
+            ["", "\n\n", "\"", "A,B,C\n\"", ",,,\n,,", "A,B,C\n\u{0}\u{1},\u{ff}", "\u{feff}", "A\n,\"\"\"\"\"\n"]
+        {
             let _ = rows(text);
         }
     }
@@ -219,11 +166,7 @@ mod tests {
     fn cutting_a_million_rows_into_cells_alone() {
         let mut text = String::from("Posting Date,Description,Amount,Balance\n");
         for row in 0..1_000_000u32 {
-            let quoted = if row % 5 == 0 {
-                "\"TRADER JOE'S, #634 \"\"SF\"\"\""
-            } else {
-                "SHELL OIL 5741"
-            };
+            let quoted = if row % 5 == 0 { "\"TRADER JOE'S, #634 \"\"SF\"\"\"" } else { "SHELL OIL 5741" };
             text += &format!(
                 "{:02}/{:02}/2026,{quoted},-{}.{:02},\"1,234.56\"\n",
                 row % 12 + 1,
@@ -237,11 +180,6 @@ mod tests {
         while reader.next(&mut cells).is_some() {
             count += cells.len();
         }
-        eprintln!(
-            "cut {} cells ({} MB) in {:?}",
-            count,
-            text.len() >> 20,
-            started.elapsed()
-        );
+        eprintln!("cut {} cells ({} MB) in {:?}", count, text.len() >> 20, started.elapsed());
     }
 }

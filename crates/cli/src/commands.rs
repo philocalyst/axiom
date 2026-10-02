@@ -33,13 +33,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
     let mut sources = project.load()?;
     if let Command::Fmt { files, check } = command {
-        return Ok(crate::fmt::execute(
-            &sources,
-            &project.root,
-            files,
-            *check,
-            terminals.out,
-        ));
+        return Ok(crate::fmt::execute(&sources, &project.root, files, *check, terminals.out));
     }
     let (parsed, mut diagnostics) = Sources::parse_files(&sources.files);
     let (book, built) = axiom_model::build(&parsed);
@@ -47,34 +41,16 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     drop(parsed);
     diagnostics.extend(built);
 
-    let options = Options {
-        today: invocation.today.unwrap_or_else(system_today),
-        relaxed: invocation.relaxed,
-    };
+    let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
     if let Command::Sync { names, dry } = command {
         let run = axiom_engine::run(&book, options);
         let planned = {
             let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
-            sync::plan(
-                &book,
-                &run,
-                &project,
-                options.today,
-                names,
-                files,
-                auxiliary,
-            )?
+            sync::plan(&book, &run, &project, options.today, names, files, auxiliary)?
         };
         let mut sync_diagnostics = diagnostics;
         sync_diagnostics.extend(run.diagnostics);
-        return Ok(render_sync(
-            planned,
-            &mut sources,
-            &project.root,
-            *dry,
-            terminals,
-            &sync_diagnostics,
-        ));
+        return Ok(render_sync(planned, &mut sources, &project.root, *dry, terminals, &sync_diagnostics));
     }
     if let Command::Report(query, whose) = command {
         let context = match Context::new(&book, options, *whose) {
@@ -83,19 +59,10 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
                 // Preserve the report command's diagnostics and exit status if
                 // owner resolution fails before Context can create its run.
                 let run = axiom_engine::run(&book, options);
-                let mut shown: Vec<&Diagnostic> = diagnostics
-                    .iter()
-                    .chain(&run.diagnostics)
-                    .filter(|diagnostic| diagnostic.is_error())
-                    .collect();
+                let mut shown: Vec<&Diagnostic> =
+                    diagnostics.iter().chain(&run.diagnostics).filter(|diagnostic| diagnostic.is_error()).collect();
                 shown.push(&problem);
-                return Ok(report_error(
-                    &shown,
-                    &sources,
-                    terminals,
-                    invocation.all,
-                    invocation.json,
-                ));
+                return Ok(report_error(&shown, &sources, terminals, invocation.all, invocation.json));
             }
         };
         let run = context.run();
@@ -143,10 +110,8 @@ fn check_memos(
 ) -> (Vec<Diagnostic>, Vec<MemoSuggestion>) {
     let mut diagnostics = Vec::new();
     let mut inputs = Vec::new();
-    let mut registered: HashMap<String, FileId> = auxiliary
-        .iter()
-        .map(|file| (file.path.to_string(), file.id))
-        .collect();
+    let mut registered: HashMap<String, FileId> =
+        auxiliary.iter().map(|file| (file.path.to_string(), file.id)).collect();
     for (source_index, source) in book.sources.iter().enumerate() {
         let Fetch::Read(pattern) = source.fetch else {
             continue;
@@ -208,15 +173,9 @@ fn check_memos(
     (diagnostics, suggestions)
 }
 
-fn source_by_id<'a>(
-    files: &'a [SourceFile],
-    auxiliary: &'a [SourceFile],
-    id: FileId,
-) -> Option<&'a SourceFile> {
+fn source_by_id<'a>(files: &'a [SourceFile], auxiliary: &'a [SourceFile], id: FileId) -> Option<&'a SourceFile> {
     let index = usize::from(id.0);
-    files
-        .get(index)
-        .or_else(|| auxiliary.get(index.checked_sub(files.len())?))
+    files.get(index).or_else(|| auxiliary.get(index.checked_sub(files.len())?))
 }
 
 #[derive(Clone, Debug)]
@@ -234,11 +193,7 @@ fn suggestion_lines(suggestions: &[MemoSuggestion]) -> Vec<String> {
     }
     let mut lines = vec!["Memos nothing recognized:".to_string()];
     for group in suggestions {
-        lines.push(format!(
-            "  {} ({} records)",
-            group.example.replace('\n', " ").replace('\r', " "),
-            group.count
-        ));
+        lines.push(format!("  {} ({} records)", group.example.replace('\n', " ").replace('\r', " "), group.count));
         lines.push(format!("    {}", group.known_as));
     }
     lines
@@ -306,11 +261,7 @@ fn report_error(
     if let Some(line) = tally.line() {
         text += &terminals.err.painter.paint(&[line]);
     }
-    Outcome {
-        answer: String::new(),
-        diagnostics: text,
-        failed: true,
-    }
+    Outcome { answer: String::new(), diagnostics: text, failed: true }
 }
 
 /// Presents a no-write sync plan, and applies its changes only when the user
@@ -324,16 +275,8 @@ fn render_sync(
     prior: &[Diagnostic],
 ) -> Outcome {
     let blocked_by_book_errors = prior.iter().any(Diagnostic::is_error);
-    let write_problems = if dry || blocked_by_book_errors {
-        Vec::new()
-    } else {
-        apply_changes(root, &planned.changes)
-    };
-    let mut diagnostics: Vec<&Diagnostic> = prior
-        .iter()
-        .chain(&planned.problems)
-        .chain(&planned.incomplete)
-        .collect();
+    let write_problems = if dry || blocked_by_book_errors { Vec::new() } else { apply_changes(root, &planned.changes) };
+    let mut diagnostics: Vec<&Diagnostic> = prior.iter().chain(&planned.problems).chain(&planned.incomplete).collect();
     for source in &planned.sources {
         match source.failure.as_ref() {
             Some(SourceFailure::Read(problem) | SourceFailure::Generated(problem)) => {
@@ -355,10 +298,7 @@ fn render_sync(
         line.push("  ", Ink::PLAIN);
         match &source.failure {
             None if source.added == 0 => line.push("no new items", Ink::DIM),
-            None => line.push(
-                &format!("{} added", plural(source.added, "item")),
-                Ink::PLAIN,
-            ),
+            None => line.push(&format!("{} added", plural(source.added, "item")), Ink::PLAIN),
             Some(SourceFailure::Command(failure)) => {
                 line.push(&failure.summary, Ink::RED);
                 if !failure.stderr.trim().is_empty() {
@@ -368,9 +308,7 @@ fn render_sync(
                     }
                 }
             }
-            Some(
-                SourceFailure::Read(_) | SourceFailure::Generated(_) | SourceFailure::Output(_),
-            ) => {
+            Some(SourceFailure::Read(_) | SourceFailure::Generated(_) | SourceFailure::Output(_)) => {
                 line.push("see diagnostics", Ink::RED);
             }
         }
@@ -396,19 +334,10 @@ fn render_sync(
         answer.push_str("no changes\n");
     }
 
-    let (diagnostic_text, tally) =
-        Renderer::new(sources, terminals.err).present(&diagnostics, true);
-    let failed = tally.errors > 0
-        || !write_problems.is_empty()
-        || planned
-            .sources
-            .iter()
-            .any(|source| source.failure.is_some());
-    Outcome {
-        answer,
-        diagnostics: diagnostic_text,
-        failed,
-    }
+    let (diagnostic_text, tally) = Renderer::new(sources, terminals.err).present(&diagnostics, true);
+    let failed =
+        tally.errors > 0 || !write_problems.is_empty() || planned.sources.iter().any(|source| source.failure.is_some());
+    Outcome { answer, diagnostics: diagnostic_text, failed }
 }
 
 /// Writes planned targets through sibling temporary files. The canonical
@@ -418,20 +347,13 @@ fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
     let canonical_root = match fs::canonicalize(root) {
         Ok(root) => root,
         Err(error) => {
-            return vec![Diagnostic::error(
-                "sync-project-root",
-                format!("cannot resolve the project root: {error}"),
-            )];
+            return vec![Diagnostic::error("sync-project-root", format!("cannot resolve the project root: {error}"))];
         }
     };
     let mut problems = Vec::new();
     for (index, change) in changes.iter().enumerate() {
         let relative = Path::new(&change.path);
-        if change.path.is_empty()
-            || !relative
-                .components()
-                .all(|component| matches!(component, Component::Normal(_)))
-        {
+        if change.path.is_empty() || !relative.components().all(|component| matches!(component, Component::Normal(_))) {
             problems.push(Diagnostic::error(
                 "sync-path-outside-project",
                 format!("`{}` is not a project-relative path", change.path),
@@ -502,18 +424,12 @@ fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
                 name.to_string_lossy(),
                 std::process::id(),
             ));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&candidate)
-            {
+            match OpenOptions::new().write(true).create_new(true).open(&candidate) {
                 Ok(mut file) => {
                     if let Err(error) = file.write_all(change.after.as_bytes()) {
                         let _ = fs::remove_file(&candidate);
-                        problems.push(Diagnostic::error(
-                            "sync-write",
-                            format!("cannot write `{}`: {error}", change.path),
-                        ));
+                        problems
+                            .push(Diagnostic::error("sync-write", format!("cannot write `{}`: {error}", change.path)));
                     } else {
                         temporary = Some(candidate);
                     }
@@ -521,10 +437,8 @@ fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => {
-                    problems.push(Diagnostic::error(
-                        "sync-write",
-                        format!("cannot prepare `{}`: {error}", change.path),
-                    ));
+                    problems
+                        .push(Diagnostic::error("sync-write", format!("cannot prepare `{}`: {error}", change.path)));
                     break;
                 }
             }
@@ -534,10 +448,7 @@ fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
         };
         if let Err(error) = fs::rename(&temporary, &target) {
             let _ = fs::remove_file(&temporary);
-            problems.push(Diagnostic::error(
-                "sync-write",
-                format!("cannot replace `{}`: {error}", change.path),
-            ));
+            problems.push(Diagnostic::error("sync-write", format!("cannot replace `{}`: {error}", change.path)));
         }
     }
     problems
@@ -621,9 +532,7 @@ fn change_diff(change: &Change) -> String {
 
 /// The current day, by the system clock, in UTC.
 fn system_today() -> Day {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
+    let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs());
     Day((seconds / 86_400) as i32)
 }
 
@@ -648,48 +557,25 @@ impl Session<'_, '_> {
         if self.json {
             let mut answer = diagnostics;
             answer.push_str(&json_suggestions(suggestions));
-            return Outcome {
-                answer,
-                diagnostics: String::new(),
-                failed: tally.errors > 0,
-            };
+            return Outcome { answer, diagnostics: String::new(), failed: tally.errors > 0 };
         }
         if tally.errors > 0 {
             let mut diagnostics = diagnostics;
             diagnostics.push_str(&self.suggestions(suggestions, self.terminals.err));
-            return Outcome {
-                answer: String::new(),
-                diagnostics,
-                failed: true,
-            };
+            return Outcome { answer: String::new(), diagnostics, failed: true };
         }
         let summary = axiom_report::summary(self.book, self.run);
-        let mut answer = self
-            .terminals
-            .out
-            .painter
-            .paint(&[summary_line(self.book, &summary)]);
+        let mut answer = self.terminals.out.painter.paint(&[summary_line(self.book, &summary)]);
         answer.push_str(&self.suggestions(suggestions, self.terminals.out));
-        Outcome {
-            answer,
-            diagnostics,
-            failed: false,
-        }
+        Outcome { answer, diagnostics, failed: false }
     }
 
-    fn suggestions(
-        &self,
-        suggestions: &[MemoSuggestion],
-        terminal: crate::style::Terminal,
-    ) -> String {
+    fn suggestions(&self, suggestions: &[MemoSuggestion], terminal: crate::style::Terminal) -> String {
         let lines = suggestion_lines(suggestions);
         if lines.is_empty() {
             return String::new();
         }
-        let lines = lines
-            .iter()
-            .map(|suggestion| Line::text(suggestion, Ink::DIM))
-            .collect::<Vec<_>>();
+        let lines = lines.iter().map(|suggestion| Line::text(suggestion, Ink::DIM)).collect::<Vec<_>>();
         terminal.painter.paint(&lines)
     }
 
@@ -697,27 +583,14 @@ impl Session<'_, '_> {
     /// that a reader can investigate them; it says at its head what it rests on.
     fn report(&self, context: &Context<'_, '_>, query: &Query<'_>) -> Outcome {
         let result = context.report_with_sources(query, self.sources);
-        let mut shown: Vec<&Diagnostic> = self
-            .diagnostics
-            .iter()
-            .copied()
-            .filter(|found| found.is_error())
-            .collect();
+        let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
         shown.extend(result.as_ref().err());
         let (diagnostics, tally) = self.show(&shown);
         let Ok(report) = result else {
             return if self.json {
-                Outcome {
-                    answer: diagnostics,
-                    diagnostics: String::new(),
-                    failed: true,
-                }
+                Outcome { answer: diagnostics, diagnostics: String::new(), failed: true }
             } else {
-                Outcome {
-                    answer: String::new(),
-                    diagnostics,
-                    failed: true,
-                }
+                Outcome { answer: String::new(), diagnostics, failed: true }
             };
         };
         if self.json {
@@ -727,10 +600,7 @@ impl Session<'_, '_> {
                 failed: tally.errors > 0,
             };
         }
-        let mut answer = table::TableRenderer {
-            terminal: self.terminals.out,
-        }
-        .render(&report, self.sources);
+        let mut answer = table::TableRenderer { terminal: self.terminals.out }.render(&report, self.sources);
         if tally.errors > 0 {
             let caveat = format!(
                 "rests on a book with {} (`axiom check` lists them): what they touch may be wrong",
@@ -740,11 +610,7 @@ impl Session<'_, '_> {
             line.push(&caveat, Ink::DIM);
             answer.insert_str(0, &self.terminals.out.painter.paint(&[line, Line::new()]));
         }
-        Outcome {
-            answer,
-            diagnostics,
-            failed: tally.errors > 0,
-        }
+        Outcome { answer, diagnostics, failed: tally.errors > 0 }
     }
 
     /// The diagnostics, and after them how many of each there were.
@@ -755,8 +621,7 @@ impl Session<'_, '_> {
                 Tally::of(diagnostics.iter().copied()),
             );
         }
-        let (mut text, tally) =
-            Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
+        let (mut text, tally) = Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
         if let Some(line) = tally.line() {
             text += &self.terminals.err.painter.paint(&[line]);
         }
@@ -775,10 +640,7 @@ fn summary_line(book: &Book, summary: &Summary) -> Line {
     let mut line = Line::text("✓ ", Ink::GREEN.bold());
     line.push(&facts.join(" · "), Ink::PLAIN);
     if summary.unpriced > 0 {
-        line.push(
-            &format!(" · {} unpriced", plural(summary.unpriced, "holding")),
-            Ink::YELLOW,
-        );
+        line.push(&format!(" · {} unpriced", plural(summary.unpriced, "holding")), Ink::YELLOW);
     }
     line
 }
@@ -812,24 +674,13 @@ mod tests {
         let (book, built) = axiom_model::build(&parsed);
         drop(parsed);
         diagnostics.extend(built);
-        assert!(
-            diagnostics.iter().all(|problem| !problem.is_error()),
-            "fixture has no model errors: {diagnostics:?}"
-        );
+        assert!(diagnostics.iter().all(|problem| !problem.is_error()), "fixture has no model errors: {diagnostics:?}");
 
-        let (read_problems, suggestions) =
-            check_memos(&book, &project, &sources.files, &mut sources.auxiliary);
+        let (read_problems, suggestions) = check_memos(&book, &project, &sources.files, &mut sources.auxiliary);
         assert!(read_problems.is_empty(), "{read_problems:?}");
         assert!(suggestions.iter().any(|group| group.count == 2));
-        assert!(
-            suggestions
-                .iter()
-                .any(|group| group.known_as == "known-as \"TRADER JOE'S\"")
-        );
-        assert!(
-            !marker.exists(),
-            "check must never execute a declared run command"
-        );
+        assert!(suggestions.iter().any(|group| group.known_as == "known-as \"TRADER JOE'S\""));
+        assert!(!marker.exists(), "check must never execute a declared run command");
     }
 
     #[test]
@@ -854,20 +705,14 @@ mod tests {
             &mut sources,
             &project.root,
             true,
-            Terminals {
-                out: crate::style::Terminal::plain(80),
-                err: crate::style::Terminal::plain(80),
-            },
+            Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) },
             &[],
         );
 
         assert!(!outcome.failed);
         assert!(outcome.answer.contains("-old\n"));
         assert!(outcome.answer.contains("+new\n"));
-        assert_eq!(
-            fs::read_to_string(dir.path().join("prices.ax")).unwrap(),
-            "old\n"
-        );
+        assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
     }
 
     #[cfg(unix)]
@@ -896,10 +741,7 @@ mod tests {
             &mut sources,
             &project.root,
             false,
-            Terminals {
-                out: crate::style::Terminal::plain(80),
-                err: crate::style::Terminal::plain(80),
-            },
+            Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) },
             &[],
         );
 
@@ -930,22 +772,12 @@ mod tests {
             &mut sources,
             &project.root,
             false,
-            Terminals {
-                out: crate::style::Terminal::plain(80),
-                err: crate::style::Terminal::plain(80),
-            },
+            Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) },
             &[invalid_book],
         );
 
         assert!(outcome.failed);
-        assert!(
-            outcome
-                .answer
-                .contains("not applied because the project has errors")
-        );
-        assert_eq!(
-            fs::read_to_string(dir.path().join("prices.ax")).unwrap(),
-            "old\n"
-        );
+        assert!(outcome.answer.contains("not applied because the project has errors"));
+        assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
     }
 }

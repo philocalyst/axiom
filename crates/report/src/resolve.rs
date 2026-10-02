@@ -29,22 +29,13 @@ pub fn entity_miss(book: &Book, text: &str, miss: Miss<Entity>) -> Diagnostic {
 
 pub fn contract(book: &Book, text: &str) -> Result<Id<Contract>, Diagnostic> {
     book.contract(text).ok_or_else(|| {
-        nothing_named(
-            "contract",
-            text,
-            book.contracts.iter().map(|(_, contract)| book.name(contract.name)),
-        )
+        nothing_named("contract", text, book.contracts.iter().map(|(_, contract)| book.name(contract.name)))
     })
 }
 
 pub fn asset(book: &Book, text: &str) -> Result<Id<Asset>, Diagnostic> {
-    book.asset(text).ok_or_else(|| {
-        nothing_named(
-            "asset",
-            text,
-            book.assets.iter().map(|(_, asset)| book.name(asset.name)),
-        )
-    })
+    book.asset(text)
+        .ok_or_else(|| nothing_named("asset", text, book.assets.iter().map(|(_, asset)| book.name(asset.name))))
 }
 
 /// Why `text` is not one place.

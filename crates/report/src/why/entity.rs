@@ -19,17 +19,12 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
     let book = lens.book();
     let name = book.name(book.entities[entity].path);
     if !lens.owns_entity(entity) {
-        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
-            "{name} is outside this owner's scope."
-        )));
+        return Report::new(format!("Why {name}"))
+            .with(Section::note_only(format!("{name} is outside this owner's scope.")));
     }
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
-    for holding in run
-        .holdings
-        .iter()
-        .filter(|holding| on_balance_sheet(book.places[holding.place].class))
-    {
+    for holding in run.holdings.iter().filter(|holding| on_balance_sheet(book.places[holding.place].class)) {
         // `why ENTITY` is about that entity's financial holdings even when the
         // caller's lens is the household. Allocate with the same cent
         // boundaries used by registers so shared places neither leak the
@@ -43,18 +38,12 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
         };
         let sign = book.places[holding.place].class.display_sign();
         let held = Amount::new(Qty(held.0 * sign), holding.unit);
-        places.push(Row::new([
-            Cell::text(path(book, holding.place)),
-            Cell::amount(book, held),
-        ]));
+        places.push(Row::new([Cell::text(path(book, holding.place)), Cell::amount(book, held)]));
     }
 
     // What governs the entity itself: its `on spend` laws while it holds money for others, and its own timed laws.
     let rules = &book.rules;
-    let timed = rules
-        .timed
-        .iter()
-        .filter(|rule| rule.subject == Subject::Entity(entity));
+    let timed = rules.timed.iter().filter(|rule| rule.subject == Subject::Entity(entity));
     let laws: Vec<Id<Law>> = rules.on_spend[entity]
         .iter()
         .chain(timed)
@@ -63,13 +52,9 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
         .collect();
 
     // Money tied to it: it may leave the owner's places only as its laws allow.
-    let mut ties = Section::new([
-        Column::left("Place"),
-        Column::right("Amount"),
-        Column::left("Since"),
-        Column::left("From"),
-    ])
-    .headed("Held for it");
+    let mut ties =
+        Section::new([Column::left("Place"), Column::right("Amount"), Column::left("Since"), Column::left("From")])
+            .headed("Held for it");
     let mut remaining = Qty::ZERO;
     for holding in &run.holdings {
         if !lens.owns(holding.place) {
@@ -78,11 +63,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
         for lot in holding.lots.iter().filter(|lot| lot.tied == Some(entity)) {
             let held = Amount::new(lens.place_qty(holding.place, lot.qty), holding.unit);
             remaining += lens.value(held).unwrap_or_default();
-            let source = lot
-                .txn
-                .source_txn()
-                .and_then(|txn| book.txns.get(txn))
-                .map(|txn| txn.loc);
+            let source = lot.txn.source_txn().and_then(|txn| book.txns.get(txn)).map(|txn| txn.loc);
             let cells = [
                 Cell::text(path(book, holding.place)),
                 Cell::amount(book, held),
@@ -93,17 +74,14 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
         }
     }
     if !ties.rows.is_empty() {
-        ties.push(
-            Row::padded([Cell::text("Remaining"), Cell::base(book, remaining)], 4)
-                .style(Style::Total),
-        );
+        ties.push(Row::padded([Cell::text("Remaining"), Cell::base(book, remaining)], 4).style(Style::Total));
     }
 
     let open = claims::open(lens, run, run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
-    Report::new(format!("Why {name}"))
-        .with(places)
-        .with(laws_table(book, &laws))
-        .with(ties)
-        .with(claims::section(lens, "Claims with it", &with_it))
+    Report::new(format!("Why {name}")).with(places).with(laws_table(book, &laws)).with(ties).with(claims::section(
+        lens,
+        "Claims with it",
+        &with_it,
+    ))
 }

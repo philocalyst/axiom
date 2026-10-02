@@ -26,28 +26,10 @@ pub fn plan(
     files: &[SourceFile],
     auxiliary: &mut Vec<SourceFile>,
 ) -> Result<PlanOutcome, Diagnostic> {
-    let project_paths: Vec<&str> = files
-        .iter()
-        .filter(|file| !file.embedded)
-        .map(|file| file.path.as_ref())
-        .collect();
+    let project_paths: Vec<&str> = files.iter().filter(|file| !file.embedded).map(|file| file.path.as_ref()).collect();
     let file_paths: Vec<&str> = files.iter().map(|file| file.path.as_ref()).collect();
-    let mut registry = Catalog {
-        project,
-        files,
-        auxiliary,
-        first_auxiliary: files.len(),
-    };
-    axiom_sync::plan(
-        book,
-        run,
-        &project.root,
-        today,
-        wanted,
-        &project_paths,
-        &file_paths,
-        &mut registry,
-    )
+    let mut registry = Catalog { project, files, auxiliary, first_auxiliary: files.len() };
+    axiom_sync::plan(book, run, &project.root, today, wanted, &project_paths, &file_paths, &mut registry)
 }
 
 struct Catalog<'a> {
@@ -62,20 +44,11 @@ impl SourceRegistry for Catalog<'_> {
         // A declared reader may name an Axiom source already loaded by the
         // project. Reuse that exact text and identity instead of reading or
         // registering a duplicate.
-        if let Some(source) = self
-            .files
-            .iter()
-            .find(|source| !source.embedded && source.path == path)
-        {
+        if let Some(source) = self.files.iter().find(|source| !source.embedded && source.path == path) {
             return Ok(Some(source.id));
         }
         let text = self.project.read_local(path)?;
-        let file = Sources::append_auxiliary_to(
-            self.auxiliary,
-            self.first_auxiliary,
-            path.to_owned(),
-            text,
-        )?;
+        let file = Sources::append_auxiliary_to(self.auxiliary, self.first_auxiliary, path.to_owned(), text)?;
         Ok(Some(file))
     }
 
@@ -88,12 +61,7 @@ impl SourceRegistry for Catalog<'_> {
     }
 
     fn generated(&mut self, path: &str, text: String) -> Result<FileId, Diagnostic> {
-        Sources::append_auxiliary_to(
-            self.auxiliary,
-            self.first_auxiliary,
-            path.to_owned(),
-            text,
-        )
+        Sources::append_auxiliary_to(self.auxiliary, self.first_auxiliary, path.to_owned(), text)
     }
 }
 
@@ -111,18 +79,11 @@ mod tests {
         let mut sources = project.load().unwrap();
         let first_auxiliary = sources.files.len();
         let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
-        let mut catalog = Catalog {
-            project: &project,
-            files,
-            auxiliary,
-            first_auxiliary,
-        };
+        let mut catalog = Catalog { project: &project, files, auxiliary, first_auxiliary };
 
         let input = catalog.read("statement.csv").unwrap().unwrap();
         assert_eq!(catalog.text(input), Some("date,amount,memo\n"));
-        let generated = catalog
-            .generated("out.ax", "2026-01-01 a -> b 1 USD\n".to_owned())
-            .unwrap();
+        let generated = catalog.generated("out.ax", "2026-01-01 a -> b 1 USD\n".to_owned()).unwrap();
         assert_eq!(generated.0, input.0 + 1);
         assert_eq!(catalog.text(generated), Some("2026-01-01 a -> b 1 USD\n"));
     }

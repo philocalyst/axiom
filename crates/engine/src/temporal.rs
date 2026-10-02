@@ -138,63 +138,22 @@ mod tests {
             part: None,
         };
         let mut history = History::default();
-        history.record(
-            key,
-            day,
-            Value::Amount(Amount::new(axiom_core::Qty(100), unit)),
-        );
-        history.record(
-            key,
-            day,
-            Value::Amount(Amount::new(axiom_core::Qty(200), unit)),
-        );
-        history.record(
-            key,
-            day,
-            Value::Amount(Amount::new(axiom_core::Qty(150), unit)),
-        );
-        history.record(
-            key,
-            day,
-            Value::Amount(Amount::new(axiom_core::Qty(150), unit)),
-        );
+        history.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(100), unit)));
+        history.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(200), unit)));
+        history.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(150), unit)));
+        history.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(150), unit)));
 
         let samples = history.get(key);
-        assert_eq!(
-            samples.len(),
-            3,
-            "same-day changes are observable, repeats are compacted"
-        );
-        assert_eq!(
-            samples[0].value,
-            Value::Amount(Amount::new(axiom_core::Qty(100), unit))
-        );
-        assert_eq!(
-            samples[1].value,
-            Value::Amount(Amount::new(axiom_core::Qty(200), unit))
-        );
-        assert_eq!(
-            samples[2].value,
-            Value::Amount(Amount::new(axiom_core::Qty(150), unit))
-        );
+        assert_eq!(samples.len(), 3, "same-day changes are observable, repeats are compacted");
+        assert_eq!(samples[0].value, Value::Amount(Amount::new(axiom_core::Qty(100), unit)));
+        assert_eq!(samples[1].value, Value::Amount(Amount::new(axiom_core::Qty(200), unit)));
+        assert_eq!(samples[2].value, Value::Amount(Amount::new(axiom_core::Qty(150), unit)));
 
         let changed = {
             let mut other = History::default();
-            other.record(
-                key,
-                day,
-                Value::Amount(Amount::new(axiom_core::Qty(100), unit)),
-            );
-            other.record(
-                key,
-                day,
-                Value::Amount(Amount::new(axiom_core::Qty(200), unit)),
-            );
-            other.record(
-                key,
-                day,
-                Value::Amount(Amount::new(axiom_core::Qty(149), unit)),
-            );
+            other.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(100), unit)));
+            other.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(200), unit)));
+            other.record(key, day, Value::Amount(Amount::new(axiom_core::Qty(149), unit)));
             other
         };
         let hash = |history: &History| {
@@ -202,21 +161,14 @@ mod tests {
             history.hash(&mut state);
             state.finish()
         };
-        assert_ne!(
-            hash(&history),
-            hash(&changed),
-            "checkpoint state includes every retained extreme"
-        );
+        assert_ne!(hash(&history), hash(&changed), "checkpoint state includes every retained extreme");
     }
 
     #[test]
     fn part_temporal_histories_do_not_merge_asset_costs() {
         let day = Day::from_ymd(2026, 2, 5).unwrap();
         let unit = Id::new(0);
-        let origin = axiom_model::RuntimeTxn::Adjustment {
-            place: Id::new(0),
-            day,
-        };
+        let origin = axiom_model::RuntimeTxn::Adjustment { place: Id::new(0), day };
         let key = Key {
             law: Id::new(0),
             subject: Subject::Asset(Id::new(0)),
@@ -227,16 +179,8 @@ mod tests {
         let first = PartId { origin, ordinal: 0 };
         let second = PartId { origin, ordinal: 1 };
         let mut history = History::default();
-        history.record(
-            Key { part: Some(first), ..key },
-            day,
-            Value::Amount(Amount::new(axiom_core::Qty(100), unit)),
-        );
-        history.record(
-            Key { part: Some(second), ..key },
-            day,
-            Value::Amount(Amount::new(axiom_core::Qty(200), unit)),
-        );
+        history.record(Key { part: Some(first), ..key }, day, Value::Amount(Amount::new(axiom_core::Qty(100), unit)));
+        history.record(Key { part: Some(second), ..key }, day, Value::Amount(Amount::new(axiom_core::Qty(200), unit)));
 
         assert_eq!(history.get(Key { part: Some(first), ..key }).len(), 1);
         assert_eq!(history.get(Key { part: Some(second), ..key }).len(), 1);

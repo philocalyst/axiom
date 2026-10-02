@@ -17,8 +17,7 @@ use axiom_core::day::days_in_month;
 use axiom_core::{Arena, Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
 use crate::book::{
-    Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule,
-    System, Text,
+    Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System, Text,
 };
 use crate::journal::Object;
 
@@ -70,10 +69,7 @@ pub(crate) enum RankClass {
 
 impl Rank {
     /// Placeholder before law registration calculates scope and depth.
-    pub const ZERO: Rank = Rank {
-        class: RankClass::System,
-        depth: 0,
-    };
+    pub const ZERO: Rank = Rank { class: RankClass::System, depth: 0 };
 
     pub(crate) const fn scoped(class: RankClass, depth: u32) -> Rank {
         Rank { class, depth }
@@ -105,31 +101,20 @@ impl Law {
     /// `budget 500 USD monthly` means. A total is read straight from the
     /// ledger, so a cap that holds takes no evaluating.
     pub fn cap(&self) -> Option<Cap> {
-        let [
-            Step {
-                kind: StepKind::Require {
-                    cond, otherwise, ..
-                },
-                ..
-            },
-        ] = &*self.steps
-        else {
+        let [Step { kind: StepKind::Require { cond, otherwise, .. }, .. }] = &*self.steps else {
             return None;
         };
         if !otherwise.is_empty() {
             return None;
         }
-        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[*cond].op
-        else {
+        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[*cond].op else {
             return None;
         };
         let (target, window) = match &self.nodes[total].op {
             // A kind among the arguments widens the total, so the cap cannot
             // be read from the subject's single watched bucket.
             Op::Call(Func::Total(dir, window), args)
-                if args
-                    .iter()
-                    .all(|arg| self.nodes[*arg].typed_ty() != Some(Ty::Kind)) =>
+                if args.iter().all(|arg| self.nodes[*arg].typed_ty() != Some(Ty::Kind)) =>
             {
                 (CapTarget::Total(*dir), *window)
             }
@@ -145,12 +130,7 @@ impl Law {
         let Op::Const(Value::Amount(limit)) = self.nodes[limit].op else {
             return None;
         };
-        Some(Cap {
-            target,
-            window,
-            limit,
-            strict: cmp == BinOp::Lt,
-        })
+        Some(Cap { target, window, limit, strict: cmp == BinOp::Lt })
     }
 }
 
@@ -221,11 +201,7 @@ impl Closing {
     /// falls on the 28th in a year that has no 29th.
     pub fn day_for(self, year: i32) -> Option<Day> {
         let (next, month) = (year + 1, u32::from(self.month));
-        Day::from_ymd(
-            next,
-            month,
-            u32::from(self.day).min(days_in_month(next, month)),
-        )
+        Day::from_ymd(next, month, u32::from(self.day).min(days_in_month(next, month)))
     }
 }
 
@@ -257,12 +233,7 @@ pub enum StepKind {
 pub enum Effect {
     /// An obligation from the subject's owner to `to`, due by `due` (default:
     /// the triggering day). `name` defaults to the law's name.
-    Owe {
-        amount: NodeId,
-        to: Id<Entity>,
-        due: Option<NodeId>,
-        name: Sym,
-    },
+    Owe { amount: NodeId, to: Id<Entity>, due: Option<NodeId>, name: Sym },
     /// Adds to a tally keyed by owner, year, name and the law's system.
     Count { amount: NodeId, name: Sym },
     /// Lowers the governed asset part's basis (depreciation, depletion).
@@ -270,11 +241,7 @@ pub enum Effect {
     /// Holds a disallowed loss and adds it to the basis of the nearest
     /// acquisition of `unit` within the span `within`, before or after (a wash
     /// sale).
-    Carry {
-        amount: NodeId,
-        unit: NodeId,
-        within: NodeId,
-    },
+    Carry { amount: NodeId, unit: NodeId, within: NodeId },
 }
 
 /// Index of a node in its law's arena.
@@ -588,7 +555,10 @@ pub enum Fault {
         quote: Id<Commodity>,
     },
     /// A runtime amount disagrees with the commodity the expression declared.
-    UnitMismatch { found: Id<Commodity>, expected: Id<Commodity> },
+    UnitMismatch {
+        found: Id<Commodity>,
+        expected: Id<Commodity>,
+    },
     /// A property the subject never set and whose kind gives no default.
     Unset(Sym),
     /// A contract template input was not bound for this occurrence.
@@ -637,10 +607,7 @@ impl Rules {
     /// Every rule that runs while the fold does, in each list it is in: the
     /// per-place tables, `on spend`, and the timed rules.
     pub fn all(&self) -> impl Iterator<Item = &Rule> {
-        let per_place = self
-            .per_place()
-            .into_iter()
-            .flat_map(|table| table.values());
+        let per_place = self.per_place().into_iter().flat_map(|table| table.values());
         per_place
             .chain(self.on_spend.values())
             .chain(self.purposes.values())

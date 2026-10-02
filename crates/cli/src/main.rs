@@ -44,11 +44,7 @@ pub struct Outcome {
 
 impl Outcome {
     pub fn ok(answer: String) -> Outcome {
-        Outcome {
-            answer,
-            diagnostics: String::new(),
-            failed: false,
-        }
+        Outcome { answer, diagnostics: String::new(), failed: false }
     }
 }
 
@@ -62,32 +58,21 @@ pub struct Terminals {
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args_os()
-        .skip(1)
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
-    let json = args
-        .iter()
-        .any(|argument| argument == "--json" || argument.starts_with("--json="));
+    let args: Vec<String> = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let json = args.iter().any(|argument| argument == "--json" || argument.starts_with("--json="));
     let invocation = match args::parse(&args) {
         Ok(invocation) => invocation,
         Err(usage) => return refuse(&usage, ColorChoice::Auto, json),
     };
     let color = invocation.color;
-    let terminals = Terminals {
-        out: Terminal::detect(color, &io::stdout()),
-        err: Terminal::detect(color, &io::stderr()),
-    };
+    let terminals =
+        Terminals { out: Terminal::detect(color, &io::stdout()), err: Terminal::detect(color, &io::stderr()) };
     match commands::run(&invocation, terminals) {
         Ok(outcome) => {
             // A closed pipe (`axiom balance | head`) is the reader's choice, not a failure.
             let _ = io::stderr().write_all(outcome.diagnostics.as_bytes());
             let _ = io::stdout().write_all(outcome.answer.as_bytes());
-            if outcome.failed {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
-            }
+            if outcome.failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
         Err(problem) => refuse(&problem, invocation.color, invocation.json),
     }

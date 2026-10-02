@@ -3,14 +3,9 @@ use axiom_core::FileId;
 use axiom_syntax::Folder;
 
 fn book() -> Book<'static> {
-    let (file, diagnostics) =
-        axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+    let (file, diagnostics) = axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
     assert!(diagnostics.is_empty(), "axiom.ax: {diagnostics:?}");
-    let sources = [axiom_model::Source {
-        path: "axiom.ax",
-        file,
-        embedded: false,
-    }];
+    let sources = [axiom_model::Source { path: "axiom.ax", file, embedded: false }];
     let (book, diagnostics) = axiom_model::build(&sources);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     book
@@ -20,11 +15,8 @@ fn book() -> Book<'static> {
 fn generated_names_match_hyphens_and_paths_as_spaces_without_allocating_per_match() {
     let mut book = book();
     let sym = book.names.intern("trader-joes/market");
-    let id = book.patterns.push(Pattern {
-        name: None,
-        program: Box::new([Op::Name(sym)]),
-        loc: axiom_core::Loc::default(),
-    });
+    let id =
+        book.patterns.push(Pattern { name: None, program: Box::new([Op::Name(sym)]), loc: axiom_core::Loc::default() });
     let patterns = Patterns::new(&book);
     assert_eq!(patterns.starts(id), Some(&[b"trader".to_vec()][..]));
 
@@ -60,14 +52,7 @@ fn unicode_repeat_decodes_one_scalar_at_a_time_and_never_starts_mid_character() 
     });
     let repeated = book.patterns.push(Pattern {
         name: None,
-        program: Box::new([
-            Op::Repeat {
-                min: 1,
-                max: None,
-                len: 1,
-            },
-            Op::Class(CharClass::Any),
-        ]),
+        program: Box::new([Op::Repeat { min: 1, max: None, len: 1 }, Op::Class(CharClass::Any)]),
         loc: axiom_core::Loc::default(),
     });
     let literal = book.intern_text("é");

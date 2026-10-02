@@ -29,11 +29,7 @@ use crate::names::Rank as NameRank;
 use crate::scope::Home;
 use crate::sources::Site;
 
-pub(crate) fn declare<'s>(
-    world: &mut World<'s>,
-    sites: &[Site<'_, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
     world.tallies = counted(sites);
     let mut seen: Set<(DeclKind, u32)> = Set::default();
     for source in sites {
@@ -50,10 +46,7 @@ pub(crate) fn declare<'s>(
                 }
                 ItemKind::Decl(id) => {
                     let decl = &file[id];
-                    let word = Word {
-                        text: decl.name.0,
-                        loc: file.loc(decl.name.0),
-                    };
+                    let word = Word { text: decl.name.0, loc: file.loc(decl.name.0) };
                     let resolved = match decl.what {
                         DeclKind::Kind => world.kind(source.home, word).map(|kind| {
                             let subject = match world.book.kinds[kind].sort {
@@ -64,12 +57,12 @@ pub(crate) fn declare<'s>(
                             };
                             (Owner::Kind(kind), subject, kind.index() as u32)
                         }),
-                        DeclKind::Account => world
-                            .place(word)
-                            .map(|place| (Owner::Place(place), Ty::Place, place.index() as u32)),
-                        DeclKind::Entity => world.entity(source.home, word).map(|entity| {
-                            (Owner::Entity(entity), Ty::Entity, entity.index() as u32)
-                        }),
+                        DeclKind::Account => {
+                            world.place(word).map(|place| (Owner::Place(place), Ty::Place, place.index() as u32))
+                        }
+                        DeclKind::Entity => world
+                            .entity(source.home, word)
+                            .map(|entity| (Owner::Entity(entity), Ty::Entity, entity.index() as u32)),
                         DeclKind::Asset => world
                             .book
                             .asset(word.text)
@@ -142,12 +135,7 @@ pub(crate) fn compile_native<'s>(
     if law.damaged {
         return None;
     }
-    let site = Placement {
-        file,
-        home,
-        owner,
-        subject,
-    };
+    let site = Placement { file, home, owner, subject };
     let compiled = compile(world, diags, &site, law)?;
     Some(push(world, compiled))
 }
@@ -164,12 +152,8 @@ pub(crate) fn register_native(world: &mut World<'_>, diags: &mut Vec<Diagnostic>
 
 /// Resolve `overrides` after every top-level and nested law has a stable id.
 fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
-    let pending: Vec<_> = world
-        .book
-        .laws
-        .iter()
-        .filter_map(|(id, law)| law.override_name.map(|name| (id, name, law.loc)))
-        .collect();
+    let pending: Vec<_> =
+        world.book.laws.iter().filter_map(|(id, law)| law.override_name.map(|name| (id, name, law.loc))).collect();
     for (id, name, loc) in pending {
         let text = world.book.name(name);
         let home = law_home(&world.book.laws[id]);
@@ -182,13 +166,10 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
             .copied()
             .filter(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
             .collect();
-        if let Some(nearest) = candidates
-            .iter()
-            .map(|&candidate| scope.rank(law_home(&world.book.laws[candidate])))
-            .min()
+        if let Some(nearest) =
+            candidates.iter().map(|&candidate| scope.rank(law_home(&world.book.laws[candidate]))).min()
         {
-            candidates
-                .retain(|&candidate| scope.rank(law_home(&world.book.laws[candidate])) == nearest);
+            candidates.retain(|&candidate| scope.rank(law_home(&world.book.laws[candidate])) == nearest);
         }
         match candidates.as_slice() {
             [target] if *target != id => world.book.laws[id].overrides = Some(*target),
@@ -211,17 +192,13 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
                 diags.push(suggest(diagnostic, loc, text, keys));
             }
             targets => {
-                let mut diagnostic = Diagnostic::error(
-                    "ambiguous-law",
-                    format!("law `{text}` names more than one law"),
-                )
-                .label(loc, "qualify which law this one overrides");
+                let mut diagnostic =
+                    Diagnostic::error("ambiguous-law", format!("law `{text}` names more than one law"))
+                        .label(loc, "qualify which law this one overrides");
                 for &target in targets {
                     let law = &world.book.laws[target];
-                    diagnostic = diagnostic.context(
-                        law.loc,
-                        format!("`{}` is declared here", world.book.name(law.name)),
-                    );
+                    diagnostic =
+                        diagnostic.context(law.loc, format!("`{}` is declared here", world.book.name(law.name)));
                 }
                 diags.push(diagnostic);
             }
@@ -241,20 +218,10 @@ fn set_specificity(world: &mut World<'_>) {
         .iter()
         .map(|(_, law)| match law.owner {
             Owner::Book => Rank::scoped(RankClass::Book, 0),
-            Owner::System(system) => Rank::scoped(
-                RankClass::System,
-                book.systems.lineage(system).count() as u32,
-            ),
-            Owner::Kind(kind) => {
-                Rank::scoped(RankClass::Kind, book.kinds.lineage(kind).count() as u32)
-            }
-            Owner::Purpose(purpose) => Rank::scoped(
-                RankClass::Purpose,
-                book.purposes.lineage(purpose).count() as u32,
-            ),
-            Owner::Place(_) | Owner::Entity(_) | Owner::Asset(_) => {
-                Rank::scoped(RankClass::Explicit, 0)
-            }
+            Owner::System(system) => Rank::scoped(RankClass::System, book.systems.lineage(system).count() as u32),
+            Owner::Kind(kind) => Rank::scoped(RankClass::Kind, book.kinds.lineage(kind).count() as u32),
+            Owner::Purpose(purpose) => Rank::scoped(RankClass::Purpose, book.purposes.lineage(purpose).count() as u32),
+            Owner::Place(_) | Owner::Entity(_) | Owner::Asset(_) => Rank::scoped(RankClass::Explicit, 0),
             Owner::Contract(_) => Rank::scoped(RankClass::Contract, 0),
         })
         .collect();
@@ -278,18 +245,13 @@ pub(crate) fn compile_also<'s>(
     roots: &[(ExprId, Ty)],
     loc: axiom_core::Loc,
 ) -> Option<(Id<Law>, Box<[NodeId]>)> {
-    let (program, roots) =
-        compile_template(world, diags, file, home, subject, name, inputs, roots)?;
+    let (program, roots) = compile_template(world, diags, file, home, subject, name, inputs, roots)?;
     let (book, nodes) = (&mut world.book, program.nodes);
     let law = Law {
         name,
         doc: None,
         owner,
-        system: if let Home::System(system) = home {
-            Some(system)
-        } else {
-            None
-        },
+        system: if let Home::System(system) = home { Some(system) } else { None },
         trigger: Trigger::Flow,
         budget: None,
         overrides: None,
@@ -331,14 +293,8 @@ fn declare_alsos<'s>(
         _ => {
             for also in &file[decl.alsos] {
                 diags.push(
-                    Diagnostic::error(
-                        "also-owner",
-                        "declaration-level `also` needs an entity, kind, or purpose",
-                    )
-                    .label(
-                        also.loc,
-                        format!("`also` is not supported on this {what:?}"),
-                    ),
+                    Diagnostic::error("also-owner", "declaration-level `also` needs an entity, kind, or purpose")
+                        .label(also.loc, format!("`also` is not supported on this {what:?}")),
                 );
             }
             return;
@@ -346,17 +302,7 @@ fn declare_alsos<'s>(
     };
 
     let currency = fallback_currency(world, owner);
-    lower_alsos(
-        world,
-        diags,
-        file,
-        home,
-        decl.alsos,
-        owner,
-        on,
-        &[],
-        currency,
-    );
+    lower_alsos(world, diags, file, home, decl.alsos, owner, on, &[], currency);
 }
 
 /// Lowers `also` clauses shared by declaration and contract lowering.
@@ -388,10 +334,7 @@ pub(crate) fn lower_alsos<'s>(
                 let amount = match item.amount {
                     ast::Amount::Literal(literal) => {
                         let unit = match literal.unit() {
-                            Some(unit) => match world.commodity_of(Word {
-                                text: unit.0,
-                                loc: file.loc(unit.0),
-                            }) {
+                            Some(unit) => match world.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) }) {
                                 Ok(unit) => unit,
                                 Err(problem) => {
                                     diags.push(problem);
@@ -452,37 +395,29 @@ pub(crate) fn lower_alsos<'s>(
                 }
                 let mut valid_ends = true;
                 let from = match flow.from.end {
-                    Some(end) if end.name.0 != "self" => match world.end(
-                        home,
-                        Word {
-                            text: end.name.0,
-                            loc: file.loc(end.name.0),
-                        },
-                    ) {
-                        Ok(end) => Some(end.place),
-                        Err(problem) => {
-                            diags.push(problem);
-                            valid_ends = false;
-                            None
+                    Some(end) if end.name.0 != "self" => {
+                        match world.end(home, Word { text: end.name.0, loc: file.loc(end.name.0) }) {
+                            Ok(end) => Some(end.place),
+                            Err(problem) => {
+                                diags.push(problem);
+                                valid_ends = false;
+                                None
+                            }
                         }
-                    },
+                    }
                     _ => None,
                 };
                 let to = match flow.to.end {
-                    Some(end) if end.name.0 != "self" => match world.end(
-                        home,
-                        Word {
-                            text: end.name.0,
-                            loc: file.loc(end.name.0),
-                        },
-                    ) {
-                        Ok(end) => Some(end.place),
-                        Err(problem) => {
-                            diags.push(problem);
-                            valid_ends = false;
-                            None
+                    Some(end) if end.name.0 != "self" => {
+                        match world.end(home, Word { text: end.name.0, loc: file.loc(end.name.0) }) {
+                            Ok(end) => Some(end.place),
+                            Err(problem) => {
+                                diags.push(problem);
+                                valid_ends = false;
+                                None
+                            }
                         }
-                    },
+                    }
                     _ => None,
                 };
                 if !valid_ends {
@@ -496,10 +431,7 @@ pub(crate) fn lower_alsos<'s>(
                                 "also-flow-amount",
                                 "an implied flow amount must be an amount expression",
                             )
-                            .label(
-                                quantity_loc(file, other, also.loc),
-                                "this quantity cannot be implied",
-                            ),
+                            .label(quantity_loc(file, other, also.loc), "this quantity cannot be implied"),
                         );
                         continue;
                     }
@@ -513,10 +445,7 @@ pub(crate) fn lower_alsos<'s>(
                                 "also-flow-amount",
                                 "an implied flow amount must be an amount expression",
                             )
-                            .label(
-                                quantity_loc(file, other, also.loc),
-                                "this quantity cannot be implied",
-                            ),
+                            .label(quantity_loc(file, other, also.loc), "this quantity cannot be implied"),
                         );
                         continue;
                     }
@@ -525,22 +454,16 @@ pub(crate) fn lower_alsos<'s>(
                 let amount = match (from_amount, to_amount) {
                     (Some(_), Some(_)) => {
                         diags.push(
-                            Diagnostic::error(
-                                "also-flow-amount",
-                                "an implied flow states its amount on one side only",
-                            )
-                            .label(also.loc, "remove one of these amounts"),
+                            Diagnostic::error("also-flow-amount", "an implied flow states its amount on one side only")
+                                .label(also.loc, "remove one of these amounts"),
                         );
                         continue;
                     }
                     (Some(amount), None) | (None, Some(amount)) => amount,
                     (None, None) => {
                         diags.push(
-                            Diagnostic::error(
-                                "also-flow-amount",
-                                "an implied flow needs an amount",
-                            )
-                            .label(also.loc, "write an amount on one side of the arrow"),
+                            Diagnostic::error("also-flow-amount", "an implied flow needs an amount")
+                                .label(also.loc, "write an amount on one side of the arrow"),
                         );
                         continue;
                     }
@@ -548,10 +471,7 @@ pub(crate) fn lower_alsos<'s>(
                 let amount = match amount {
                     ast::Amount::Literal(literal) => {
                         let unit = match literal.unit() {
-                            Some(unit) => match world.commodity_of(Word {
-                                text: unit.0,
-                                loc: file.loc(unit.0),
-                            }) {
+                            Some(unit) => match world.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) }) {
                                 Ok(unit) => unit,
                                 Err(problem) => {
                                     diags.push(problem);
@@ -576,11 +496,7 @@ pub(crate) fn lower_alsos<'s>(
                     }
                 };
                 (
-                    Some(Implied::Flow {
-                        from,
-                        to,
-                        amount: TemplateAmount::Literal(Amount::zero(currency)),
-                    }),
+                    Some(Implied::Flow { from, to, amount: TemplateAmount::Literal(Amount::zero(currency)) }),
                     Some(amount),
                     flow.tail,
                     flow.from.end.map(|end| end.select),
@@ -596,25 +512,15 @@ pub(crate) fn lower_alsos<'s>(
             continue;
         }
         let selector_errors = diags.len();
-        let select = source_selectors.map_or(metadata.select, |selectors| {
-            lower_also_selectors(world, home, file, selectors, diags)
-        });
+        let select = source_selectors
+            .map_or(metadata.select, |selectors| lower_also_selectors(world, home, file, selectors, diags));
         if diags.len() != selector_errors {
             continue;
         }
         let name = world.book.names.intern("also");
-        let Some((law, compiled_roots)) = compile_also(
-            world,
-            diags,
-            file,
-            home,
-            owner,
-            Ty::Flow,
-            name,
-            inputs,
-            &roots,
-            also.loc,
-        ) else {
+        let Some((law, compiled_roots)) =
+            compile_also(world, diags, file, home, owner, Ty::Flow, name, inputs, &roots, also.loc)
+        else {
             continue;
         };
         let amount = match amount {
@@ -622,9 +528,7 @@ pub(crate) fn lower_alsos<'s>(
             PendingAmount::Computed(index) => TemplateAmount::Computed(compiled_roots[index]),
         };
         match &mut what {
-            Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => {
-                *slot = amount
-            }
+            Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => *slot = amount,
         }
         let when = when_index.map(|index| compiled_roots[index]);
         let id = world.book.also.push(Also {
@@ -662,38 +566,21 @@ fn lower_also_selectors<'s>(
     let start = world.book.selectors.len();
     for written in &file[selectors] {
         let resolved = match *written {
-            ast::Select::Range(first, last, at) => {
-                Days::new(first, last).map(LotSelect::Range).ok_or_else(|| {
-                    Diagnostic::error("selector-range", "selector range ends before it begins")
-                        .label(at, "reverse or correct this date range")
-                })
-            }
+            ast::Select::Range(first, last, at) => Days::new(first, last).map(LotSelect::Range).ok_or_else(|| {
+                Diagnostic::error("selector-range", "selector range ends before it begins")
+                    .label(at, "reverse or correct this date range")
+            }),
             ast::Select::Code(code) => Ok(LotSelect::Code(world.book.names.intern(code.name()))),
             ast::Select::Policy(policy, _) => Ok(LotSelect::Policy(policy)),
-            ast::Select::Purpose(name) => world
-                .purpose(
-                    home,
-                    Word {
-                        text: name.0,
-                        loc: file.loc(name.0),
-                    },
-                )
-                .map(LotSelect::Purpose),
-            ast::Select::Unit(name) => world
-                .commodity_of(Word {
-                    text: name.0,
-                    loc: file.loc(name.0),
-                })
-                .map(LotSelect::Unit),
-            ast::Select::End(name) => world
-                .end(
-                    home,
-                    Word {
-                        text: name.0,
-                        loc: file.loc(name.0),
-                    },
-                )
-                .map(|end| LotSelect::End(end.place)),
+            ast::Select::Purpose(name) => {
+                world.purpose(home, Word { text: name.0, loc: file.loc(name.0) }).map(LotSelect::Purpose)
+            }
+            ast::Select::Unit(name) => {
+                world.commodity_of(Word { text: name.0, loc: file.loc(name.0) }).map(LotSelect::Unit)
+            }
+            ast::Select::End(name) => {
+                world.end(home, Word { text: name.0, loc: file.loc(name.0) }).map(|end| LotSelect::End(end.place))
+            }
         };
         match resolved {
             Ok(selector) => {
@@ -702,17 +589,10 @@ fn lower_also_selectors<'s>(
             Err(problem) => diags.push(problem),
         }
     }
-    axiom_core::Run::new(
-        Id::new(start as u32),
-        (world.book.selectors.len() - start) as u32,
-    )
+    axiom_core::Run::new(Id::new(start as u32), (world.book.selectors.len() - start) as u32)
 }
 
-fn quantity_loc(
-    file: &ast::File<'_>,
-    quantity: ast::Quantity<'_>,
-    fallback: axiom_core::Loc,
-) -> axiom_core::Loc {
+fn quantity_loc(file: &ast::File<'_>, quantity: ast::Quantity<'_>, fallback: axiom_core::Loc) -> axiom_core::Loc {
     match quantity {
         ast::Quantity::Amount(ast::Amount::Literal(literal)) => file.loc(literal.0),
         ast::Quantity::Amount(ast::Amount::Computed(root))
@@ -751,46 +631,23 @@ fn counted<'s>(sites: &[Site<'_, 's>]) -> Set<&'s str> {
 fn push(world: &mut World, law: Law) -> Id<Law> {
     let name = world.book.name(law.name);
     let id = world.book.laws.push(law);
-    world
-        .book
-        .lookup
-        .laws
-        .insert(&mut world.book.names, name, NameRank::Path, id);
+    world.book.lookup.laws.insert(&mut world.book.names, name, NameRank::Path, id);
     id
 }
 
 fn unknown_named(world: &World<'_>, noun: &str, word: Word<'_>) -> Diagnostic {
     let (code, known): (&'static str, Vec<&str>) = match noun {
-        "asset" => (
-            "unknown-asset",
-            world
-                .book
-                .assets
-                .values()
-                .map(|asset| world.book.name(asset.name))
-                .collect(),
-        ),
-        "contract" => (
-            "unknown-contract",
-            world
-                .book
-                .contracts
-                .values()
-                .map(|contract| world.book.name(contract.name))
-                .collect(),
-        ),
+        "asset" => ("unknown-asset", world.book.assets.values().map(|asset| world.book.name(asset.name)).collect()),
+        "contract" => {
+            ("unknown-contract", world.book.contracts.values().map(|contract| world.book.name(contract.name)).collect())
+        }
         _ => ("unknown-name", Vec::new()),
     };
     suggest(unknown(code, noun, word, None), word.loc, word.text, known)
 }
 
 /// Laws written inside declarations that cannot own them.
-fn misplaced(
-    diags: &mut Vec<Diagnostic>,
-    file: &ast::File,
-    laws: ast::Many<ast::Law>,
-    within: &str,
-) {
+fn misplaced(diags: &mut Vec<Diagnostic>, file: &ast::File, laws: ast::Many<ast::Law>, within: &str) {
     for law in &file[laws] {
         diags.push(
             Diagnostic::error("law-position", format!("a law cannot be written inside {within}"))
@@ -802,35 +659,21 @@ fn misplaced(
 
 /// Whether the trigger suits what the law governs.
 fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
-    let thing_kind =
-        matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Thing);
-    let place_kind =
-        matches!(owner, Owner::Kind(kind) if matches!(world.book.kinds[kind].sort, Sort::Place(_)));
-    let entity_kind =
-        matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Entity);
+    let thing_kind = matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Thing);
+    let place_kind = matches!(owner, Owner::Kind(kind) if matches!(world.book.kinds[kind].sort, Sort::Place(_)));
+    let entity_kind = matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Entity);
     let allowed = match law.trigger {
         Written::In | Written::Out | Written::Gain => {
             matches!(owner, Owner::Place(_) | Owner::System(_) | Owner::Book) || place_kind
         }
         Written::Spend => matches!(owner, Owner::Entity(_)) || entity_kind,
-        Written::Flow => {
-            matches!(
-                owner,
-                Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_)
-            ) || thing_kind
-        }
+        Written::Flow => matches!(owner, Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_)) || thing_kind,
         Written::Each(_) | Written::Closing { .. } | Written::By(_) => {
             !matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Commodity)
         }
         Written::Always => {
-            matches!(
-                owner,
-                Owner::Place(_)
-                    | Owner::Entity(_)
-                    | Owner::System(_)
-                    | Owner::Book
-                    | Owner::Asset(_)
-            ) || place_kind
+            matches!(owner, Owner::Place(_) | Owner::Entity(_) | Owner::System(_) | Owner::Book | Owner::Asset(_))
+                || place_kind
                 || thing_kind
                 || entity_kind
         }
@@ -902,18 +745,10 @@ fn register(world: &mut World) {
     for id in book.systems.ids().collect::<Vec<Id<System>>>() {
         book.systems[id].laws = std::mem::take(&mut of_system[id.index()]).into();
     }
-    for id in book
-        .purposes
-        .ids()
-        .collect::<Vec<Id<crate::book::Purpose>>>()
-    {
+    for id in book.purposes.ids().collect::<Vec<Id<crate::book::Purpose>>>() {
         book.purposes[id].laws = std::mem::take(&mut of_purpose[id.index()]).into();
     }
-    for id in book
-        .contracts
-        .ids()
-        .collect::<Vec<Id<crate::book::Contract>>>()
-    {
+    for id in book.contracts.ids().collect::<Vec<Id<crate::book::Contract>>>() {
         book.contracts[id].laws = std::mem::take(&mut of_contract[id.index()]).into();
     }
 }

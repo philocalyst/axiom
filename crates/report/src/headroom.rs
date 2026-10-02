@@ -38,7 +38,18 @@ pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
             if in_force && begins <= days.last() && read.insert((rule.law, step, rule.subject, days.first())) {
                 let (owner, counted) = (book.places[place].owner, Amount::new(Qty::ZERO, limit.unit));
                 let (law, subject, day) = (rule.law, rule.subject, days.last().min(to));
-                readings.push(Headroom { law, step, subject, owner, days, counted, limit, day, warn, bound: Bound::Cap });
+                readings.push(Headroom {
+                    law,
+                    step,
+                    subject,
+                    owner,
+                    days,
+                    counted,
+                    limit,
+                    day,
+                    warn,
+                    bound: Bound::Cap,
+                });
             }
         }
     }

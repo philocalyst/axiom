@@ -252,15 +252,17 @@ impl<'s> Parser<'s> {
                 Tok::Purpose(name) => ClauseKind::Purpose(self.purpose(name)?),
                 Tok::Str(text) => self.bump_as(ClauseKind::Description(Text(text))),
                 Tok::Code(code) => self.bump_as(ClauseKind::Code(code)),
-                Tok::Name("via") => {
-                    ClauseKind::Via(self.then(|p| p.name("expected-party", "the party it went through, such as `paypal`"))?)
-                }
+                Tok::Name("via") => ClauseKind::Via(
+                    self.then(|p| p.name("expected-party", "the party it went through, such as `paypal`"))?,
+                ),
                 Tok::Punct(Punct::Slash) => return Err(self.slash(None)),
                 Tok::Punct(Punct::At) => ClauseKind::Price(self.then(Self::measured)?),
-                Tok::Name("against") => ClauseKind::Against(self.then(|p| p.code("expected-code", "the code of the flow it is about, such as `^inv-11`"))?),
-                Tok::Name("until") if matches!(scope, Scope::Statement(_)) => {
-                    ClauseKind::Until(self.then(|p| p.date_from(scope.day(), "the last day it holds, like `2026-05-31`"))?)
-                }
+                Tok::Name("against") => ClauseKind::Against(
+                    self.then(|p| p.code("expected-code", "the code of the flow it is about, such as `^inv-11`"))?,
+                ),
+                Tok::Name("until") if matches!(scope, Scope::Statement(_)) => ClauseKind::Until(
+                    self.then(|p| p.date_from(scope.day(), "the last day it holds, like `2026-05-31`"))?,
+                ),
                 Tok::Punct(Punct::Bang) => ClauseKind::Waive(self.waiver()?),
                 Tok::Name("for") => ClauseKind::For(self.then(|p| p.for_what(token.loc))?),
                 Tok::Name("due") => ClauseKind::Due(self.then(|p| p.due(scope))?),
@@ -349,7 +351,11 @@ impl<'s> Parser<'s> {
                 let end_loc = self.loc_of(&end.name);
                 let between = &self.src[end_loc.end as usize..slash.start as usize];
                 let via = format!("{party}{between}via {}", &*end.name);
-                diag = diag.fix(format!("`{}` is who it went through: `via {}`", &*end.name, &*end.name), end_loc.to(written), via);
+                diag = diag.fix(
+                    format!("`{}` is who it went through: `via {}`", &*end.name, &*end.name),
+                    end_loc.to(written),
+                    via,
+                );
                 let amount = match (from.amount, to.amount) {
                     (Some(Quantity::Amount(Amount::Literal(amount))), None)
                     | (None, Some(Quantity::Amount(Amount::Literal(amount)))) => Some(amount),
