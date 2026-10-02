@@ -3,6 +3,9 @@
 //! A statement holds from its day (LANGUAGE §3): a contract's terms, a
 //! budget's limit and a person's residence are each a declaration's value
 //! and then whatever later statements said, over the days they said it.
+//!
+//! The painting is a function of its own, `paint_steps`, on a plain vector of `(Day, T)`, so that [`Timeline`] and
+//! the facts builder, which paints thousands of small timelines into one reused vector, run the same code.
 
 use crate::calendar::Days;
 use crate::day::Day;
@@ -28,18 +31,12 @@ impl<T: Clone + PartialEq> Timeline<T> {
     /// Painting an unbounded end (`Days::new(day, Day::MAX)`) is "from now on".
     /// Adjacent equal steps merge.
     pub fn paint(&mut self, days: Days, value: T) {
-        // What held on the day after: it resumes there.
-        let resumed = days.last().0.checked_add(1).map(|next| (Day(next), self.at(Day(next)).clone()));
-        let from = self.steps.partition_point(|(day, _)| *day < days.first());
-        let to = self.steps.partition_point(|(day, _)| *day <= resumed.as_ref().map_or(Day::MAX, |(next, _)| *next));
-        self.steps.splice(from..to, [(days.first(), value)].into_iter().chain(resumed));
-        self.steps.dedup_by(|later, earlier| later.1 == earlier.1);
+        paint_steps(&mut self.steps, days, value);
     }
 
     /// What holds on `day`.
     pub fn at(&self, day: Day) -> &T {
-        let after = self.steps.partition_point(|(from, _)| *from <= day);
-        &self.steps[after - 1].1
+        step_at(&self.steps, day)
     }
 
     /// Every stretch that meets `within`, in order, with what holds through
@@ -58,6 +55,25 @@ impl<T: Clone + PartialEq> Timeline<T> {
     pub fn changes(&self) -> impl Iterator<Item = (Day, &T)> {
         self.steps[1..].iter().map(|(day, value)| (*day, value))
     }
+}
+
+/// What holds on `day` in `steps`: the last step that has begun. `steps` is sorted by day and begins at [`Day::MIN`],
+/// so there always is one.
+pub(crate) fn step_at<T>(steps: &[(Day, T)], day: Day) -> &T {
+    let after = steps.partition_point(|(from, _)| *from <= day);
+    &steps[after - 1].1
+}
+
+/// Paints `value` over `days` in `steps`, which are sorted by day, begin at [`Day::MIN`] and have no two neighbours
+/// that hold the same value, and leaves them so: a statement overrides what was there over its days, what held before
+/// resumes after it, and neighbours that come to hold the same value merge.
+pub(crate) fn paint_steps<T: Clone + PartialEq>(steps: &mut Vec<(Day, T)>, days: Days, value: T) {
+    // What held on the day after: it resumes there.
+    let resumed = days.last().0.checked_add(1).map(|next| (Day(next), step_at(steps, Day(next)).clone()));
+    let from = steps.partition_point(|(day, _)| *day < days.first());
+    let to = steps.partition_point(|(day, _)| *day <= resumed.as_ref().map_or(Day::MAX, |(next, _)| *next));
+    steps.splice(from..to, [(days.first(), value)].into_iter().chain(resumed));
+    steps.dedup_by(|later, earlier| later.1 == earlier.1);
 }
 
 #[cfg(test)]
