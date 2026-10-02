@@ -6,6 +6,7 @@
 
 pub mod calendar;
 pub mod day;
+pub mod dayset;
 pub mod diag;
 pub mod glob;
 pub mod groups;
@@ -25,6 +26,7 @@ pub mod unit;
 // already in scope where a window is spoken of.
 pub use calendar::{Cadence, DateLayout, Days, On, Period, due, spread};
 pub use day::{Day, Span};
+pub use dayset::{DaySet, DaySlice};
 pub use diag::{Diagnostic, Disposition, FileId, Loc, Severity};
 pub use groups::Groups;
 pub use hash::{Map, Set};
