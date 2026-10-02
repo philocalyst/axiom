@@ -41,6 +41,22 @@ Behaviour is preserved with exactly two exceptions, both listed in your report:
 
 No other test expectation, golden or mistake output changes.
 
+## What you start from
+
+K0a and K0b are merged, so the model is no longer the cutover's. Know these before you start:
+- `collect.rs` sorts every item of every file into typed buckets in one pass (`Collected`, with `Written<T>` per item).
+  Declarations and statements are read from there. Do not walk the items again.
+- `problem.rs` is the diagnostic catalog: plain functions per family (`unknown`, `ambiguous`, `duplicate`, `twice`), over
+  a `Noun`. Add `wrong-kind`, `too-many`, `missing-role` and `slot-widening` there.
+- `declare.rs` is a driver over `declare/{commodities,holdings,parties,places}.rs`; `lower/` is split into
+  `flow.rs`, `statements.rs`, `tail.rs`, `also.rs`, `contracts.rs`, `record.rs` and `staged.rs` (the RAII guard).
+- `kinds.rs` (401 lines) and `purposes.rs` (301) still have their own `declare_sites`, and `kinds.rs` its own `cycles`:
+  the duplication K1's `Taxonomy` removes. `props.rs` is still 1,855 lines.
+- The model now **trusts the parser** in a few places (`unreachable!`, `assert!` where a diagnostic used to be). If you
+  change what the parser accepts, run `python3 docs/v5/measure/fuzz.py OLD NEW examples SEED COUNT` (the old binary is
+  `target/release/axiom` built from the branch you started from) with at least 1,000 mutants before each commit that
+  touches `syntax`, and fix any panic it finds. Do not turn an `unreachable!` into a silent default.
+
 ## Steps
 
 Each step is one or more commits, each building and passing.
@@ -132,8 +148,9 @@ Then move, one family per commit, every value that changes on a day or is said a
   - and the kind flags `restricted`, `deferred`, `claim`, `basis`, `purpose`, `pays`, `takes`, `sales-tax` and
     `share`.
 
-  Each becomes a slot that `std.ax` declares on the root kind it belongs to. The engine reads it through a `Key<V>`
-  constant. Its `Args` reader becomes the parser of its value type. The `Assign` enum goes. A kind's facts are the
+  Each becomes a slot that `std.ax` declares on the root kind it belongs to. The engine reads it through the typed
+  key of the `Slots` struct above, never through a numbered constant. Its `Args` reader becomes the parser of its
+  value type. The `Assign` enum goes. A kind's facts are the
   defaults of its things, and lookup falls back up the kind's ancestors (a pre-order range);
 - **`Residence`** becomes the `lives` slot's timeline;
 - **the fields of `Kind`, `Place`, `Entity`, `Commodity` and `Asset`** that only cache a property go. Their readers in
