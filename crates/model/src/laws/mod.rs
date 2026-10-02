@@ -15,17 +15,17 @@ mod types;
 mod vars;
 
 use axiom_core::diag::closest;
-use axiom_core::{Days, Diagnostic, Id, Set};
-use axiom_syntax::{self as ast, DeclKind, ExprId, ItemKind, Trigger as Written};
+use axiom_core::{Diagnostic, Id, Set};
+use axiom_syntax::{self as ast, DeclKind, ItemKind, Trigger as Written};
 
 pub(crate) use self::compile::compile_template;
 use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
-use crate::book::{Also, AlsoOn, Amount, Implied, Input, Kind, Sign, Sort, System, TemplateAmount};
+use crate::book::{AlsoOn, Kind, Sort, System};
 use crate::declare::World;
-use crate::errors::{Candidate, Reported, Word};
-use crate::journal::Select as LotSelect;
-use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
+use crate::errors::{Candidate, Word};
+use crate::law::{Law, Owner, Rank, RankClass, Ty};
+use crate::lower::also::{AlsoCx, lower_alsos};
 use crate::names::Rank as NameRank;
 use crate::problem::{self, Noun};
 use crate::scope::Home;
@@ -223,66 +223,6 @@ fn set_specificity(world: &mut World<'_>) {
     }
 }
 
-/// Compiles the expression roots of an `also` declaration into a law arena.
-/// The caller owns the returned root mapping and stores the law id in its
-/// `book::Also`; roots must be ordered as written (`when`, then amounts).
-pub(crate) fn compile_also<'s>(
-    world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
-    file: &ast::File<'s>,
-    home: Home,
-    owner: Owner,
-    subject: Ty,
-    name: axiom_core::Sym,
-    inputs: &[Input],
-    roots: &[(ExprId, Ty)],
-    loc: axiom_core::Loc,
-) -> Option<(Id<Law>, Box<[NodeId]>)> {
-    let (program, roots) = compile_template(world, diags, file, home, subject, name, inputs, roots)?;
-    let (book, nodes) = (&mut world.book, program.nodes);
-    let law = Law {
-        name,
-        doc: None,
-        owner,
-        system: if let Home::System(system) = home { Some(system) } else { None },
-        trigger: Trigger::Flow,
-        budget: None,
-        overrides: None,
-        override_name: None,
-        rank: Rank::ZERO,
-        steps: Box::default(),
-        nodes,
-        loc,
-    };
-    Some((book.laws.push(law), roots))
-}
-
-#[derive(Clone, Copy)]
-enum PendingAmount {
-    Literal(Amount),
-    Computed(usize),
-}
-
-/// An implied amount: a literal is resolved now, and an expression is compiled with the rest of its `also`.
-fn pending_amount<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    amount: ast::Amount<'s>,
-    currency: Id<crate::book::Commodity>,
-    roots: &mut Vec<(ExprId, Ty)>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<PendingAmount> {
-    match amount {
-        ast::Amount::Literal(literal) => {
-            world.literal_amount(file, literal, Some(currency)).or_report(diags).map(PendingAmount::Literal)
-        }
-        ast::Amount::Computed(root) => {
-            roots.push((root, Ty::AMOUNT));
-            Some(PendingAmount::Computed(roots.len() - 1))
-        }
-    }
-}
-
 /// Lower every declaration `also` while the complete declaration namespace is
 /// available. Its law is auxiliary: `register` deliberately leaves it out of
 /// the owner's ordinary law list, and the native group builder applies it to
@@ -315,247 +255,14 @@ fn declare_alsos<'s>(
     };
 
     let currency = fallback_currency(world, owner);
-    lower_alsos(world, diags, file, home, decl.alsos, owner, on, &[], currency);
-}
-
-/// Lowers `also` clauses shared by declaration and contract lowering.
-///
-/// `inputs` are the caller's template inputs, while `currency` supplies the
-/// unit for written amounts without an explicit commodity. The caller chooses
-/// the matching `AlsoOn` owner and owns any fallback endpoint semantics.
-pub(crate) fn lower_alsos<'s>(
-    world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
-    file: &ast::File<'s>,
-    home: Home,
-    alsos: ast::Many<ast::Also<'s>>,
-    owner: Owner,
-    on: AlsoOn,
-    inputs: &[Input],
-    currency: Id<crate::book::Commodity>,
-) -> Box<[Id<Also>]> {
-    let mut lowered = Vec::new();
-    for also in &file[alsos] {
-        let mut roots = Vec::new();
-        let when_index = also.when.map(|when| {
-            let index = roots.len();
-            roots.push((when, Ty::Bool));
-            index
-        });
-        let (what, amount_index, metadata_clauses, source_selectors) = match &also.line {
-            ast::AlsoLine::Item(item) => {
-                let Some(amount) = pending_amount(world, file, item.amount, currency, &mut roots, diags) else {
-                    continue;
-                };
-                (
-                    Some(Implied::Item {
-                        sign: match item.sign {
-                            ast::Sign::Carve => Sign::Carve,
-                            ast::Sign::Add => Sign::Add,
-                            ast::Sign::Less => Sign::Less,
-                        },
-                        amount: TemplateAmount::Literal(Amount::zero(currency)),
-                    }),
-                    Some(amount),
-                    item.tail,
-                    None,
-                )
-            }
-            ast::AlsoLine::Flow(flow) => {
-                if !file[flow.body.legs].is_empty() || !file[flow.body.items].is_empty() {
-                    diags.push(
-                        Diagnostic::error(
-                            "also-flow-body",
-                            "a declaration `also` flow cannot have split legs or items",
-                        )
-                        .label(also.loc, "write one implied flow here"),
-                    );
-                    continue;
-                }
-                if flow.to.end.is_some_and(|end| !file[end.select].is_empty()) {
-                    diags.push(
-                        Diagnostic::error(
-                            "selector-target",
-                            "selectors narrow the source endpoint; an implied flow target receives",
-                        )
-                        .label(also.loc, "remove selectors from the target endpoint"),
-                    );
-                    continue;
-                }
-                let mut valid_ends = true;
-                let from = match flow.from.end {
-                    Some(end) if end.name.0 != "self" => match world.end(home, Word::of(file, end.name.0)) {
-                        Ok(end) => Some(end.place),
-                        Err(problem) => {
-                            diags.push(problem);
-                            valid_ends = false;
-                            None
-                        }
-                    },
-                    _ => None,
-                };
-                let to = match flow.to.end {
-                    Some(end) if end.name.0 != "self" => match world.end(home, Word::of(file, end.name.0)) {
-                        Ok(end) => Some(end.place),
-                        Err(problem) => {
-                            diags.push(problem);
-                            valid_ends = false;
-                            None
-                        }
-                    },
-                    _ => None,
-                };
-                if !valid_ends {
-                    continue;
-                }
-                let from_amount = match flow.from.amount {
-                    Some(ast::Quantity::Amount(amount)) => Some(amount),
-                    Some(other) => {
-                        diags.push(
-                            Diagnostic::error(
-                                "also-flow-amount",
-                                "an implied flow amount must be an amount expression",
-                            )
-                            .label(quantity_loc(file, other, also.loc), "this quantity cannot be implied"),
-                        );
-                        continue;
-                    }
-                    None => None,
-                };
-                let to_amount = match flow.to.amount {
-                    Some(ast::Quantity::Amount(amount)) => Some(amount),
-                    Some(other) => {
-                        diags.push(
-                            Diagnostic::error(
-                                "also-flow-amount",
-                                "an implied flow amount must be an amount expression",
-                            )
-                            .label(quantity_loc(file, other, also.loc), "this quantity cannot be implied"),
-                        );
-                        continue;
-                    }
-                    None => None,
-                };
-                let amount = match (from_amount, to_amount) {
-                    (Some(_), Some(_)) => {
-                        diags.push(
-                            Diagnostic::error("also-flow-amount", "an implied flow states its amount on one side only")
-                                .label(also.loc, "remove one of these amounts"),
-                        );
-                        continue;
-                    }
-                    (Some(amount), None) | (None, Some(amount)) => amount,
-                    (None, None) => {
-                        diags.push(
-                            Diagnostic::error("also-flow-amount", "an implied flow needs an amount")
-                                .label(also.loc, "write an amount on one side of the arrow"),
-                        );
-                        continue;
-                    }
-                };
-                let Some(amount) = pending_amount(world, file, amount, currency, &mut roots, diags) else {
-                    continue;
-                };
-                (
-                    Some(Implied::Flow { from, to, amount: TemplateAmount::Literal(Amount::zero(currency)) }),
-                    Some(amount),
-                    flow.tail,
-                    flow.from.end.map(|end| end.select),
-                )
-            }
-        };
-        let (Some(mut what), Some(amount)) = (what, amount_index) else {
-            continue;
-        };
-        let metadata_errors = diags.len();
-        let metadata = crate::lower::also::tail(world, home, file, metadata_clauses, diags);
-        if diags.len() != metadata_errors {
-            continue;
-        }
-        let selector_errors = diags.len();
-        let select = source_selectors
-            .map_or(metadata.select, |selectors| lower_also_selectors(world, home, file, selectors, diags));
-        if diags.len() != selector_errors {
-            continue;
-        }
-        let name = world.book.names.intern("also");
-        let Some((law, compiled_roots)) =
-            compile_also(world, diags, file, home, owner, Ty::Flow, name, inputs, &roots, also.loc)
-        else {
-            continue;
-        };
-        let amount = match amount {
-            PendingAmount::Literal(amount) => TemplateAmount::Literal(amount),
-            PendingAmount::Computed(index) => TemplateAmount::Computed(compiled_roots[index]),
-        };
-        match &mut what {
-            Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => *slot = amount,
-        }
-        let when = when_index.map(|index| compiled_roots[index]);
-        let id = world.book.also.push(Also {
-            on,
-            what,
-            when,
-            law,
-            purpose: metadata.purpose,
-            description: metadata.description,
-            codes: metadata.codes,
-            select,
-            detail: metadata.detail,
-            waive: metadata.waive,
-            loc: also.loc,
-        });
-        lowered.push(id);
-    }
-    Box::from(lowered)
+    let cx = AlsoCx { file, home, owner, on, inputs: &[], currency };
+    lower_alsos(world, &cx, decl.alsos, diags);
 }
 
 fn fallback_currency(world: &World<'_>, owner: Owner) -> Id<crate::book::Commodity> {
     match owner {
         Owner::Entity(entity) => world.book.entities[entity].currency,
         _ => world.book.base,
-    }
-}
-
-fn lower_also_selectors<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    selectors: ast::Many<ast::Select<'s>>,
-    diags: &mut Vec<Diagnostic>,
-) -> axiom_core::Run<LotSelect> {
-    let start = world.book.selectors.len();
-    for written in &file[selectors] {
-        let resolved = match *written {
-            ast::Select::Range(first, last, at) => Days::new(first, last).map(LotSelect::Range).ok_or_else(|| {
-                Diagnostic::error("selector-range", "selector range ends before it begins")
-                    .label(at, "reverse or correct this date range")
-            }),
-            ast::Select::Code(code) => Ok(LotSelect::Code(world.book.names.intern(code.name()))),
-            ast::Select::Policy(policy, _) => Ok(LotSelect::Policy(policy)),
-            ast::Select::Purpose(name) => world.purpose(home, Word::of(file, name.0)).map(LotSelect::Purpose),
-            ast::Select::Unit(name) => world.commodity_of(Word::of(file, name.0)).map(LotSelect::Unit),
-            ast::Select::End(name) => world.end(home, Word::of(file, name.0)).map(|end| LotSelect::End(end.place)),
-        };
-        match resolved {
-            Ok(selector) => {
-                world.book.selectors.push(selector);
-            }
-            Err(problem) => diags.push(problem),
-        }
-    }
-    axiom_core::Run::new(Id::new(start as u32), (world.book.selectors.len() - start) as u32)
-}
-
-fn quantity_loc(file: &ast::File<'_>, quantity: ast::Quantity<'_>, fallback: axiom_core::Loc) -> axiom_core::Loc {
-    match quantity {
-        ast::Quantity::Amount(ast::Amount::Literal(literal)) => file.loc(literal.0),
-        ast::Quantity::Amount(ast::Amount::Computed(root))
-        | ast::Quantity::Pending(ast::Amount::Computed(root))
-        | ast::Quantity::Target(ast::Amount::Computed(root)) => file.exprs[root].loc,
-        ast::Quantity::Pending(ast::Amount::Literal(literal))
-        | ast::Quantity::Target(ast::Amount::Literal(literal)) => file.loc(literal.0),
-        _ => fallback,
     }
 }
 

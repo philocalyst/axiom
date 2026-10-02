@@ -6,6 +6,7 @@ use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Span
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
+use super::also::{AlsoCx, lower_alsos};
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
@@ -164,17 +165,15 @@ fn lower_contract<'a, 's>(
         diags,
     )
     .ok()?;
-    let also = crate::laws::lower_alsos(
-        world,
-        diags,
+    let also_cx = AlsoCx {
         file,
-        written.site.home,
-        node.alsos,
-        Owner::Contract(written.id),
-        AlsoOn::Contract(written.id),
-        &contract_inputs,
-        world.book.entities[owner].currency,
-    );
+        home: written.site.home,
+        owner: Owner::Contract(written.id),
+        on: AlsoOn::Contract(written.id),
+        inputs: &contract_inputs,
+        currency: world.book.entities[owner].currency,
+    };
+    let also = lower_alsos(world, &also_cx, node.alsos, diags);
     let loan = contract_loan(world, file, node.props, party, owner, written.site.home, diags)?;
     let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
     contract.party = party;
