@@ -798,7 +798,7 @@ fn invalid_contract_deposits_do_not_leave_active_terms() {
     let cases = [
         ("deposit 0 USD", "contract-deposit-positive"),
         ("deposit 5 USD into dana", "contract-deposit-holding"),
-        ("deposit 5 USD\n  deposit 7 USD", "contract-deposit-duplicate"),
+        ("deposit 5 USD\n  deposit 7 USD", "duplicate-deposit"),
     ];
     for (deposit, expected) in cases {
         let text = format!(
@@ -1477,4 +1477,51 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
             assert_eq!(book.touching[flow.to].iter().filter(|&&id| id == flow_id).count(), 1);
         }
     }
+}
+
+/// What `build` says about a ledger that has `tail` after a contract, an account, a unit of work and an entity.
+fn rejections(tail: &str) -> (Vec<String>, Vec<String>) {
+    let path = "journal/2026/01.ax";
+    let head = "base USD\ncommodity USD\ncommodity HR\naccount checking\nentity me\n\
+                contract phone with carrier\n  100 USD monthly from checking\n  from 2026-01-01\n";
+    let text = format!("{head}{tail}");
+    let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
+    let (_, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    let codes = |diagnostics: &[axiom_core::Diagnostic]| diagnostics.iter().map(|d| d.code.to_string()).collect();
+    (codes(&syntax), codes(&diagnostics))
+}
+
+#[test]
+fn the_parser_keeps_out_of_the_model_what_the_model_does_not_check_again() {
+    // The parser takes one description and one `until` per statement, and only the clauses a verb means something
+    // to; a statement that breaks either is not passed on, so the model has nothing to say about it.
+    let refused = [
+        ("2026-01-15 phone waived \"a\" \"b\"\n", "duplicate-clause"),
+        ("2026-01-15 phone waived until 2026-02-01 until 2026-03-01\n", "duplicate-clause"),
+        ("2025-12-01 checking -> ? 5 USD ^cash\n2025-12-15 ^cash waived \"a\" \"b\"\n", "duplicate-clause"),
+        ("2026-01-15 phone ends \"a\" \"b\"\n", "duplicate-clause"),
+        ("2026-01-15 phone ends via checking\n", "clause-not-taken"),
+        ("2026-01-15 phone waived for 2025\n", "clause-not-taken"),
+        ("2026-01-15 checking = 5 USD for me\n", "clause-not-taken"),
+        ("2026-01-15 checking = 5 USD #food\n", "clause-not-taken"),
+    ];
+    for (tail, expected) in refused {
+        let (syntax, model) = rejections(tail);
+        assert_eq!(syntax, [expected], "{tail}");
+        assert!(model.is_empty(), "{tail}: {model:?}");
+    }
+}
+
+#[test]
+fn a_period_on_a_measure_and_an_until_on_a_line_of_an_occurrence_get_the_parsers_blessing_and_the_models_refusal() {
+    // These two the parser lets through (a measure takes `for`, and a line under a statement is a statement's
+    // scope), so the model is the one that says no.
+    let (syntax, model) = rejections("2026-01-15 me worked 5 HR for 2025\n");
+    assert!(syntax.is_empty(), "{syntax:?}");
+    assert_eq!(model, ["measure-tail"]);
+
+    let occurrence = "2026-01-01 phone 100 USD\n  checking 100 USD until 2026-03-01\n";
+    let (syntax, model) = rejections(occurrence);
+    assert!(syntax.is_empty(), "{syntax:?}");
+    assert!(model.contains(&"until-position".to_string()), "{model:?}");
 }

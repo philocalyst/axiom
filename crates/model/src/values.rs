@@ -1,5 +1,6 @@
 //! Constants: the literal values written in properties, params and laws.
 
+use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Dim, Id, Loc, Qty, Ratio};
 use axiom_syntax::{Bracket as WrittenBracket, Expr, ExprId, ExprKind, File, Many};
 
@@ -7,6 +8,7 @@ use crate::book::{Bracket, Commodity, Schedule};
 use crate::declare::World;
 use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
+use crate::problem::{self, Noun};
 use crate::scope::Home;
 
 impl Value {
@@ -82,7 +84,7 @@ impl<'s> World<'s> {
             }
             ExprKind::Amount(amount) => match amount.unit() {
                 Some(unit) => {
-                    let unit = self.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) })?;
+                    let unit = self.commodity_of(Word::of(file, unit.0))?;
                     (Value::Amount(self.amount(amount.num(), unit, expr.loc)?), Ty::Amount(Dim::Of(unit)))
                 }
                 None => (Value::Empty, Ty::Empty),
@@ -176,12 +178,10 @@ impl<'s> World<'s> {
         })
     }
 
-    fn missing_asset(&self, word: Word<'_>) -> Diagnostic {
-        let suggestion = axiom_core::diag::closest(
-            word.text,
-            self.book.assets.iter().map(|(_, asset)| self.book.names.name(asset.name)),
-        );
-        crate::errors::unknown("unknown-asset", "asset", word, suggestion)
+    /// Why `word` is no asset, with the nearest asset as the fix.
+    pub(crate) fn missing_asset(&self, word: Word<'_>) -> Diagnostic {
+        let nearest = closest(word.text, self.book.assets.values().map(|asset| self.book.name(asset.name)));
+        problem::unknown(Noun::Asset, word, nearest)
     }
 
     /// `0 USD 10% | 12_400 USD 12% | …`: marginal brackets, ascending from zero,

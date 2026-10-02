@@ -1,0 +1,93 @@
+use std
+base USD
+entity me : person
+entity landlord : org
+account checking : bank
+account savings : bank
+account assets/bank/loan-stuff : bank
+asset car : vehicle
+asset boat : vehicle
+contract lease with landlord
+  500 USD monthly on 1 from checking
+contract lonely with landlord
+  100 USD monthly on 5 from checking
+  until 2026-06-30
+commodity VTI : stock
+commodity GAS : measure
+
+2026-01-01 market -> checking 9_000 USD ^buy1
+2026-01-02 checking -> savings 100 USD ^move1
+2026-01-03 checking -> landlord 50 USD ^plain
+2026-01-04 checking -> market 10 USD
+
+// values
+2026-02-01 nowhere = 5 USD
+2026-02-01 me = 5 USD
+2026-02-01 checking = 5 EUR
+2026-02-01 checking = 5 USD via nowhere
+2026-02-01 checking = 5 USD via savings
+2026-02-01 checking = 5 USD !
+2026-02-01 car = 5 USD
+2026-02-01 car = 5 EUR
+2026-02-01 ^buy1 = 5 USD
+2026-02-01 ^buy1 = 5 EUR
+2026-02-01 #chow = 5 USD
+2026-02-01 VTI = 5 USD
+2026-02-01 VTI = 5
+2026-02-01 VTI = 0 USD
+2026-02-01 VTI = 5 NOPE
+2026-02-01 lease = 5 USD
+
+// measures
+2026-02-02 me worked 8 GAS
+2026-02-02 me used 8 GAS #nope
+2026-02-02 me worked 8 GAS for nobody
+2026-02-02 me worked 8 GAS ^c1 "described" against ^nope
+2026-02-02 me worked 8 GAS against ^buy1
+2026-02-02 car used 8 GAS
+2026-02-02 checking used 8 GAS
+2026-02-02 VTI used 8 GAS
+2026-02-02 me worked 8 NOPE
+
+// splits, events, filed
+2026-03-01 VTI split 2 for 1
+2026-03-01 NOPE split 2 for 1
+2026-03-01 me split 2 for 1
+2026-03-01 ^buy1 settled
+2026-03-01 me settled
+2026-03-01 us filed 2025
+  income 5 USD
+  income 5 EUR
+2026-03-01 nosuch filed 2025
+2026-03-01 me filed 2025
+
+// endings
+2026-04-01 lease ends
+2026-04-01 lonely ends "bye" ^e1 ^e2
+2026-04-01 car ends
+2026-04-01 savings ends
+2026-04-01 nowhere ends
+2026-04-01 ^buy1 ends
+2020-04-01 lease ends
+
+// waivers
+2026-05-01 lease waived
+2026-05-01 lease waived until 2026-04-01
+2026-05-01 lease waived until 2026-06-01 "why" ^w1
+2026-05-01 car waived
+2026-05-01 ^buy1 waived
+2026-05-01 ^nope waived
+2026-05-01 ^move1 waived
+2026-05-01 ^buy1 waived "fine"
+2026-05-01 nowhere waived
+
+// basis
+2026-06-01 car basis 400 USD
+2026-06-01 car basis 400 EUR
+2026-06-01 car basis 400
+2026-06-01 car basis 400 USD since 2020-01-01
+2026-06-01 nothing basis 400 USD
+2026-06-01 checking basis 400 USD
+2026-06-01 me basis 400 USD
+2026-06-01 car basis 400 USD #nope
+2026-06-01 car basis 400 USD ^b1 "text"

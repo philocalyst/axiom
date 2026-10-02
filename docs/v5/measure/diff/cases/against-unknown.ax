@@ -1,0 +1,5 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+2026-01-01 me -> checking 5 USD against ^nothing

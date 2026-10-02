@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+purpose p/food : spending
+purpose q/food : spending
+2026-01-01 me -> checking 1 USD #food

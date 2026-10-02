@@ -1,4 +1,4 @@
-error[duplicate-declaration]: account `assets/checking` is declared twice
+error[duplicate-account]: account `assets/checking` is declared twice
   ╭─[26-duplicate-account.ax:7:9]
   │
 5 │ account assets/checking : bank

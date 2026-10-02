@@ -1,0 +1,31 @@
+use std
+base USD
+entity me : person
+account checking : bank
+account reserve : bank
+account envelope : bank
+purpose pay : income
+purpose chow : spending
+  budget 650 USD monthly carries
+purpose lunch : spending
+  budget 250 USD monthly funded from checking into reserve
+purpose treats : spending
+  budget 20% of #pay yearly
+purpose later : spending
+purpose fees : spending
+budget fees 25 USD monthly
+2026-03-01 #chow now budget 700 USD monthly until 2026-05-31
+2026-04-01 #lunch now budget 300 USD monthly funded from checking into envelope until 2026-04-30
+2026-03-01 #later now budget 30 USD monthly
+2026-06-01 #later now budget 90 USD yearly carries
+2026-07-01 #treats now budget 5% of #pay monthly
+
+2026-01-05 market -> checking 9_000 USD
+2026-03-05 checking -> market 400 USD #chow
+2026-03-06 checking -> market 400 USD #chow
+2026-04-06 checking -> market 400 USD #lunch
+2026-04-07 checking -> market 500 USD #lunch
+2026-03-06 market -> checking 4_000 USD #pay
+2026-03-10 checking -> market 40 USD #later
+2026-06-10 checking -> market 100 USD #later
+2026-06-12 checking -> market 100 USD #fees

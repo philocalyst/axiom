@@ -1,0 +1,6 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+pattern p1 = "A" digit+
+pattern p2 = p11 digit+

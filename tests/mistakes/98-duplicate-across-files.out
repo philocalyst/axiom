@@ -18,7 +18,7 @@ error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, 
   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
           for; declare institution positions as `account checking : bank at chase`
 
-error[duplicate-declaration]: account `assets/checking` is declared twice
+error[duplicate-account]: account `assets/checking` is declared twice
   ╭─[journal/2026/01.ax:2:9]
   │
 2 │ account assets/checking : bank
@@ -30,6 +30,8 @@ error[duplicate-declaration]: account `assets/checking` is declared twice
 1 │ account assets/checking : bank
   │         ───────┬───────
   │                ╰── first declared here
+  │
+  = help: keep the declaration you mean and delete the other
 
 error[flow-shape]: a flow needs a named end and at least one leg
   ╭─[journal/2026/01.ax:5:1]

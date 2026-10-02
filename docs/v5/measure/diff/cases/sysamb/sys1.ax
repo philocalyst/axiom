@@ -1,0 +1,6 @@
+system sys1
+kind widget : asset
+purpose food : spending
+entity shared : org
+param limit
+  2026 1

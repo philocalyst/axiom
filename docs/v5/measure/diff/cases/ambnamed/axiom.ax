@@ -1,0 +1,10 @@
+use std
+use sys1
+use sys2
+base USD
+entity me : person
+account checking : deposit
+pattern q = p digit+
+sync s1
+  read "a.csv"
+  format f

@@ -1,0 +1,9 @@
+use std
+use mine
+base USD
+entity me : person
+kind tagged : asset
+  has tag number
+account t : tagged
+2026-02-01 t now tag 1
+2026-02-01 t now tag 2

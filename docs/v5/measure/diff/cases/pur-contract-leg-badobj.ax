@@ -1,0 +1,8 @@
+base USD
+entity me : person
+entity zland : org
+account checking : deposit
+purpose zork : spending
+contract zlease with zland
+  100 USD monthly on 1 from checking
+  zwater 5 USD #zork of nowhere

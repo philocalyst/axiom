@@ -1,0 +1,6 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+asset house : property
+2026-01-01 me -> checking 1 USD #purchase of hous

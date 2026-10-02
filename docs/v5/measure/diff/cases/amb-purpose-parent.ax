@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+purpose p/food : spending
+purpose q/food : spending
+purpose child : food

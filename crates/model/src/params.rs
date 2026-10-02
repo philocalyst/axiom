@@ -7,15 +7,16 @@
 //! can apply the declared unit with the same rounding rules as other amounts.
 
 use axiom_core::{Day, Diagnostic, Dim, Sym};
-use axiom_syntax::{ExprKind, File, ItemKind, Key, Param as Written, ParamRow as WrittenRow};
+use axiom_syntax::{ExprKind, File, Key, Param as Written, ParamRow as WrittenRow};
 
 use crate::book::{Param, ParamRow};
+use crate::collect::Collected;
 use crate::declare::World;
-use crate::errors::{Word, article, duplicate};
+use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
 use crate::names::Scoped;
+use crate::problem::{self, Noun};
 use crate::scope::Home;
-use crate::sources::Site;
 
 /// What every row of a param looks like.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -37,35 +38,29 @@ impl Shape {
 }
 
 /// Declare native S5 params directly from their arranged source sites.
-pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Param(id) = item.kind else {
-                continue;
-            };
-            let written = &file[id];
-            let home = site.home;
-            let system = if let Home::System(system) = home { Some(system) } else { None };
-            let name = written.name.0;
-            let sym = world.book.names.intern(name);
-            let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
-            if let Some((_, first)) = earlier {
-                diags.push(duplicate("param", Word { text: name, loc: file.loc(name) }, Some(first.loc), None));
-                continue;
-            }
+pub(crate) fn declare<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
+    for param in &collected.params {
+        let (file, written, home) = (param.file(), param.node, param.home());
+        let system = if let Home::System(system) = home { Some(system) } else { None };
+        let name = written.name.0;
+        let sym = world.book.names.intern(name);
+        let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
+        if let Some((_, first)) = earlier {
+            let (word, first) = (Word::of(file, name), Some(first.loc));
+            diags.push(problem::duplicate(Noun::Param, word, first));
+            continue;
+        }
 
-            let unit = match declared_unit(world, file, written) {
-                Ok(unit) => unit,
-                Err(error) => {
-                    diags.push(error);
-                    continue;
-                }
-            };
-            let rows = rows(world, home, file, written, unit, diags);
-            if !rows.is_empty() {
-                world.book.params.push(Param { name: sym, unit, system, rows: rows.into(), loc: file.loc(name) });
+        let unit = match declared_unit(world, file, written) {
+            Ok(unit) => unit,
+            Err(error) => {
+                diags.push(error);
+                continue;
             }
+        };
+        let rows = rows(world, home, file, written, unit, diags);
+        if !rows.is_empty() {
+            world.book.params.push(Param { name: sym, unit, system, rows: rows.into(), loc: file.loc(name) });
         }
     }
 
@@ -218,19 +213,18 @@ fn row_value<'s>(
     unit: Option<Dim<axiom_core::Id<crate::book::Commodity>>>,
 ) -> Result<Value, Diagnostic> {
     let expr = &file.exprs[row.value];
-    if let (Some(Dim::Per(want_top, want_bottom)), ExprKind::Amount(amount)) = (unit, &expr.kind) {
-        if let Some(written_unit) = amount.unit() {
-            if written_unit.0.contains('/') {
-                let found = parse_unit(world, written_unit.0, file.loc(written_unit.0))?;
-                if found != Dim::Per(want_top, want_bottom) {
-                    return Err(unit_mismatch(world, unit.unwrap(), found, expr.loc));
-                }
-                let ratio = amount.num().to_ratio().ok_or_else(|| {
-                    Diagnostic::error("number-range", "this param value is too large").label(expr.loc, "out of range")
-                })?;
-                return Ok(Value::Num(ratio));
-            }
+    if let (Some(Dim::Per(want_top, want_bottom)), ExprKind::Amount(amount)) = (unit, &expr.kind)
+        && let Some(written_unit) = amount.unit()
+        && written_unit.0.contains('/')
+    {
+        let found = parse_unit(world, written_unit.0, file.loc(written_unit.0))?;
+        if found != Dim::Per(want_top, want_bottom) {
+            return Err(unit_mismatch(world, unit.unwrap(), found, expr.loc));
         }
+        let ratio = amount.num().to_ratio().ok_or_else(|| {
+            Diagnostic::error("number-range", "this param value is too large").label(expr.loc, "out of range")
+        })?;
+        return Ok(Value::Num(ratio));
     }
     let (value, _) = world.constant(home, file, row.value, None)?;
     Ok(value)

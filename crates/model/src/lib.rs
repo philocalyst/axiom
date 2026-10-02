@@ -1,22 +1,25 @@
 //! Syntax trees to a [`Book`]: names resolved, kinds linked, laws compiled and
 //! type-checked, transactions elaborated into flows.
 //!
-//! | module      | job                                                          |
-//! |-------------|--------------------------------------------------------------|
-//! | `sources`   | which files are systems, the tree of systems, folder layout  |
-//! | `collect`   | declarations sorted out of the items; what needs every source |
-//! | `declare`   | kinds, commodities, entities and places come to exist        |
-//! | `props`     | property lines, read once and applied down the kind chain    |
-//! | `params`    | dated tables                                                 |
-//! | `laws`      | laws compiled and typed, and the order they run in           |
-//! | `rules`     | which laws watch which place, households and residences      |
-//! | `flows`     | the journal elaborated, in parallel, into flows              |
+//! | module       | job                                                         |
+//! |--------------|-------------------------------------------------------------|
+//! | `sources`    | which files are systems, the tree of systems, folder layout |
+//! | `collect`    | every item of every source, sorted into typed buckets once  |
+//! | `declare`    | kinds, commodities, entities and places come to exist       |
+//! | `props`      | property lines, read once and applied down the kind chain   |
+//! | `params`     | dated tables                                                |
+//! | `laws`       | laws compiled and typed, and the order they run in          |
+//! | `rules`      | which laws watch which place, households and residences     |
+//! | `lower`      | the journal and the contracts elaborated into flows         |
+//! | `sync_lower` | patterns, formats, code rules and sources of `sync`         |
+//! | `problem`    | the diagnostics that come in families, each worded once     |
 
 pub mod book;
 pub mod journal;
 pub mod law;
 pub mod sync;
 
+mod collect;
 mod declare;
 mod errors;
 mod kinds;
@@ -28,6 +31,7 @@ mod names_tests;
 mod params;
 mod paths;
 mod prices;
+mod problem;
 mod props;
 mod purposes;
 mod resolve;
@@ -46,6 +50,8 @@ pub use law::*;
 use axiom_core::{Diagnostic, Interner, Set};
 use axiom_syntax::File;
 
+use crate::collect::Collected;
+
 /// One parsed source.
 pub struct Source<'s> {
     /// Relative to the project root (`journal/2026/03.ax`), or the system path
@@ -63,19 +69,22 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut names = Interner::default();
     let (sites, systems_tree, systems) = sources::arrange(sources, &mut names, &mut diags);
-    let settings = declare::settings(&sites, &mut diags);
-    let scopes = declare::scopes(&sites, &systems, &systems_tree, &mut diags);
+    let collected = Collected::of(&sites);
+    let settings = declare::settings(&collected, &mut diags);
+    let scopes = declare::scopes(&collected, &systems, &systems_tree, &mut diags);
     let survey = lower::survey(&sites);
-    let mut world = declare::declare(&sites, &settings, names, systems_tree, systems, scopes, &survey, &mut diags);
-    props::declare(&mut world, &sites, &mut diags);
+    let said = declare::Said { sites: &sites, collected: &collected, survey: &survey };
+    let systems = declare::Systems { tree: systems_tree, index: systems, scopes };
+    let mut world = declare::declare(said, &settings, names, systems, &mut diags);
+    props::declare(&mut world, &collected, &mut diags);
     world.finish_props();
-    params::declare(&mut world, &sites, &mut diags);
-    props::system_rates(&mut world, &sites, &mut diags);
-    sync_lower::declare(&mut world, &sites, &mut diags);
+    params::declare(&mut world, &collected, &mut diags);
+    props::system_rates(&mut world, &collected, &mut diags);
+    sync_lower::declare(&mut world, &sites, &collected, &mut diags);
     laws::declare(&mut world, &sites, &mut diags);
-    lower::contracts(&mut world, &sites, &survey, &mut diags);
+    lower::contracts(&mut world, &collected, &mut diags);
     laws::register_native(&mut world, &mut diags);
-    lower::record(&mut world, &sites, &mut diags);
+    lower::record(&mut world, &collected, &mut diags);
     // One cause is reported once, however many declarations shared the line.
     let mut seen = Set::default();
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));

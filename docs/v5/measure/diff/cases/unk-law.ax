@@ -1,0 +1,10 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+law a1
+  always
+  warn 1 > 2
+law b1 overrides nosuch
+  always
+  warn 1 > 3

@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+kind k2 : asset
+  has tag number
+  has tag number

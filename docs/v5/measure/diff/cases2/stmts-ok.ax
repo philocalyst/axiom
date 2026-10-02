@@ -1,0 +1,47 @@
+use std
+base USD
+entity me : person
+entity landlord : org
+entity client : org
+account checking : bank
+account savings : bank
+asset car : vehicle
+asset boat : vehicle
+commodity VTI : stock
+contract lease with landlord
+  500 USD monthly on 1 from checking
+  from 2026-01-01
+contract gym with landlord
+  40 USD monthly on 3 from checking
+  from 2026-01-01
+contract short with landlord
+  100 USD monthly on 5 from checking
+  from 2026-01-01
+  until 2026-12-31
+
+2025-12-31 market -> checking 9_000 USD
+2026-01-02 checking -> savings 100 USD
+2026-01-03 checking -> client 50 USD ^claim1
+2026-01-04 client owes me 50 USD ^debt1
+2026-01-05 checking -> market 10 USD
+
+2026-02-01 checking = 8_400 USD via savings
+2026-02-01 savings = 540 USD
+2026-02-01 car = 10_000 USD !
+2026-02-01 ^debt1 = 50 USD
+2026-02-01 VTI = 285.70 USD
+2026-02-02 me worked 8 HR #travel for client ^w1 "a day"
+2026-02-02 me used 3 HR
+2026-02-02 car used 2 HR
+2026-02-03 VTI split 2 for 1
+2026-03-01 us filed 2025
+  income 5_000 USD
+  wages 4_000 USD
+2026-03-05 gym waived until 2026-04-30 ^pause "traveling"
+2026-03-05 short waived
+2026-06-01 car basis 8_000 USD since 2020-01-01 ^b1 "bought"
+2026-06-01 boat basis 2_000 USD
+2026-07-01 ^debt1 waived "forgiven"
+2026-09-01 gym ends ^stop "cancelled"
+2026-10-01 car ends
+2026-10-01 savings ends

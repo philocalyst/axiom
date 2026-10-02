@@ -1,0 +1,11 @@
+use std
+base USD
+entity me : person
+entity landlord : org
+account checking : deposit
+contract flat with landlord
+  input water USD
+  1_000 USD monthly on 1 from checking
+2026-02-01 flat
+  water = 5 USD
+  water = 6 USD

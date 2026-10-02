@@ -1,0 +1,6 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+purpose p1 : spending
+purpose p1 : spending

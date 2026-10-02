@@ -1,0 +1,15 @@
+use std
+base USD
+entity me : person
+entity acme : org
+entity shop : org
+account checking : bank
+account savings : bank
+asset car : vehicle
+asset house : vehicle
+commodity VTI : stock
+2025-12-31 market -> checking 9_000 USD
+contract mortgage with shop
+  loan 100_000 USD on 2026-01-01 at 5% over 10y
+  monthly on 1 from checking
+  from 2026-02-01

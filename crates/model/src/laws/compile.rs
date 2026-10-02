@@ -113,17 +113,91 @@ fn function_names() -> Vec<&'static str> {
     FUNCTION_SPECS.iter().map(|spec| spec.name).collect()
 }
 
+/// A call being checked: the function, and each argument as written, as a node and where it is.
+struct Call<'c, 's> {
+    function: Word<'s>,
+    args: &'c [ExprId],
+    typed: Vec<(NodeId, Ty)>,
+    locs: Vec<Loc>,
+}
+
+impl Call<'_, '_> {
+    /// The type of argument `at`, which is empty for one not given.
+    fn ty(&self, at: usize) -> Ty {
+        self.typed.get(at).map_or(Ty::Empty, |&(_, ty)| ty)
+    }
+
+    fn loc(&self, at: usize) -> Loc {
+        self.locs[at]
+    }
+
+    fn nodes(&self) -> Box<[NodeId]> {
+        self.typed.iter().map(|&(node, _)| node).collect()
+    }
+
+    /// Argument `at` is `wanted`, which `fits` says its type is.
+    fn want(&self, at: usize, wanted: &str, fits: impl Fn(Ty) -> bool) -> Check<()> {
+        match self.ty(at) {
+            ty if fits(ty) => Ok(()),
+            ty => Err(expected(wanted, ty, self.loc(at)).into()),
+        }
+    }
+
+    fn check_arity(&self, spec: &FunctionSpec, loc: Loc) -> Check<()> {
+        if (spec.min..=spec.max).contains(&self.typed.len()) {
+            return Ok(());
+        }
+        let takes = if spec.min == spec.max { spec.min.to_string() } else { format!("{} to {}", spec.min, spec.max) };
+        Err(Diagnostic::error(
+            "call-arity",
+            format!("`{}` takes {takes} arguments, but {} were given", self.function.text, self.typed.len()),
+        )
+        .label(loc, "wrong number of arguments")
+        .into())
+    }
+
+    /// `min(a, b)` and `max(a, b)`: both of one type that is ordered.
+    fn extremum(&self, func: Func) -> Check<(Func, Ty)> {
+        let shared = unify(self.ty(0), self.ty(1)).filter(|&shared| binary(BinOp::Lt, shared, shared).is_some());
+        let shared = shared.ok_or_else(|| mismatch(BinOp::Lt, (self.ty(0), self.loc(0)), (self.ty(1), self.loc(1))))?;
+        Ok((func, shared))
+    }
+
+    fn abs(&self) -> Check<(Func, Ty)> {
+        let ty = negate(self.ty(0)).ok_or_else(|| expected("an amount or a number", self.ty(0), self.loc(0)))?;
+        Ok((Func::Abs, ty))
+    }
+
+    /// `date(year, month, day)`.
+    fn date(&self) -> Check<(Func, Ty)> {
+        for at in 0..3 {
+            self.want(at, "a number", |ty| ty == Ty::Num)?;
+        }
+        Ok((Func::Date, Ty::Day))
+    }
+
+    /// `straight_line(amount, span, start[, option, option])`.
+    fn straight_line(&self) -> Check<(Func, Ty)> {
+        let wants = [Ty::Amount(Dim::Any), Ty::Span, Ty::Day, Ty::Name, Ty::Name];
+        for (at, &want) in wants.iter().take(self.args.len()).enumerate() {
+            let phrase = if want == Ty::Name { "a `mid-month` option".into() } else { article(want.word()) };
+            self.want(at, &phrase, |ty| fits(want, ty))?;
+        }
+        Ok((Func::StraightLine, self.ty(0)))
+    }
+}
+
 /// Why a node has no type.
 enum Bad {
-    /// A diagnostic for it.
-    Report(Diagnostic),
+    /// A diagnostic for it, boxed because every step of the compiler returns a `Check` and a diagnostic is large.
+    Report(Box<Diagnostic>),
     /// A child was already reported.
     Cascade,
 }
 
 impl From<Diagnostic> for Bad {
     fn from(diagnostic: Diagnostic) -> Bad {
-        Bad::Report(diagnostic)
+        Bad::Report(Box::new(diagnostic))
     }
 }
 
@@ -211,9 +285,9 @@ pub(crate) fn compile_budget_limit<'s>(
     file: &File<'s>,
     home: Home,
     purpose: axiom_core::Id<crate::book::Purpose>,
-    name: Sym,
     root: ExprId,
 ) -> Option<(TemplateProgram, NodeId)> {
+    let name = world.book.purposes[purpose].name;
     let mut compiler = Compiler {
         world,
         diags,
@@ -356,7 +430,7 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn owed_to(&mut self, name: &'s str) -> Option<Id<Entity>> {
-        let entity = self.world.entity(self.home, Word { text: name, loc: self.file.loc(name) });
+        let entity = self.world.entity(self.home, Word::of(self.file, name));
         entity.map_err(|diagnostic| self.report(diagnostic)).ok()
     }
 
@@ -436,9 +510,7 @@ impl<'s> Compiler<'_, '_, 's> {
     fn expression(&mut self, root: ExprId, want: Ty) -> Option<NodeId> {
         let node = self.value(root)?;
         let found = &self.nodes[node];
-        let Some(found_ty) = found.typed_ty() else {
-            return None;
-        };
+        let found_ty = found.typed_ty()?;
         if fits(want, found_ty) {
             return Some(node);
         }
@@ -450,9 +522,7 @@ impl<'s> Compiler<'_, '_, 's> {
     fn condition(&mut self, root: ExprId) -> Option<NodeId> {
         let node = self.value(root)?;
         let found = &self.nodes[node];
-        let Some(found_ty) = found.typed_ty() else {
-            return None;
-        };
+        let found_ty = found.typed_ty()?;
         if found_ty == Ty::Bool {
             return Some(node);
         }
@@ -472,7 +542,7 @@ impl<'s> Compiler<'_, '_, 's> {
         let (op, ty) = match self.check(at, expr) {
             Ok((op, ty)) => (op, Some(ty)),
             Err(Bad::Report(diagnostic)) => {
-                self.report(diagnostic);
+                self.report(*diagnostic);
                 (Op::Const(Value::Empty), None)
             }
             Err(Bad::Cascade) => (Op::Const(Value::Empty), None),
@@ -504,11 +574,9 @@ impl<'s> Compiler<'_, '_, 's> {
         match expr.kind {
             ExprKind::Year(year) => Ok((Op::Const(Value::Num(Ratio::int(i64::from(year)))), Ty::Num)),
             ExprKind::Name(name) => self.name(at, Word { text: name.0, loc: expr.loc }),
-            ExprKind::Field(receiver, field) => self.field(receiver, Word { text: field.0, loc: file.loc(field.0) }),
+            ExprKind::Field(receiver, field) => self.field(receiver, Word::of(file, field.0)),
             ExprKind::Index(base, keys) => self.lookup(base, &file[keys], expr.loc),
-            ExprKind::Call(function, args) => {
-                self.call(Word { text: function.0, loc: file.loc(function.0) }, &file[args], expr.loc)
-            }
+            ExprKind::Call(function, args) => self.call(Word::of(file, function.0), &file[args], expr.loc),
             ExprKind::Unary(op, operand) => self.unary(op, operand),
             ExprKind::Binary(op, left, right) => self.binary(op, left, right),
             ExprKind::Of(purpose, object) => self.of(purpose, object),
@@ -897,138 +965,115 @@ impl<'s> Compiler<'_, '_, 's> {
 
     // ─── Calls ──────────────────────────────────────────────────────────────
 
+    /// A call to one of the functions: its arguments compiled, their number and types checked against what the
+    /// function takes.
     fn call(&mut self, function: Word<'s>, args: &[ExprId], loc: Loc) -> Check<(Op, Ty)> {
         let Some(spec) = function_spec(function.text) else {
             return Err(self.unknown_function(function).into());
         };
         let typed = self.children(args)?;
-        let arity = |low: usize, high: usize| -> Check<()> {
-            if (low..=high).contains(&typed.len()) {
-                return Ok(());
-            }
-            let takes = if low == high { low.to_string() } else { format!("{low} to {high}") };
-            Err(Diagnostic::error(
-                "call-arity",
-                format!("`{}` takes {takes} arguments, but {} were given", function.text, typed.len()),
-            )
-            .label(loc, "wrong number of arguments")
-            .into())
-        };
-        let nodes: Box<[NodeId]> = typed.iter().map(|&(node, _)| node).collect();
-        let ty_at = |at: usize| typed.get(at).map_or(Ty::Empty, |&(_, ty)| ty);
-        let arg_loc = |at: usize| self.nodes[typed[at].0].loc;
-        arity(spec.min, spec.max)?;
-        let owner_currency = self.owner_amount_ty();
-        let (func, ty) = match spec.signature {
-            Signature::Total => (self.total(&typed)?, owner_currency),
-            Signature::Tally => {
-                if args.len() == 2 && !matches!(ty_at(1), Ty::Num | Ty::Day) {
-                    return Err(expected("a year or a date", ty_at(1), arg_loc(1)).into());
-                }
-                (self.tally(args[0])?, owner_currency)
-            }
-            Signature::Min | Signature::Max => {
-                let shared = unify(ty_at(0), ty_at(1)).filter(|&shared| binary(BinOp::Lt, shared, shared).is_some());
-                let shared =
-                    shared.ok_or_else(|| mismatch(BinOp::Lt, (ty_at(0), arg_loc(0)), (ty_at(1), arg_loc(1))))?;
-                (if matches!(spec.signature, Signature::Min) { Func::Min } else { Func::Max }, shared)
-            }
-            Signature::Abs => {
-                let ty = negate(ty_at(0)).ok_or_else(|| expected("an amount or a number", ty_at(0), arg_loc(0)))?;
-                (Func::Abs, ty)
-            }
-            Signature::Progressive => {
-                if ty_at(0) != Ty::Schedule {
-                    return Err(expected("a schedule", ty_at(0), arg_loc(0)).into());
-                }
-                if !matches!(ty_at(1), Ty::Amount(_) | Ty::Empty) {
-                    return Err(expected("an amount", ty_at(1), arg_loc(1)).into());
-                }
-                let schedule_unit = match self.nodes[typed[0].0].op {
-                    Op::Const(Value::Schedule(schedule)) => Some(self.world.book.schedules[schedule].unit),
-                    _ => None,
-                };
-                if let Some(unit) = schedule_unit
-                    && let Ty::Amount(Dim::Of(input)) = ty_at(1)
-                    && unit != input
-                {
-                    return Err(Diagnostic::error(
-                        "unit-mismatch",
-                        "the amount and tax schedule use different commodities",
-                    )
-                    .label(arg_loc(1), "convert the amount to the schedule's commodity")
-                    .context(arg_loc(0), "the schedule is declared in another commodity")
-                    .help("use `value(amount, UNIT)` to make the conversion explicit")
-                    .into());
-                }
-                (Func::Progressive, schedule_unit.map_or(ty_at(1), |unit| Ty::Amount(Dim::Of(unit))))
-            }
-            Signature::Value => {
-                if !matches!(ty_at(0), Ty::Amount(_) | Ty::Empty) {
-                    return Err(expected("an amount", ty_at(0), arg_loc(0)).into());
-                }
-                if ty_at(1) != Ty::Unit {
-                    return Err(expected("a commodity", ty_at(1), arg_loc(1)).into());
-                }
-                if args.len() == 3 && ty_at(2) != Ty::Name {
-                    return Err(expected("a rate policy name", ty_at(2), arg_loc(2)).into());
-                }
-                let target = match self.nodes[typed[1].0].op {
-                    Op::Const(Value::Unit(unit)) => Ty::Amount(Dim::Of(unit)),
-                    _ => Ty::AMOUNT,
-                };
-                (Func::Value, target)
-            }
-            Signature::Date => {
-                for at in 0..3 {
-                    if ty_at(at) != Ty::Num {
-                        return Err(expected("a number", ty_at(at), arg_loc(at)).into());
-                    }
-                }
-                (Func::Date, Ty::Day)
-            }
-            Signature::StraightLine => {
-                let wants = [Ty::Amount(Dim::Any), Ty::Span, Ty::Day, Ty::Name, Ty::Name];
-                for (at, want) in wants.iter().take(args.len()).enumerate() {
-                    if !fits(*want, ty_at(at)) {
-                        let phrase =
-                            if *want == Ty::Name { "a `mid-month` option".into() } else { article(want.word()) };
-                        return Err(expected(&phrase, ty_at(at), arg_loc(at)).into());
-                    }
-                }
-                (Func::StraightLine, ty_at(0))
-            }
-            Signature::Open => {
-                let ExprKind::Code(code) = self.file.exprs[args[0]].kind else {
-                    return Err(expected("a source code such as `^rent`", ty_at(0), arg_loc(0)).into());
-                };
-                if ty_at(0) != Ty::Code {
-                    return Err(expected("a source code", ty_at(0), arg_loc(0)).into());
-                }
-                let symbol = self.world.book.names.intern(code.name());
-                (Func::Open(symbol), owner_currency)
-            }
-            Signature::Peak | Signature::Low => {
-                if !matches!(ty_at(0), Ty::Amount(_) | Ty::Num | Ty::Day | Ty::Span) {
-                    return Err(expected("an ordered value", ty_at(0), arg_loc(0)).into());
-                }
-                if !matches!(self.keyword(args[1]), Some(Window::Month | Window::Year | Window::Ever)) {
-                    return Err(self.keyword_error(typed[1].0, function.text, "`month`, `year` or `ever`").into());
-                }
-                (if matches!(spec.signature, Signature::Peak) { Func::Peak } else { Func::Low }, ty_at(0))
-            }
-            Signature::Days => {
-                if ty_at(0) != Ty::Bool {
-                    return Err(expected("a condition", ty_at(0), arg_loc(0)).into());
-                }
-                if !matches!(self.keyword(args[1]), Some(Window::Month | Window::Year | Window::Ever)) {
-                    return Err(self.keyword_error(typed[1].0, function.text, "`month`, `year` or `ever`").into());
-                }
-                (Func::Days, Ty::Num)
-            }
-        };
-        let nodes = if matches!(func, Func::Open(_) | Func::PurposeTotal { .. }) { Box::default() } else { nodes };
+        let locs = typed.iter().map(|&(node, _)| self.nodes[node].loc).collect();
+        let call = Call { function, args, typed, locs };
+        call.check_arity(spec, loc)?;
+        let (func, ty) = self.signed(spec.signature, &call)?;
+        // `open` and a purpose's total carry what they read in the function; no argument is evaluated for them.
+        let nodes =
+            if matches!(func, Func::Open(_) | Func::PurposeTotal { .. }) { Box::default() } else { call.nodes() };
         Ok((Op::Call(func, nodes), ty))
+    }
+
+    /// The function a call is, and the type it gives, once each argument is the type its signature wants.
+    fn signed(&mut self, signature: Signature, call: &Call<'_, 's>) -> Check<(Func, Ty)> {
+        let currency = self.owner_amount_ty();
+        match signature {
+            Signature::Total => Ok((self.total(&call.typed)?, currency)),
+            Signature::Tally => Ok((self.tally_of(call)?, currency)),
+            Signature::Open => Ok((self.open(call)?, currency)),
+            Signature::Min => call.extremum(Func::Min),
+            Signature::Max => call.extremum(Func::Max),
+            Signature::Abs => call.abs(),
+            Signature::Date => call.date(),
+            Signature::StraightLine => call.straight_line(),
+            Signature::Progressive => self.progressive(call),
+            Signature::Value => self.value_call(call),
+            Signature::Peak => self.in_window(call, Func::Peak),
+            Signature::Low => self.in_window(call, Func::Low),
+            Signature::Days => self.days(call),
+        }
+    }
+
+    /// `tally(name[, year])`.
+    fn tally_of(&mut self, call: &Call<'_, 's>) -> Check<Func> {
+        if call.args.len() == 2 {
+            call.want(1, "a year or a date", |ty| matches!(ty, Ty::Num | Ty::Day))?;
+        }
+        self.tally(call.args[0])
+    }
+
+    /// `open(^code)`: the code is read as written, not as a value.
+    fn open(&mut self, call: &Call<'_, 's>) -> Check<Func> {
+        let ExprKind::Code(code) = self.file.exprs[call.args[0]].kind else {
+            return Err(expected("a source code such as `^rent`", call.ty(0), call.loc(0)).into());
+        };
+        call.want(0, "a source code", |ty| ty == Ty::Code)?;
+        Ok(Func::Open(self.world.book.names.intern(code.name())))
+    }
+
+    /// `progressive(schedule, amount)`: the amount is in the commodity the schedule is, when that is known.
+    fn progressive(&self, call: &Call<'_, 's>) -> Check<(Func, Ty)> {
+        call.want(0, "a schedule", |ty| ty == Ty::Schedule)?;
+        call.want(1, "an amount", |ty| matches!(ty, Ty::Amount(_) | Ty::Empty))?;
+        let schedule_unit = match self.nodes[call.typed[0].0].op {
+            Op::Const(Value::Schedule(schedule)) => Some(self.world.book.schedules[schedule].unit),
+            _ => None,
+        };
+        if let Some(unit) = schedule_unit
+            && let Ty::Amount(Dim::Of(input)) = call.ty(1)
+            && unit != input
+        {
+            return Err(Diagnostic::error("unit-mismatch", "the amount and tax schedule use different commodities")
+                .label(call.loc(1), "convert the amount to the schedule's commodity")
+                .context(call.loc(0), "the schedule is declared in another commodity")
+                .help("use `value(amount, UNIT)` to make the conversion explicit")
+                .into());
+        }
+        Ok((Func::Progressive, schedule_unit.map_or(call.ty(1), |unit| Ty::Amount(Dim::Of(unit)))))
+    }
+
+    /// `value(amount, UNIT[, policy])`: the amount in another commodity.
+    fn value_call(&self, call: &Call<'_, 's>) -> Check<(Func, Ty)> {
+        call.want(0, "an amount", |ty| matches!(ty, Ty::Amount(_) | Ty::Empty))?;
+        call.want(1, "a commodity", |ty| ty == Ty::Unit)?;
+        if call.args.len() == 3 {
+            call.want(2, "a rate policy name", |ty| ty == Ty::Name)?;
+        }
+        let target = match self.nodes[call.typed[1].0].op {
+            Op::Const(Value::Unit(unit)) => Ty::Amount(Dim::Of(unit)),
+            _ => Ty::AMOUNT,
+        };
+        Ok((Func::Value, target))
+    }
+
+    /// `peak(value, window)` and `low(value, window)`: the most or least an ordered value was in the window.
+    fn in_window(&self, call: &Call<'_, 's>, func: Func) -> Check<(Func, Ty)> {
+        call.want(0, "an ordered value", |ty| matches!(ty, Ty::Amount(_) | Ty::Num | Ty::Day | Ty::Span))?;
+        self.want_window(call)?;
+        Ok((func, call.ty(0)))
+    }
+
+    /// `days(condition, window)`: how many days the condition held in the window.
+    fn days(&self, call: &Call<'_, 's>) -> Check<(Func, Ty)> {
+        call.want(0, "a condition", |ty| ty == Ty::Bool)?;
+        self.want_window(call)?;
+        Ok((Func::Days, Ty::Num))
+    }
+
+    /// The second argument is `month`, `year` or `ever`.
+    fn want_window(&self, call: &Call<'_, 's>) -> Check<()> {
+        if self.keyword(call.args[1]).is_none() {
+            return Err(self.keyword_error(call.typed[1].0, call.function.text, "`month`, `year` or `ever`").into());
+        }
+        Ok(())
     }
 
     /// `total(in|out, month|year|ever[, KIND])`
@@ -1209,7 +1254,7 @@ impl<'s> Compiler<'_, '_, 's> {
                         .label(expr.loc, "name a system")
                         .into());
                 };
-                systems.push(self.world.system(Word { text: name.0, loc: self.file.loc(name.0) })?);
+                systems.push(self.world.system(Word::of(self.file, name.0))?);
             }
             return Ok((Op::Resides(entity, systems.into()), Ty::Bool));
         }

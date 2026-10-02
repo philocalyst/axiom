@@ -1,0 +1,15 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+kind kk : asset
+  law same
+    always
+    warn 1 > 2
+kind jj : asset
+  law same
+    always
+    warn 1 > 2
+law b1 overrides same
+  always
+  warn 1 > 3

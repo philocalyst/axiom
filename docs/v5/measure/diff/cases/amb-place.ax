@@ -1,0 +1,8 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+account a/sav : deposit
+account b/sav : deposit
+2026-01-01 checking = 0 USD
+2026-01-02 sav = 5 USD

@@ -1,0 +1,9 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+param rate
+  2026 3%
+law foo
+  always
+  warn balance > rte[year]

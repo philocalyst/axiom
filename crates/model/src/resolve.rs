@@ -8,13 +8,15 @@
 
 use axiom_core::diag::closest;
 use axiom_core::num::DecError;
-use axiom_core::{Dec, Diagnostic, Id, Loc, Sym};
+use axiom_core::{Dec, Diagnostic, Id, Loc};
+use axiom_syntax::{File, Literal};
 
 use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, Place, Purpose, Role, System};
 use crate::declare::{World, near_place};
-use crate::errors::{Candidate, Word, ambiguous, not_used, unknown};
+use crate::errors::{Candidate, Word};
 use crate::kinds;
-use crate::names::{Found, Names};
+use crate::names::{Found, Scoped};
+use crate::problem::{self, Among, Noun};
 use crate::scope::Home;
 
 /// A place written in a flow, and the entity it stood for if it was one.
@@ -44,8 +46,8 @@ impl<'s> World<'s> {
 
     fn explain_commodity(&self, word: Word) -> Diagnostic {
         let symbols = self.book.commodities.values().map(|commodity| self.book.name(commodity.symbol));
-        let diagnostic = unknown("unknown-commodity", "commodity", word, closest(word.text, symbols));
-        diagnostic.note(format!(
+        let nearest = closest(word.text, symbols);
+        problem::unknown(Noun::Commodity, word, nearest).note(format!(
             "commodities are declared with `commodity {}`; USD, EUR, GBP… come with `use std`",
             word.text
         ))
@@ -56,6 +58,25 @@ impl<'s> World<'s> {
         let scale = self.book.commodities[unit].scale;
         let quantity = number.to_qty(scale);
         quantity.map(|qty| Amount::new(qty, unit)).map_err(|error| self.not_an_amount(error, number, unit, loc))
+    }
+
+    /// A written literal as an amount of the unit it names, or of `fallback` when it names none; with no
+    /// fallback an amount without a unit is a mistake.
+    pub fn literal_amount(
+        &self,
+        file: &File<'s>,
+        literal: Literal<'s>,
+        fallback: Option<Id<Commodity>>,
+    ) -> Result<Amount, Diagnostic> {
+        let unit = match (literal.unit(), fallback) {
+            (Some(unit), _) => self.commodity_of(Word::of(file, unit.0))?,
+            (None, Some(unit)) => unit,
+            (None, None) => {
+                return Err(Diagnostic::error("amount-unit", "this amount needs an explicit unit")
+                    .label(file.loc(literal.0), "write a commodity after the amount"));
+            }
+        };
+        self.amount(literal.num(), unit, file.loc(literal.0))
     }
 
     /// Why a written number is not an amount of `unit`.
@@ -83,8 +104,7 @@ impl<'s> World<'s> {
     }
 
     fn kind_miss(&self, miss: Miss<Kind>, word: Word) -> Diagnostic {
-        let loc_of = |id: Id<Kind>| self.book.kinds[id].loc;
-        kinds::unresolved(miss, word, &self.book.lookup.kinds, &self.book.names, &self.book.systems, loc_of)
+        kinds::unresolved(miss, word, &self.among(&self.book.lookup.kinds), |id| &self.book.kinds[id])
     }
 
     pub fn seek_kind(&self, home: Home, word: Word) -> Seek<Kind> {
@@ -112,29 +132,29 @@ impl<'s> World<'s> {
     }
 
     fn ambiguous_entity(&self, word: Word, ids: &[Id<Entity>]) -> Diagnostic {
-        let entities = &self.book.entities;
-        let candidates =
-            self.candidates(&self.book.lookup.entities.names, ids, |id| entities[id].path, |id| entities[id].loc);
-        ambiguous("ambiguous-entity", "entities", word, &candidates)
+        let (entities, table) = (&self.book.entities, &self.book.lookup.entities.names);
+        let candidates = problem::shortest(&self.book.names, table, ids, |id| entities[id].path, |id| entities[id].loc);
+        problem::ambiguous(Noun::Entity, word, &candidates)
     }
 
-    fn missing_entity(&self, home: Home, word: Word) -> Diagnostic {
-        let (lookup, names) = (&self.book.lookup.entities, &self.book.names);
-        let suggestion = lookup.resolve(names, self.scopes.of(home), word.text).err().and_then(|miss| match miss {
-            Miss::Unknown { suggestion } => suggestion,
-            Miss::Ambiguous(_) => None,
-        });
-        let mut diagnostic = unknown("unknown-entity", "entity", word, suggestion.map(|sym| names.name(sym)));
-        for &hidden in lookup.names.candidates(names, word.text) {
-            if let Home::System(system) = lookup.home(hidden) {
-                diagnostic = not_used(diagnostic, "entity", word.text, self.book.name(self.book.systems[system].path));
-            }
-        }
-        diagnostic
+    /// What a name is looked up among, for the diagnostics about a lookup that failed.
+    fn among<'a, T>(&'a self, index: &'a Scoped<T>) -> Among<'a, 's, T> {
+        Among { index, names: &self.book.names, systems: &self.book.systems }
+    }
+
+    /// Why `word` names nothing `home` can see: the closest name it can see, and the systems that declare it
+    /// without being used.
+    fn missing<T>(&self, noun: Noun, lookup: &Scoped<T>, home: Home, word: Word) -> Diagnostic {
+        let names = &self.book.names;
+        let nearest = match lookup.resolve(names, self.scopes.of(home), word.text) {
+            Err(Miss::Unknown { suggestion }) => suggestion.map(|sym| names.name(sym)),
+            Ok(_) | Err(Miss::Ambiguous(_)) => None,
+        };
+        self.among(lookup).unknown(noun, word, nearest)
     }
 
     pub fn entity(&self, home: Home, word: Word) -> Result<Id<Entity>, Diagnostic> {
-        self.seek_entity(home, word)?.ok_or_else(|| self.missing_entity(home, word))
+        self.seek_entity(home, word)?.ok_or_else(|| self.missing(Noun::Entity, &self.book.lookup.entities, home, word))
     }
 
     // ─── Purposes ───────────────────────────────────────────────────────────
@@ -150,29 +170,14 @@ impl<'s> World<'s> {
     }
 
     fn ambiguous_purpose(&self, word: Word, ids: &[Id<Purpose>]) -> Diagnostic {
-        let purposes = &self.book.purposes;
-        let candidates =
-            self.candidates(&self.book.lookup.purposes.names, ids, |id| purposes[id].name, |id| purposes[id].loc);
-        ambiguous("ambiguous-purpose", "purposes", word, &candidates)
-    }
-
-    fn missing_purpose(&self, home: Home, word: Word) -> Diagnostic {
-        let (lookup, names) = (&self.book.lookup.purposes, &self.book.names);
-        let suggestion = lookup.resolve(names, self.scopes.of(home), word.text).err().and_then(|miss| match miss {
-            Miss::Unknown { suggestion } => suggestion,
-            Miss::Ambiguous(_) => None,
-        });
-        let mut diagnostic = unknown("unknown-purpose", "purpose", word, suggestion.map(|sym| names.name(sym)));
-        for &hidden in lookup.names.candidates(names, word.text) {
-            if let Home::System(system) = lookup.home(hidden) {
-                diagnostic = not_used(diagnostic, "purpose", word.text, self.book.name(self.book.systems[system].path));
-            }
-        }
-        diagnostic
+        let (purposes, table) = (&self.book.purposes, &self.book.lookup.purposes.names);
+        let candidates = problem::shortest(&self.book.names, table, ids, |id| purposes[id].name, |id| purposes[id].loc);
+        problem::ambiguous(Noun::Purpose, word, &candidates)
     }
 
     pub fn purpose(&self, home: Home, word: Word) -> Result<Id<Purpose>, Diagnostic> {
-        self.seek_purpose(home, word)?.ok_or_else(|| self.missing_purpose(home, word))
+        self.seek_purpose(home, word)?
+            .ok_or_else(|| self.missing(Noun::Purpose, &self.book.lookup.purposes, home, word))
     }
 
     // ─── Places ─────────────────────────────────────────────────────────────
@@ -183,10 +188,10 @@ impl<'s> World<'s> {
             Found::One(place) => Ok(Some(place)),
             Found::Nothing => Ok(None),
             Found::Several(ids) => {
-                let places = &self.book.places;
-                let names = &self.book.lookup.places;
-                let candidates = self.candidates(names, &ids, |id| places[id].path, |id| places[id].loc);
-                Err(ambiguous("ambiguous-place", "accounts", word, &candidates))
+                let (places, table) = (&self.book.places, &self.book.lookup.places);
+                let candidates =
+                    problem::shortest(&self.book.names, table, &ids, |id| places[id].path, |id| places[id].loc);
+                Err(problem::ambiguous(Noun::Place, word, &candidates))
             }
         }
     }
@@ -200,38 +205,56 @@ impl<'s> World<'s> {
     /// in the other. Entities stand for their configured holding/outside place
     /// and retain their identity as the counterparty.
     pub(crate) fn end(&self, home: Home, word: Word) -> Result<End, Diagnostic> {
+        if let Some(end) = self.special_end(home, word) {
+            return end;
+        }
+        if let Some(end) = self.found_end(home, word) {
+            return end;
+        }
+        if let Some(end) = self.commodity_end(word) {
+            return end;
+        }
+        let entity = self.entity(home, word)?;
+        self.entity_end(entity, word)
+    }
+
+    /// The names that are none of an account or a party: the unknown party, a contract and an asset. None for
+    /// any other. A contract's name stands for its debt tab when it is a loan, and for its party otherwise.
+    fn special_end(&self, home: Home, word: Word) -> Option<Result<End, Diagnostic>> {
         if word.text == "?" {
-            return Ok(End {
-                place: self.book.entities[self.book.roots.unknown].place.expect("unknown has an endpoint"),
-                entity: None,
-            });
+            let place = self.book.entities[self.book.roots.unknown].place.expect("unknown has an endpoint");
+            return Some(Ok(End { place, entity: None }));
         }
         if let Some(sym) = self.book.names.get(word.text)
             && let Some(&end) = self.contract_endpoints.get(&sym)
         {
-            return Ok(end);
+            return Some(Ok(end));
         }
         if let Some(contract) = self.book.contract(word.text) {
-            if let Some(loan) = self.book.contracts[contract].loan {
-                return Ok(End { place: loan.debt, entity: Some(self.book.contracts[contract].party) });
+            let contract = &self.book.contracts[contract];
+            if let Some(loan) = contract.loan {
+                return Some(Ok(End { place: loan.debt, entity: Some(contract.party) }));
             }
-            if let Some(entity) = self.seek_entity(home, word)? {
-                return self.entity_end(entity, word);
-            }
-            return Err(Diagnostic::error(
-                "contract-endpoint",
-                format!("contract `{}` is not a flow endpoint", word.text),
-            )
-            .label(word.loc, "name its party or holding account instead")
-            .help("loan contracts name their debt tab; other contracts are not places"));
+            return Some(match self.seek_entity(home, word) {
+                Ok(Some(entity)) => self.entity_end(entity, word),
+                Ok(None) => Err(Diagnostic::error(
+                    "contract-endpoint",
+                    format!("contract `{}` is not a flow endpoint", word.text),
+                )
+                .label(word.loc, "name its party or holding account instead")
+                .help("loan contracts name their debt tab; other contracts are not places")),
+                Err(problem) => Err(problem),
+            });
         }
         if self.book.asset(word.text).is_some() {
-            return Err(Diagnostic::error("asset-endpoint", format!("asset `{}` is not a flow endpoint", word.text))
-                .label(word.loc, "this names the asset itself")
-                .help(format!("use `#purchase of {}` to acquire the asset", word.text)));
+            return Some(Err(asset_endpoint(word.text, word.loc)));
         }
+        None
+    }
 
-        let place_candidates = self.book.lookup.places.candidates(&self.book.names, word.text);
+    /// What the places and parties a name answers to say it is, if it answers to any.
+    fn found_end(&self, home: Home, word: Word) -> Option<Result<End, Diagnostic>> {
+        let places = self.book.lookup.places.candidates(&self.book.names, word.text);
         let entity_candidates = self.book.lookup.entities.names.candidates(&self.book.names, word.text);
         let visible = || {
             entity_candidates
@@ -241,48 +264,38 @@ impl<'s> World<'s> {
         };
         let mut visible_entities = visible();
         let entity = visible_entities.next();
-        let multiple_entities = visible_entities.next().is_some();
-
-        if place_candidates.len() > 1 && entity.is_none() {
-            return Err(self.seek_place(word).expect_err("multiple visible places must be ambiguous"));
+        let several = visible_entities.next().is_some();
+        if places.len() > 1 && entity.is_none() {
+            return Some(Err(self.seek_place(word).expect_err("multiple visible places must be ambiguous")));
         }
-        if multiple_entities && place_candidates.is_empty() {
-            return Err(self.seek_entity(home, word).expect_err("multiple visible entities must be ambiguous"));
-        }
-        if (place_candidates.len() > 1 || multiple_entities || entity.is_some())
-            && !(place_candidates.len() == 1
-                && !multiple_entities
-                && entity.is_some_and(|entity| self.book.entities[entity].place == Some(place_candidates[0])))
-            && !place_candidates.is_empty()
-            && entity.is_some()
-        {
-            return Err(self.ambiguous_end(word, place_candidates, &visible().collect::<Vec<_>>()));
+        if several && places.is_empty() {
+            return Some(Err(self.seek_entity(home, word).expect_err("multiple visible entities must be ambiguous")));
         }
         if let Some(entity) = entity {
-            return self.entity_end(entity, word);
-        }
-        if let Some(&place) = place_candidates.first() {
-            if let Role::Asset(asset) = self.book.places[place].role {
-                let name = self.book.name(self.book.assets[asset].name);
-                return Err(Diagnostic::error("asset-endpoint", format!("asset `{name}` is not a flow endpoint"))
-                    .label(word.loc, "this names the asset itself")
-                    .help(format!("use `#purchase of {name}` to acquire the asset")));
+            // A name that is an account and a party is one thing only when the party's own place is that
+            // account and no other party answers to the name.
+            let same = places.len() == 1 && !several && self.book.entities[entity].place == Some(places[0]);
+            if !places.is_empty() && !same {
+                return Some(Err(self.ambiguous_end(word, places, &visible().collect::<Vec<_>>())));
             }
-            return Ok(End { place, entity: None });
+            return Some(self.entity_end(entity, word));
         }
-        if let Some(unit) = self.book.commodity(word.text) {
-            if let Some(place) = self.book.issuer_place(unit) {
-                return Ok(End { place, entity: None });
-            }
-            return Err(Diagnostic::error(
-                "commodity-endpoint",
-                format!("commodity `{}` has no issuer endpoint", word.text),
-            )
+        let &place = places.first()?;
+        if let Role::Asset(asset) = self.book.places[place].role {
+            return Some(Err(asset_endpoint(self.book.name(self.book.assets[asset].name), word.loc)));
+        }
+        Some(Ok(End { place, entity: None }))
+    }
+
+    /// A commodity stands for the place its issuer is, when its kind chain says who that is.
+    fn commodity_end(&self, word: Word) -> Option<Result<End, Diagnostic>> {
+        let unit = self.book.commodity(word.text)?;
+        if let Some(place) = self.book.issuer_place(unit) {
+            return Some(Ok(End { place, entity: None }));
+        }
+        Some(Err(Diagnostic::error("commodity-endpoint", format!("commodity `{}` has no issuer endpoint", word.text))
             .label(word.loc, "this commodity's kind chain declares no `pays` purpose")
-            .help("write `pays PURPOSE` on its commodity kind before using it as a party"));
-        }
-        let entity = self.entity(home, word)?;
-        self.entity_end(entity, word)
+            .help("write `pays PURPOSE` on its commodity kind before using it as a party")))
     }
 
     fn ambiguous_end(&self, word: Word, places: &[Id<Place>], entities: &[Id<Entity>]) -> Diagnostic {
@@ -323,7 +336,7 @@ impl<'s> World<'s> {
         let (places, names) = (&self.book.lookup.places, &self.book.names);
         let known = places.keys(names);
         let closest = closest(word.text, known);
-        let mut diagnostic = unknown("unknown-place", "place", word, closest);
+        let mut diagnostic = problem::unknown(Noun::Place, word, closest);
         // Old chart roots no longer assign place classes. Preserve a useful
         // refusal for paths that look like an attempt to use the v3 chart.
         if legacy_chart_path(word.text) {
@@ -349,39 +362,14 @@ impl<'s> World<'s> {
         diagnostic
     }
 
-    /// The things an ambiguous suffix could mean, each with the shortest
-    /// written form that means only it.
-    fn candidates<T>(
-        &self,
-        table: &Names<T>,
-        ids: &[Id<T>],
-        path: impl Fn(Id<T>) -> Sym,
-        loc: impl Fn(Id<T>) -> Option<Loc>,
-    ) -> Vec<Candidate> {
-        let names = &self.book.names;
-        let describe = |&id: &Id<T>| {
-            let full = self.book.name(path(id));
-            let write = table.shortest_unique(names, full, id).to_string();
-            Candidate { is: format!("`{full}`"), declared: loc(id), write: Some(write) }
-        };
-        ids.iter().map(describe).collect()
-    }
-
     // ─── Params ─────────────────────────────────────────────────────────────
-
-    fn param_system(&self, id: Id<Param>) -> Option<&'s str> {
-        match self.book.lookup.params.home(id) {
-            Home::System(system) => Some(self.book.name(self.book.systems[system].path)),
-            Home::Project | Home::Builtin => None,
-        }
-    }
 
     /// The param `home` can see under `word`: its own system's first, then its
     /// ancestors', then the used systems' (which must not disagree). Written
     /// `us/401k/limit`, it names that system's param, used or not.
     pub fn seek_param(&self, home: Home, word: Word) -> Seek<Param> {
         let (lookup, names) = (&self.book.lookup.params, &self.book.names);
-        let scope = self.scopes.of(home);
+        let (scope, among) = (self.scopes.of(home), self.among(lookup));
         let (qualifier, leaf) = match word.text.rsplit_once('/') {
             Some((system, leaf)) => (Some(system), leaf),
             None => (None, word.text),
@@ -392,7 +380,7 @@ impl<'s> World<'s> {
             .iter()
             .copied()
             .filter(|&id| match qualifier {
-                Some(system) => self.param_system(id) == Some(system),
+                Some(system) => among.system_of(id) == Some(system),
                 None => scope.sees(lookup.home(id)),
             })
             .collect();
@@ -407,7 +395,7 @@ impl<'s> World<'s> {
                     .iter()
                     .map(|&id| {
                         let declared = Some(self.book.params[id].loc);
-                        match self.param_system(id) {
+                        match among.system_of(id) {
                             Some(system) => Candidate {
                                 is: format!("`{leaf}` from `{system}`"),
                                 declared,
@@ -417,7 +405,7 @@ impl<'s> World<'s> {
                         }
                     })
                     .collect();
-                Err(ambiguous("ambiguous-param", "params", word, &candidates))
+                Err(problem::ambiguous(Noun::Param, word, &candidates))
             }
         }
     }
@@ -425,18 +413,12 @@ impl<'s> World<'s> {
     pub fn missing_param(&self, home: Home, word: Word) -> Diagnostic {
         let (lookup, names) = (&self.book.lookup.params, &self.book.names);
         let scope = self.scopes.of(home);
-        let leaf = word.text.rsplit('/').next().unwrap_or(word.text);
         let visible = lookup
             .names
             .keys(names)
             .filter(|&known| lookup.names.candidates(names, known).iter().any(|&id| scope.sees(lookup.home(id))));
-        let mut diagnostic = unknown("unknown-param", "param", word, closest(word.text, visible));
-        for &hidden in lookup.names.candidates(names, leaf) {
-            if let Some(system) = self.param_system(hidden) {
-                diagnostic = not_used(diagnostic, "param", leaf, system);
-            }
-        }
-        diagnostic
+        let nearest = closest(word.text, visible);
+        self.among(lookup).unknown(Noun::Param, word, nearest)
     }
 
     pub fn system(&self, word: Word) -> Result<Id<System>, Diagnostic> {
@@ -456,4 +438,11 @@ fn written(number: Dec, unit: &str) -> String {
         Some(ratio) => format!("`{ratio} {unit}`"),
         None => format!("this amount of {unit}"),
     }
+}
+
+/// Said of an asset's name used where a flow's end goes.
+fn asset_endpoint(name: &str, at: Loc) -> Diagnostic {
+    Diagnostic::error("asset-endpoint", format!("asset `{name}` is not a flow endpoint"))
+        .label(at, "this names the asset itself")
+        .help(format!("use `#purchase of {name}` to acquire the asset"))
 }

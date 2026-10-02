@@ -1,0 +1,6 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+commodity XYZ : currency
+commodity XYZ : currency

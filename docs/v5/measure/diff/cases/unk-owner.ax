@@ -1,0 +1,6 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+account z : deposit
+  owner nobody

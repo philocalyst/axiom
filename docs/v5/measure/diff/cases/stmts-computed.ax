@@ -1,0 +1,19 @@
+use std
+base USD
+entity me : person
+account checking : bank
+asset car : vehicle
+asset boat : vehicle
+commodity VTI : stock
+2026-01-01 market -> checking 9_000 USD ^buy1
+2026-02-01 checking = 50% of 100 USD
+2026-02-01 checking = 50% of 100 EUR
+2026-02-01 car = 50% of 100 USD
+2026-02-01 car = 50% of 100 EUR
+2026-02-01 ^buy1 = 50% of 100 USD
+2026-02-01 VTI = 50% of 100 USD
+2026-06-01 car basis 50% of 400 USD
+2026-06-01 boat basis 50% of 400 EUR
+2026-06-01 car basis 50% of 400 EUR since 2020-01-01
+2026-06-01 boat basis 50% of 400 USD since 2020-01-01 ^bb "described"
+2026-06-01 boat basis 50% of 400 USD since 2020-01-01 ^bb2 #nope

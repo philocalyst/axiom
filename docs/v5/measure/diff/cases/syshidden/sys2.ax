@@ -1,0 +1,6 @@
+system sys2
+kind only2 : asset
+purpose only2p : spending
+entity only2e : org
+param only2param
+  2026 5
