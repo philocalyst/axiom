@@ -4,10 +4,10 @@
 //! measure and entity kinds. This stage creates the trees and resolves parents.
 
 use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
-use axiom_syntax::DeclKind;
+use axiom_syntax::{Decl, DeclKind};
 
 use crate::book::{Class, Kind, Miss, Sort, System};
-use crate::collect::Collected;
+use crate::collect::{Collected, Written};
 use crate::errors::{Candidate, Word};
 use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
@@ -48,6 +48,21 @@ fn draft<'s>(names: &mut Interner<'s>, name: &'s str, sort: Sort) -> Kind {
     }
 }
 
+const ROOTS: [(&str, Sort); 6] = [
+    ("asset", Sort::Place(Class::Asset)),
+    ("debt", Sort::Place(Class::Debt)),
+    ("thing", Sort::Thing),
+    ("commodity", Sort::Commodity),
+    ("measure", Sort::Commodity),
+    ("entity", Sort::Entity),
+];
+const ROOT_ASSET: usize = 0;
+const ROOT_DEBT: usize = 1;
+const ROOT_THING: usize = 2;
+const ROOT_COMMODITY: usize = 3;
+const ROOT_MEASURE: usize = 4;
+const ROOT_ENTITY: usize = 5;
+
 /// Builds the typed kind hierarchy directly from borrowed S5 items. Draft
 /// indices let forward parents resolve before the tree is frozen; `Tree::build`
 /// then assigns the final pre-order ids once.
@@ -58,50 +73,71 @@ pub(crate) fn declare_sites<'s>(
     scopes: &Scopes,
     diags: &mut Vec<Diagnostic>,
 ) -> NativeKinds {
-    const ROOTS: [(&str, Sort); 6] = [
-        ("asset", Sort::Place(Class::Asset)),
-        ("debt", Sort::Place(Class::Debt)),
-        ("thing", Sort::Thing),
-        ("commodity", Sort::Commodity),
-        ("measure", Sort::Commodity),
-        ("entity", Sort::Entity),
-    ];
-    const ROOT_ASSET: usize = 0;
-    const ROOT_DEBT: usize = 1;
-    const ROOT_THING: usize = 2;
-    const ROOT_COMMODITY: usize = 3;
-    const ROOT_MEASURE: usize = 4;
-    const ROOT_ENTITY: usize = 5;
+    let mut drafts = Drafts::of(collected, names, diags);
+    let draft_index = drafts.index(names);
+    drafts.link_parents(&draft_index, names, systems, scopes, diags);
+    drafts.cut_cycles(names, diags);
+    drafts.freeze(names)
+}
 
-    let mut drafts: Vec<Kind> = ROOTS.iter().map(|&(name, sort)| draft(names, name, sort)).collect();
-    let mut homes = vec![Home::Builtin; ROOTS.len()];
-    let mut parents = vec![None; ROOTS.len()];
-    parents[ROOT_MEASURE] = Some(ROOT_COMMODITY);
-    let mut broken = vec![false; ROOTS.len()];
-    let mut duplicate_of: Map<(Home, &'s str), usize> = Map::default();
-    for (at, &(name, _)) in ROOTS.iter().enumerate() {
-        duplicate_of.insert((Home::Builtin, name), at);
+/// One written kind and the draft it stands for: its own, the first of its name, or a root.
+struct Declared<'a, 's> {
+    written: Written<'a, 's, Decl<'s>>,
+    draft: usize,
+}
+
+/// The kinds as written, before they are a tree. A kind whose parent is missing or on a cycle is `broken`, and so
+/// is every kind beneath it once the tree is made.
+struct Drafts<'a, 's> {
+    kinds: Vec<Kind>,
+    homes: Vec<Home>,
+    parents: Vec<Option<usize>>,
+    broken: Vec<bool>,
+    declared: Vec<Declared<'a, 's>>,
+}
+
+impl<'a, 's> Drafts<'a, 's> {
+    /// The roots, then one draft for each declaration that is neither a root again nor an earlier kind again.
+    fn of(collected: &Collected<'a, 's>, names: &mut Interner<'s>, diags: &mut Vec<Diagnostic>) -> Drafts<'a, 's> {
+        let kinds: Vec<Kind> = ROOTS.iter().map(|&(name, sort)| draft(names, name, sort)).collect();
+        let mut drafts = Drafts {
+            homes: vec![Home::Builtin; kinds.len()],
+            parents: vec![None; kinds.len()],
+            broken: vec![false; kinds.len()],
+            kinds,
+            declared: Vec::new(),
+        };
+        drafts.parents[ROOT_MEASURE] = Some(ROOT_COMMODITY);
+        let mut seen: Map<(Home, &'s str), usize> = Map::default();
+        for (at, &(name, _)) in ROOTS.iter().enumerate() {
+            seen.insert((Home::Builtin, name), at);
+        }
+        for written in collected.decls_of(DeclKind::Kind) {
+            let draft = drafts.declare(written, &mut seen, names, diags);
+            drafts.declared.push(Declared { written: *written, draft });
+        }
+        drafts
     }
-    let mut written: Vec<(&axiom_syntax::File<'s>, &axiom_syntax::Decl<'s>, Home)> = Vec::new();
-    let mut draft_of = Vec::new();
 
-    for kind_decl in collected.decls_of(DeclKind::Kind) {
+    /// The draft a declaration is: a new one, or the one it repeats or is built in as (said either way).
+    fn declare(
+        &mut self,
+        kind_decl: &Written<'a, 's, Decl<'s>>,
+        seen: &mut Map<(Home, &'s str), usize>,
+        names: &mut Interner<'s>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> usize {
         let (file, decl, home) = (kind_decl.file(), kind_decl.node, kind_decl.home());
         let name = decl.name.0;
-        written.push((file, decl, home));
-        if let Some(&first) = duplicate_of.get(&(home, name)) {
-            let (word, earlier) = (Word::of(file, name), drafts[first].loc);
-            diags.push(problem::duplicate(Noun::Kind, word, earlier));
-            draft_of.push(first);
-            continue;
+        if let Some(&first) = seen.get(&(home, name)) {
+            diags.push(problem::duplicate(Noun::Kind, Word::of(file, name), self.kinds[first].loc));
+            return first;
         }
         if let Some(first) = ROOTS.iter().position(|&(root, _)| root == name) {
             diags.push(problem::duplicate(Noun::Kind, Word::of(file, name), None));
-            duplicate_of.insert((home, name), first);
-            draft_of.push(first);
-            continue;
+            seen.insert((home, name), first);
+            return first;
         }
-
         let mut kind = draft(names, name, Sort::Thing);
         kind.system = match home {
             Home::System(system) => Some(system),
@@ -109,88 +145,107 @@ pub(crate) fn declare_sites<'s>(
         };
         kind.doc = kind_decl.item.doc.map(|doc| names.intern(doc.0));
         kind.loc = Some(file.loc(name));
-        let at = drafts.len();
-        duplicate_of.insert((home, name), at);
-        drafts.push(kind);
-        homes.push(home);
-        parents.push(None);
-        broken.push(false);
-        draft_of.push(at);
+        let at = self.kinds.len();
+        seen.insert((home, name), at);
+        self.kinds.push(kind);
+        self.homes.push(home);
+        self.parents.push(None);
+        self.broken.push(false);
+        at
     }
 
-    let draft_names: Vec<_> =
-        drafts.iter().enumerate().map(|(at, kind)| (Id::new(at as u32), names.name(kind.name), homes[at])).collect();
-    let draft_index = Scoped::build(names, draft_names);
-    for (at, &(file, decl, home)) in written.iter().enumerate() {
-        let child = draft_of[at];
-        if child < ROOTS.len() || parents[child].is_some() {
-            continue;
-        }
-        let Some(parent) = decl.kind else {
-            diags.push(
-                Diagnostic::error("kind-parent", format!("kind `{}` needs a parent", decl.name.0))
-                    .label(file.loc(decl.name.0), "what kind of thing is this?")
-                    .help(
-                        "write `: asset`, `: debt`, `: thing`, `: commodity`, `: measure`, `: entity`, or another kind",
-                    ),
-            );
-            parents[child] = Some(ROOT_THING);
-            broken[child] = true;
-            continue;
-        };
-        match find(&draft_index, names, systems, parent.0, |visible| scopes.of(home).sees(visible)) {
-            Ok(parent) => parents[child] = Some(parent.index()),
-            Err(miss) => {
-                let among = Among { index: &draft_index, names, systems };
-                diags.push(unresolved(miss, Word::of(file, parent.0), &among, |id| &drafts[id.index()]));
-                parents[child] = Some(ROOT_THING);
-                broken[child] = true;
+    fn index(&self, names: &mut Interner<'s>) -> Scoped<Kind> {
+        let drafts: Vec<_> = (self.kinds.iter().enumerate())
+            .map(|(at, kind)| (Id::new(at as u32), names.name(kind.name), self.homes[at]))
+            .collect();
+        Scoped::build(names, drafts)
+    }
+
+    /// Each declaration's parent, found among all the drafts; one that names none, or none there, hangs from
+    /// `thing` and is broken.
+    fn link_parents(
+        &mut self,
+        index: &Scoped<Kind>,
+        names: &Interner<'s>,
+        systems: &Tree<System>,
+        scopes: &Scopes,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Drafts { kinds, parents, broken, declared, .. } = self;
+        for Declared { written, draft } in declared.iter() {
+            let (file, decl) = (written.file(), written.node);
+            if *draft < ROOTS.len() || parents[*draft].is_some() {
+                continue;
+            }
+            let Some(parent) = decl.kind else {
+                diags.push(
+                    Diagnostic::error("kind-parent", format!("kind `{}` needs a parent", decl.name.0))
+                        .label(file.loc(decl.name.0), "what kind of thing is this?")
+                        .help(
+                            "write `: asset`, `: debt`, `: thing`, `: commodity`, `: measure`, `: entity`, or another kind",
+                        ),
+                );
+                (parents[*draft], broken[*draft]) = (Some(ROOT_THING), true);
+                continue;
+            };
+            match find(index, names, systems, parent.0, |visible| scopes.of(written.home()).sees(visible)) {
+                Ok(parent) => parents[*draft] = Some(parent.index()),
+                Err(miss) => {
+                    let among = Among { index, names, systems };
+                    diags.push(unresolved(miss, Word::of(file, parent.0), &among, |id| &kinds[id.index()]));
+                    (parents[*draft], broken[*draft]) = (Some(ROOT_THING), true);
+                }
             }
         }
     }
 
-    for cycle in cycles(&parents) {
-        diags.push(cycle_diagnostic(&cycle, &drafts, names));
-        for &member in &cycle {
-            parents[member] = Some(ROOT_THING);
-            broken[member] = true;
-        }
-    }
-    let (mut tree, remap) = Tree::build(drafts, &parents).expect("kind cycles were cut before freezing");
-    for id in tree.ids() {
-        if let Some(parent) = tree.parent(id) {
-            tree[id].sort = tree[parent].sort;
+    /// A parent chain that never reaches a root is said, and cut by hanging each of its members from `thing`.
+    fn cut_cycles(&mut self, names: &Interner<'s>, diags: &mut Vec<Diagnostic>) {
+        for cycle in cycles(&self.parents) {
+            diags.push(cycle_diagnostic(&cycle, &self.kinds, names));
+            for &member in &cycle {
+                (self.parents[member], self.broken[member]) = (Some(ROOT_THING), true);
+            }
         }
     }
 
-    let mut final_homes = vec![Home::Builtin; homes.len()];
-    let mut unrooted = vec![false; homes.len()];
-    for (old, &home) in homes.iter().enumerate() {
-        final_homes[remap[old].index()] = home;
-        unrooted[remap[old].index()] = broken[old];
-    }
-    for id in tree.ids() {
-        if let Some(parent) = tree.parent(id) {
-            unrooted[id.index()] |= unrooted[parent.index()];
+    /// The tree, in its final order, with each kind's sort taken from its parent and what answers to its name.
+    fn freeze(self, names: &mut Interner<'s>) -> NativeKinds {
+        let Drafts { kinds, homes, parents, broken, declared } = self;
+        let (mut tree, remap) = Tree::build(kinds, &parents).expect("kind cycles were cut before freezing");
+        for id in tree.ids() {
+            if let Some(parent) = tree.parent(id) {
+                tree[id].sort = tree[parent].sort;
+            }
         }
-    }
-    let visible_names: Vec<_> =
-        tree.iter().map(|(id, kind)| (id, names.name(kind.name), final_homes[id.index()])).collect();
-    let index = Scoped::build(names, visible_names);
-    let declarations = draft_of.into_iter().map(|draft| remap[draft]).collect();
-    NativeKinds {
-        tree,
-        index,
-        roots: crate::book::KindRoots {
-            asset: remap[ROOT_ASSET],
-            debt: remap[ROOT_DEBT],
-            thing: remap[ROOT_THING],
-            commodity: remap[ROOT_COMMODITY],
-            measure: remap[ROOT_MEASURE],
-            entity: remap[ROOT_ENTITY],
-        },
-        declarations,
-        unrooted,
+        let mut final_homes = vec![Home::Builtin; homes.len()];
+        let mut unrooted = vec![false; homes.len()];
+        for (old, &home) in homes.iter().enumerate() {
+            final_homes[remap[old].index()] = home;
+            unrooted[remap[old].index()] = broken[old];
+        }
+        for id in tree.ids() {
+            if let Some(parent) = tree.parent(id) {
+                unrooted[id.index()] |= unrooted[parent.index()];
+            }
+        }
+        let visible_names: Vec<_> =
+            tree.iter().map(|(id, kind)| (id, names.name(kind.name), final_homes[id.index()])).collect();
+        let index = Scoped::build(names, visible_names);
+        NativeKinds {
+            tree,
+            index,
+            roots: crate::book::KindRoots {
+                asset: remap[ROOT_ASSET],
+                debt: remap[ROOT_DEBT],
+                thing: remap[ROOT_THING],
+                commodity: remap[ROOT_COMMODITY],
+                measure: remap[ROOT_MEASURE],
+                entity: remap[ROOT_ENTITY],
+            },
+            declarations: declared.into_iter().map(|declared| remap[declared.draft]).collect(),
+            unrooted,
+        }
     }
 }
 

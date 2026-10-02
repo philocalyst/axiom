@@ -5,10 +5,10 @@
 //! because resolution happens against the complete draft index.
 
 use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
-use axiom_syntax::{DeclKind, ExprKind};
+use axiom_syntax::{Decl, DeclKind, ExprKind};
 
 use crate::book::{At, Kind, Purpose, PurposeRoot, System};
-use crate::collect::Collected;
+use crate::collect::{Collected, Written};
 use crate::errors::Word;
 use crate::kinds;
 use crate::names::Scoped;
@@ -21,6 +21,17 @@ pub(crate) struct NativePurposes {
     pub roots: crate::book::PurposeRoots,
 }
 
+/// The four roots, which are the first four drafts.
+const ROOTS: [(&str, PurposeRoot); 4] = [
+    ("income", PurposeRoot::Income),
+    ("spending", PurposeRoot::Spending),
+    ("capital", PurposeRoot::Capital),
+    ("transfer", PurposeRoot::Transfer),
+];
+
+/// The draft a purpose hangs from when it names no parent, or one that is not there.
+const TRANSFER: usize = 3;
+
 pub(crate) fn declare_sites<'s>(
     collected: &Collected<'_, 's>,
     names: &mut Interner<'s>,
@@ -29,54 +40,88 @@ pub(crate) fn declare_sites<'s>(
     kind_index: &Scoped<Kind>,
     diags: &mut Vec<Diagnostic>,
 ) -> NativePurposes {
-    let root_names = ["income", "spending", "capital", "transfer"];
-    let root_kinds = [PurposeRoot::Income, PurposeRoot::Spending, PurposeRoot::Capital, PurposeRoot::Transfer];
-    let mut drafts: Vec<Purpose> = root_names
-        .iter()
-        .zip(root_kinds)
-        .map(|(&name, root)| Purpose {
-            name: names.intern(name),
-            root,
-            system: None,
-            of: None,
-            shares: Box::default(),
-            laws: Box::default(),
-            doc: None,
-            loc: None,
-        })
-        .collect();
-    let root_ids: [Id<Purpose>; 4] = [Id::new(0), Id::new(1), Id::new(2), Id::new(3)];
-    let mut homes = vec![Home::Builtin; drafts.len()];
-    let mut parents = vec![None; drafts.len()];
-    let mut seen: Map<(Home, &'s str), usize> = Map::default();
-    for (at, root) in root_names.into_iter().enumerate() {
-        seen.insert((Home::Builtin, root), at);
+    let mut drafts = Drafts::of(collected, names, diags);
+    let draft_index = drafts.index(names);
+    drafts.link_parents(&draft_index, names, systems, scopes, diags);
+    drafts.cut_cycles(names, diags);
+    let (mut tree, remap) = drafts.freeze();
+    drafts.attach_objects(&mut tree, &remap, names, systems, scopes, kind_index, diags);
+    let index = drafts.index_of(&tree, &remap, names);
+    let root = |at: usize| remap[at];
+    let roots =
+        crate::book::PurposeRoots { income: root(0), spending: root(1), capital: root(2), transfer: root(TRANSFER) };
+    NativePurposes { tree, index, roots }
+}
+
+/// One written purpose and the draft it stands for: its own, the first of its name, or a root.
+struct Declared<'a, 's> {
+    written: Written<'a, 's, Decl<'s>>,
+    draft: usize,
+}
+
+/// The purposes as written, before they are a tree. Forward parents work because they are resolved against all of
+/// them.
+struct Drafts<'a, 's> {
+    purposes: Vec<Purpose>,
+    homes: Vec<Home>,
+    parents: Vec<Option<usize>>,
+    declared: Vec<Declared<'a, 's>>,
+}
+
+impl<'a, 's> Drafts<'a, 's> {
+    /// The roots, then one draft for each declaration that is not a root's or an earlier one's again.
+    fn of(collected: &Collected<'a, 's>, names: &mut Interner<'s>, diags: &mut Vec<Diagnostic>) -> Drafts<'a, 's> {
+        let purposes: Vec<Purpose> = ROOTS
+            .iter()
+            .map(|&(name, root)| Purpose {
+                name: names.intern(name),
+                root,
+                system: None,
+                of: None,
+                shares: Box::default(),
+                laws: Box::default(),
+                doc: None,
+                loc: None,
+            })
+            .collect();
+        let mut drafts = Drafts {
+            homes: vec![Home::Builtin; purposes.len()],
+            parents: vec![None; purposes.len()],
+            purposes,
+            declared: Vec::new(),
+        };
+        let mut seen: Map<(Home, &'s str), usize> = Map::default();
+        for (at, &(root, _)) in ROOTS.iter().enumerate() {
+            seen.insert((Home::Builtin, root), at);
+        }
+        for written in collected.decls_of(DeclKind::Purpose) {
+            let draft = drafts.declare(written, &mut seen, names, diags);
+            drafts.declared.push(Declared { written: *written, draft });
+        }
+        drafts
     }
 
-    let mut written: Vec<(&axiom_syntax::File<'s>, &axiom_syntax::Decl<'s>, Home)> = Vec::new();
-    let mut draft_of = Vec::new();
-    for purpose in collected.decls_of(DeclKind::Purpose) {
+    /// The draft a declaration is: a new one, or the earlier one it repeats (said, unless it is a root, which a
+    /// declaration may attach laws to as a system may extend the built-in root with domain rules).
+    fn declare(
+        &mut self,
+        purpose: &Written<'a, 's, Decl<'s>>,
+        seen: &mut Map<(Home, &'s str), usize>,
+        names: &mut Interner<'s>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> usize {
         let (file, decl, home) = (purpose.file(), purpose.node, purpose.home());
         let text = decl.name.0;
-        written.push((file, decl, home));
-        if root_names.contains(&text) {
-            // Purpose roots are built in identities. A declaration of a
-            // root may attach laws to that identity without creating a
-            // second tree node, just as a shared system may extend the
-            // built-in root with domain rules.
-            draft_of.push(root_ids[root_names.iter().position(|&name| name == text).unwrap()].index());
-            continue;
+        if let Some(root) = ROOTS.iter().position(|&(name, _)| name == text) {
+            return root;
         }
         if let Some(&first) = seen.get(&(home, text)) {
-            let (word, earlier) = (Word::of(file, text), drafts.get(first).and_then(|purpose| purpose.loc));
-            diags.push(problem::duplicate(Noun::Purpose, word, earlier));
-            draft_of.push(first);
-            continue;
+            diags.push(problem::duplicate(Noun::Purpose, Word::of(file, text), self.purposes[first].loc));
+            return first;
         }
-        let symbol = names.intern(text);
-        let at = drafts.len();
-        let draft = Purpose {
-            name: symbol,
+        let at = self.purposes.len();
+        self.purposes.push(Purpose {
+            name: names.intern(text),
             root: PurposeRoot::Transfer,
             system: match home {
                 Home::System(id) => Some(id),
@@ -87,127 +132,145 @@ pub(crate) fn declare_sites<'s>(
             laws: Box::default(),
             doc: purpose.item.doc.map(|doc| names.intern(doc.0)),
             loc: Some(file.loc(text)),
-        };
+        });
         seen.insert((home, text), at);
-        drafts.push(draft);
-        homes.push(home);
-        parents.push(None);
-        draft_of.push(at);
+        self.homes.push(home);
+        self.parents.push(None);
+        at
     }
 
-    let draft_names: Vec<_> = drafts
-        .iter()
-        .enumerate()
-        .map(|(at, purpose)| (Id::<Purpose>::new(at as u32), names.name(purpose.name), homes[at]))
-        .collect();
-    let index = Scoped::build(names, draft_names);
+    fn index(&self, names: &mut Interner<'s>) -> Scoped<Purpose> {
+        let drafts: Vec<_> = (self.purposes.iter().enumerate())
+            .map(|(at, purpose)| (Id::<Purpose>::new(at as u32), names.name(purpose.name), self.homes[at]))
+            .collect();
+        Scoped::build(names, drafts)
+    }
 
-    for (written_at, (file, decl, home)) in written.iter().enumerate() {
-        let child = draft_of[written_at];
-        if root_ids.iter().any(|&root| root.index() == child) || parents[child].is_some() {
-            continue;
+    /// Each declaration's parent, found among all the drafts; one that names none, or none there, hangs from
+    /// `transfer`.
+    fn link_parents(
+        &mut self,
+        index: &Scoped<Purpose>,
+        names: &Interner<'s>,
+        systems: &Tree<System>,
+        scopes: &Scopes,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Drafts { purposes, parents, declared, .. } = self;
+        for Declared { written, draft } in declared.iter() {
+            let (file, decl) = (written.file(), written.node);
+            if *draft < ROOTS.len() || parents[*draft].is_some() {
+                continue;
+            }
+            let Some(parent) = decl.kind else {
+                diags.push(
+                    Diagnostic::error("purpose-parent", format!("purpose `{}` needs a parent", decl.name.0))
+                        .label(file.loc(decl.name.0), "what is this purpose a kind of?")
+                        .help("give it a parent such as `income`, `spending`, `capital`, or `transfer`"),
+                );
+                parents[*draft] = Some(TRANSFER);
+                continue;
+            };
+            parents[*draft] = Some(match index.resolve(names, scopes.of(written.home()), parent.0) {
+                Ok(parent_id) => parent_id.index(),
+                Err(miss) => {
+                    let among = Among { index, names, systems };
+                    let describe = |ids: &[Id<Purpose>]| {
+                        let (name, loc) =
+                            (|id: Id<Purpose>| purposes[id.index()].name, |id: Id<Purpose>| purposes[id.index()].loc);
+                        problem::shortest(names, &index.names, ids, name, loc)
+                    };
+                    diags.push(among.failed(miss, Noun::Purpose, Word::of(file, parent.0), describe));
+                    TRANSFER
+                }
+            });
         }
-        let Some(parent) = decl.kind else {
-            diags.push(
-                Diagnostic::error("purpose-parent", format!("purpose `{}` needs a parent", decl.name.0))
-                    .label(file.loc(decl.name.0), "what is this purpose a kind of?")
-                    .help("give it a parent such as `income`, `spending`, `capital`, or `transfer`"),
+    }
+
+    /// A parent chain that never reaches a root is said, and cut by hanging each of its members from `transfer`.
+    fn cut_cycles(&mut self, names: &Interner<'s>, diags: &mut Vec<Diagnostic>) {
+        for cycle in cycles(&self.parents) {
+            let route: Vec<&str> = cycle.iter().map(|&at| names.name(self.purposes[at].name)).collect();
+            let mut diagnostic =
+                Diagnostic::error("purpose-cycle", format!("purpose `{}` inherits from itself", route[0]))
+                    .note(format!("the chain is {}", route.join(" -> ")))
+                    .help("give one of them a parent outside the loop");
+            if let Some(loc) = self.purposes[cycle[0]].loc {
+                diagnostic = diagnostic.label(loc, "this parent chain never reaches a root");
+            }
+            diags.push(diagnostic);
+            for &at in &cycle {
+                self.parents[at] = Some(TRANSFER);
+            }
+        }
+    }
+
+    /// The tree, and where each draft went in it. A purpose is of the root it hangs beneath.
+    fn freeze(&mut self) -> (Tree<Purpose>, Vec<Id<Purpose>>) {
+        let purposes = std::mem::take(&mut self.purposes);
+        let (mut tree, remap) = Tree::build(purposes, &self.parents).expect("purpose cycles were cut before freezing");
+        for id in tree.ids() {
+            tree[id].root = tree.parent(id).map_or_else(
+                || ROOTS[(0..ROOTS.len()).find(|&at| remap[at] == id).unwrap()].1,
+                |parent| tree[parent].root,
             );
-            parents[child] = Some(root_ids[3].index());
-            continue;
-        };
-        let scope = scopes.of(*home);
-        match index.resolve(names, scope, parent.0) {
-            Ok(parent_id) => parents[child] = Some(parent_id.index()),
-            Err(miss) => {
-                let among = Among { index: &index, names, systems };
-                let describe = |ids: &[Id<Purpose>]| {
-                    let (name, loc) =
-                        (|id: Id<Purpose>| drafts[id.index()].name, |id: Id<Purpose>| drafts[id.index()].loc);
-                    problem::shortest(names, &index.names, ids, name, loc)
+        }
+        (tree, remap)
+    }
+
+    /// `of KIND` is the only property that determines a purpose's object type.
+    fn attach_objects(
+        &self,
+        tree: &mut Tree<Purpose>,
+        remap: &[Id<Purpose>],
+        names: &Interner<'s>,
+        systems: &Tree<System>,
+        scopes: &Scopes,
+        kind_index: &Scoped<Kind>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        for Declared { written, draft } in &self.declared {
+            let (file, decl) = (written.file(), written.node);
+            let id = remap[*draft];
+            if remap[..ROOTS.len()].contains(&id) {
+                continue;
+            }
+            for prop in file[decl.props].iter().filter(|prop| prop.name.0 == "of") {
+                let [expr] = &file[prop.args][..] else {
+                    diags.push(
+                        Diagnostic::error("purpose-object", "`of` needs exactly one kind name")
+                            .label(prop.loc, "write `of KIND`"),
+                    );
+                    continue;
                 };
-                diags.push(among.failed(miss, Noun::Purpose, Word::of(file, parent.0), describe));
-                parents[child] = Some(root_ids[3].index());
+                let ExprKind::Name(kind_name) = file.exprs[*expr].kind else {
+                    diags.push(
+                        Diagnostic::error("purpose-object", "`of` needs a kind name")
+                            .label(prop.loc, "write `of KIND`"),
+                    );
+                    continue;
+                };
+                let scope = scopes.of(written.home());
+                match kinds::find(kind_index, names, systems, kind_name.0, |visible| scope.sees(visible)) {
+                    Ok(kind) => tree[id].of = Some(At { value: kind, loc: prop.loc }),
+                    Err(_) => diags.push(
+                        Diagnostic::error("unknown-kind", format!("kind `{}` is not known here", kind_name.0))
+                            .label(file.loc(kind_name.0), "not a visible kind"),
+                    ),
+                }
             }
         }
     }
 
-    for cycle in cycles(&parents) {
-        let route: Vec<&str> = cycle.iter().map(|&at| names.name(drafts[at].name)).collect();
-        let loc = drafts[cycle[0]].loc;
-        let mut diagnostic = Diagnostic::error("purpose-cycle", format!("purpose `{}` inherits from itself", route[0]))
-            .note(format!("the chain is {}", route.join(" -> ")))
-            .help("give one of them a parent outside the loop");
-        if let Some(loc) = loc {
-            diagnostic = diagnostic.label(loc, "this parent chain never reaches a root");
+    /// What answers to a purpose's name, now that the tree has put them in their final order.
+    fn index_of(&self, tree: &Tree<Purpose>, remap: &[Id<Purpose>], names: &mut Interner<'s>) -> Scoped<Purpose> {
+        let mut homes = vec![Home::Builtin; self.homes.len()];
+        for (at, &home) in self.homes.iter().enumerate() {
+            homes[remap[at].index()] = home;
         }
-        diags.push(diagnostic);
-        for &at in &cycle {
-            parents[at] = Some(root_ids[3].index());
-        }
-    }
-
-    let (mut tree, remap) = Tree::build(drafts, &parents).expect("purpose cycles were cut before freezing");
-    for id in tree.ids() {
-        tree[id].root = tree.parent(id).map_or_else(
-            || {
-                let at = root_ids.iter().position(|&root| remap[root.index()] == id).unwrap();
-                [PurposeRoot::Income, PurposeRoot::Spending, PurposeRoot::Capital, PurposeRoot::Transfer][at]
-            },
-            |parent| tree[parent].root,
-        );
-    }
-
-    // `of KIND` is the only property that determines a purpose's object type.
-    for (at, (file, decl, home)) in written.iter().enumerate() {
-        let id = remap[draft_of[at]];
-        if root_ids.iter().any(|&root| remap[root.index()] == id) {
-            continue;
-        }
-        for prop in &file[decl.props] {
-            if prop.name.0 != "of" {
-                continue;
-            }
-            let [expr] = &file[prop.args][..] else {
-                diags.push(
-                    Diagnostic::error("purpose-object", "`of` needs exactly one kind name")
-                        .label(prop.loc, "write `of KIND`"),
-                );
-                continue;
-            };
-            let ExprKind::Name(kind_name) = file.exprs[*expr].kind else {
-                diags.push(
-                    Diagnostic::error("purpose-object", "`of` needs a kind name").label(prop.loc, "write `of KIND`"),
-                );
-                continue;
-            };
-            let scope = scopes.of(*home);
-            match kinds::find(kind_index, names, systems, kind_name.0, |visible| scope.sees(visible)) {
-                Ok(kind) => tree[id].of = Some(At { value: kind, loc: prop.loc }),
-                Err(_) => diags.push(
-                    Diagnostic::error("unknown-kind", format!("kind `{}` is not known here", kind_name.0))
-                        .label(file.loc(kind_name.0), "not a visible kind"),
-                ),
-            }
-        }
-    }
-
-    let mut final_homes = vec![Home::Builtin; homes.len()];
-    for (at, &home) in homes.iter().enumerate() {
-        final_homes[remap[at].index()] = home;
-    }
-    let final_names: Vec<_> =
-        tree.iter().map(|(id, purpose)| (id, names.name(purpose.name), final_homes[id.index()])).collect();
-    let index = Scoped::build(names, final_names);
-    NativePurposes {
-        tree,
-        index,
-        roots: crate::book::PurposeRoots {
-            income: remap[root_ids[0].index()],
-            spending: remap[root_ids[1].index()],
-            capital: remap[root_ids[2].index()],
-            transfer: remap[root_ids[3].index()],
-        },
+        let tree_names: Vec<_> =
+            tree.iter().map(|(id, purpose)| (id, names.name(purpose.name), homes[id.index()])).collect();
+        Scoped::build(names, tree_names)
     }
 }
 
