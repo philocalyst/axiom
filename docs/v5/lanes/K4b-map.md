@@ -321,3 +321,35 @@ that adds it, and listed in the report. The commit that adds it is separate from
   (`a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot`,
   `a_context_forecast_keeps_historical_and_same_day_obligations_once`,
   `native_loan_forecast_stops_after_the_typed_principal_is_repaid`).
+
+## 9. Addendum: the scope the orchestrator gave after this map
+
+The orchestrator checked section 4.1 on the integration binary and found it true, and that LANGUAGE.md §3 (normative) says the
+opposite of what a split statement does: "their total is the header amount, or the sum of the legs", `...` is the remainder,
+and items are "carved out of the header's amount". No example in `examples/` uses a split **statement** (every `...` there is
+in a contract), so no golden depends on the wrong behaviour. The lane's rule "behaviour is preserved" is therefore **lifted
+for the statement path** and kept for the promise path:
+
+- A split statement and a statement's items mean what §3 says, **through the same `solve`** the promise path uses. The model
+  solves a literal group (constant folding: the flows it makes carry the solved amounts, and the fold only posts). The fold
+  solves the rest with its own `Env` when the group's first flow lands (computed amounts, `=`, `all`).
+- The promise path, and everything `splits.py` writes for it, stays byte for byte. Section 3.1's accidents on the promise
+  side (4.4's `=` leg that carves its balance, the leg modes, `all` and `=` posted as written by a kept occurrence) are
+  preserved; 4.4 is decided in the report with the question for the user.
+- Acceptance tests come first, written from §3's own worked examples (`14 visa -> target 120.00 USD #household` with 32.10
+  and 12.00 items, 75.90 left) and from 4.1 to 4.3 as written; they are committed ignored, shown failing on the old code,
+  and un-ignored by the commit that makes them pass.
+- Every difference the oracle shows between the baseline and the new binary on a statement is classified (4.1 a leg did not
+  debit its source, 4.2 the total and `...` were inert or a total after the arrow was dropped, 4.3 an item did not carve, or
+  the new static check rejects the split). A difference that is none of these is a bug.
+- The line target is secondary. Correctness, and one algorithm, come first.
+
+Two things the statement path needs that this map's sections 2 and 5 did not plan for, found while reading for it:
+
+1. **The `amount` an item's expression reads is the item's own stand-in zero** (`journal_expression` reads the item flow's
+   out or arrive): `25% of amount` under a statement header posts `0.00 USD` today (`/tmp` probe: `checking -> shop 200 USD
+   #household` over `25% of amount #fun` posts `#fun` 0.00 and `#household` 200.00). §3 says an item carves the header's amount,
+   so `amount` in an item of a statement is the header's. This is a fifth class of difference, reported as such.
+2. **`6%` as an item's amount does not compile today** (`type-mismatch: expected an amount, but this is a number`), and it is
+   the second worked example of §3 (`- 6% #selling-costs`). A percentage of the header is a quantity the group has (`Part::Share`
+   for a leg); for an item it is not built. Reported; built if the work allows.
