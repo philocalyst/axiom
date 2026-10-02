@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use axiom_core::{Days, Id, Qty};
 use axiom_engine::Run;
 use axiom_model::{
-    Book, Cadence, Contract, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, Sign, Terms, TermsState,
+    Cadence, Contract, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, Sign, Terms, TermsState,
 };
 
 use crate::lens::Lens;

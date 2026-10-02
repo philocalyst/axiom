@@ -226,3 +226,22 @@ pub type Promised = Group<Header<Flow>, Flow, Says>;
 
 /// What a record made: its flows are the record's own, named by offset, and an item is the flow it made, if any.
 pub type Made = Group<Heading, u32, Option<u32>>;
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of;
+
+    use super::*;
+    use crate::journal::Program;
+
+    /// What a transaction holds of its split is no larger than the types it replaced: a quantity was 32 bytes, a
+    /// record's group 104, its item 56 and its program 56. (A promise's group is larger than its 272 by a quantity
+    /// that is a word wider: the cost of one `Quantity` for headers and legs alike.)
+    #[test]
+    fn what_a_record_holds_of_a_split_is_no_larger_than_what_it_held() {
+        assert!(size_of::<Quantity>() <= 32, "Quantity is {}", size_of::<Quantity>());
+        assert!(size_of::<Made>() <= 104, "Made is {}", size_of::<Made>());
+        assert!(size_of::<Item<Option<u32>>>() <= 56, "Item is {}", size_of::<Item<Option<u32>>>());
+        assert!(size_of::<Program>() <= 56, "Program is {}", size_of::<Program>());
+    }
+}
