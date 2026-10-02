@@ -23,8 +23,7 @@ random.seed(seed)
 def mutate(text):
     lines = text.split("\n")
     for _ in range(random.randint(1, 3)):
-        kind, at = random.random(), None
-        at = random.randrange(len(lines))
+        kind, at = random.random(), random.randrange(len(lines))
         if kind < .15:
             del lines[at]
         elif kind < .25:
