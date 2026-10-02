@@ -1,0 +1,13 @@
+use std
+use sys1
+base USD
+entity me : person
+account a : only2
+account checking : deposit
+2026-01-01 only2e -> checking 1 USD
+2026-01-02 checking -> me 1 USD #only2p
+law l1
+  always
+  warn only2param[year] > 3
+kind k3 : only2
+purpose pchild : only2p

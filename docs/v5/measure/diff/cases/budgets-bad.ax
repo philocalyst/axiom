@@ -1,0 +1,39 @@
+base USD
+use std
+
+entity me : person
+
+account assets/checking : bank
+account assets/envelope : bank
+
+purpose chow : spending
+  budget 650 USD monthly carries
+budget chow 900 USD monthly
+purpose lunch : spending
+  budget 250 USD monthly
+purpose treats : spending
+  budget 20% of #chow yearly
+purpose misc : spending
+  budget 10% of #nope monthly
+purpose saved : spending
+  budget 100 USD monthly funded from checking into envelope
+purpose lost : spending
+  budget 100 USD monthly funded from nowhere into envelope
+purpose odd : spending
+  budget 100 EUR monthly
+purpose later : spending
+budget missing 50 USD monthly
+budget lunch 20 USD monthly
+budget later 30 USD yearly funded from checking into nowhere
+
+2026-03-01 #chow now budget 700 USD monthly until 2026-06-01
+2026-03-01 #chow now budget 750 USD monthly until 2026-06-01 until 2026-07-01
+2026-03-01 #chow now budget 800 USD monthly until 2026-02-01
+2026-04-01 chow now budget 1 USD monthly
+2026-03-01 #nope now budget 1 USD monthly
+2026-05-01 #saved now budget 200 USD yearly
+2026-05-01 #lost now budget 200 USD yearly
+2026-05-01 #treats now budget 30% of #chow monthly
+2026-05-01 #later now budget 30 USD monthly
+2026-05-02 #later now budget 40 USD monthly until 2026-05-20
+2026-05-10 #later now budget 50 USD monthly funded from checking into envelope

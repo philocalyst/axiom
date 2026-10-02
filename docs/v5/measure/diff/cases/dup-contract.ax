@@ -1,0 +1,9 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+entity landlord : org
+contract c1 with landlord
+  1_000 USD monthly on 1 from checking
+contract c1 with landlord
+  1_000 USD monthly on 1 from checking

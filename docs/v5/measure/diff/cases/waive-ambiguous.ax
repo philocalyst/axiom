@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+2026-01-01 me -> checking 5 USD ^dup
+2026-01-02 me -> checking 6 USD ^dup
+2026-01-03 ^dup waived

@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+param rate
+  2026 3%
+  2026 4%

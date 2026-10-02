@@ -1,0 +1,5 @@
+system sys2
+pattern p = "B"
+format f
+  date "Posting Date" "MM/DD/YYYY"
+  amount "Amount"

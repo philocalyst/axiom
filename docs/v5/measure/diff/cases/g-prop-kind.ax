@@ -1,0 +1,14 @@
+use std
+base USD
+entity me : person
+entity acme : org
+entity shop : org
+account checking : bank
+account savings : bank
+asset car : vehicle
+asset house : vehicle
+commodity VTI : stock
+2025-12-31 market -> checking 9_000 USD
+kind jar2 : bank
+  has size number
+2026-03-01 jar2 now size 5

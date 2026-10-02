@@ -1,0 +1,54 @@
+base USD
+use std
+use us
+
+param brackets
+  2026 0 EUR 10% | 5_000 EUR 20%
+param limit
+  2026 5_000 USD
+
+entity me : person
+  born   1988-04-12
+  filing single
+  lives  us
+
+account assets/checking : bank
+
+law calls
+  on in
+  count amount as seen
+  warn min(1) > 0 "arity low"
+  warn abs(1, 2) > 0 "arity high"
+  warn min(1 USD, 2) > 0 "mismatch"
+  warn min(amount > 0 USD, amount > 1 USD) "unordered"
+  warn abs("text") > 0 "abs text"
+  warn date(1, 2) > 0 "date short"
+  warn date(2026, "m", 3) > 0 "date text"
+  warn tally(seen, "x") > empty "tally year"
+  warn tally(unseen) > empty "tally unknown"
+  warn tally(3) > empty "tally number"
+  warn open(5) > empty "open number"
+  warn open(amount) > empty "open name"
+  warn progressive(5, 1 USD) > empty "progressive first"
+  warn progressive(brackets[year], "x") > empty "progressive second"
+  warn progressive(brackets[year], 5 USD) > empty "progressive unit"
+  warn value(5 USD, 5) > empty "value unit"
+  warn value("x", EUR) > empty "value first"
+  warn value(5 USD, EUR, 7) > empty "value policy"
+  warn peak(amount > 0 USD, month) > empty "peak type"
+  warn peak(amount, week) > empty "peak window"
+  warn low(amount, 5) > empty "low window"
+  warn days(amount, month) > empty "days type"
+  warn days(amount > 0 USD, fortnight) > empty "days window"
+  warn total(in) > empty "total arity"
+  warn straight-line(5 USD, 3, 2026-01-01) > empty "sl span"
+  warn straight-line(5 USD, 3y, 2026-01-01, 4) > empty "sl option"
+  warn limit[year] > empty "ok"
+  warn peak(amount, month) > 0 USD "peak ok"
+  warn low(amount, ever) > 0 USD "low ok"
+  warn days(amount > 0 USD, year) > 3 "days ok"
+  warn min(amount, 0 USD) > 0 USD "min ok"
+  warn value(amount, EUR, mid) > 0 EUR "value ok"
+  warn open(^rent) > 0 USD "open ok"
+  warn straight-line(5 USD, 3y, 2026-01-01, month, mid-month) > 0 USD "sl ok"
+  warn progressive(brackets[year], 5 EUR) > 0 EUR "progressive ok"

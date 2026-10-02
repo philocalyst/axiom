@@ -1,0 +1,5 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+2026-01-01 me worked 5 HRS against ^nothing

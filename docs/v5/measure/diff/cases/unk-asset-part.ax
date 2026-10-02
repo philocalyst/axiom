@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+asset car : property
+asset wheel : property
+  part of cra

@@ -1,0 +1,6 @@
+base USD
+entity me : person
+entity zland : org
+account checking : deposit
+purpose zork : spending
+2026-01-05 me worked 5 HR #zork of nowhere

@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+sync s1
+  read "a.csv"
+  format csvv

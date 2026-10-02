@@ -1,0 +1,35 @@
+use std
+base USD
+entity me : person
+entity landlord : org
+account checking : deposit
+contract c1 with landlord
+  1_000 USD monthly on 1 from checking
+  grace 3d
+  grace 4d
+contract c2 with landlord
+  1_000 USD monthly on 1 from checking
+  area 100 SQFT
+  area 200 SQFT
+contract c3 with landlord
+  1_000 USD monthly on 1 from checking
+  deposit 500 USD
+  deposit 600 USD
+contract c4 with landlord
+  1_000 USD monthly on 1 from checking
+  from 2026-01-01
+  from 2026-02-01
+contract c5 with landlord
+  1_000 USD monthly on 1 from checking
+  loan 1_000 USD on 2026-01-01 at 5% over 1y
+  loan 2_000 USD on 2026-01-01 at 5% over 1y
+contract c6 with landlord
+  1_000 USD monthly on 1 from checking
+  loan 1_000 USD on 2026-01-01 at 5% over 1y
+    prepay shortens
+    prepay recasts
+contract c7 with landlord
+  1_000 USD monthly on 1 from checking
+  loan 1_000 USD on 2026-01-01 at 5% over 1y
+    resets 1y from 2027-01-01 to cpi + 1%
+    resets 1y from 2028-01-01 to cpi + 1%

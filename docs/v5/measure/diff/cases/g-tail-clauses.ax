@@ -1,0 +1,12 @@
+use std
+base USD
+entity me : person
+entity acme : org
+entity shop : org
+account checking : bank
+account savings : bank
+asset car : vehicle
+asset house : vehicle
+commodity VTI : stock
+2025-12-31 market -> checking 9_000 USD
+2026-01-02 checking -> shop 5 USD due 30d for 2025 via acme ^t1 basis 5 USD @ 2 EUR ! "ok"

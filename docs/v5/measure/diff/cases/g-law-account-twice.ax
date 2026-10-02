@@ -1,0 +1,19 @@
+use std
+base USD
+entity me : person
+entity acme : org
+entity shop : org
+account checking : bank
+account savings : bank
+asset car : vehicle
+asset house : vehicle
+commodity VTI : stock
+2025-12-31 market -> checking 9_000 USD
+account assets/big : bank
+  law l2
+    on in
+    warn amount > 1_000 USD "big"
+account assets/big : bank
+  law l3
+    on in
+    warn amount > 2_000 USD "big"

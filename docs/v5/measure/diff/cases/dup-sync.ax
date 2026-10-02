@@ -1,0 +1,14 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+sync s1
+  read "a.csv"
+  format csv
+    date "Posting Date" "MM/DD/YYYY"
+    amount "Amount"
+sync s1
+  read "b.csv"
+  format csv
+    date "Posting Date" "MM/DD/YYYY"
+    amount "Amount"

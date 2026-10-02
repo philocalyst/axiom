@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+kind a/thing1 : asset
+kind b/thing1 : asset
+kind child : thing1

@@ -1,0 +1,15 @@
+use std
+use sys1
+use sys2
+base USD
+entity me : person
+account a : widget
+entity e : person
+  purpose food
+account checking : deposit
+2026-01-01 shared -> checking 1 USD
+2026-01-02 checking -> shared 1 USD #food
+law l1
+  always
+  warn limit[year] > 3
+purpose child : food

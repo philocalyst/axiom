@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity landlord : org
+entity bob : org
+account checking : deposit
+account savings : deposit
+contract flat with landlord
+  1_000 USD monthly on 1 from checking
+  bob 100 USD
+2026-03-01 flat
+  bob 5 USD
+  bob 6 USD

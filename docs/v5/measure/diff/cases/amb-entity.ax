@@ -1,0 +1,7 @@
+use std
+base USD
+entity me : person
+account checking : deposit
+entity x/bob : person
+entity y/bob : person
+2026-01-01 bob -> checking 1 USD
