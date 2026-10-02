@@ -29,6 +29,17 @@ pub(crate) enum Found<T> {
     Several(Vec<Id<T>>),
 }
 
+impl<T> Found<T> {
+    /// Everything found, which is nothing, one or several.
+    pub fn into_ids(self) -> Vec<Id<T>> {
+        match self {
+            Found::One(id) => vec![id],
+            Found::Nothing => Vec::new(),
+            Found::Several(ids) => ids,
+        }
+    }
+}
+
 pub(crate) struct Names<T> {
     slots: Map<Sym, Slot<T>>,
 }

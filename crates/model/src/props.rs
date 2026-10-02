@@ -1414,39 +1414,34 @@ fn dimension_name(world: &World<'_>, dim: Dim<Id<Commodity>>) -> String {
     }
 }
 
-fn native_target(world: &World<'_>, written: Written<'_, '_, Decl<'_>>) -> Option<NativeTarget> {
-    let word = Word { text: written.node.name.0, loc: written.item.loc };
-    let found = match written.node.what {
-        DeclKind::Account => world.place(word).ok().map(|id| NativeTarget {
-            target: PropTarget::Place(id),
-            kind: world.book.places[id].kind,
-            sort: world.book.kinds[world.book.places[id].kind].sort,
-        }),
-        DeclKind::Entity => world.entity(written.home(), word).ok().map(|id| NativeTarget {
-            target: PropTarget::Entity(id),
-            kind: world.book.entities[id].kind,
-            sort: world.book.kinds[world.book.entities[id].kind].sort,
-        }),
-        DeclKind::Commodity => world.commodity_of(word).ok().map(|id| NativeTarget {
-            target: PropTarget::Commodity(id),
-            kind: world.book.commodities[id].kind,
-            sort: world.book.kinds[world.book.commodities[id].kind].sort,
-        }),
-        DeclKind::Asset => world.book.asset(word.text).map(|id| NativeTarget {
-            target: PropTarget::Asset(id),
-            kind: world.book.assets[id].kind,
-            sort: world.book.kinds[world.book.assets[id].kind].sort,
-        }),
-        DeclKind::Kind => world.kind(written.home(), word).ok().map(|id| NativeTarget {
-            target: PropTarget::Kind(id),
-            kind: id,
-            sort: world.book.kinds[id].sort,
-        }),
-        DeclKind::Purpose => None,
-    };
-    found
+impl NativeTarget {
+    fn of(world: &World<'_>, target: PropTarget) -> NativeTarget {
+        let kind = match target {
+            PropTarget::Place(id) => world.book.places[id].kind,
+            PropTarget::Entity(id) => world.book.entities[id].kind,
+            PropTarget::Commodity(id) => world.book.commodities[id].kind,
+            PropTarget::Asset(id) => world.book.assets[id].kind,
+            PropTarget::Kind(id) => id,
+        };
+        NativeTarget { target, kind, sort: world.book.kinds[kind].sort }
+    }
 }
 
+fn native_target(world: &World<'_>, written: Written<'_, '_, Decl<'_>>) -> Option<NativeTarget> {
+    let word = Word { text: written.node.name.0, loc: written.item.loc };
+    let target = match written.node.what {
+        DeclKind::Account => PropTarget::Place(world.place(word).ok()?),
+        DeclKind::Entity => PropTarget::Entity(world.entity(written.home(), word).ok()?),
+        DeclKind::Commodity => PropTarget::Commodity(world.commodity_of(word).ok()?),
+        DeclKind::Asset => PropTarget::Asset(world.book.asset(word.text)?),
+        DeclKind::Kind => PropTarget::Kind(world.kind(written.home(), word).ok()?),
+        DeclKind::Purpose => return None,
+    };
+    Some(NativeTarget::of(world, target))
+}
+
+/// What a property statement is about: the one thing with a property of that name among those its subject may
+/// name, or the only thing it may name. None, said, when two have such a property.
 fn native_statement_target(
     world: &World<'_>,
     home: Home,
@@ -1455,72 +1450,11 @@ fn native_statement_target(
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<NativeTarget> {
-    let mut candidates = Vec::new();
-    match subject {
-        Subject::Unit(unit) => {
-            if let Ok(id) = world.commodity_of(Word { text: unit.0, loc }) {
-                let kind = world.book.commodities[id].kind;
-                candidates.push(NativeTarget {
-                    target: PropTarget::Commodity(id),
-                    kind,
-                    sort: world.book.kinds[kind].sort,
-                });
-            }
-        }
-        Subject::Name(subject) => {
-            let place_word = Word { text: subject.0, loc };
-            match world.book.lookup.places.find(&world.book.names, subject.0, |_| true) {
-                crate::names::Found::One(id) => {
-                    let kind = world.book.places[id].kind;
-                    candidates.push(NativeTarget {
-                        target: PropTarget::Place(id),
-                        kind,
-                        sort: world.book.kinds[kind].sort,
-                    });
-                }
-                crate::names::Found::Several(ids) => candidates.extend(ids.into_iter().map(|id| {
-                    let kind = world.book.places[id].kind;
-                    NativeTarget { target: PropTarget::Place(id), kind, sort: world.book.kinds[kind].sort }
-                })),
-                crate::names::Found::Nothing => {}
-            }
-            match world.book.lookup.entities.find(&world.book.names, world.scopes.of(home), subject.0) {
-                crate::names::Found::One(id) => {
-                    let kind = world.book.entities[id].kind;
-                    candidates.push(NativeTarget {
-                        target: PropTarget::Entity(id),
-                        kind,
-                        sort: world.book.kinds[kind].sort,
-                    });
-                }
-                crate::names::Found::Several(ids) => candidates.extend(ids.into_iter().map(|id| {
-                    let kind = world.book.entities[id].kind;
-                    NativeTarget { target: PropTarget::Entity(id), kind, sort: world.book.kinds[kind].sort }
-                })),
-                crate::names::Found::Nothing => {}
-            }
-            if let Some(id) = world.book.asset(subject.0) {
-                let kind = world.book.assets[id].kind;
-                candidates.push(NativeTarget {
-                    target: PropTarget::Asset(id),
-                    kind,
-                    sort: world.book.kinds[kind].sort,
-                });
-            }
-            if let Ok(id) = world.kind(home, place_word) {
-                candidates.push(NativeTarget {
-                    target: PropTarget::Kind(id),
-                    kind: id,
-                    sort: world.book.kinds[id].sort,
-                });
-            }
-        }
-        Subject::Code(_) | Subject::Purpose(_) => {}
-    }
-    let mut matches =
-        candidates.iter().copied().filter(|target| has_named(world, target.kind, world.book.name(name)).is_some());
-    if let Some(first) = matches.next() {
-        if matches.next().is_some() {
+    let candidates = subject_candidates(world, home, subject, loc);
+    let property = world.book.name(name);
+    let mut having = candidates.iter().copied().filter(|target| has_named(world, target.kind, property).is_some());
+    if let Some(first) = having.next() {
+        if having.next().is_some() {
             diags.push(
                 Diagnostic::error("ambiguous-property-target", "this property applies to more than one named thing")
                     .label(loc, "qualify the target so the intended thing is clear"),
@@ -1530,6 +1464,28 @@ fn native_statement_target(
         return Some(first);
     }
     (candidates.len() == 1).then(|| candidates[0])
+}
+
+/// Everything a statement's subject may name: a commodity, or, by one name, places, parties, an asset and a kind.
+fn subject_candidates(world: &World<'_>, home: Home, subject: Subject<'_>, loc: Loc) -> Vec<NativeTarget> {
+    let mut targets = Vec::new();
+    match subject {
+        Subject::Unit(unit) => {
+            targets.extend(world.commodity_of(Word { text: unit.0, loc }).ok().map(PropTarget::Commodity));
+        }
+        Subject::Name(subject) => {
+            let names = &world.book.names;
+            targets.extend(
+                world.book.lookup.places.find(names, subject.0, |_| true).into_ids().into_iter().map(PropTarget::Place),
+            );
+            let entities = world.book.lookup.entities.find(names, world.scopes.of(home), subject.0);
+            targets.extend(entities.into_ids().into_iter().map(PropTarget::Entity));
+            targets.extend(world.book.asset(subject.0).map(PropTarget::Asset));
+            targets.extend(world.kind(home, Word { text: subject.0, loc }).ok().map(PropTarget::Kind));
+        }
+        Subject::Code(_) | Subject::Purpose(_) => {}
+    }
+    targets.into_iter().map(|target| NativeTarget::of(world, target)).collect()
 }
 
 fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Has> {
