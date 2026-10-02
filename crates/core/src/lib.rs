@@ -21,6 +21,7 @@ pub mod tagless;
 #[cfg(test)]
 mod testing;
 pub mod timeline;
+pub mod trail;
 pub mod tree;
 pub mod unit;
 
@@ -38,5 +39,6 @@ pub use sparse::Sparse;
 pub use sym::{Interner, Sym};
 pub use tagless::{Column, Tag};
 pub use timeline::Timeline;
+pub use trail::{Fork, Trail, Trailed, Undo};
 pub use tree::Tree;
 pub use unit::Dim;

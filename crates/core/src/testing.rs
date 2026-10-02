@@ -25,6 +25,11 @@ impl Rng {
     pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next() % n as u64) as usize
     }
+
+    /// Whether to do something that should happen `percent` times in a hundred.
+    pub(crate) fn chance(&mut self, percent: usize) -> bool {
+        self.below(100) < percent
+    }
 }
 
 /// The fastest of `runs` runs of `work`, after one run to warm the caches. The fastest, because on a busy machine
