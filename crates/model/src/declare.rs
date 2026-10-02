@@ -8,18 +8,18 @@ use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Ratio, Set, 
 use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
 use crate::book::{
-    Asset, Book, Class, Commodity, Entity, Kind, Lookup, Place, Prop, Purpose, Roots, Share, Sort, System,
+    Asset, Book, Class, Commodity, Entity, Kind, KindRoots, Lookup, Place, Prop, Purpose, Roots, Share, Sort, System,
 };
 use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
-use crate::kinds::{self, NativeKinds};
 use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
 use crate::props::PropTable;
-use crate::purposes::NativePurposes;
 use crate::resolve::End;
 use crate::scope::{Home, Scopes, Seeing};
 use crate::sources::{Site, SystemIndex};
+use crate::taxonomy::{self, Taxonomy};
+use crate::{kinds, purposes};
 
 /// Quanta are `i64`; eighteen decimals is as fine as one can count.
 pub(crate) const MAX_SCALE: u8 = 18;
@@ -481,11 +481,13 @@ pub(crate) fn declare<'a, 's>(
 ) -> World<'s> {
     let Said { collected, survey, .. } = said;
     let Systems { tree: systems_tree, index: systems, scopes } = systems;
-    let native_kinds = kinds::declare_sites(collected, &mut names, &systems_tree, &scopes, diags);
     let seeing = Seeing { systems: &systems_tree, scopes: &scopes };
-    let native_purposes = crate::purposes::declare_sites(collected, &mut names, seeing, &native_kinds.index, diags);
+    let native_kinds = taxonomy::declare::<Kind>(collected, &mut names, seeing, diags);
+    let mut native_purposes = taxonomy::declare::<Purpose>(collected, &mut names, seeing, diags);
+    purposes::attach_objects(&mut native_purposes, collected, &names, seeing, &native_kinds.index, diags);
     check_cross_namespace_names(collected, &scopes, &systems_tree, diags);
-    let resolving = Resolving { seeing, kinds: &native_kinds, purposes: &native_purposes };
+    let kind_roots = kinds::roots(&native_kinds.roots);
+    let resolving = Resolving { seeing, kinds: &native_kinds, kind_roots, purposes: &native_purposes };
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
     let parties = parties::find(said, &resolving, &commodities, &mut names, diags);
@@ -520,8 +522,8 @@ struct Made<'s> {
     entities: Entities<'s>,
     assets: Assets<'s>,
     places: Places,
-    kinds: NativeKinds,
-    purposes: NativePurposes,
+    kinds: Taxonomy<Kind>,
+    purposes: Taxonomy<Purpose>,
 }
 
 /// The book the passes made, empty of everything the lowerers will fill in.
@@ -532,8 +534,8 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
         unknown: entities.unknown,
         opening: entities.opening,
         market: entities.market,
-        kinds: kinds.roots,
-        purposes: purposes.roots,
+        kinds: kinds::roots(&kinds.roots),
+        purposes: purposes::roots(&purposes.roots),
     };
     let lookup = Lookup {
         places: places.names,
@@ -688,8 +690,9 @@ use self::places::{PlaceInputs, Places};
 /// What the words of a declaration are resolved against once the kinds and the purposes are built.
 struct Resolving<'a> {
     seeing: Seeing<'a>,
-    kinds: &'a NativeKinds,
-    purposes: &'a NativePurposes,
+    kinds: &'a Taxonomy<Kind>,
+    kind_roots: KindRoots,
+    purposes: &'a Taxonomy<Purpose>,
 }
 
 impl Resolving<'_> {

@@ -188,6 +188,35 @@ pub(crate) fn twice(what: &str, again: Loc, first: Loc) -> Diagnostic {
         .context(first, "first written here")
 }
 
+/// A name in a tree of names that every node must give a parent, declared with none: `kind x` and not `kind x : entity`.
+pub(crate) fn parentless(noun: Noun, word: Word, question: &str, roots: &[&str]) -> Diagnostic {
+    let name = noun.words().0;
+    let roots: Vec<String> = roots.iter().map(|root| format!("`: {root}`")).collect();
+    Diagnostic::error(format!("{name}-parent"), format!("{name} `{}` needs a parent", word.text))
+        .label(word.loc, question)
+        .help(format!("write {}, or another {name}", roots.join(", ")))
+}
+
+/// A chain of parents that never reaches a root, as the names on it with where each is declared, in the order each
+/// inherits from the next.
+pub(crate) fn cycle(noun: Noun, route: &[(&str, Option<Loc>)], root: &str) -> Diagnostic {
+    let name = noun.words().0;
+    let chain: Vec<&str> = route.iter().chain(&route[..1]).map(|&(member, _)| member).collect();
+    let mut diagnostic =
+        Diagnostic::error(format!("{name}-cycle"), format!("{name} `{}` inherits from itself", chain[0]))
+            .note(format!("the chain is {}", chain.join(" -> ")))
+            .help(format!("give one of them a parent outside the loop, such as a root {name} like `{root}`"));
+    if let Some(loc) = route[0].1 {
+        diagnostic = diagnostic.label(loc, "its parent chain never reaches a root");
+    }
+    for (&(member, declared), parent) in route.iter().zip(&chain[1..]).skip(1) {
+        if let Some(loc) = declared {
+            diagnostic = diagnostic.context(loc, format!("`{member}` inherits from `{parent}` here"));
+        }
+    }
+    diagnostic
+}
+
 /// A property a kind may not declare because every kind has it.
 pub(crate) fn built_in_property(word: Word) -> Diagnostic {
     Diagnostic::error("reserved-property", format!("`{}` is a built-in property", word.text))

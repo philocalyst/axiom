@@ -6,6 +6,7 @@
 //! | `sources`    | which files are systems, the tree of systems, folder layout |
 //! | `collect`    | every item of every source, sorted into typed buckets once  |
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
+//! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
 //! | `props`      | property lines, read once and applied down the kind chain   |
 //! | `params`     | dated tables                                                |
 //! | `laws`       | laws compiled and typed, and the order they run in          |
@@ -39,6 +40,7 @@ mod rules;
 mod scope;
 mod sources;
 mod sync_lower;
+mod taxonomy;
 #[cfg(test)]
 mod tests;
 mod values;

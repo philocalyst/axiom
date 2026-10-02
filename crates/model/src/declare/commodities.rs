@@ -46,7 +46,7 @@ pub(super) fn declare<'a, 's>(
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Commodities<'s> {
-    let root = resolving.kinds.roots.commodity;
+    let root = resolving.kind_roots.commodity;
     let mut arena = Arena::new();
     let mut by_name: Map<&'s str, Id<Commodity>> = Map::default();
     for written in collected.decls_of(DeclKind::Commodity) {

@@ -207,7 +207,7 @@ pub(super) fn declare<'a, 's>(
         let (kind, purpose, doc, loc) = match written.get(path) {
             Some((decl, doc)) => {
                 let (file, node) = (decl.file(), decl.node);
-                let kind = resolving.kind(names, decl, Sort::Entity, resolving.kinds.roots.entity, diags);
+                let kind = resolving.kind(names, decl, Sort::Entity, resolving.kind_roots.entity, diags);
                 let purpose = node.purpose.and_then(|name| {
                     resolving
                         .purpose(names, name.0, file.loc(name.0), decl.home(), diags)
@@ -215,7 +215,7 @@ pub(super) fn declare<'a, 's>(
                 });
                 (kind, purpose, *doc, Some(file.loc(node.name.0)))
             }
-            None => (resolving.kinds.roots.entity, None, None, implied.get(path).copied()),
+            None => (resolving.kind_roots.entity, None, None, implied.get(path).copied()),
         };
         Entity {
             path: names.intern(path),
