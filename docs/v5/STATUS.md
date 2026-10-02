@@ -11,9 +11,10 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **C** core primitives | `tagless`, `dayset`, `sparse`, `postings`, `placement`, `trail` | **merged** (`8704e75`) |
 | **K0a** model groundwork | `Staged`, one `problem` catalog, `Word::of`, one collect pass, dead code, short functions | **merged** (`5f99b98`) |
 | **K0b** outer groundwork | owners, JSON writers, sync dates, sync apply, `RuntimeRange`, short functions | **merged** (`daf104e`) |
-| **C3** `postings` SIMD | the `fearless_simd` block-compare kernel, kept only if it is 1.3× | running (resumed after a rate limit) |
+| **C3** `postings` SIMD | the `fearless_simd` block-compare kernel, kept only if it is 1.3× | **merged**: kept, 1.8-2.7× |
 | **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral, sets as `Many` | **merged** (after K0a) |
 | **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | running |
+| **K4a** one split vocabulary | `Quantity`, `Group`, `Program` replace the two parallel Template*/Journal* families | brief written; starts now |
 | K3 positions and addresses | | after K12 |
 | K4 events | | after K3 |
 | K5 promises | | after K4 |
@@ -37,10 +38,10 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
 
 ## Waiting on you
 
-1. **`fearless_simd` source access.** The registry source is unreadable to the lanes (a permission refusal) and docs.rs is
-   blocked by the network policy, and nothing was worked around. The API was recovered from our own scratch
-   prototypes, which compile against `fearless_simd = "1"`, and lane C3 builds the `postings` kernel from them. If you
-   would rather lanes read the crate directly, allow `~/.cargo/registry/src/*/fearless_simd-*`.
+1. **`fearless_simd` source access.** The registry source stayed unreadable to the lanes (a permission refusal) and docs.rs is
+   blocked by the network policy; nothing was worked around. The API was recovered from our own scratch prototypes, and
+   lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
+   able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
    20,000 (PROPOSAL §7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3): whether a prorata sale carries basis per unit or by exact share. The lane keeps the
@@ -63,6 +64,16 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
   was not kept. Belongs to K7's position steppers.
 - A smaller or interned `Diagnostic` in `core` would remove the boxed-error aliases the groundwork needed.
 - The CLI and report render cells twice. K7.
+
+## Lane C3, in numbers
+
+| | |
+|---|---|
+| kernel | broadcast block compare, `u32x8`, a 2 KB packing table, about 80 lines, no `unsafe` |
+| speed | 0.95-1.05 ns per id against 2.0-2.8 scalar, at 10⁴ to 10⁶ ids, 1% and 50% shared (median of five runs, worst single run 1.39×) |
+| the bar | 1.3×: cleared |
+| gap | the AVX-512 path was measured on the old host (3-4×) but not with the final code: this host reports AVX2 |
+| side effect | galloping now starts at skew 32 instead of 8, because the block merge beats it below that |
 
 ## Lane C2, in numbers
 
