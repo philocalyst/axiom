@@ -1,5 +1,7 @@
 # Axiom v4: what remains
 
+> **Superseded direction (2026-10-02):** the work continued on `cutover/promote-workspace`. Its review and the v5 plan are in [PROPOSAL-v5.md](PROPOSAL-v5.md).
+
 As of 2026-09-30. This is the brief for whoever continues the v4 rework, whether a person or a session of agents. Read it first. Then read:
 
 - [PLAN.md](PLAN.md): history, motives and every decision so far;
