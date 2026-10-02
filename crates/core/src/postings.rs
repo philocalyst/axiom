@@ -17,8 +17,9 @@
 use fearless_simd::{Level, Simd, SimdBase, dispatch, prelude::*, u32x8};
 
 /// How many times longer one list must be than the other for galloping to beat the merge: where the two cross in the
-/// benchmark in the tests, which has the galloping 1.2 times faster at 8, 3 times at 32 and 65 times at 1,024.
-const SKEW: usize = 8;
+/// benchmark in the tests, which has the galloping 0.75 times as fast at 16, 1.3 times at 32, 2 times at 64 and 23
+/// times at 1,024, against the merge that goes a block at a time.
+const SKEW: usize = 32;
 
 /// The ids in both `a` and `b`, in order, in `out`, whose old contents are dropped.
 pub fn intersect(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
@@ -592,7 +593,7 @@ mod tests {
         let long = random_list(&mut rng, 1_000_000, 4_000_000);
         for skew in [2, 4, 8, 16, 32, 64, 128, 1024] {
             let short: Vec<u32> = random_list(&mut rng, long.len() / skew, 4_000_000);
-            let merged = time(9, |out| merge_scalar(&short, &long, out));
+            let merged = time(9, |out| merge(&short, &long, out));
             let galloped = time(9, |out| gallop(&short, &long, out));
             eprintln!(
                 "one list {skew:>4}x the other: merge {:>10.0} ns, gallop {:>10.0} ns ({:.2}x)",
