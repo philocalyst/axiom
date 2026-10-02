@@ -273,6 +273,57 @@ entity shop : grocer
 }
 
 #[test]
+fn a_things_residences_add_to_its_kinds_and_a_place_may_hold_any_where_its_kind_holds_one() {
+    let std = "\
+system std
+kind person : entity
+kind bank : asset
+kind currency : commodity
+commodity USD : currency
+commodity EUR : currency
+";
+    let abroad = "system abroad\nuse std\n";
+    let home = "system home\nuse std\n";
+    let project = "\
+use std
+use home
+use abroad
+base USD
+kind resident : person
+  lives home
+kind usd-only : bank
+  holds USD
+entity jo : resident
+  lives abroad from 2026-02-01 until 2026-02-28
+account kept : usd-only
+account anything : usd-only
+  holds any
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "abroad.ax", abroad, true),
+        parsed_source(2, "home.ax", home, true),
+        parsed_source(3, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let jo = book.entity("jo").unwrap();
+    let on = |month, date| {
+        let day = Day::from_ymd(2026, month, date).unwrap();
+        let mut systems: Vec<&str> =
+            book.residing(jo, day).map(|system| book.name(book.systems[system].path)).collect();
+        systems.sort_unstable();
+        systems
+    };
+    assert_eq!(on(1, 15), ["home"], "what its kind says, from the beginning");
+    assert_eq!(on(2, 10), ["abroad", "home"], "and its own, while they last");
+    assert_eq!(on(3, 1), ["home"]);
+    let usd = book.commodity("USD").unwrap();
+    assert_eq!(book.holds(book.place("kept").unwrap()).map(Iterator::collect::<Vec<_>>), Some(vec![usd]));
+    assert!(book.holds(book.place("anything").unwrap()).is_none(), "`holds any` says it may hold anything");
+}
+
+#[test]
 fn the_days_an_entity_lives_somewhere_are_counted_from_its_residences_whole() {
     let std = "\
 system std
