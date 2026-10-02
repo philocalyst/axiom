@@ -4,6 +4,8 @@
     splits.py gen DIR N [SEED]                  write N projects into DIR (p0000/main.ax ...), and DIR/forms.json
     splits.py run BASELINE NEW DIR [JOBS]       run the commands below over every project through both binaries
     splits.py all BASELINE NEW DIR N [SEED]     gen, then run
+    splits.py internals BASELINE NEW DIR [JOBS] compare what two builds of `internals/main.rs` print for each project
+    splits.py survey BINARY DIR                 which diagnostics BINARY raises over the projects
 
 What it is for. Lane K4a unifies the types that say how a statement or a promise splits (a header, its legs and
 its items) without changing what any of them means. `docs/v5/measure/diff/` has the mistakes and the valid projects
@@ -25,6 +27,14 @@ or more of the forms a quantity can take:
 Each project is run through `check`, `balance`, `register` of every place, `flow`, `contracts`, `claims`, `lots`,
 `gains`, `forecast`, and `why` of every line and every contract, with and without `--json` where the form
 differs, and the run fails on the first difference in stdout, stderr or exit status between the two binaries.
+
+What the commands show is not all the engine decides. `internals/main.rs` is a small program (it is not a member
+of the workspace: give it a Cargo.toml with path dependencies on the `core`, `syntax`, `model`, `engine` and
+`systems` crates of a tree, and build it once for each tree) that prints, for a project's file, every promise the
+fold kept or missed with the flows it materialized, the debug text of each posted flow, gain and holding, and what
+`instantiate_occurrence` makes of every due day to the end of 2027 as the forecast would call it. `internals` runs
+two builds of it over the projects. A mutation that changes only a flow's mode, which no report prints, is seen by
+it and by nothing else.
 
 It is not vacuous, and says so: `gen` counts the forms it writes, and `run` reports, from what the BASELINE
 printed, how many projects were clean (no error), silent (no diagnostic at all), and moved money, and how many of
@@ -688,6 +698,41 @@ def run(baseline, new, directory, jobs=3):
     return len(failed)
 
 
+def internals(baseline, new, directory, jobs=3):
+    """What two builds of internals/main.rs print for each project: the materialized flows, kept and forecast."""
+    paths = sorted(os.path.join(directory, name) for name in os.listdir(directory) if name.startswith("p"))
+
+    def say(binary, path):
+        run = subprocess.run([binary, "main.ax"], cwd=path, capture_output=True, text=True, timeout=120)
+        return [run.returncode, run.stdout, run.stderr]
+
+    def one(path):
+        with open(os.path.join(path, "main.ax"), "rb") as source:
+            stamp = [os.path.getmtime(baseline), os.path.getsize(baseline), hashlib.sha1(source.read()).hexdigest()]
+        kept = os.path.join(path, "internals.json")
+        before = None
+        if os.path.exists(kept):
+            saved = json.load(open(kept))
+            before = saved["said"] if saved["stamp"] == stamp else None
+        if before is None:
+            before = say(baseline, path)
+            json.dump({"stamp": stamp, "said": before}, open(kept, "w"))
+        after = say(new, path)
+        return path, before, after
+
+    with ThreadPoolExecutor(jobs) as pool:
+        results = list(pool.map(one, paths))
+    different = [(path, before, after) for path, before, after in results if before != after]
+    for path, before, after in different[:3]:
+        old, now = before[1].split("\n"), after[1].split("\n")
+        at = next((i for i, (a, b) in enumerate(zip(old, now)) if a != b), min(len(old), len(now)))
+        print(f"DIFFERENT {path} at line {at}:\n--- baseline\n{old[at][:600]}\n--- new\n{now[at][:600]}")
+    promises = sum(before[1].count("\npromise ") for _, before, _ in results)
+    forecast = sum(before[1].count("\nforecast ") for _, before, _ in results)
+    print(f"{len(results)} projects, {promises} promises and {forecast} forecast occurrences, {len(different)} differ")
+    return len(different)
+
+
 def survey(binary, directory, jobs=3):
     """Which diagnostics the BINARY raises over the projects, and how clean each form's projects are."""
     paths = sorted(os.path.join(directory, name) for name in os.listdir(directory) if name.startswith("p"))
@@ -716,6 +761,8 @@ def survey(binary, directory, jobs=3):
 
 
 def main(argv):
+    if len(argv) >= 5 and argv[1] == "internals":
+        return 1 if internals(argv[2], argv[3], argv[4], int(argv[5]) if len(argv) > 5 else 3) else 0
     if len(argv) >= 4 and argv[1] == "survey":
         survey(argv[2], argv[3])
         return 0
