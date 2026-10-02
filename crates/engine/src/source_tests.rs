@@ -30,6 +30,19 @@ fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R
     with_book(text, |book| then(book, &crate::run(book, Options { today, relaxed: false })))
 }
 
+fn with_hsa_run<R>(text: &str, then: impl FnOnce(&Book, &Run) -> R) -> R {
+    with_run_sources(
+        &[
+            ("std.ax", include_str!("../../systems/src/std.ax"), true),
+            ("us.ax", include_str!("../../systems/src/us.ax"), true),
+            ("us/hsa.ax", include_str!("../../systems/src/us/hsa.ax"), true),
+            ("axiom.ax", text, false),
+        ],
+        day(2026, 4, 15),
+        then,
+    )
+}
+
 /// Builds several native source sites, as a project with embedded systems.
 fn with_run_sources<'s, R>(
     written: &[(&'s str, &'s str, bool)],
@@ -173,6 +186,36 @@ opening 2026-01-01
 }
 
 #[test]
+fn temporal_owner_balance_ignores_the_in_flight_state_of_an_internal_transfer() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+law owner-floor
+  always
+  warn value(low(balance, year), USD) >= 100 USD \"the owner's total fell\"
+account checking
+account savings
+opening 2025-12-31
+  checking 100 USD
+2026-02-01 checking -> savings 100 USD
+";
+
+    with_run(text, day(2026, 12, 31), |book, run| {
+        let law = book.law("owner-floor").expect("the owner law is compiled");
+        assert!(run.checks[law.index()] > 0, "the project owner law ran on its holdings");
+        assert!(
+            run.violations.is_empty(),
+            "the owner's combined holdings remain 100 USD throughout the transfer: {:?}",
+            run.violations
+                .iter()
+                .map(|violation| &run.diagnostics[violation.diagnostic as usize])
+                .collect::<Vec<_>>()
+        );
+    });
+}
+
+#[test]
 fn temporal_days_count_an_inclusive_residence_before_the_first_flow() {
     let std = "\
 system std
@@ -253,6 +296,77 @@ law to-is-counterparty
         let me = book.entity("me").unwrap();
         let market = book.entity("market").unwrap();
         assert_ne!(book.entities[market].place.unwrap(), book.entities[me].place.unwrap());
+    });
+}
+
+#[test]
+fn hsa_basis_zero_contribution_and_against_medical_reimbursement() {
+    let source = |withdrawal: &str| {
+        format!(
+            "\
+base USD
+use std
+use us/hsa
+kind clinic : org
+  purpose medical
+entity me : person
+  born 1988-02-10
+  lives us
+entity dentist : clinic
+account checking : bank
+  owner me
+account hsa : hsa
+  owner me
+  coverage self-only
+opening 2024-12-31
+  checking 1_240 USD
+2025-01-02 checking -> hsa 1_240 USD
+2025-05-09 checking -> dentist 620 USD ^bill #medical
+{withdrawal}
+"
+        )
+    };
+
+    let bare = source("2025-11-05 hsa -> checking 620 USD ! \"unlinked withdrawal\"");
+    with_hsa_run(&bare, |book, run| {
+        let gain = run
+            .gains
+            .iter()
+            .find(|gain| gain.day == day(2025, 11, 5))
+            .expect("the zero-basis contribution realizes its full amount");
+        assert_eq!((gain.basis.0, gain.proceeds.0, gain.gain().0), (0, 62_000, 62_000));
+        assert!(run.effects.iter().any(|effect| {
+            book.name(effect.name) == "distributions"
+                && effect.amount.qty.0 == 62_000
+                && effect.consequence == crate::Consequence::Count
+        }), "the unlinked HSA withdrawal remains taxable income");
+        assert!(run.violations.iter().any(|violation| {
+            run.diagnostics[violation.diagnostic as usize].code == "nonqualified-hsa-penalty"
+                && violation.verdict.is_waived()
+        }), "the ! waives the 124 USD penalty while preserving the distribution");
+        assert!(run.effects.iter().all(|effect| !effect.is_penalty()));
+    });
+
+    let linked = source("2025-11-05 hsa -> checking 620 USD against ^bill");
+    with_hsa_run(&linked, |book, run| {
+        let gain = run
+            .gains
+            .iter()
+            .find(|gain| gain.day == day(2025, 11, 5))
+            .expect("the linked reimbursement still realizes the HSA's taxable basis-zero amount");
+        assert_eq!((gain.basis.0, gain.proceeds.0, gain.gain().0), (0, 62_000, 62_000));
+        assert!(
+            !run.effects.iter().any(|effect| {
+                book.name(effect.name) == "distributions" && effect.amount.qty.0 == 62_000
+            }),
+            "the linked qualified reimbursement is excluded from taxable distributions"
+        );
+        assert!(
+            !run.violations.iter().any(|violation| {
+                run.diagnostics[violation.diagnostic as usize].code == "nonqualified-hsa-penalty"
+            }),
+            "the original medical purpose qualifies the linked reimbursement"
+        );
     });
 }
 

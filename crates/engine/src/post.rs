@@ -91,7 +91,6 @@ impl Ledger<'_, '_, '_> {
             || m.moves != Moves::Value
         {
             self.relieve(m);
-            self.sample_temporal(m.day);
             let keeps = self.price(m);
             self.arrive(m, keeps);
         } else {
@@ -252,7 +251,6 @@ impl Ledger<'_, '_, '_> {
                 .relief
                 .slices
                 .push(fresh_slice(m, m.out.qty, is_base, now));
-            self.sample_temporal(m.day);
             return;
         }
         self.ask_ties(m);
@@ -357,6 +355,11 @@ impl Ledger<'_, '_, '_> {
             let stated = fixed.as_mut().map(|shares| shares.take(slice.qty));
             slice.carried = match (stated, restarts, proceeds.is_some(), slice.origin) {
                 (Some(basis), ..) => basis,
+                // A taxed account funding a basis-zero destination is a
+                // contribution, even when relief selected an existing lot
+                // and the transfer otherwise keeps parcel identity. A move
+                // between two tax-deferred accounts still carries its basis.
+                (None, _, _, _) if unbased && !m.source.deferred => Qty::ZERO,
                 (None, false, ..) => slice.basis,
                 (None, true, true, Origin::Fresh) if unbased => Qty::ZERO,
                 (None, true, true, _) => slice.worth,
@@ -422,6 +425,7 @@ impl Ledger<'_, '_, '_> {
     fn realize(&mut self, m: &Motion) {
         let book = self.plan.book;
         let ambiguous = self.scratch.relief.ambiguous;
+        let purpose = self.reimbursed_purpose(m).or(m.purpose);
         for at in 0..self.scratch.relief.slices.len() {
             let slice = self.scratch.relief.slices[at];
             if slice.origin != Origin::Lot {
@@ -454,10 +458,28 @@ impl Ledger<'_, '_, '_> {
             let on = Occasion {
                 amount: Some(Amount::new(slice.qty, m.out.unit)),
                 realized: Some(realized),
+                purpose,
                 ..Occasion::flow(m)
             };
             self.fire(&book.rules.on_gain[m.from], &on);
         }
+    }
+
+    /// A reimbursement's purpose is the purpose of the transaction it names.
+    /// A linked transaction with conflicting purposes is ambiguous, so leave
+    /// the current flow's purpose in force instead of choosing one line.
+    fn reimbursed_purpose(&self, m: &Motion) -> Option<axiom_model::Purposed> {
+        let book = self.plan.book;
+        let txn = book.txns.get(m.detail().against?)?;
+        let mut purpose = None;
+        for flow in txn.flows.ids().filter_map(|id| book.flows.get(id)) {
+            let Some(found) = flow.purpose else { continue };
+            if purpose.is_some_and(|prior| prior != found) {
+                return None;
+            }
+            purpose = Some(found);
+        }
+        purpose
     }
 
     /// Lands the slices at the target.
