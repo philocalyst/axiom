@@ -7,16 +7,16 @@
 //! can apply the declared unit with the same rounding rules as other amounts.
 
 use axiom_core::{Day, Diagnostic, Dim, Sym};
-use axiom_syntax::{ExprKind, File, ItemKind, Key, Param as Written, ParamRow as WrittenRow};
+use axiom_syntax::{ExprKind, File, Key, Param as Written, ParamRow as WrittenRow};
 
 use crate::book::{Param, ParamRow};
+use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
 use crate::names::Scoped;
 use crate::problem::{Noun, Problem};
 use crate::scope::Home;
-use crate::sources::Site;
 
 /// What every row of a param looks like.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,36 +38,29 @@ impl Shape {
 }
 
 /// Declare native S5 params directly from their arranged source sites.
-pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Param(id) = item.kind else {
-                continue;
-            };
-            let written = &file[id];
-            let home = site.home;
-            let system = if let Home::System(system) = home { Some(system) } else { None };
-            let name = written.name.0;
-            let sym = world.book.names.intern(name);
-            let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
-            if let Some((_, first)) = earlier {
-                let (word, first) = (Word::of(file, name), Some(first.loc));
-                diags.push(Problem::Duplicate { noun: Noun::Param, word, first }.diagnostic());
-                continue;
-            }
+pub(crate) fn declare<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
+    for param in &collected.params {
+        let (file, written, home) = (param.file(), param.node, param.home());
+        let system = if let Home::System(system) = home { Some(system) } else { None };
+        let name = written.name.0;
+        let sym = world.book.names.intern(name);
+        let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
+        if let Some((_, first)) = earlier {
+            let (word, first) = (Word::of(file, name), Some(first.loc));
+            diags.push(Problem::Duplicate { noun: Noun::Param, word, first }.diagnostic());
+            continue;
+        }
 
-            let unit = match declared_unit(world, file, written) {
-                Ok(unit) => unit,
-                Err(error) => {
-                    diags.push(error);
-                    continue;
-                }
-            };
-            let rows = rows(world, home, file, written, unit, diags);
-            if !rows.is_empty() {
-                world.book.params.push(Param { name: sym, unit, system, rows: rows.into(), loc: file.loc(name) });
+        let unit = match declared_unit(world, file, written) {
+            Ok(unit) => unit,
+            Err(error) => {
+                diags.push(error);
+                continue;
             }
+        };
+        let rows = rows(world, home, file, written, unit, diags);
+        if !rows.is_empty() {
+            world.book.params.push(Param { name: sym, unit, system, rows: rows.into(), loc: file.loc(name) });
         }
     }
 

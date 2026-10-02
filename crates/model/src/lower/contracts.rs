@@ -4,7 +4,7 @@
 
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline};
 use axiom_syntax as ast;
-use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, ItemKind, Name};
+use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
 use super::{JournalSurvey, compile_roots, contract_roots, inputs};
 use crate::book::{
@@ -12,6 +12,7 @@ use crate::book::{
     Relative, Reset, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent, TemplateLeg,
     TemplateProgram, TemplateQuantity, Terms, TermsState,
 };
+use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
@@ -34,28 +35,22 @@ struct WrittenContract<'a, 's> {
 /// namespace, while occurrences are handled by [`super::record`].
 pub(crate) fn contracts<'a, 's>(
     world: &mut World<'s>,
-    sites: &'a [Site<'a, 's>],
+    collected: &Collected<'a, 's>,
     _survey: &JournalSurvey<'s>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut written = Vec::new();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Contract(reference) = item.kind else {
-                continue;
-            };
-            let node = &file[reference];
-            let name = world.book.names.intern(node.name.0);
-            if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
-                let (word, first) = (Word::of(file, node.name.0), Some(world.book.contracts[first].loc));
-                diags.push(Problem::Duplicate { noun: Noun::Contract, word, first }.diagnostic());
-                continue;
-            }
-            let id = world.book.contracts.push(empty_contract(name, item.loc, world.book.roots.me));
-            world.book.lookup.contracts.insert(name, id);
-            written.push(WrittenContract { site, node, id, name, loc: item.loc });
+    for contract in &collected.contracts {
+        let (site, node, loc) = (contract.site, contract.node, contract.item.loc);
+        let name = world.book.names.intern(node.name.0);
+        if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
+            let (word, first) = (Word::of(contract.file(), node.name.0), Some(world.book.contracts[first].loc));
+            diags.push(Problem::Duplicate { noun: Noun::Contract, word, first }.diagnostic());
+            continue;
         }
+        let id = world.book.contracts.push(empty_contract(name, loc, world.book.roots.me));
+        world.book.lookup.contracts.insert(name, id);
+        written.push(WrittenContract { site, node, id, name, loc });
     }
 
     for written in written.iter().copied() {

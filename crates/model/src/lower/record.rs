@@ -3,7 +3,7 @@
 
 use axiom_core::{Day, Days, Diagnostic, Dim, Groups, Id, Loc, Map, Qty, Run, Span, Sym};
 use axiom_syntax as ast;
-use axiom_syntax::{ClauseKind, ItemKind, Quantity, Subject};
+use axiom_syntax::{ClauseKind, Quantity, Subject};
 
 use super::push_amount_root;
 use super::staged::Staged;
@@ -11,6 +11,7 @@ use crate::book::{
     Amount, Change as BookChange, FlowSide, Place, ScheduleKind, Sign, TemplateAmount, TemplateItemParent, TermsState,
     Text,
 };
+use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
@@ -24,11 +25,43 @@ use crate::problem::{CodeUse, Problem, Twice};
 use crate::scope::Home;
 use crate::sources::Site;
 
+/// A dated record of the journal, whichever kind of item wrote it.
 #[derive(Clone, Copy)]
-struct Dated {
-    day: Day,
-    site: u32,
-    item: u32,
+enum Record<'a, 's> {
+    Txn(Written<'a, 's, ast::Txn<'s>>),
+    Statement(Written<'a, 's, ast::Statement<'s>>),
+    Opening(Written<'a, 's, ast::Opening<'s>>),
+}
+
+impl<'a, 's> Record<'a, 's> {
+    /// Every dated record of every source, from the buckets of `collected`, not yet in order.
+    fn all(collected: &Collected<'a, 's>) -> Vec<Record<'a, 's>> {
+        let txns = collected.txns.iter().map(|&written| Record::Txn(written));
+        let statements = collected.statements.iter().map(|&written| Record::Statement(written));
+        let openings = collected.openings.iter().map(|&written| Record::Opening(written));
+        txns.chain(statements).chain(openings).collect()
+    }
+
+    /// Records are lowered by day, and by the order they were written within one.
+    fn when(&self) -> (Day, Order) {
+        match self {
+            Record::Txn(written) => (written.node.date, written.order),
+            Record::Statement(written) => (written.node.date, written.order),
+            Record::Opening(written) => (written.node.date, written.order),
+        }
+    }
+
+    /// How many flows the record is expected to make, to reserve room for them.
+    fn flows(&self) -> usize {
+        match self {
+            Record::Txn(written) => {
+                let flow = &written.node.flow;
+                if flow.from.end.is_some() && flow.to.end.is_some() { 1 } else { flow.body.legs.len() }
+            }
+            Record::Opening(written) => written.node.lines.len(),
+            Record::Statement(_) => 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -137,64 +170,25 @@ impl CodeIndex {
 /// Lowers dated native transactions, statements and openings in stable
 /// `(day, source order)` order. Each transaction checkpoints the shared pools
 /// so an invalid line cannot leave reachable partial flows or metadata.
-pub(crate) fn record<'a, 's>(world: &mut World<'s>, sites: &[Site<'a, 's>], diags: &mut Vec<Diagnostic>) {
-    let mut dated = Vec::new();
-    for (site_at, site) in sites.iter().enumerate() {
-        let Ok(site_at) = u32::try_from(site_at) else {
-            diags.push(Diagnostic::error("too-many-sources", "the project has too many source files"));
-            return;
-        };
-        for (item_at, item) in site.source.file.items.iter().enumerate() {
-            let day = match item.kind {
-                ItemKind::Txn(id) => Some(site.source.file[id].date),
-                ItemKind::Statement(id) => Some(site.source.file[id].date),
-                ItemKind::Opening(id) => Some(site.source.file[id].date),
-                _ => None,
-            };
-            let Some(day) = day else { continue };
-            let Ok(item_at) = u32::try_from(item_at) else {
-                diags.push(
-                    Diagnostic::error("too-many-records", "a source file has too many dated records")
-                        .label(item.loc, "record index exceeds the model limit"),
-                );
-                continue;
-            };
-            dated.push(Dated { day, site: site_at, item: item_at });
-        }
-    }
-    dated.sort_unstable_by_key(|item| (item.day, item.site, item.item));
-
-    let expected_flows = dated
-        .iter()
-        .map(|item| {
-            let source = sites[item.site as usize].source;
-            match source.file.items[item.item as usize].kind {
-                ItemKind::Txn(id) => {
-                    let flow = &source.file[id].flow;
-                    if flow.from.end.is_some() && flow.to.end.is_some() { 1 } else { flow.body.legs.len() as usize }
-                }
-                ItemKind::Opening(id) => source.file[id].lines.len(),
-                _ => 0,
-            }
-        })
-        .sum();
+pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+    let mut dated = Record::all(collected);
+    dated.sort_unstable_by_key(Record::when);
     world.book.txns.reserve(dated.len());
-    world.book.flows.reserve(expected_flows);
+    world.book.flows.reserve(dated.iter().map(Record::flows).sum());
 
     let mut code_index = CodeIndex::default();
     for record in dated {
-        let site = &sites[record.site as usize];
-        let file = &site.source.file;
-        let item = &file.items[record.item as usize];
         let txn_start = world.book.txns.len();
         let diagnostic_start = diags.len();
-        match item.kind {
-            ItemKind::Txn(id) => lower_txn(world, site, item, &file[id], &code_index, diags),
-            ItemKind::Opening(id) => lower_opening(world, site, item, &file[id], &code_index, diags),
-            ItemKind::Statement(id) => {
-                lower_statement(world, site, item.loc, item.doc, &file[id], &code_index, false, diags)
+        match record {
+            Record::Txn(written) => lower_txn(world, written.site, written.item, written.node, &code_index, diags),
+            Record::Opening(written) => {
+                lower_opening(world, written.site, written.item, written.node, &code_index, diags)
             }
-            _ => unreachable!("dated index only contains journal records"),
+            Record::Statement(written) => {
+                let (site, item) = (written.site, written.item);
+                lower_statement(world, site, item.loc, item.doc, written.node, &code_index, false, diags)
+            }
         }
         if diags.len() == diagnostic_start {
             for txn_index in txn_start..world.book.txns.len() {

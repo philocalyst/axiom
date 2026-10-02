@@ -7,6 +7,7 @@ use axiom_core::{DateLayout, Diagnostic, Id, Interner, Loc, Map, Sym};
 use axiom_syntax as ast;
 
 use crate::book::{Book, CodeRule, CodeScope, Role};
+use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::Word;
 use crate::problem::{Noun, Problem};
@@ -34,62 +35,54 @@ struct NamedFormat {
 
 /// Builds the book's canonical patterns, formats, code rules and sources.
 /// Called after base declarations exist so sync names can bind to typed ids.
-pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
+pub(crate) fn declare<'a, 's>(
+    world: &mut World<'s>,
+    sites: &[Site<'a, 's>],
+    collected: &Collected<'a, 's>,
+    diags: &mut Vec<Diagnostic>,
+) {
     let mut named = Vec::new();
     let mut by_name: Map<(Home, Sym), Named> = Map::default();
 
     // Reserve every named pattern first. Forward calls then lower to stable
     // arena ids without copying or recompiling another pattern's program.
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ast::ItemKind::Pattern(id) = item.kind else {
-                continue;
-            };
-            let source = &file[id];
-            let name = world.book.names.intern(source.name.0);
-            if let Some(first) = by_name.get(&(site.home, name)) {
-                let word = Word::of(file, source.name.0);
-                diags.push(
-                    Problem::DeclaredTwice { noun: Noun::Pattern, word, first: Some(first.loc), advice: None }
-                        .diagnostic(),
-                );
-                continue;
-            }
-            let loc = file.loc(source.name.0);
-            let model = Pattern { name: Some(name), program: Box::default(), loc };
-            let id = world.book.patterns.push(model);
-            let entry = Named { name, home: site.home, id, loc };
-            by_name.insert((site.home, name), entry);
-            named.push(entry);
+    for written in &collected.patterns {
+        let (file, source) = (written.file(), written.node);
+        let name = world.book.names.intern(source.name.0);
+        if let Some(first) = by_name.get(&(written.home(), name)) {
+            let word = Word::of(file, source.name.0);
+            diags.push(
+                Problem::DeclaredTwice { noun: Noun::Pattern, word, first: Some(first.loc), advice: None }.diagnostic(),
+            );
+            continue;
         }
+        let loc = file.loc(source.name.0);
+        let model = Pattern { name: Some(name), program: Box::default(), loc };
+        let id = world.book.patterns.push(model);
+        let entry = Named { name, home: written.home(), id, loc };
+        by_name.insert((written.home(), name), entry);
+        named.push(entry);
     }
 
     // Compile named declarations after all ids are reserved.
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ast::ItemKind::Pattern(ref_id) = item.kind else {
-                continue;
-            };
-            let source = &file[ref_id];
-            let sym = world.book.names.get(source.name.0).expect("the pattern name was reserved");
-            let Some(entry) = by_name.get(&(site.home, sym)).copied() else {
-                continue;
-            };
-            if entry.loc != file.loc(source.name.0) {
-                continue;
-            }
-            let program = match compile_pattern(file, source.pattern, &mut world.book, &named, &world.scopes, site.home)
-            {
+    for written in &collected.patterns {
+        let (file, source) = (written.file(), written.node);
+        let sym = world.book.names.get(source.name.0).expect("the pattern name was reserved");
+        let Some(entry) = by_name.get(&(written.home(), sym)).copied() else {
+            continue;
+        };
+        if entry.loc != file.loc(source.name.0) {
+            continue;
+        }
+        let program =
+            match compile_pattern(file, source.pattern, &mut world.book, &named, &world.scopes, written.home()) {
                 Ok(program) => program,
                 Err(problem) => {
                     diags.push(problem);
                     continue;
                 }
             };
-            world.book.patterns[entry.id].program = program.into_boxed_slice();
-        }
+        world.book.patterns[entry.id].program = program.into_boxed_slice();
     }
     validate_pattern_calls(&world.book.patterns, &named, diags);
 
@@ -97,8 +90,8 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
     // Their typed ids are attached to the entity, place or code rule below.
     lower_known_as(world, sites, &named, diags);
 
-    let formats = lower_formats(world, sites, diags);
-    lower_sources(world, sites, &formats, diags);
+    let formats = lower_formats(world, collected, diags);
+    lower_sources(world, collected, &formats, diags);
 }
 
 fn validate_pattern_calls(arena: &axiom_core::Arena<Pattern>, named: &[Named], diags: &mut Vec<Diagnostic>) {
@@ -313,7 +306,6 @@ fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Na
                     let decl = &file[id];
                     match decl.what {
                         ast::DeclKind::Entity => {
-                            use crate::errors::Word;
                             let mut patterns = anonymous_patterns(
                                 file,
                                 &mut world.book,
@@ -341,7 +333,6 @@ fn lower_known_as<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], named: &[Na
                             }
                         }
                         ast::DeclKind::Account => {
-                            use crate::errors::Word;
                             let mut patterns = anonymous_patterns(
                                 file,
                                 &mut world.book,
@@ -435,60 +426,51 @@ fn add_name_patterns<'s>(book: &mut crate::book::Book<'s>, patterns: &mut Vec<Id
     }
 }
 
-fn lower_formats<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) -> Vec<NamedFormat> {
+fn lower_formats<'s>(
+    world: &mut World<'s>,
+    collected: &Collected<'_, 's>,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<NamedFormat> {
     let mut named = Vec::new();
     let mut by_name: Map<(Home, Sym), NamedFormat> = Map::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ast::ItemKind::Format(id) = item.kind else {
-                continue;
-            };
-            let source = &file[id];
-            let name = world.book.names.intern(source.name.0);
-            if let Some(first) = by_name.get(&(site.home, name)) {
-                let word = Word::of(file, source.name.0);
-                diags.push(
-                    Problem::DeclaredTwice { noun: Noun::Format, word, first: Some(first.loc), advice: None }
-                        .diagnostic(),
-                );
-                continue;
-            }
-            let loc = file.loc(source.name.0);
-            let id = world.book.formats.push(Format {
-                name,
-                shape: Shape::Rows,
-                specs: Box::default(),
-                categories: Box::default(),
-                loc,
-            });
-            let entry = NamedFormat { name, home: site.home, id, loc };
-            by_name.insert((site.home, name), entry);
-            named.push(entry);
+    for written in &collected.formats {
+        let (file, source) = (written.file(), written.node);
+        let name = world.book.names.intern(source.name.0);
+        if let Some(first) = by_name.get(&(written.home(), name)) {
+            let word = Word::of(file, source.name.0);
+            diags.push(
+                Problem::DeclaredTwice { noun: Noun::Format, word, first: Some(first.loc), advice: None }.diagnostic(),
+            );
+            continue;
         }
+        let loc = file.loc(source.name.0);
+        let id = world.book.formats.push(Format {
+            name,
+            shape: Shape::Rows,
+            specs: Box::default(),
+            categories: Box::default(),
+            loc,
+        });
+        let entry = NamedFormat { name, home: written.home(), id, loc };
+        by_name.insert((written.home(), name), entry);
+        named.push(entry);
     }
 
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ast::ItemKind::Format(ref_id) = item.kind else {
-                continue;
-            };
-            let source = &file[ref_id];
-            let sym = world.book.names.get(source.name.0).expect("the format name was reserved");
-            let Some(entry) = by_name.get(&(site.home, sym)).copied() else {
-                continue;
-            };
-            if entry.loc != file.loc(source.name.0) {
-                continue;
-            }
-            let category_purposes = format_purposes(world, file, source, site.home, diags);
-            let format = match lower_format(file, source, &mut world.book, &category_purposes, diags) {
-                Some(format) => format,
-                None => continue,
-            };
-            world.book.formats[entry.id] = format;
+    for written in &collected.formats {
+        let (file, source) = (written.file(), written.node);
+        let sym = world.book.names.get(source.name.0).expect("the format name was reserved");
+        let Some(entry) = by_name.get(&(written.home(), sym)).copied() else {
+            continue;
+        };
+        if entry.loc != file.loc(source.name.0) {
+            continue;
         }
+        let category_purposes = format_purposes(world, file, source, written.home(), diags);
+        let format = match lower_format(file, source, &mut world.book, &category_purposes, diags) {
+            Some(format) => format,
+            None => continue,
+        };
+        world.book.formats[entry.id] = format;
     }
     named
 }
@@ -702,7 +684,6 @@ fn format_purposes<'s>(
     home: Home,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Option<Id<crate::book::Purpose>>> {
-    use crate::errors::Word;
     file[source.lines]
         .iter()
         .map(|line| {
@@ -765,136 +746,129 @@ fn field(name: &str) -> Option<Field> {
 
 fn lower_sources<'s>(
     world: &mut World<'s>,
-    sites: &[Site<'_, 's>],
+    collected: &Collected<'_, 's>,
     formats: &[NamedFormat],
     diags: &mut Vec<Diagnostic>,
 ) {
-    use crate::errors::Word;
-
     let mut declared: Map<(Home, Sym), Loc> = Map::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ast::ItemKind::Sync(id) = item.kind else {
-                continue;
-            };
-            let sync = &file[id];
-            let name = world.book.names.intern(sync.name.0);
-            if let Some(first) = declared.get(&(site.home, name)) {
-                let word = Word::of(file, sync.name.0);
+    for written in &collected.syncs {
+        let (file, sync) = (written.file(), written.node);
+        let name = world.book.names.intern(sync.name.0);
+        if let Some(first) = declared.get(&(written.home(), name)) {
+            let word = Word::of(file, sync.name.0);
+            diags.push(
+                Problem::DeclaredTwice { noun: Noun::Sync, word, first: Some(*first), advice: None }.diagnostic(),
+            );
+            continue;
+        }
+        declared.insert((written.home(), name), file.loc(sync.name.0));
+
+        let fetch = match (sync.read, sync.run) {
+            (Some(path), None) => Fetch::Read(world.book.quoted_text(path.0)),
+            (None, Some(command)) => Fetch::Run(world.book.intern_text(command.0)),
+            _ => {
                 diags.push(
-                    Problem::DeclaredTwice { noun: Noun::Sync, word, first: Some(*first), advice: None }.diagnostic(),
+                    Diagnostic::error("sync-fetch", "a sync source needs exactly one `read` or `run` line")
+                        .label(written.item.loc, "this source has no usable input"),
                 );
                 continue;
             }
-            declared.insert((site.home, name), file.loc(sync.name.0));
+        };
 
-            let fetch = match (sync.read, sync.run) {
-                (Some(path), None) => Fetch::Read(world.book.quoted_text(path.0)),
-                (None, Some(command)) => Fetch::Run(world.book.intern_text(command.0)),
-                _ => {
-                    diags.push(
-                        Diagnostic::error("sync-fetch", "a sync source needs exactly one `read` or `run` line")
-                            .label(item.loc, "this source has no usable input"),
-                    );
-                    continue;
-                }
-            };
-
-            let format = match sync.format {
-                None => None,
-                Some(reference) => {
-                    let written = &file[reference];
-                    if file[written.lines].is_empty() {
-                        match resolve_format(file, &world.book.names, formats, &world.scopes, site.home, written.name) {
-                            Ok(id) => Some(id),
-                            Err(problem) => {
-                                diags.push(problem);
-                                continue;
-                            }
-                        }
-                    } else {
-                        let category_purposes = format_purposes(world, file, written, site.home, diags);
-                        match lower_format(file, written, &mut world.book, &category_purposes, diags) {
-                            Some(format) => Some(world.book.formats.push(format)),
-                            None => continue,
-                        }
-                    }
-                }
-            };
-
-            let sink = match sync.into {
-                Some(into) => {
-                    let mut words = into.0.split_whitespace();
-                    match (words.next(), words.next(), words.next()) {
-                        (Some("param"), Some(param), None) => {
-                            let word = Word { text: param, loc: file.loc(into.0) };
-                            match world.seek_param(site.home, word) {
-                                Ok(Some(param)) => Sink::Param(param),
-                                Ok(None) => {
-                                    diags.push(world.missing_param(site.home, word));
-                                    continue;
-                                }
-                                Err(problem) => {
-                                    diags.push(problem);
-                                    continue;
-                                }
-                            }
-                        }
-                        (Some("param"), _, _) => {
-                            diags.push(
-                                Diagnostic::error("sync-sink", "`into param` needs one parameter name")
-                                    .label(file.loc(into.0), "this sink is malformed"),
-                            );
-                            continue;
-                        }
-                        _ => Sink::File(world.book.intern_text(into.0)),
-                    }
-                }
-                None => {
-                    let word = Word::of(file, sync.name.0);
-                    match world.seek_place(word) {
-                        Ok(Some(account)) => match world.book.places[account].role {
-                            Role::Account { .. } => {
-                                if format.is_none() {
-                                    diags.push(
-                                        Diagnostic::error("sync-format", "a feed needs a record format")
-                                            .label(item.loc, "this account source has no format"),
-                                    );
-                                    continue;
-                                }
-                                Sink::Feed { account }
-                            }
-                            _ => {
-                                diags.push(
-                                    Diagnostic::error("sync-feed", format!("`{}` is not an account", sync.name.0))
-                                        .label(file.loc(sync.name.0), "a feed must name an account"),
-                                );
-                                continue;
-                            }
-                        },
-                        Ok(None) => Sink::Journal,
+        let format = match sync.format {
+            None => None,
+            Some(reference) => {
+                let written_format = &file[reference];
+                if file[written_format.lines].is_empty() {
+                    let (names, scopes) = (&world.book.names, &world.scopes);
+                    match resolve_format(file, names, formats, scopes, written.home(), written_format.name) {
+                        Ok(id) => Some(id),
                         Err(problem) => {
                             diags.push(problem);
                             continue;
                         }
                     }
+                } else {
+                    let category_purposes = format_purposes(world, file, written_format, written.home(), diags);
+                    match lower_format(file, written_format, &mut world.book, &category_purposes, diags) {
+                        Some(format) => Some(world.book.formats.push(format)),
+                        None => continue,
+                    }
                 }
-            };
+            }
+        };
 
-            world.book.sources.push(Source {
-                name,
-                fetch,
-                format,
-                sink,
-                system: match site.home {
-                    Home::System(system) => Some(system),
-                    Home::Builtin | Home::Project => None,
-                },
-                doc: item.doc.map(|doc| world.book.names.intern(doc.0)),
-                loc: item.loc,
-            });
-        }
+        let sink = match sync.into {
+            Some(into) => {
+                let mut words = into.0.split_whitespace();
+                match (words.next(), words.next(), words.next()) {
+                    (Some("param"), Some(param), None) => {
+                        let word = Word { text: param, loc: file.loc(into.0) };
+                        match world.seek_param(written.home(), word) {
+                            Ok(Some(param)) => Sink::Param(param),
+                            Ok(None) => {
+                                diags.push(world.missing_param(written.home(), word));
+                                continue;
+                            }
+                            Err(problem) => {
+                                diags.push(problem);
+                                continue;
+                            }
+                        }
+                    }
+                    (Some("param"), _, _) => {
+                        diags.push(
+                            Diagnostic::error("sync-sink", "`into param` needs one parameter name")
+                                .label(file.loc(into.0), "this sink is malformed"),
+                        );
+                        continue;
+                    }
+                    _ => Sink::File(world.book.intern_text(into.0)),
+                }
+            }
+            None => {
+                let word = Word::of(file, sync.name.0);
+                match world.seek_place(word) {
+                    Ok(Some(account)) => match world.book.places[account].role {
+                        Role::Account { .. } => {
+                            if format.is_none() {
+                                diags.push(
+                                    Diagnostic::error("sync-format", "a feed needs a record format")
+                                        .label(written.item.loc, "this account source has no format"),
+                                );
+                                continue;
+                            }
+                            Sink::Feed { account }
+                        }
+                        _ => {
+                            diags.push(
+                                Diagnostic::error("sync-feed", format!("`{}` is not an account", sync.name.0))
+                                    .label(file.loc(sync.name.0), "a feed must name an account"),
+                            );
+                            continue;
+                        }
+                    },
+                    Ok(None) => Sink::Journal,
+                    Err(problem) => {
+                        diags.push(problem);
+                        continue;
+                    }
+                }
+            }
+        };
+
+        world.book.sources.push(Source {
+            name,
+            fetch,
+            format,
+            sink,
+            system: match written.home() {
+                Home::System(system) => Some(system),
+                Home::Builtin | Home::Project => None,
+            },
+            doc: written.item.doc.map(|doc| world.book.names.intern(doc.0)),
+            loc: written.item.loc,
+        });
     }
 }
 

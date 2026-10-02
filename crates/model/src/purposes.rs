@@ -5,15 +5,15 @@
 //! because resolution happens against the complete draft index.
 
 use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
-use axiom_syntax::{DeclKind, ExprKind, ItemKind};
+use axiom_syntax::{DeclKind, ExprKind};
 
 use crate::book::{At, Kind, Purpose, PurposeRoot, System};
+use crate::collect::Collected;
 use crate::errors::Word;
 use crate::kinds;
 use crate::names::Scoped;
 use crate::problem::{Noun, Problem, Reads, unresolved};
 use crate::scope::{Home, Scopes};
-use crate::sources::Site;
 
 pub(crate) struct NativePurposes {
     pub tree: Tree<Purpose>,
@@ -22,8 +22,8 @@ pub(crate) struct NativePurposes {
     pub declarations: Vec<Id<Purpose>>,
 }
 
-pub(crate) fn declare_sites<'a, 's>(
-    sites: &[Site<'a, 's>],
+pub(crate) fn declare_sites<'s>(
+    collected: &Collected<'_, 's>,
     names: &mut Interner<'s>,
     systems: &Tree<System>,
     scopes: &Scopes,
@@ -56,53 +56,44 @@ pub(crate) fn declare_sites<'a, 's>(
 
     let mut written: Vec<(&axiom_syntax::File<'s>, &axiom_syntax::Decl<'s>, Home)> = Vec::new();
     let mut draft_of = Vec::new();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if decl.what != DeclKind::Purpose {
-                continue;
-            }
-            let text = decl.name.0;
-            written.push((file, decl, site.home));
-            if root_names.contains(&text) {
-                // Purpose roots are built in identities. A declaration of a
-                // root may attach laws to that identity without creating a
-                // second tree node, just as a shared system may extend the
-                // built-in root with domain rules.
-                draft_of.push(root_ids[root_names.iter().position(|&name| name == text).unwrap()].index());
-                continue;
-            }
-            if let Some(&first) = seen.get(&(site.home, text)) {
-                let (word, earlier) = (Word::of(file, text), drafts.get(first).and_then(|purpose| purpose.loc));
-                diags.push(Problem::Duplicate { noun: Noun::Purpose, word, first: earlier }.diagnostic());
-                draft_of.push(first);
-                continue;
-            }
-            let symbol = names.intern(text);
-            let at = drafts.len();
-            let draft = Purpose {
-                name: symbol,
-                root: PurposeRoot::Transfer,
-                system: match site.home {
-                    Home::System(id) => Some(id),
-                    _ => None,
-                },
-                of: None,
-                shares: Box::default(),
-                laws: Box::default(),
-                doc: item.doc.map(|doc| names.intern(doc.0)),
-                loc: Some(file.loc(text)),
-            };
-            seen.insert((site.home, text), at);
-            drafts.push(draft);
-            homes.push(site.home);
-            parents.push(None);
-            draft_of.push(at);
+    for purpose in collected.decls_of(DeclKind::Purpose) {
+        let (file, decl, home) = (purpose.file(), purpose.node, purpose.home());
+        let text = decl.name.0;
+        written.push((file, decl, home));
+        if root_names.contains(&text) {
+            // Purpose roots are built in identities. A declaration of a
+            // root may attach laws to that identity without creating a
+            // second tree node, just as a shared system may extend the
+            // built-in root with domain rules.
+            draft_of.push(root_ids[root_names.iter().position(|&name| name == text).unwrap()].index());
+            continue;
         }
+        if let Some(&first) = seen.get(&(home, text)) {
+            let (word, earlier) = (Word::of(file, text), drafts.get(first).and_then(|purpose| purpose.loc));
+            diags.push(Problem::Duplicate { noun: Noun::Purpose, word, first: earlier }.diagnostic());
+            draft_of.push(first);
+            continue;
+        }
+        let symbol = names.intern(text);
+        let at = drafts.len();
+        let draft = Purpose {
+            name: symbol,
+            root: PurposeRoot::Transfer,
+            system: match home {
+                Home::System(id) => Some(id),
+                _ => None,
+            },
+            of: None,
+            shares: Box::default(),
+            laws: Box::default(),
+            doc: purpose.item.doc.map(|doc| names.intern(doc.0)),
+            loc: Some(file.loc(text)),
+        };
+        seen.insert((home, text), at);
+        drafts.push(draft);
+        homes.push(home);
+        parents.push(None);
+        draft_of.push(at);
     }
 
     let draft_names: Vec<_> = drafts

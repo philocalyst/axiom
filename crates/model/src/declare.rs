@@ -5,12 +5,13 @@
 //! against complete scoped indexes, then freezes the place tree once.
 
 use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Ratio, Set, Sym, Tree};
-use axiom_syntax::{Decl, DeclKind, ExprKind, ItemKind, Setting, Verb};
+use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
 use crate::book::{
     Asset, At, Basis, Book, Books, Class, Commodity, Entity, Kind, KindRoots, Lookup, Place, Prop, Purpose, Role,
     Roots, Share, Sort, System,
 };
+use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
 use crate::kinds::{self, NativeKinds};
 use crate::names::{Names, Scoped};
@@ -201,31 +202,25 @@ pub(crate) struct Settings<'s> {
     pub relaxed: bool,
 }
 
-pub(crate) fn settings<'a, 's>(sites: &[Site<'a, 's>], diags: &mut Vec<Diagnostic>) -> Settings<'s> {
+pub(crate) fn settings<'s>(collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) -> Settings<'s> {
     let mut settings = Settings { base: None, relaxed: false };
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Setting(id) = item.kind else {
-                continue;
-            };
-            match file[id] {
-                Setting::Base(name) => {
-                    let word = Word::of(file, name.0);
-                    match settings.base {
-                        Some(first) if first.text != word.text => diags.push(
-                            Diagnostic::error("duplicate-base", "the base currency is set twice")
-                                .label(word.loc, format!("`base {}` here", word.text))
-                                .context(first.loc, "and here")
-                                .help("a book has one base currency: remove one of them"),
-                        ),
-                        Some(_) => {}
-                        None => settings.base = Some(word),
-                    }
+    for written in &collected.settings {
+        match *written.node {
+            Setting::Base(name) => {
+                let word = Word::of(written.file(), name.0);
+                match settings.base {
+                    Some(first) if first.text != word.text => diags.push(
+                        Diagnostic::error("duplicate-base", "the base currency is set twice")
+                            .label(word.loc, format!("`base {}` here", word.text))
+                            .context(first.loc, "and here")
+                            .help("a book has one base currency: remove one of them"),
+                    ),
+                    Some(_) => {}
+                    None => settings.base = Some(word),
                 }
-                Setting::Relaxed => settings.relaxed = true,
-                Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {}
             }
+            Setting::Relaxed => settings.relaxed = true,
+            Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {}
         }
     }
     settings
@@ -234,41 +229,31 @@ pub(crate) fn settings<'a, 's>(sites: &[Site<'a, 's>], diags: &mut Vec<Diagnosti
 /// What each home has brought into scope: its `use` lines, the system of every
 /// `lives` line (which implies a `use`), and `std` for everyone.
 pub(crate) fn scopes(
-    sites: &[Site<'_, '_>],
+    collected: &Collected,
     systems: &SystemIndex,
     tree: &Tree<System>,
     diags: &mut Vec<Diagnostic>,
 ) -> Scopes {
     let mut used: Vec<(Home, Id<System>)> = Vec::new();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            match item.kind {
-                ItemKind::Setting(id) => {
-                    if let Setting::Use(name) = file[id] {
-                        match systems.find(name.0) {
-                            Some(system) => used.push((site.home, system)),
-                            None => diags.push(systems.unknown(Word::of(file, name.0))),
-                        }
-                    }
-                }
-                ItemKind::Decl(id) if file[id].what == DeclKind::Entity => {
-                    for prop in &file[file[id].props] {
-                        if prop.name.0 == "lives" {
-                            add_lives(&mut used, site.home, systems, file, prop);
-                        }
-                    }
-                }
-                ItemKind::Statement(id) => {
-                    if let Verb::Now(ax) = &file[id].verb
-                        && let axiom_syntax::Change::Property(prop) = ax
-                        && prop.name.0 == "lives"
-                    {
-                        add_lives(&mut used, site.home, systems, file, prop);
-                    }
-                }
-                _ => {}
+    for written in &collected.settings {
+        if let Setting::Use(name) = *written.node {
+            match systems.find(name.0) {
+                Some(system) => used.push((written.home(), system)),
+                None => diags.push(systems.unknown(Word::of(written.file(), name.0))),
             }
+        }
+    }
+    for written in collected.decls_of(DeclKind::Entity) {
+        let file = written.file();
+        for prop in file[written.node.props].iter().filter(|prop| prop.name.0 == "lives") {
+            add_lives(&mut used, written.home(), systems, file, prop);
+        }
+    }
+    for written in &collected.statements {
+        if let Verb::Now(Change::Property(prop)) = &written.node.verb
+            && prop.name.0 == "lives"
+        {
+            add_lives(&mut used, written.home(), systems, written.file(), prop);
         }
     }
     let std = systems.find("std");
@@ -327,6 +312,23 @@ enum NameSpace {
 }
 
 impl NameSpace {
+    /// The namespace a declaration's name lives in; a kind's is its own.
+    fn of(what: DeclKind) -> Option<NameSpace> {
+        match what {
+            DeclKind::Account => Some(NameSpace::Account),
+            DeclKind::Entity => Some(NameSpace::Entity),
+            DeclKind::Asset => Some(NameSpace::Asset),
+            DeclKind::Purpose => Some(NameSpace::Purpose),
+            DeclKind::Commodity => Some(NameSpace::Commodity),
+            DeclKind::Kind => None,
+        }
+    }
+
+    /// Whether a `/`-path in it answers to each of its suffixes.
+    fn has_suffixes(self) -> bool {
+        !matches!(self, NameSpace::Commodity | NameSpace::Contract)
+    }
+
     fn article(self) -> &'static str {
         match self {
             NameSpace::Account => "account",
@@ -356,75 +358,44 @@ struct NameClaim<'s> {
     space: NameSpace,
     home: Home,
     loc: Loc,
-    order: usize,
+    order: Order,
     /// Contracts may take the spelling of their party, but no other entity.
     contract_party: Option<&'s str>,
 }
 
+/// Every spelling a declaration answers to, for the declarations that share one namespace-free name table.
+fn name_claims<'s>(collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) -> Vec<NameClaim<'s>> {
+    let mut claims = Vec::new();
+    for written in &collected.decls {
+        let (file, decl) = (written.file(), written.node);
+        if decl.what == DeclKind::Entity && matches!(decl.name.0, "opening" | "market" | "?") {
+            diags.push(
+                Diagnostic::error(
+                    "reserved-entity-name",
+                    format!("`{}` is reserved for a built-in entity", decl.name.0),
+                )
+                .label(file.loc(decl.name.0), "choose a different entity name"),
+            );
+        }
+        if let Some(space) = NameSpace::of(decl.what) {
+            push_name_claims(&mut claims, written, decl.name.0, space, None);
+        }
+    }
+    for written in &collected.contracts {
+        let contract = written.node;
+        let party = Some(contract.party.unwrap_or(contract.name).0);
+        push_name_claims(&mut claims, written, contract.name.0, NameSpace::Contract, party);
+    }
+    claims
+}
+
 fn check_cross_namespace_names(
-    sites: &[Site<'_, '_>],
+    collected: &Collected,
     scopes: &Scopes,
     systems: &Tree<System>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let mut claims = Vec::new();
-    let mut order = 0;
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            match item.kind {
-                ItemKind::Decl(id) => {
-                    let decl = &file[id];
-                    if decl.what == DeclKind::Entity && matches!(decl.name.0, "opening" | "market" | "?") {
-                        diags.push(
-                            Diagnostic::error(
-                                "reserved-entity-name",
-                                format!("`{}` is reserved for a built-in entity", decl.name.0),
-                            )
-                            .label(file.loc(decl.name.0), "choose a different entity name"),
-                        );
-                    }
-                    let (space, aliases) = match decl.what {
-                        DeclKind::Account => (NameSpace::Account, true),
-                        DeclKind::Entity => (NameSpace::Entity, true),
-                        DeclKind::Asset => (NameSpace::Asset, true),
-                        DeclKind::Purpose => (NameSpace::Purpose, true),
-                        DeclKind::Commodity => (NameSpace::Commodity, false),
-                        DeclKind::Kind => {
-                            order += 1;
-                            continue;
-                        }
-                    };
-                    push_name_claims(
-                        &mut claims,
-                        decl.name.0,
-                        space,
-                        site.home,
-                        file.loc(decl.name.0),
-                        order,
-                        None,
-                        aliases,
-                    );
-                }
-                ItemKind::Contract(id) => {
-                    let contract = &file[id];
-                    push_name_claims(
-                        &mut claims,
-                        contract.name.0,
-                        NameSpace::Contract,
-                        site.home,
-                        file.loc(contract.name.0),
-                        order,
-                        Some(contract.party.unwrap_or(contract.name).0),
-                        false,
-                    );
-                }
-                _ => {}
-            }
-            order += 1;
-        }
-    }
-
+    let mut claims = name_claims(collected, diags);
     claims.sort_unstable_by(|a, b| a.spelling.cmp(b.spelling).then(a.order.cmp(&b.order)).then(a.space.cmp(&b.space)));
 
     let mut start = 0;
@@ -469,21 +440,19 @@ fn check_cross_namespace_names(
     }
 }
 
-fn push_name_claims<'s>(
+fn push_name_claims<'s, T>(
     claims: &mut Vec<NameClaim<'s>>,
+    written: &Written<'_, 's, T>,
     declared: &'s str,
     space: NameSpace,
-    home: Home,
-    loc: Loc,
-    order: usize,
     contract_party: Option<&'s str>,
-    aliases: bool,
 ) {
+    let (home, loc, order) = (written.home(), written.file().loc(declared), written.order);
     let mut push = |spelling| {
         claims.push(NameClaim { spelling, declared, space, home, loc, order, contract_party });
     };
     push(declared);
-    if aliases {
+    if space.has_suffixes() {
         for (at, _) in declared.match_indices('/') {
             push(&declared[at + 1..]);
         }
@@ -511,6 +480,7 @@ fn contract_party_name_exception(a: &NameClaim<'_>, b: &NameClaim<'_>, spelling:
 /// claim-bearing journal relationships. No v3 chart-account collection is used.
 pub(crate) fn declare<'a, 's>(
     sites: &[Site<'a, 's>],
+    collected: &Collected<'a, 's>,
     settings: &Settings<'s>,
     mut names: Interner<'s>,
     systems_tree: Tree<System>,
@@ -519,55 +489,46 @@ pub(crate) fn declare<'a, 's>(
     survey: &crate::lower::JournalSurvey<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> World<'s> {
-    let native_kinds = kinds::declare_sites(sites, &mut names, &systems_tree, &scopes, diags);
+    let native_kinds = kinds::declare_sites(collected, &mut names, &systems_tree, &scopes, diags);
     let native_purposes =
-        crate::purposes::declare_sites(sites, &mut names, &systems_tree, &scopes, &native_kinds.index, diags);
-    check_cross_namespace_names(sites, &scopes, &systems_tree, diags);
+        crate::purposes::declare_sites(collected, &mut names, &systems_tree, &scopes, &native_kinds.index, diags);
+    check_cross_namespace_names(collected, &scopes, &systems_tree, diags);
 
     let mut commodities = Arena::new();
     let mut commodity_by_name: Map<&'s str, Id<Commodity>> = Map::default();
     let commodity_root = native_kinds.roots.commodity;
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if decl.what != DeclKind::Commodity {
-                continue;
-            }
-            let symbol = decl.name.0;
-            if let Some(&first) = commodity_by_name.get(symbol) {
-                diags.push(declared_twice(Noun::Commodity, Word::of(file, symbol), commodities[first].loc));
-                continue;
-            }
-            let kind = resolve_kind(
-                decl,
-                site.home,
-                Sort::Commodity,
-                commodity_root,
-                &native_kinds,
-                &names,
-                &systems_tree,
-                &scopes,
-                file,
-                diags,
-            );
-            let id = commodities.push(Commodity {
-                symbol: names.intern(symbol),
-                kind,
-                scale: 0,
-                title: None,
-                liquidity: None,
-                select: None,
-                growth: None,
-                props: Box::default(),
-                doc: item.doc.map(|doc| names.intern(doc.0)),
-                loc: Some(file.loc(symbol)),
-            });
-            commodity_by_name.insert(symbol, id);
+    for written in collected.decls_of(DeclKind::Commodity) {
+        let (file, decl) = (written.file(), written.node);
+        let symbol = decl.name.0;
+        if let Some(&first) = commodity_by_name.get(symbol) {
+            diags.push(declared_twice(Noun::Commodity, Word::of(file, symbol), commodities[first].loc));
+            continue;
         }
+        let kind = resolve_kind(
+            decl,
+            written.home(),
+            Sort::Commodity,
+            commodity_root,
+            &native_kinds,
+            &names,
+            &systems_tree,
+            &scopes,
+            file,
+            diags,
+        );
+        let id = commodities.push(Commodity {
+            symbol: names.intern(symbol),
+            kind,
+            scale: 0,
+            title: None,
+            liquidity: None,
+            select: None,
+            growth: None,
+            props: Box::default(),
+            doc: written.item.doc.map(|doc| names.intern(doc.0)),
+            loc: Some(file.loc(symbol)),
+        });
+        commodity_by_name.insert(symbol, id);
     }
     let mut synthetic_base = None;
     if commodities.is_empty() {
@@ -622,44 +583,33 @@ pub(crate) fn declare<'a, 's>(
     let mut first_entity_paths = Vec::new();
     let mut owner_names: Set<&'s str> = Set::default();
     let mut declared_entity_names = Set::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if matches!(decl.what, DeclKind::Account | DeclKind::Entity | DeclKind::Asset) {
-                owner_names.extend(owner_names_in(file, decl));
-            }
-            if decl.what != DeclKind::Entity {
-                continue;
-            }
-            let path = decl.name.0;
-            if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
-                diags.push(declared_twice(Noun::Entity, Word::of(file, path), Some(first_file.loc(first.name.0))));
-                continue;
-            }
-            let doc = item.doc.map(|doc| names.intern(doc.0));
-            explicit_entities.insert(path, (site.home, file, decl, doc));
-            declared_entity_names.insert(path);
-            first_entity_paths.push(path);
+    for written in &collected.decls {
+        let (file, decl) = (written.file(), written.node);
+        if matches!(decl.what, DeclKind::Account | DeclKind::Entity | DeclKind::Asset) {
+            owner_names.extend(owner_names_in(file, decl));
         }
+        if decl.what != DeclKind::Entity {
+            continue;
+        }
+        let path = decl.name.0;
+        if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
+            diags.push(declared_twice(Noun::Entity, Word::of(file, path), Some(first_file.loc(first.name.0))));
+            continue;
+        }
+        let doc = written.item.doc.map(|doc| names.intern(doc.0));
+        explicit_entities.insert(path, (written.home(), file, decl, doc));
+        declared_entity_names.insert(path);
+        first_entity_paths.push(path);
     }
 
     // Endpoint names that are not declared account/asset paths, other typed
     // names, or explicit entities are parties. Keep only one borrowed name and
     // its first source location, even when it occurs in many journal rows.
     let mut place_names = Set::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else { continue };
-            let decl = &file[id];
-            if matches!(decl.what, DeclKind::Account | DeclKind::Asset) {
-                add_path_spellings(&mut place_names, decl.name.0);
-            }
-        }
+    for written in
+        collected.decls.iter().filter(|written| matches!(written.node.what, DeclKind::Account | DeclKind::Asset))
+    {
+        add_path_spellings(&mut place_names, written.node.name.0);
     }
 
     let mut entity_spellings = Set::default();
@@ -686,19 +636,11 @@ pub(crate) fn declare<'a, 's>(
     let mut contract_names = Set::default();
     let mut candidates: Map<&'s str, Loc> = Map::default();
     let mut entity_roles = Set::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            match item.kind {
-                ItemKind::Decl(id) if file[id].what == DeclKind::Asset => {
-                    add_path_spellings(&mut other_spellings, file[id].name.0);
-                }
-                ItemKind::Contract(id) => {
-                    add_path_spellings(&mut contract_names, file[id].name.0);
-                }
-                _ => {}
-            }
-        }
+    for written in collected.decls_of(DeclKind::Asset) {
+        add_path_spellings(&mut other_spellings, written.node.name.0);
+    }
+    for written in &collected.contracts {
+        add_path_spellings(&mut contract_names, written.node.name.0);
     }
     crate::lower::visit_endpoints(sites, |_, name, loc, _| {
         candidates.entry(name.0).or_insert(loc);
@@ -819,24 +761,15 @@ pub(crate) fn declare<'a, 's>(
 
     // Ownership belongs to entities as well as accounts. Build it after every
     // entity id exists, preserving the declaration's source order.
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if decl.what != DeclKind::Entity {
-                continue;
-            }
-            let Some(&entity) = entity_ids.get(decl.name.0) else {
-                continue;
-            };
-            let owners = resolve_owner_shares(file, decl, site.home, &entity_index, &names, &scopes, me, diags);
-            if let Some(share) = owners.first() {
-                entities[entity].owner = Some(share.entity);
-                entities[entity].owned_by = owners.into_boxed_slice();
-            }
+    for written in collected.decls_of(DeclKind::Entity) {
+        let (file, decl) = (written.file(), written.node);
+        let Some(&entity) = entity_ids.get(decl.name.0) else {
+            continue;
+        };
+        let owners = resolve_owner_shares(file, decl, written.home(), &entity_index, &names, &scopes, me, diags);
+        if let Some(share) = owners.first() {
+            entities[entity].owner = Some(share.entity);
+            entities[entity].owned_by = owners.into_boxed_slice();
         }
     }
 
@@ -844,78 +777,62 @@ pub(crate) fn declare<'a, 's>(
     // indexes are already complete.
     let mut account_drafts = Vec::new();
     let mut declared_account_paths: Map<&'s str, Loc> = Map::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if decl.what != DeclKind::Account {
-                continue;
-            }
-            let path = decl.name.0;
-            if let Some(&first) = declared_account_paths.get(path) {
-                diags.push(declared_twice(Noun::Account, Word::of(file, path), Some(first)));
-                continue;
-            }
-            declared_account_paths.insert(path, file.loc(path));
-            let kind = resolve_kind(
-                decl,
-                site.home,
-                Sort::Place(Class::Asset),
-                native_kinds.roots.asset,
-                &native_kinds,
-                &names,
-                &systems_tree,
-                &scopes,
-                file,
-                diags,
-            );
-            let class = match native_kinds.tree[kind].sort {
-                Sort::Place(class) => class,
-                found => {
-                    diags.push(
-                        Diagnostic::error("account-kind-sort", "an account needs a place kind")
-                            .label(file.loc(path), format!("this kind classifies {found:?}")),
-                    );
-                    Class::Asset
-                }
-            };
-            let shares = resolve_owner_shares(file, decl, site.home, &entity_index, &names, &scopes, me, diags);
-            let owner = shares.first().map_or_else(
-                || {
-                    first_name_prop(file, decl, "owner")
-                        .and_then(|name| entity_by_name.get(name).copied())
-                        .unwrap_or(me)
-                },
-                |share| share.entity,
-            );
-            let institution = decl.at.and_then(|name| {
-                entity_index
-                    .resolve(&names, scopes.of(site.home), name.0)
-                    .map_err(|_| {
-                        diags.push(
-                            Diagnostic::error(
-                                "unknown-institution",
-                                format!("institution `{}` is not visible", name.0),
-                            )
-                            .label(file.loc(name.0), "not a visible entity"),
-                        )
-                    })
-                    .ok()
-            });
-            let loc = file.loc(path);
-            account_drafts.push(AccountDraft {
-                path,
-                class,
-                kind,
-                owner,
-                shares: shares.into_boxed_slice(),
-                institution,
-                loc,
-            });
+    for written in collected.decls_of(DeclKind::Account) {
+        let (file, decl) = (written.file(), written.node);
+        let path = decl.name.0;
+        if let Some(&first) = declared_account_paths.get(path) {
+            diags.push(declared_twice(Noun::Account, Word::of(file, path), Some(first)));
+            continue;
         }
+        declared_account_paths.insert(path, file.loc(path));
+        let kind = resolve_kind(
+            decl,
+            written.home(),
+            Sort::Place(Class::Asset),
+            native_kinds.roots.asset,
+            &native_kinds,
+            &names,
+            &systems_tree,
+            &scopes,
+            file,
+            diags,
+        );
+        let class = match native_kinds.tree[kind].sort {
+            Sort::Place(class) => class,
+            found => {
+                diags.push(
+                    Diagnostic::error("account-kind-sort", "an account needs a place kind")
+                        .label(file.loc(path), format!("this kind classifies {found:?}")),
+                );
+                Class::Asset
+            }
+        };
+        let shares = resolve_owner_shares(file, decl, written.home(), &entity_index, &names, &scopes, me, diags);
+        let owner = shares.first().map_or_else(
+            || first_name_prop(file, decl, "owner").and_then(|name| entity_by_name.get(name).copied()).unwrap_or(me),
+            |share| share.entity,
+        );
+        let institution = decl.at.and_then(|name| {
+            entity_index
+                .resolve(&names, scopes.of(written.home()), name.0)
+                .map_err(|_| {
+                    diags.push(
+                        Diagnostic::error("unknown-institution", format!("institution `{}` is not visible", name.0))
+                            .label(file.loc(name.0), "not a visible entity"),
+                    )
+                })
+                .ok()
+        });
+        let loc = file.loc(path);
+        account_drafts.push(AccountDraft {
+            path,
+            class,
+            kind,
+            owner,
+            shares: shares.into_boxed_slice(),
+            institution,
+            loc,
+        });
     }
 
     // The entities referenced as account owners are the owners' holdings;
@@ -931,66 +848,57 @@ pub(crate) fn declare<'a, 's>(
     let mut asset_paths = Vec::new();
     let mut asset_names: Map<&'s str, Id<Asset>> = Map::default();
     let mut asset_shares: Map<Id<Asset>, Box<[Share]>> = Map::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if decl.what != DeclKind::Asset {
-                continue;
-            }
-            let path = decl.name.0;
-            if let Some(&first) = asset_names.get(path) {
-                diags.push(declared_twice(Noun::Asset, Word::of(file, path), Some(assets[first].loc)));
-                continue;
-            }
-            let kind = resolve_kind(
-                decl,
-                site.home,
-                Sort::Thing,
-                native_kinds.roots.thing,
-                &native_kinds,
-                &names,
-                &systems_tree,
-                &scopes,
-                file,
-                diags,
-            );
-            let name = names.intern(path);
-            let unit = commodities.push(Commodity {
-                symbol: name,
-                kind: commodity_root,
-                scale: 0,
-                title: None,
-                liquidity: None,
-                select: None,
-                growth: None,
-                props: Box::default(),
-                doc: None,
-                loc: Some(file.loc(path)),
-            });
-            commodity_by_name.entry(path).or_insert(unit);
-            let owners = resolve_owner_shares(file, decl, site.home, &entity_index, &names, &scopes, me, diags);
-            let owner = owners.first().map_or(me, |share| share.entity);
-            let asset = assets.push(Asset {
-                name,
-                kind,
-                owner,
-                place: Id::new(0),
-                unit,
-                part_of: None,
-                props: Box::default(),
-                doc: item.doc.map(|doc| names.intern(doc.0)),
-                loc: file.loc(path),
-            });
-            if !owners.is_empty() {
-                asset_shares.insert(asset, owners.into_boxed_slice());
-            }
-            asset_names.insert(path, asset);
-            asset_paths.push((path, asset));
+    for written in collected.decls_of(DeclKind::Asset) {
+        let (file, decl) = (written.file(), written.node);
+        let path = decl.name.0;
+        if let Some(&first) = asset_names.get(path) {
+            diags.push(declared_twice(Noun::Asset, Word::of(file, path), Some(assets[first].loc)));
+            continue;
         }
+        let kind = resolve_kind(
+            decl,
+            written.home(),
+            Sort::Thing,
+            native_kinds.roots.thing,
+            &native_kinds,
+            &names,
+            &systems_tree,
+            &scopes,
+            file,
+            diags,
+        );
+        let name = names.intern(path);
+        let unit = commodities.push(Commodity {
+            symbol: name,
+            kind: commodity_root,
+            scale: 0,
+            title: None,
+            liquidity: None,
+            select: None,
+            growth: None,
+            props: Box::default(),
+            doc: None,
+            loc: Some(file.loc(path)),
+        });
+        commodity_by_name.entry(path).or_insert(unit);
+        let owners = resolve_owner_shares(file, decl, written.home(), &entity_index, &names, &scopes, me, diags);
+        let owner = owners.first().map_or(me, |share| share.entity);
+        let asset = assets.push(Asset {
+            name,
+            kind,
+            owner,
+            place: Id::new(0),
+            unit,
+            part_of: None,
+            props: Box::default(),
+            doc: written.item.doc.map(|doc| names.intern(doc.0)),
+            loc: file.loc(path),
+        });
+        if !owners.is_empty() {
+            asset_shares.insert(asset, owners.into_boxed_slice());
+        }
+        asset_names.insert(path, asset);
+        asset_paths.push((path, asset));
     }
 
     let mut account_owner_by_path = Map::default();
@@ -1085,19 +993,12 @@ pub(crate) fn declare<'a, 's>(
     let mut own_pays = vec![false; native_kinds.tree.len()];
     let mut seen_kind_declarations = Set::default();
     let mut kind_declaration_at = 0;
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(decl_id) = item.kind else { continue };
-            let decl = &file[decl_id];
-            if decl.what != DeclKind::Kind {
-                continue;
-            }
-            let kind = native_kinds.declarations[kind_declaration_at];
-            kind_declaration_at += 1;
-            if seen_kind_declarations.insert(kind) && native_kinds.tree[kind].sort == Sort::Commodity {
-                own_pays[kind.index()] = file[decl.props].iter().any(|prop| prop.name.0 == "pays");
-            }
+    for written in collected.decls_of(DeclKind::Kind) {
+        let (file, decl) = (written.file(), written.node);
+        let kind = native_kinds.declarations[kind_declaration_at];
+        kind_declaration_at += 1;
+        if seen_kind_declarations.insert(kind) && native_kinds.tree[kind].sort == Sort::Commodity {
+            own_pays[kind.index()] = file[decl.props].iter().any(|prop| prop.name.0 == "pays");
         }
     }
     let mut inherited_pays = vec![false; native_kinds.tree.len()];

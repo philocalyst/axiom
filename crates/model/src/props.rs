@@ -12,14 +12,15 @@
 
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
 use axiom_syntax::{
-    BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, ItemKind, Policy, Prop as Line, Rates,
-    Setting, Subject, Verb,
+    BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting,
+    Subject, Verb,
 };
 
 use crate::book::{
     Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy, Residence, Role, Share,
     Sort, Take,
 };
+use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
 use crate::law::{Ty, Value};
@@ -616,8 +617,8 @@ struct Lines<'a, 's> {
 }
 
 impl<'a, 's> Lines<'a, 's> {
-    fn from_native(written: NativeDecl<'a, 's>) -> Lines<'a, 's> {
-        Lines { home: written.home, file: written.file, lines: &written.file[written.decl.props] }
+    fn from_native(written: Written<'a, 's, Decl<'s>>) -> Lines<'a, 's> {
+        Lines { home: written.home(), file: written.file(), lines: &written.file()[written.node.props] }
     }
 }
 
@@ -710,14 +711,6 @@ fn disagreement(first: Has, again: Has, family: Ty, name: &str) -> Diagnostic {
 // ─── Native S5 declarations ────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
-struct NativeDecl<'a, 's> {
-    home: Home,
-    file: &'a File<'s>,
-    decl: &'a Decl<'s>,
-    loc: Loc,
-}
-
-#[derive(Clone, Copy)]
 struct NativeTarget {
     target: PropTarget,
     kind: Id<Kind>,
@@ -738,28 +731,12 @@ struct PropertyChange {
 /// Resolves custom `has` properties and their values directly from the S5 AST.
 /// Kind defaults stay on their kind and are inherited by the law evaluator via
 /// the kind tree; this pass never clones a default into every instance.
-pub(crate) fn declare<'a, 's>(
-    world: &mut World<'s>,
-    sites: &'a [crate::sources::Site<'a, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
-    let mut kind_decls: Map<Id<Kind>, NativeDecl<'a, 's>> = Map::default();
-    let mut decls = Vec::new();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            let native = NativeDecl { home: site.home, file, decl, loc: item.loc };
-            decls.push(native);
-            if decl.what == DeclKind::Kind {
-                let word = Word { text: decl.name.0, loc: item.loc };
-                if let Ok(kind) = world.kind(site.home, word) {
-                    kind_decls.entry(kind).or_insert(native);
-                }
-            }
+pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+    let mut kind_decls: Map<Id<Kind>, Written<'a, 's, Decl<'s>>> = Map::default();
+    for written in collected.decls_of(DeclKind::Kind) {
+        let word = Word { text: written.node.name.0, loc: written.item.loc };
+        if let Ok(kind) = world.kind(written.home(), word) {
+            kind_decls.entry(kind).or_insert(*written);
         }
     }
 
@@ -768,7 +745,7 @@ pub(crate) fn declare<'a, 's>(
     let kinds: Vec<Id<Kind>> = world.book.kinds.ids().collect();
     for kind in kinds {
         let own = match kind_decls.get(&kind).copied() {
-            Some(written) => read_has_lines(world, written.file, written.decl, diags),
+            Some(written) => read_has_lines(world, written.file(), written.node, diags),
             None => Vec::new(),
         };
         let sort = world.book.kinds[kind].sort;
@@ -783,17 +760,17 @@ pub(crate) fn declare<'a, 's>(
         world.book.kinds[kind].has = own.iter().chain(inherited).copied().collect();
     }
 
-    native_builtins(world, sites, diags);
+    native_builtins(world, collected, diags);
 
     let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
-    for written in decls {
-        if written.decl.what == DeclKind::Purpose {
+    for &written in &collected.decls {
+        if written.node.what == DeclKind::Purpose {
             continue;
         }
         let Some(target) = native_target(world, written) else {
             continue;
         };
-        let lines = &written.file[written.decl.props];
+        let lines = &written.file()[written.node.props];
         for line in lines {
             if is_builtin_line(line.name.0) {
                 continue;
@@ -802,7 +779,7 @@ pub(crate) fn declare<'a, 's>(
                 diags.push(unknown_native_property(world, target, line));
                 continue;
             };
-            let Some(value) = property_value(world, written.home, written.file, line, has, diags) else {
+            let Some(value) = property_value(world, written.home(), written.file(), line, has, diags) else {
                 continue;
             };
             stage_unique(
@@ -817,63 +794,57 @@ pub(crate) fn declare<'a, 's>(
 
     let mut updates = Vec::new();
     let mut order = 0;
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Statement(id) = item.kind else {
-                continue;
-            };
-            let statement = &file[id];
-            let Verb::Now(Change::Property(line)) = &statement.verb else {
-                continue;
-            };
-            if is_builtin_line(line.name.0) {
-                continue;
-            }
-            let property_name = world.book.names.intern(line.name.0);
-            let Some(target) =
-                native_statement_target(world, site.home, statement.subject, property_name, item.loc, diags)
-            else {
-                // The statement pass owns unresolved subjects. This pass only
-                // consumes a custom property after its target kind is known.
-                continue;
-            };
-            let Some(has) = has_named(world, target.kind, line.name.0) else {
-                diags.push(unknown_native_property(world, target, line));
-                continue;
-            };
-            let Some(value) = property_value(world, site.home, file, line, has, diags) else {
-                continue;
-            };
-            let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
-                ClauseKind::Until(day) => Some(day),
-                _ => None,
-            });
-            if until.is_some_and(|day| day < statement.date) {
-                diags.push(
-                    Diagnostic::error("property-until-order", "this property change ends before it begins")
-                        .label(line.loc, "`until` is earlier than the change")
-                        .help("move the end date to the change date or later"),
-                );
-                continue;
-            }
-            let key = (target_key(target.target), has.name, statement.date);
-            if let Some(first) = seen.get(&key).copied() {
-                diags.push(Problem::Twice { what: Twice::PropertyChange, again: line.loc, first }.diagnostic());
-                continue;
-            }
-            seen.insert(key, line.loc);
-            updates.push(PropertyChange {
-                target: target.target,
-                name: has.name,
-                since: statement.date,
-                until,
-                value,
-                loc: line.loc,
-                order,
-            });
-            order += 1;
+    for written in &collected.statements {
+        let (file, statement) = (written.file(), written.node);
+        let Verb::Now(Change::Property(line)) = &statement.verb else {
+            continue;
+        };
+        if is_builtin_line(line.name.0) {
+            continue;
         }
+        let property_name = world.book.names.intern(line.name.0);
+        let Some(target) =
+            native_statement_target(world, written.home(), statement.subject, property_name, written.item.loc, diags)
+        else {
+            // The statement pass owns unresolved subjects. This pass only
+            // consumes a custom property after its target kind is known.
+            continue;
+        };
+        let Some(has) = has_named(world, target.kind, line.name.0) else {
+            diags.push(unknown_native_property(world, target, line));
+            continue;
+        };
+        let Some(value) = property_value(world, written.home(), file, line, has, diags) else {
+            continue;
+        };
+        let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
+            ClauseKind::Until(day) => Some(day),
+            _ => None,
+        });
+        if until.is_some_and(|day| day < statement.date) {
+            diags.push(
+                Diagnostic::error("property-until-order", "this property change ends before it begins")
+                    .label(line.loc, "`until` is earlier than the change")
+                    .help("move the end date to the change date or later"),
+            );
+            continue;
+        }
+        let key = (target_key(target.target), has.name, statement.date);
+        if let Some(first) = seen.get(&key).copied() {
+            diags.push(Problem::Twice { what: Twice::PropertyChange, again: line.loc, first }.diagnostic());
+            continue;
+        }
+        seen.insert(key, line.loc);
+        updates.push(PropertyChange {
+            target: target.target,
+            name: has.name,
+            since: statement.date,
+            until,
+            value,
+            loc: line.loc,
+            order,
+        });
+        order += 1;
     }
     stage_changes(world, updates, diags);
 }
@@ -881,49 +852,31 @@ pub(crate) fn declare<'a, 's>(
 /// Reads built-in kind defaults and applies them oldest-ancestor first to the
 /// native entities, commodities and places. Custom property values are read
 /// separately below and remain stored once on their declaring kind.
-fn native_builtins<'a, 's>(
-    world: &mut World<'s>,
-    sites: &'a [crate::sources::Site<'a, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
     let mut kinds_written = Map::default();
     let mut entities_written = Map::default();
     let mut commodities_written = Map::default();
     let mut places_written = Map::default();
     let mut assets_written = Map::default();
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else {
-                continue;
-            };
-            let decl = &file[id];
-            if !matches!(
-                decl.what,
-                DeclKind::Kind | DeclKind::Entity | DeclKind::Commodity | DeclKind::Account | DeclKind::Asset
-            ) {
-                continue;
+    for &written in &collected.decls {
+        let Some(target) = native_target(world, written) else {
+            continue;
+        };
+        match target.target {
+            PropTarget::Kind(id) => {
+                kinds_written.entry(id).or_insert(written);
             }
-            let written = NativeDecl { home: site.home, file, decl, loc: item.loc };
-            let Some(target) = native_target(world, written) else {
-                continue;
-            };
-            match target.target {
-                PropTarget::Kind(id) => {
-                    kinds_written.entry(id).or_insert(written);
-                }
-                PropTarget::Entity(id) => {
-                    entities_written.entry(id).or_insert(written);
-                }
-                PropTarget::Commodity(id) => {
-                    commodities_written.entry(id).or_insert(written);
-                }
-                PropTarget::Place(id) => {
-                    places_written.entry(id).or_insert(written);
-                }
-                PropTarget::Asset(id) => {
-                    assets_written.entry(id).or_insert(written);
-                }
+            PropTarget::Entity(id) => {
+                entities_written.entry(id).or_insert(written);
+            }
+            PropTarget::Commodity(id) => {
+                commodities_written.entry(id).or_insert(written);
+            }
+            PropTarget::Place(id) => {
+                places_written.entry(id).or_insert(written);
+            }
+            PropTarget::Asset(id) => {
+                assets_written.entry(id).or_insert(written);
             }
         }
     }
@@ -967,7 +920,7 @@ fn native_builtins<'a, 's>(
                         commodities[id].set(assign);
                     }
                 }
-                native_system_currencies(world, sites, diags);
+                native_system_currencies(world, collected, diags);
             }
             Target::Entity => {
                 let ids: Vec<_> = world.book.entities.ids().collect();
@@ -1160,80 +1113,55 @@ fn diagnose_asset_cycles(
     }
 }
 
-fn native_system_currencies<'a, 's>(
-    world: &mut World<'s>,
-    sites: &'a [crate::sources::Site<'a, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
     let mut seen: Map<Id<crate::book::System>, Loc> = Map::default();
-    for site in sites {
-        let crate::scope::Home::System(system) = site.home else {
+    for written in &collected.settings {
+        let (Home::System(system), Setting::Currency(unit)) = (written.home(), *written.node) else {
             continue;
         };
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Setting(id) = item.kind else {
-                continue;
-            };
-            let Setting::Currency(unit) = file[id] else {
-                continue;
-            };
-            if let Some(first) = seen.insert(system, item.loc) {
-                diags.push(Problem::Twice { what: Twice::SystemCurrency, again: item.loc, first }.diagnostic());
-                continue;
-            }
-            let word = Word::of(file, unit.0);
-            match world.commodity_of(word) {
-                Ok(currency) => world.book.systems[system].currency = Some(currency),
-                Err(problem) => diags.push(problem),
-            }
+        let at = written.item.loc;
+        if let Some(first) = seen.insert(system, at) {
+            diags.push(Problem::Twice { what: Twice::SystemCurrency, again: at, first }.diagnostic());
+            continue;
+        }
+        match world.commodity_of(Word::of(written.file(), unit.0)) {
+            Ok(currency) => world.book.systems[system].currency = Some(currency),
+            Err(problem) => diags.push(problem),
         }
     }
 }
 
 /// Completes each system's exchange-rate policy after params have been
 /// declared, so `rates param NAME` resolves with the system's visibility.
-pub(crate) fn system_rates<'a, 's>(
-    world: &mut World<'s>,
-    sites: &'a [crate::sources::Site<'a, 's>],
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
     let mut seen: Map<Id<crate::book::System>, Loc> = Map::default();
-    for site in sites {
-        let crate::scope::Home::System(system) = site.home else {
+    for written in &collected.settings {
+        let (Home::System(system), Setting::Rates(policy)) = (written.home(), *written.node) else {
             continue;
         };
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Setting(id) = item.kind else {
-                continue;
-            };
-            let Setting::Rates(policy) = file[id] else {
-                continue;
-            };
-            if let Some(first) = seen.insert(system, item.loc) {
-                diags.push(Problem::Twice { what: Twice::SystemRates, again: item.loc, first }.diagnostic());
-                continue;
-            }
-            let policy = match policy {
-                Rates::Spot => Some(RatePolicy::Spot),
-                Rates::Param(name) => {
-                    let word = Word::of(file, name.0);
-                    match world.seek_param(site.home, word) {
-                        Ok(Some(param)) => Some(RatePolicy::Param(param)),
-                        Ok(None) => {
-                            diags.push(world.missing_param(site.home, word));
-                            None
-                        }
-                        Err(problem) => {
-                            diags.push(problem);
-                            None
-                        }
+        let at = written.item.loc;
+        if let Some(first) = seen.insert(system, at) {
+            diags.push(Problem::Twice { what: Twice::SystemRates, again: at, first }.diagnostic());
+            continue;
+        }
+        let policy = match policy {
+            Rates::Spot => Some(RatePolicy::Spot),
+            Rates::Param(name) => {
+                let word = Word::of(written.file(), name.0);
+                match world.seek_param(written.home(), word) {
+                    Ok(Some(param)) => Some(RatePolicy::Param(param)),
+                    Ok(None) => {
+                        diags.push(world.missing_param(written.home(), word));
+                        None
+                    }
+                    Err(problem) => {
+                        diags.push(problem);
+                        None
                     }
                 }
-            };
-            world.book.systems[system].rates = policy;
-        }
+            }
+        };
+        world.book.systems[system].rates = policy;
     }
 }
 
@@ -1416,15 +1344,15 @@ fn dimension_name(world: &World<'_>, dim: Dim<Id<Commodity>>) -> String {
     }
 }
 
-fn native_target(world: &World<'_>, written: NativeDecl<'_, '_>) -> Option<NativeTarget> {
-    let word = Word { text: written.decl.name.0, loc: written.loc };
-    let found = match written.decl.what {
+fn native_target(world: &World<'_>, written: Written<'_, '_, Decl<'_>>) -> Option<NativeTarget> {
+    let word = Word { text: written.node.name.0, loc: written.item.loc };
+    let found = match written.node.what {
         DeclKind::Account => world.place(word).ok().map(|id| NativeTarget {
             target: PropTarget::Place(id),
             kind: world.book.places[id].kind,
             sort: world.book.kinds[world.book.places[id].kind].sort,
         }),
-        DeclKind::Entity => world.entity(written.home, word).ok().map(|id| NativeTarget {
+        DeclKind::Entity => world.entity(written.home(), word).ok().map(|id| NativeTarget {
             target: PropTarget::Entity(id),
             kind: world.book.entities[id].kind,
             sort: world.book.kinds[world.book.entities[id].kind].sort,
@@ -1439,7 +1367,7 @@ fn native_target(world: &World<'_>, written: NativeDecl<'_, '_>) -> Option<Nativ
             kind: world.book.assets[id].kind,
             sort: world.book.kinds[world.book.assets[id].kind].sort,
         }),
-        DeclKind::Kind => world.kind(written.home, word).ok().map(|id| NativeTarget {
+        DeclKind::Kind => world.kind(written.home(), word).ok().map(|id| NativeTarget {
             target: PropTarget::Kind(id),
             kind: id,
             sort: world.book.kinds[id].sort,

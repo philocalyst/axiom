@@ -4,9 +4,10 @@
 //! measure and entity kinds. This stage creates the trees and resolves parents.
 
 use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Tree};
-use axiom_syntax::{DeclKind, ItemKind};
+use axiom_syntax::DeclKind;
 
 use crate::book::{Class, Kind, Miss, Sort, System};
+use crate::collect::Collected;
 use crate::errors::{Candidate, Word};
 use crate::names::Scoped;
 use crate::problem::{Noun, Problem, Unused};
@@ -50,8 +51,8 @@ fn draft<'s>(names: &mut Interner<'s>, name: &'s str, sort: Sort) -> Kind {
 /// Builds the typed kind hierarchy directly from borrowed S5 items. Draft
 /// indices let forward parents resolve before the tree is frozen; `Tree::build`
 /// then assigns the final pre-order ids once.
-pub(crate) fn declare_sites<'a, 's>(
-    sites: &[crate::sources::Site<'a, 's>],
+pub(crate) fn declare_sites<'s>(
+    collected: &Collected<'_, 's>,
     names: &mut Interner<'s>,
     systems: &Tree<System>,
     scopes: &Scopes,
@@ -84,46 +85,37 @@ pub(crate) fn declare_sites<'a, 's>(
     let mut written: Vec<(&axiom_syntax::File<'s>, &axiom_syntax::Decl<'s>, Home)> = Vec::new();
     let mut draft_of = Vec::new();
 
-    for site in sites {
-        let file = &site.source.file;
-        for item in &file.items {
-            let ItemKind::Decl(id) = item.kind else { continue };
-            let decl = &file[id];
-            if decl.what != DeclKind::Kind {
-                continue;
-            }
-            let name = decl.name.0;
-            written.push((file, decl, site.home));
-            if let Some(&first) = duplicate_of.get(&(site.home, name)) {
-                let (word, earlier) = (Word::of(file, name), drafts[first].loc);
-                diags.push(Problem::Duplicate { noun: Noun::Kind, word, first: earlier }.diagnostic());
-                draft_of.push(first);
-                continue;
-            }
-            if let Some(first) = ROOTS.iter().position(|&(root, _)| root == name) {
-                diags.push(
-                    Problem::Duplicate { noun: Noun::Kind, word: Word::of(file, name), first: None }.diagnostic(),
-                );
-                duplicate_of.insert((site.home, name), first);
-                draft_of.push(first);
-                continue;
-            }
-
-            let mut kind = draft(names, name, Sort::Thing);
-            kind.system = match site.home {
-                Home::System(system) => Some(system),
-                Home::Project | Home::Builtin => None,
-            };
-            kind.doc = item.doc.map(|doc| names.intern(doc.0));
-            kind.loc = Some(file.loc(name));
-            let at = drafts.len();
-            duplicate_of.insert((site.home, name), at);
-            drafts.push(kind);
-            homes.push(site.home);
-            parents.push(None);
-            broken.push(false);
-            draft_of.push(at);
+    for kind_decl in collected.decls_of(DeclKind::Kind) {
+        let (file, decl, home) = (kind_decl.file(), kind_decl.node, kind_decl.home());
+        let name = decl.name.0;
+        written.push((file, decl, home));
+        if let Some(&first) = duplicate_of.get(&(home, name)) {
+            let (word, earlier) = (Word::of(file, name), drafts[first].loc);
+            diags.push(Problem::Duplicate { noun: Noun::Kind, word, first: earlier }.diagnostic());
+            draft_of.push(first);
+            continue;
         }
+        if let Some(first) = ROOTS.iter().position(|&(root, _)| root == name) {
+            diags.push(Problem::Duplicate { noun: Noun::Kind, word: Word::of(file, name), first: None }.diagnostic());
+            duplicate_of.insert((home, name), first);
+            draft_of.push(first);
+            continue;
+        }
+
+        let mut kind = draft(names, name, Sort::Thing);
+        kind.system = match home {
+            Home::System(system) => Some(system),
+            Home::Project | Home::Builtin => None,
+        };
+        kind.doc = kind_decl.item.doc.map(|doc| names.intern(doc.0));
+        kind.loc = Some(file.loc(name));
+        let at = drafts.len();
+        duplicate_of.insert((home, name), at);
+        drafts.push(kind);
+        homes.push(home);
+        parents.push(None);
+        broken.push(false);
+        draft_of.push(at);
     }
 
     let draft_names: Vec<_> =
@@ -346,8 +338,9 @@ mod native_tests {
         let mut diags = Vec::new();
         let mut names = Interner::default();
         let (sites, systems_tree, systems) = sources::arrange(&sources, &mut names, &mut diags);
-        let scopes = crate::declare::scopes(&sites, &systems, &systems_tree, &mut diags);
-        let kinds = declare_sites(&sites, &mut names, &systems_tree, &scopes, &mut diags);
+        let collected = Collected::of(&sites);
+        let scopes = crate::declare::scopes(&collected, &systems, &systems_tree, &mut diags);
+        let kinds = declare_sites(&collected, &mut names, &systems_tree, &scopes, &mut diags);
         (kinds, diags)
     }
 
