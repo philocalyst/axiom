@@ -1294,7 +1294,7 @@ use std
 entity me : person
   filing single
   lives sample-return
-entity employer : employer
+entity employer
 entity treasury : government
 
 law count-pay
@@ -1445,7 +1445,7 @@ use std
 entity me : person
   filing single
   lives context-return
-entity employer : employer
+entity employer
 entity treasury : government
 
 law year-end-tax
@@ -1456,7 +1456,7 @@ law year-end-tax
 base USD
 use context-return
 entity reserve
-entity grocer : grocer
+entity grocer
 purpose salary : income
   law count-pay
     on flow
@@ -1694,8 +1694,8 @@ fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
 fn native_budget_rows_include_empty_months_and_keep_yearly_caps() {
     const SOURCE: &str = "\
 base USD
-entity grocer : grocer
-entity insurer : insurer
+entity grocer
+entity insurer
 purpose meals : spending
 budget meals 500 USD monthly
 purpose coverage : spending
@@ -1958,7 +1958,7 @@ use std
 entity me : person
   filing single
   lives salary-system
-entity employer : employer
+entity employer
 entity treasury : government
 
 law count-pay
