@@ -6,12 +6,13 @@ use std::borrow::Cow;
 
 use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic, FileId, Id, Qty, calendar::DateLayout};
+use axiom_model::Text;
 use axiom_model::sync::{Column, Fetch, Field, Format, Rule, Shape, Source, Spec};
 use axiom_model::{Book, Purpose};
 
 use crate::amount::amount;
 use crate::cell::{ABSENT, Cell, MemoJoin};
-use crate::csv::Reader as CsvReader;
+use crate::csv::{Broken, Reader as CsvReader};
 use crate::date::iso_day;
 use crate::{Facts, Record, Span, Unit, tagged};
 
@@ -139,7 +140,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         self.format.specs.iter().find(|spec| spec.field == field)
     }
 
-    fn plan(&self, mut locate: impl FnMut(Column) -> Result<usize, Diagnostic>) -> Result<Plan<'f>, Diagnostic> {
+    fn plan(&self, mut locate: impl FnMut(Column) -> Result<usize, RowError>) -> Result<Plan<'f>, RowError> {
         let mut plan = Plan(std::array::from_fn(|_| None));
         for spec in self.format.specs.iter() {
             let slots = spec.places.iter().copied().map(&mut locate).collect::<Result<Vec<_>, _>>()?;
@@ -152,109 +153,73 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         Ok(plan)
     }
 
-    fn rows<'t>(&self, text: &'t str, file: FileId, unit: Unit<'_>, units: &[Unit<'_>], out: &mut Harvest<'t>) {
+    fn rows<'t>(&self, text: &'t str, file: FileId, units: Units, out: &mut Harvest<'t>) {
         let mut csv = CsvReader::new(text);
         let mut cells = Vec::new();
         let Some(first) = csv.next(&mut cells) else {
             return;
         };
-        let header_row =
-            Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book: self.book };
+        let header = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book: self.book };
         if let Err(broken) = first {
-            out.problems.push(header_row.error("bad-csv", broken.what.into(), broken.span, "here"));
+            out.problems.push(header.error("bad-csv", broken.what.into(), broken.span, "here"));
             return;
         }
-        let locate = |column: Column| match column {
-            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
-            Column::Index(_) => Err(Diagnostic::error("bad-format", "columns are counted from 1")),
-            Column::Header(header) => {
-                let name = self.book.text(header);
-                header_row.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(name)).ok_or_else(|| {
-                    let choices: Vec<&str> = header_row.cells.iter().map(|cell| cell.text.as_ref()).collect();
-                    let listed = choices.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ");
-                    let error = header_row
-                        .error(
-                            "no-such-column",
-                            format!("the export has no column \"{name}\""),
-                            header_row.whole,
-                            "the header row",
-                        )
-                        .note(format!("its columns are {listed}"));
-                    match closest(name, choices.iter().copied()) {
-                        Some(near) => error.help(format!("did you mean \"{near}\"?")),
-                        None => error,
-                    }
-                })
-            }
-            Column::Path(_) => Err(Diagnostic::error("bad-format", "a rows format names columns")),
-        };
-        let plan = match self.plan(locate) {
+        let plan = match self.plan(|column| self.in_header(&header, column)) {
             Ok(plan) => plan,
             Err(problem) => {
-                out.problems.push(problem);
+                out.problems.push(*problem);
                 return;
             }
         };
-        let has_headers = self
-            .format
-            .specs
-            .iter()
-            .flat_map(|spec| spec.places.iter())
-            .any(|place| matches!(*place, Column::Header(_)));
-        let dated = plan.of(Field::Date).and_then(|bound| header_row.cell(bound, 0).ok());
-        let dateless = dated.is_none_or(|cell| day_of(cell, self.spec(Field::Date)).is_none());
         let mut more =
-            has_headers || dateless || out.take(Fields { plan: &plan, row: &header_row }.record(unit, units));
+            !self.is_a_record(&plan, &header) || out.take(Fields { plan: &plan, row: &header }.record(units));
         while more {
             let Some(read) = csv.next(&mut cells) else {
                 break;
             };
             let row = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book: self.book };
             let record = match read {
-                Ok(()) => Fields { plan: &plan, row: &row }.record(unit, units),
+                Ok(()) => Fields { plan: &plan, row: &row }.record(units),
                 Err(broken) => Err(row.error("bad-csv", broken.what.into(), broken.span, "here").into()),
             };
             more = out.take(record);
         }
     }
 
-    fn tagged<'t>(
-        &self,
-        record_name: &str,
-        text: &'t str,
-        file: FileId,
-        unit: Unit<'_>,
-        units: &[Unit<'_>],
-        out: &mut Harvest<'t>,
-    ) {
-        let mut paths: Vec<&str> = Vec::new();
-        for spec in self.format.specs.iter() {
-            for place in spec.places.iter().copied() {
-                if let Column::Path(path) = place {
-                    let path = self.book.text(path);
-                    if !paths.contains(&path) {
-                        paths.push(path);
-                    }
-                }
+    /// Where a column is in an export that has a header row: an index counts from 1, and a header is looked for
+    /// in `header`.
+    fn in_header(&self, header: &Row, column: Column) -> Result<usize, RowError> {
+        match column {
+            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
+            Column::Index(_) => Err(bad_format("columns are counted from 1").into()),
+            Column::Header(name) => {
+                let name = self.book.text(name);
+                let found = header.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(name));
+                found.ok_or_else(|| no_such_column(header, name).into())
             }
-            if let Rule::Sign { place: Column::Path(path), .. } = spec.rule {
-                let path = self.book.text(path);
-                if !paths.contains(&path) {
-                    paths.push(path);
-                }
-            }
+            Column::Path(_) => Err(bad_format("a rows format names columns").into()),
         }
-        let locate = |column: Column| match column {
-            Column::Path(path) => {
-                let path = self.book.text(path);
-                Ok(paths.iter().position(|known| *known == path).unwrap_or(0))
+    }
+
+    /// Whether the first row of an export is a record, and not the header: no column is found by its header,
+    /// and the row has a day where the date goes.
+    fn is_a_record(&self, plan: &Plan, first: &Row) -> bool {
+        let dated = plan.of(Field::Date).and_then(|bound| first.cell(bound, 0).ok());
+        !names_a_header(self.format) && dated.is_some_and(|cell| day_of(cell, self.spec(Field::Date)).is_some())
+    }
+
+    fn tagged<'t>(&self, record_name: &str, text: &'t str, file: FileId, units: Units, out: &mut Harvest<'t>) {
+        let paths = distinct_paths(self.book, self.columns());
+        let locate = |column: Column| -> Result<usize, RowError> {
+            match column {
+                Column::Path(path) => Ok(path_slot(self.book, &paths, path)),
+                _ => Err(bad_format("a tagged format names paths").into()),
             }
-            _ => Err(Diagnostic::error("bad-format", "a tagged format names paths")),
         };
         let plan = match self.plan(locate) {
             Ok(plan) => plan,
             Err(problem) => {
-                out.problems.push(problem);
+                out.problems.push(*problem);
                 return;
             }
         };
@@ -269,15 +234,32 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                         whole: found.whole,
                         book: self.book,
                     };
-                    Fields { plan: &plan, row: &row }.record(unit, units)
+                    Fields { plan: &plan, row: &row }.record(units)
                 }
-                Err(broken) => Err(Diagnostic::error("bad-tags", format!("record {}: {}", broken.row, broken.what))
-                    .label(broken.span.loc(file), "here")
-                    .into()),
+                Err(broken) => Err(bad_tags(&broken, file).into()),
             };
             out.take(record)
         });
     }
+
+    /// Every column the format reads, field by field: the places of a field, then where its sign is.
+    fn columns(&self) -> impl Iterator<Item = Column> {
+        self.format.specs.iter().flat_map(|spec| {
+            let sign = match spec.rule {
+                Rule::Sign { place, .. } => Some(place),
+                _ => None,
+            };
+            spec.places.iter().copied().chain(sign)
+        })
+    }
+}
+
+/// What an export's amounts can be in: the unit of the account it is of, and the units the book has, which a
+/// record may name instead.
+#[derive(Clone, Copy)]
+struct Units<'a, 'u> {
+    account: Unit<'u>,
+    book: &'a [Unit<'u>],
 }
 
 /// What the format says of one row or record: where each field is, and the cells to read them from.
@@ -288,10 +270,10 @@ struct Fields<'a, 'r, 't, 'n, 's> {
 
 impl<'t> Fields<'_, '_, 't, '_, '_> {
     /// The record the row holds. Each field is read in the order the faults are reported in.
-    fn record(&self, account_unit: Unit<'_>, units: &[Unit<'_>]) -> Result<Record<'t>, RowError> {
+    fn record(&self, units: Units) -> Result<Record<'t>, RowError> {
         let mut facts = Facts::default();
-        let currency = self.text(Field::Currency)?.filter(|code| !code.eq_ignore_ascii_case(account_unit.name));
-        let unit = self.unit(currency.as_deref(), account_unit, units)?;
+        let currency = self.text(Field::Currency)?.filter(|code| !code.eq_ignore_ascii_case(units.account.name));
+        let unit = self.unit(currency.as_deref(), units)?;
         facts.currency = currency.map(uppercase);
         let day = self.day()?;
         let (gross, fee) = (self.money(Field::Gross, unit)?, self.money(Field::Fee, unit)?);
@@ -327,9 +309,9 @@ impl<'t> Fields<'_, '_, 't, '_, '_> {
     }
 
     /// What the amounts are in: the account's unit, unless the row names a currency the book has.
-    fn unit<'u>(&self, currency: Option<&str>, account: Unit<'u>, units: &[Unit<'u>]) -> Result<Unit<'u>, RowError> {
-        let Some(code) = currency else { return Ok(account) };
-        if let Some(&known) = units.iter().find(|known| known.name.eq_ignore_ascii_case(code)) {
+    fn unit<'u>(&self, currency: Option<&str>, units: Units<'_, 'u>) -> Result<Unit<'u>, RowError> {
+        let Some(code) = currency else { return Ok(units.account) };
+        if let Some(&known) = units.book.iter().find(|known| known.name.eq_ignore_ascii_case(code)) {
             return Ok(known);
         }
         let cell = self.plan.of(Field::Currency).map(|bound| self.row.cell(bound, 0)).transpose()?;
@@ -444,10 +426,10 @@ pub fn read<'t, 'n, 's>(
     units: &[Unit<'_>],
 ) -> (Vec<Record<'t>>, Vec<Diagnostic>) {
     let reader = Reader { format, book };
-    let mut out = Harvest::default();
+    let (mut out, units) = (Harvest::default(), Units { account: unit, book: units });
     match &format.shape {
-        Shape::Rows => reader.rows(text, file, unit, units, &mut out),
-        Shape::Tagged { records } => reader.tagged(book.name(*records), text, file, unit, units, &mut out),
+        Shape::Rows => reader.rows(text, file, units, &mut out),
+        Shape::Tagged { records } => reader.tagged(book.name(*records), text, file, units, &mut out),
     }
     (out.records, out.problems)
 }
@@ -484,12 +466,12 @@ pub fn read_memos<'t, 's>(
     }
     match &format.shape {
         Shape::Rows => read_row_memos(book, format, memo, text, file),
-        Shape::Tagged { records } => read_tagged_memos(book, format, memo, book.name(*records), text, file),
+        Shape::Tagged { records } => read_tagged_memos(book, memo, book.name(*records), text, file),
     }
 }
 
-fn read_row_memos<'t, 's>(
-    book: &Book<'s>,
+fn read_row_memos<'t>(
+    book: &Book<'_>,
     format: &Format,
     memo: &Spec,
     text: &'t str,
@@ -499,50 +481,53 @@ fn read_row_memos<'t, 's>(
     let Some(header) = csv.next(&mut cells) else {
         return Ok(Vec::new());
     };
-    let span = whole(&cells);
     if let Err(broken) = header {
-        return Err(vec![Diagnostic::error("bad-csv", broken.what).label(broken.span.loc(file), "here")]);
+        return Err(vec![bad_csv(&broken, file)]);
     }
-    let first = Row { number: csv.row, file, what: "row", cells: &cells, whole: span, book };
-    let locate = |column: Column| -> Result<usize, Diagnostic> {
-        match column {
-            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
-            Column::Index(_) => Err(Diagnostic::error("bad-format", "columns are counted from 1")),
-            Column::Header(header) => {
-                first.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(book.text(header))).ok_or_else(|| {
-                    Diagnostic::error("no-such-column", format!("the export has no column \"{}\"", book.text(header)))
-                        .label(first.whole.loc(file), "the header row")
-                })
-            }
-            Column::Path(_) => Err(Diagnostic::error("bad-format", "a rows format names columns")),
-        }
-    };
-    let memo_slots =
-        memo.places.iter().copied().map(locate).collect::<Result<Vec<_>, _>>().map_err(|problem| vec![problem])?;
-    let date_spec = format.specs.iter().find(|spec| spec.field == Field::Date);
-    let date_slot = date_spec
-        .and_then(|spec| spec.places.first().copied())
-        .map(locate)
-        .transpose()
-        .map_err(|problem| vec![problem])?;
-    let has_headers =
-        format.specs.iter().flat_map(|spec| spec.places.iter()).any(|place| matches!(place, Column::Header(_)));
-    let first_is_record = !has_headers
-        && date_slot.and_then(|slot| first.cells.get(slot)).is_some_and(|cell| day_of(cell, date_spec).is_some());
+    let first = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book };
+    let slots = memo.places.iter().map(|&column| header_slot(book, &first, column)).collect::<Result<Vec<_>, _>>()?;
     let mut memos = Vec::new();
-    if first_is_record {
-        take_row_memo(&first, &memo_slots, &mut memos)?;
+    if first_row_is_a_record(book, format, &first)? {
+        take_row_memo(&first, &slots, &mut memos)?;
     }
     while let Some(read) = csv.next(&mut cells) {
         let row = Row { number: csv.row, file, what: "row", cells: &cells, whole: whole(&cells), book };
         match read {
-            Ok(()) => take_row_memo(&row, &memo_slots, &mut memos)?,
-            Err(broken) => {
-                return Err(vec![Diagnostic::error("bad-csv", broken.what).label(broken.span.loc(file), "here")]);
-            }
+            Ok(()) => take_row_memo(&row, &slots, &mut memos)?,
+            Err(broken) => return Err(vec![bad_csv(&broken, file)]),
         }
     }
     Ok(memos)
+}
+
+/// Where a column is in an export whose first row is `first`: an index counts from 1, and a header is looked for
+/// in the row.
+fn header_slot(book: &Book<'_>, first: &Row, column: Column) -> Result<usize, Vec<Diagnostic>> {
+    let problem = |diagnostic: Diagnostic| vec![diagnostic];
+    match column {
+        Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
+        Column::Index(_) => Err(problem(bad_format("columns are counted from 1"))),
+        Column::Header(header) => {
+            let name = book.text(header);
+            first.cells.iter().position(|cell| cell.text.eq_ignore_ascii_case(name)).ok_or_else(|| {
+                let missing = format!("the export has no column \"{name}\"");
+                problem(
+                    Diagnostic::error("no-such-column", missing).label(first.whole.loc(first.file), "the header row"),
+                )
+            })
+        }
+        Column::Path(_) => Err(problem(bad_format("a rows format names columns"))),
+    }
+}
+
+/// Whether the first row of an export is a record, and not the header: no column is found by its header, and
+/// the row has a day where the date goes.
+fn first_row_is_a_record(book: &Book<'_>, format: &Format, first: &Row) -> Result<bool, Vec<Diagnostic>> {
+    let date = format.specs.iter().find(|spec| spec.field == Field::Date);
+    let slot = date.and_then(|spec| spec.places.first().copied()).map(|column| header_slot(book, first, column));
+    let slot = slot.transpose()?;
+    let dated = slot.and_then(|slot| first.cells.get(slot)).is_some_and(|cell| day_of(cell, date).is_some());
+    Ok(!names_a_header(format) && dated)
 }
 
 fn take_row_memo<'t>(
@@ -568,64 +553,108 @@ fn take_row_memo<'t>(
     Ok(())
 }
 
-fn read_tagged_memos<'t, 's>(
-    book: &Book<'s>,
-    _format: &Format,
+fn read_tagged_memos<'t>(
+    book: &Book<'_>,
     memo: &Spec,
     record_name: &str,
     text: &'t str,
     file: FileId,
 ) -> Result<Vec<Cow<'t, str>>, Vec<Diagnostic>> {
-    let mut paths = Vec::with_capacity(memo.places.len());
-    for place in memo.places.iter().copied() {
-        let Column::Path(path) = place else {
-            return Err(vec![Diagnostic::error("bad-format", "a tagged format names paths")]);
-        };
-        let path = book.text(path);
-        if !paths.contains(&path) {
-            paths.push(path);
-        }
+    if !memo.places.iter().all(|place| matches!(place, Column::Path(_))) {
+        return Err(vec![bad_format("a tagged format names paths")]);
     }
+    let paths = distinct_paths(book, memo.places.iter().copied());
     let slots: Vec<usize> = memo
         .places
         .iter()
-        .map(|place| {
-            let Column::Path(path) = place else {
-                return Err(Diagnostic::error("bad-format", "a tagged format names paths"));
-            };
-            Ok(paths.iter().position(|known| *known == book.text(*path)).unwrap_or(0))
+        .filter_map(|place| match place {
+            Column::Path(path) => Some(path_slot(book, &paths, *path)),
+            _ => None,
         })
-        .collect::<Result<_, _>>()
-        .map_err(|problem| vec![problem])?;
+        .collect();
     let mut memos = Vec::new();
     let mut problems = Vec::new();
     tagged::scan(text, record_name, &paths, |found| match found {
-        Ok(found) => {
-            let mut joined = MemoJoin::default();
-            for &slot in &slots {
-                let Some(cell) = found.cells.get(slot) else {
-                    problems.push(Diagnostic::error(
-                        "bad-tags",
-                        "the tagged record has fewer cells than the format requests",
-                    ));
-                    return false;
-                };
-                joined.push(cell);
+        Ok(found) => match take_tagged_memo(found.cells, &slots, &mut memos) {
+            Ok(()) => true,
+            Err(problem) => {
+                problems.push(problem);
+                false
             }
-            if let Some((memo, _)) = joined.finish() {
-                memos.push(memo);
-            }
-            true
-        }
+        },
         Err(broken) => {
-            problems.push(
-                Diagnostic::error("bad-tags", format!("record {}: {}", broken.row, broken.what))
-                    .label(broken.span.loc(file), "here"),
-            );
+            problems.push(bad_tags(&broken, file));
             false
         }
     });
     if problems.is_empty() { Ok(memos) } else { Err(problems) }
+}
+
+fn take_tagged_memo<'t>(cells: &[Cell<'t>], slots: &[usize], memos: &mut Vec<Cow<'t, str>>) -> Result<(), Diagnostic> {
+    let mut joined = MemoJoin::default();
+    for &slot in slots {
+        let Some(cell) = cells.get(slot) else {
+            return Err(Diagnostic::error("bad-tags", "the tagged record has fewer cells than the format requests"));
+        };
+        joined.push(cell);
+    }
+    if let Some((memo, _)) = joined.finish() {
+        memos.push(memo);
+    }
+    Ok(())
+}
+
+/// Whether any column of the format is found by its header.
+fn names_a_header(format: &Format) -> bool {
+    format.specs.iter().flat_map(|spec| spec.places.iter()).any(|place| matches!(place, Column::Header(_)))
+}
+
+/// The paths among `columns`, each once, in the order they are first named.
+fn distinct_paths<'b>(book: &'b Book<'_>, columns: impl Iterator<Item = Column>) -> Vec<&'b str> {
+    let mut paths = Vec::new();
+    for column in columns {
+        if let Column::Path(path) = column {
+            let path = book.text(path);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
+/// Where `path` is among the paths a tagged export is read for.
+fn path_slot(book: &Book<'_>, paths: &[&str], path: Text) -> usize {
+    let path = book.text(path);
+    paths.iter().position(|known| *known == path).unwrap_or(0)
+}
+
+fn bad_format(message: &'static str) -> Diagnostic {
+    Diagnostic::error("bad-format", message)
+}
+
+/// A row of an export that could not be split into cells.
+fn bad_csv(broken: &Broken, file: FileId) -> Diagnostic {
+    Diagnostic::error("bad-csv", broken.what).label(broken.span.loc(file), "here")
+}
+
+/// A record of an export that could not be read for its tags.
+fn bad_tags(broken: &Broken, file: FileId) -> Diagnostic {
+    Diagnostic::error("bad-tags", format!("record {}: {}", broken.row, broken.what))
+        .label(broken.span.loc(file), "here")
+}
+
+/// The header row has no column called `name`: what it has instead, and the nearest of those.
+fn no_such_column(header: &Row, name: &str) -> Diagnostic {
+    let choices: Vec<&str> = header.cells.iter().map(|cell| cell.text.as_ref()).collect();
+    let listed = choices.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ");
+    let headline = format!("the export has no column \"{name}\"");
+    let error = header.error("no-such-column", headline, header.whole, "the header row");
+    let error = error.note(format!("its columns are {listed}"));
+    match closest(name, choices.iter().copied()) {
+        Some(near) => error.help(format!("did you mean \"{near}\"?")),
+        None => error,
+    }
 }
 
 pub fn date_layout(format: &Format) -> Option<&DateLayout> {
