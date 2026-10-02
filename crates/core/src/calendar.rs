@@ -386,6 +386,28 @@ impl fmt::Display for Window {
     }
 }
 
+/// The calendar quarter `n` quarters on from the one `day` is in, or before it when `n` is negative. Total like
+/// [`Window::containing`]: where the calendar gives out the quarter is cut short rather than wrong.
+pub fn quarter(day: Day, n: i32) -> Days {
+    let (year, month, _) = day.ymd();
+    let first = Day::from_ymd(year, (month - 1) / 3 * 3 + 1, 1).unwrap_or(day);
+    let start = first.checked_add(Span::months(n.saturating_mul(3))).unwrap_or(first);
+    let last = start.checked_add(Span::months(3)).map_or(Day::MAX, |after| Day(after.0 - 1));
+    Days { first: start, last }
+}
+
+/// The latest anniversary of `start` not after `day`, with how many years on from `start` it is (negative before
+/// it). The 29th of February has its anniversaries on the 28th in a year without one. `None` where the calendar
+/// gives out, as it does counting from [`Day::MIN`].
+pub fn anniversary(start: Day, day: Day) -> Option<(Day, i32)> {
+    let years = day.year().checked_sub(start.year())?;
+    let after = |years: i32| start.checked_add(Span::months(years.checked_mul(12)?));
+    match after(years)? {
+        candidate if candidate <= day => Some((candidate, years)),
+        _ => Some((after(years.checked_sub(1)?)?, years - 1)),
+    }
+}
+
 /// The share of `qty`, spread evenly per day over `over`, that falls in
 /// `within`. What has been recognized by the end of each day is rounded once,
 /// and a share is the difference of two such values, so the shares of a
@@ -937,5 +959,31 @@ mod tests {
         let (year, month, date) = Day::MIN.ymd();
         assert!(year < -999_999, "the full-range fallback must be exercised");
         assert_eq!(checked_day(year, month, date), Some(Day::MIN));
+    }
+    #[test]
+    fn a_quarter_is_three_months_from_the_first_of_the_one_a_day_is_in() {
+        assert_eq!(quarter(day(2026, 5, 17), 0), days(day(2026, 4, 1), day(2026, 6, 30)));
+        assert_eq!(quarter(day(2026, 5, 17), -1), days(day(2026, 1, 1), day(2026, 3, 31)));
+        assert_eq!(quarter(day(2026, 1, 3), -1), days(day(2025, 10, 1), day(2025, 12, 31)));
+        assert_eq!(quarter(day(2026, 12, 31), 1), days(day(2027, 1, 1), day(2027, 3, 31)));
+        assert_eq!(quarter(Day::MAX, 0).last(), Day::MAX, "cut short, not wrong, where the calendar gives out");
+    }
+
+    #[test]
+    fn an_anniversary_clamps_the_leap_day_and_counts_years() {
+        let leap = day(2024, 2, 29);
+        assert_eq!(anniversary(leap, day(2025, 2, 27)), Some((leap, 0)));
+        assert_eq!(anniversary(leap, day(2025, 2, 28)), Some((day(2025, 2, 28), 1)));
+        assert_eq!(anniversary(leap, day(2028, 2, 29)), Some((day(2028, 2, 29), 4)));
+        assert_eq!(anniversary(day(2026, 6, 1), day(2026, 3, 1)), Some((day(2025, 6, 1), -1)));
+        assert_eq!(anniversary(day(2026, 1, 1), Day::MIN), None, "a day the calendar has no years for");
+    }
+
+    #[test]
+    fn a_sum_past_the_calendar_is_none_not_a_panic() {
+        assert_eq!(day(2026, 1, 31).checked_add(Span::months(1)), Some(day(2026, 2, 28)));
+        assert_eq!(day(2026, 1, 1).checked_add(Span::months(12_000_000)), None);
+        assert_eq!(Day::MIN.checked_add(Span::months(1)), None);
+        assert_eq!(Day::MAX.checked_add(Span::days(1)), None);
     }
 }

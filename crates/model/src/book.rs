@@ -8,7 +8,7 @@
 
 use std::cmp::Ordering;
 
-use axiom_core::day::days_in_month;
+use axiom_core::calendar::Window;
 use axiom_core::{
     Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
 };
@@ -801,10 +801,23 @@ pub enum ContractCoverage {
 pub enum ForecastError {
     OutsideContract(Day),
     Waived(Day),
-    MissingInput { input: Sym, day: Day },
-    MissingIndex { param: Id<Param>, day: Day },
-    InvalidIndex { param: Id<Param>, day: Day },
-    IndexFault { param: Id<Param>, day: Day, fault: Fault },
+    MissingInput {
+        input: Sym,
+        day: Day,
+    },
+    MissingIndex {
+        param: Id<Param>,
+        day: Day,
+    },
+    InvalidIndex {
+        param: Id<Param>,
+        day: Day,
+    },
+    IndexFault {
+        param: Id<Param>,
+        day: Day,
+        fault: Fault,
+    },
     InvalidRate,
     UnresolvedAmount(Day),
     ConflictingRecognition(Day),
@@ -812,7 +825,12 @@ pub enum ForecastError {
     UnsupportedProration(Day),
     MissingTemplate(Day),
     UnsupportedLoan(Day),
-    UnsupportedFeature { feature: ForecastFeature, day: Day },
+    UnsupportedFeature {
+        feature: ForecastFeature,
+        day: Day,
+    },
+    /// A ratio past what `Ratio` holds (an escalation compounded over the years from a contract with no start,
+    /// which counts from `Day::MIN`: K5 removes that anchor), or a span that runs off the calendar.
     Overflow,
 }
 
@@ -907,11 +925,12 @@ impl Contract {
                 if yearly.is_negative() {
                     return Err(ForecastError::InvalidRate);
                 }
-                ratio_pow(yearly, anniversary_count(self.days.first(), day)?)
+                let (_, years) = calendar::anniversary(self.days.first(), day).ok_or(ForecastError::Overflow)?;
+                ratio_pow(yearly, u32::try_from(years).map_err(|_| ForecastError::Overflow)?)
             }
             Some(Escalation::Indexed(param)) => {
                 let first = self.days.first();
-                let anniversary = anniversary_on(first, day)?;
+                let (anniversary, _) = calendar::anniversary(first, day).ok_or(ForecastError::Overflow)?;
                 let base = index_at(book, param, first)?;
                 let current = index_at(book, param, anniversary)?;
                 current.checked_div(base).ok_or(ForecastError::Overflow)
@@ -954,7 +973,7 @@ impl Contract {
             return Ok(period);
         }
         let shift = day.0.checked_sub(template.day.0).ok_or(ForecastError::Overflow)?;
-        move_days(template.recognized, shift)
+        Ok(template.recognized.moved(shift))
     }
 
     fn recognition_period_for_schedule(&self, schedule: ScheduleKind, day: Day) -> Result<Option<Days>, ForecastError> {
@@ -963,10 +982,10 @@ impl Contract {
             return Err(ForecastError::ConflictingRecognition(day));
         }
         match (terms.period, terms.covers) {
-            (Some(Relative::Last(period)), None) => Ok(Some(previous_window(period, day)?)),
-            (Some(Relative::LastQuarter), None) => Ok(Some(quarter_window(day, true)?)),
-            (None, Some(Coverage::Calendar(period))) => Ok(Some(calendar_window(period, day)?)),
-            (None, Some(Coverage::Quarter)) => Ok(Some(quarter_window(day, false)?)),
+            (Some(Relative::Last(period)), None) => Ok(Some(Window::containing(period, day).previous().days())),
+            (Some(Relative::LastQuarter), None) => Ok(Some(calendar::quarter(day, -1))),
+            (None, Some(Coverage::Calendar(period))) => Ok(Some(Window::containing(period, day).days())),
+            (None, Some(Coverage::Quarter)) => Ok(Some(calendar::quarter(day, 0))),
             (None, Some(Coverage::Span(span))) => Ok(Some(covered_span(day, span)?)),
             (None, None) => Ok(None),
             (Some(_), Some(_)) => Err(ForecastError::ConflictingRecognition(day)),
@@ -1073,25 +1092,6 @@ fn same_flow_kind(a: &Flow, b: &Flow) -> bool {
         && same_purpose
 }
 
-fn anniversary_count(start: Day, day: Day) -> Result<u32, ForecastError> {
-    let anniversary = anniversary_on(start, day)?;
-    let years = anniversary.ymd().0.checked_sub(start.ymd().0).ok_or(ForecastError::Overflow)?;
-    u32::try_from(years).map_err(|_| ForecastError::Overflow)
-}
-
-/// The latest anniversary not after `day`, clamping Feb 29 in non-leap years.
-fn anniversary_on(start: Day, day: Day) -> Result<Day, ForecastError> {
-    let year_delta = day.ymd().0.checked_sub(start.ymd().0).ok_or(ForecastError::Overflow)?;
-    let month_delta = year_delta.checked_mul(12).ok_or(ForecastError::Overflow)?;
-    let candidate = add_months(start, month_delta)?;
-    if candidate <= day {
-        Ok(candidate)
-    } else {
-        let previous = month_delta.checked_sub(12).ok_or(ForecastError::Overflow)?;
-        add_months(start, previous)
-    }
-}
-
 fn ratio_pow(mut base: Ratio, mut exponent: u32) -> Result<Ratio, ForecastError> {
     let mut result = Ratio::ONE;
     while exponent > 0 {
@@ -1106,18 +1106,10 @@ fn ratio_pow(mut base: Ratio, mut exponent: u32) -> Result<Ratio, ForecastError>
     Ok(result)
 }
 
+/// The index `param` stood at on `day`: its latest row at or before it that has no keys.
 fn index_at(book: &Book<'_>, param: Id<Param>, day: Day) -> Result<Ratio, ForecastError> {
-    let Some(param_data) = book.params.get(param) else {
-        return Err(ForecastError::MissingIndex { param, day });
-    };
-    let Some(row) = param_data
-        .rows
-        .iter()
-        .filter(|row| row.names.is_empty() && row.since.is_none_or(|since| since <= day))
-        .reduce(|best, row| if row.since > best.since { row } else { best })
-    else {
-        return Err(ForecastError::MissingIndex { param, day });
-    };
+    let missing = ForecastError::MissingIndex { param, day };
+    let row = book.params.get(param).and_then(|data| data.row(day, &[])).ok_or(missing)?;
     match row.value {
         Value::Num(value) if value > Ratio::ZERO => Ok(value),
         Value::Fault(fault) => Err(ForecastError::IndexFault { param, day, fault }),
@@ -1134,66 +1126,12 @@ fn prorated_share(contract: Days, period: Days) -> Result<Ratio, ForecastError> 
     Ratio::new(i128::from(part), i128::from(whole)).ok_or(ForecastError::Overflow)
 }
 
-fn calendar_window(period: Period, day: Day) -> Result<Days, ForecastError> {
-    let (year, month, _) = day.ymd();
-    let (first_month, last_month) = match period {
-        Period::Month => (month, month),
-        Period::Year => (1, 12),
-    };
-    let first = Day::from_ymd(year, first_month, 1).ok_or(ForecastError::Overflow)?;
-    let last = Day::from_ymd(year, last_month, days_in_month(year, last_month)).ok_or(ForecastError::Overflow)?;
-    Days::new(first, last).ok_or(ForecastError::Overflow)
-}
-
-fn previous_window(period: Period, day: Day) -> Result<Days, ForecastError> {
-    let first = calendar_window(period, day)?.first();
-    let months = period.months().checked_neg().ok_or(ForecastError::Overflow)?;
-    calendar_window(period, add_months(first, months)?)
-}
-
-fn quarter_window(day: Day, previous: bool) -> Result<Days, ForecastError> {
-    let (year, month, _) = day.ymd();
-    let first_month = ((month - 1) / 3) * 3 + 1;
-    let first = Day::from_ymd(year, first_month, 1).ok_or(ForecastError::Overflow)?;
-    let start = if previous { add_months(first, -3)? } else { first };
-    let after = add_months(start, 3)?;
-    let last = after.0.checked_sub(1).map(Day).ok_or(ForecastError::Overflow)?;
-    Days::new(start, last).ok_or(ForecastError::Overflow)
-}
-
 fn covered_span(start: Day, span: Span) -> Result<Days, ForecastError> {
-    let after = add_span(start, span)?;
+    let after = start.checked_add(span).ok_or(ForecastError::Overflow)?;
     if after <= start {
         return Err(ForecastError::InvalidCoverage(start));
     }
-    let last = after.0.checked_sub(1).map(Day).ok_or(ForecastError::Overflow)?;
-    Days::new(start, last).ok_or(ForecastError::InvalidCoverage(start))
-}
-
-fn add_months(start: Day, months: i32) -> Result<Day, ForecastError> {
-    add_span(start, Span::months(months))
-}
-
-fn add_span(start: Day, span: Span) -> Result<Day, ForecastError> {
-    let (year, month, date) = start.ymd();
-    let absolute_month = i64::from(year) * 12 + i64::from(month - 1) + i64::from(span.months);
-    let year = i32::try_from(absolute_month.div_euclid(12)).map_err(|_| ForecastError::Overflow)?;
-    let month = u32::try_from(absolute_month.rem_euclid(12) + 1).map_err(|_| ForecastError::Overflow)?;
-    let date = date.min(days_in_month(year, month));
-    let first = Day::from_ymd(year, month, date).ok_or(ForecastError::Overflow)?;
-    let value = i64::from(first.0) + i64::from(span.days);
-    i32::try_from(value).map(Day).map_err(|_| ForecastError::Overflow)
-}
-
-fn move_days(days: Days, shift: i32) -> Result<Days, ForecastError> {
-    let move_bound = |day: Day| {
-        if day == Day::MIN || day == Day::MAX {
-            Ok(day)
-        } else {
-            day.0.checked_add(shift).map(Day).ok_or(ForecastError::Overflow)
-        }
-    };
-    Days::new(move_bound(days.first())?, move_bound(days.last())?).ok_or(ForecastError::Overflow)
+    Days::new(start, Day(after.0 - 1)).ok_or(ForecastError::InvalidCoverage(start))
 }
 
 /// One contract occurrence and the terms that govern its flow template.

@@ -95,11 +95,18 @@ impl Day {
     /// Adds whole months (clamping to month end, so Jan 31 + 1m = Feb 28),
     /// then days.
     pub fn add(self, span: Span) -> Day {
+        self.checked_add(span).expect("the sum is a day")
+    }
+
+    /// [`Day::add`], or `None` when the calendar gives out first: a sum past
+    /// the years there are days for, or a start (`Day::MIN`) that is not a
+    /// date to count months from.
+    pub fn checked_add(self, span: Span) -> Option<Day> {
         let (y, m, d) = self.ymd();
         let months = y as i64 * 12 + (m as i64 - 1) + span.months as i64;
-        let (y, m) = (months.div_euclid(12) as i32, months.rem_euclid(12) as u32 + 1);
-        let clamped = Day::from_ymd(y, m, d.min(days_in_month(y, m))).expect("clamped date exists");
-        clamped.add_days(span.days)
+        let (y, m) = (i32::try_from(months.div_euclid(12)).ok()?, months.rem_euclid(12) as u32 + 1);
+        let clamped = Day::from_ymd(y, m, d.min(days_in_month(y, m)))?;
+        clamped.0.checked_add(span.days).map(Day)
     }
 
     /// The calendar span from `earlier` to `self`: whole months, then days.
