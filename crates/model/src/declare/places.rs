@@ -205,7 +205,6 @@ impl<'x, 's> Nodes<'x, 's> {
             closed: None,
             shares,
             known_as: Box::default(),
-            props: Box::default(),
             doc: None,
             loc: origin.loc,
         };
@@ -307,7 +306,6 @@ fn issuer_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, unit: 
         closed: None,
         shares: Box::default(),
         known_as: Box::default(),
-        props: Box::default(),
         doc: commodity.doc,
         loc: commodity.loc,
     }
@@ -332,7 +330,6 @@ fn tab_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, tab: &Tab
         closed: None,
         shares: Box::default(),
         known_as: Box::default(),
-        props: Box::default(),
         doc: None,
         loc: Some(tab.loc),
     }

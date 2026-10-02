@@ -10,9 +10,10 @@ use std::cmp::Ordering;
 
 use axiom_core::calendar::Window;
 use axiom_core::{
-    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
+    Arena, Day, Days, Dim, Facts, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
 };
 
+use crate::holders::HolderIndex;
 use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Prices, Purposed,
     Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
@@ -45,6 +46,10 @@ pub struct Book<'s> {
     pub kinds: Tree<Kind>,
     /// What every kind's things have, and what each takes.
     pub schema: Schema,
+    /// The things above, numbered for the facts.
+    pub holders: HolderIndex,
+    /// Everything the book says of its things, as steps on days: the values of the slots.
+    pub facts: Facts,
     /// What flows are for: `income`, `spending`, `capital` and the tree beneath
     /// them, pre-ordered so "is groceries food" is an interval test.
     pub purposes: Tree<Purpose>,
@@ -250,8 +255,6 @@ pub struct Place {
     pub shares: Box<[Share]>,
     /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
     pub known_as: Box<[Id<Pattern>]>,
-    /// Own properties first, then defaults inherited from the kind chain.
-    pub props: Props,
     pub doc: Option<Sym>,
     /// `None` for places opened implicitly by a full path.
     pub loc: Option<Loc>,
@@ -310,7 +313,6 @@ pub struct Entity {
     pub books: Books,
     /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
     pub known_as: Box<[Id<Pattern>]>,
-    pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -374,8 +376,6 @@ pub struct Kind {
     pub shares: Box<[Share]>,
     /// The slots this kind declares itself, a run of [`Schema`]'s: its things have these and its ancestors'.
     pub slots: Run<Slot>,
-    /// Defaults for instances: own, then inherited.
-    pub props: Props,
     /// Only this kind's own laws; ancestors' laws are found through the tree.
     pub laws: Box<[Id<Law>]>,
     pub doc: Option<Sym>,
@@ -400,21 +400,6 @@ pub struct Take {
     pub from: Id<Purpose>,
 }
 
-pub type Props = Box<[Prop]>;
-
-/// A property's value from a day: a declaration's, or a statement's
-/// (`06-15 me lives us/ny`, `07-01 flat business 20% for studio`). A thing's
-/// props are sorted by name, then `since`; `until` adds a row that restores
-/// the value before.
-#[derive(Clone, Copy, Debug)]
-pub struct Prop {
-    pub name: Sym,
-    pub value: Value,
-    /// `Day::MIN` for a declaration's.
-    pub since: Day,
-    pub loc: Option<Loc>,
-}
-
 /// A declared relationship together with the line that established it.
 /// Keeping the source beside its resolved value lets diagnostics identify the
 /// actual setting even after declarations have been lowered.
@@ -422,13 +407,6 @@ pub struct Prop {
 pub struct At<T> {
     pub value: T,
     pub loc: Loc,
-}
-
-/// The row of `name` in force on `day`: the latest that has begun, the first
-/// written where two begin together.
-pub fn prop(props: &[Prop], name: Sym, day: Day) -> Option<&Prop> {
-    let begun = props.iter().filter(|prop| prop.name == name && prop.since <= day);
-    begun.reduce(|best, prop| if prop.since > best.since { prop } else { best })
 }
 
 /// A unit of account: `USD`, `VTI`, `BTC`, `HOUSE`.
@@ -444,7 +422,6 @@ pub struct Commodity {
     pub select: Option<Policy>,
     /// `grows 5% yearly`: the valuation model forecasts use.
     pub growth: Option<Ratio>,
-    pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -526,9 +503,8 @@ pub struct Asset {
     /// Its own commodity: one unit, precision 0, named after it.
     pub unit: Id<Commodity>,
     /// `part of building`: a unit of it, a room of it. What is `of` the whole is
-    /// shared among its parts by their measures (`area`), which are props.
+    /// shared among its parts by their measures (`area`), which are slots.
     pub part_of: Option<At<Id<Asset>>>,
-    pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Loc,
 }

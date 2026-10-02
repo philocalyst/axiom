@@ -8,6 +8,8 @@
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
 //! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
 //! | `slots`      | what the things of a kind have: ranges, counts and weights  |
+//! | `holders`    | the things a book says things about, numbered for the facts |
+//! | `said`       | what a book says of a thing: a slot's value on a day        |
 //! | `fill`       | what a line gives a slot: range, count and weights, checked |
 //! | `props`      | property lines, read once and applied down the kind chain   |
 //! | `params`     | dated tables                                                |
@@ -26,6 +28,7 @@ mod collect;
 mod declare;
 mod errors;
 mod fill;
+mod holders;
 mod kinds;
 mod laws;
 mod lower;
@@ -40,6 +43,7 @@ mod props;
 mod purposes;
 mod resolve;
 mod rules;
+mod said;
 mod scope;
 mod slots;
 mod sources;
@@ -50,6 +54,7 @@ mod tests;
 mod values;
 
 pub use book::*;
+pub use holders::{Holder, HolderIndex};
 pub use journal::*;
 pub use law::*;
 pub use slots::{Mult, Range, Schema, Slot, View, Weight};
@@ -85,7 +90,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let mut world = declare::declare(said, &settings, names, systems, &mut diags);
     slots::declare(&mut world, &collected, &mut diags);
     props::declare(&mut world, &collected, &mut diags);
-    world.finish_props();
+    world.freeze_facts();
     params::declare(&mut world, &collected, &mut diags);
     props::system_rates(&mut world, &collected, &mut diags);
     sync_lower::declare(&mut world, &sites, &collected, &mut diags);

@@ -16,9 +16,9 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Arena, Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field, FlowCodes, Func, Law,
-    NodeId, Object, Op, Param, Prop, Purposed, RuntimeDetail, RuntimeFlow, SelectKey, StepKind, Subject, Text, Ty,
-    Value, Var, Window,
+    self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field, FlowCodes, Func,
+    Holder, Law, NodeId, Object, Op, Param, Purposed, RuntimeDetail, RuntimeFlow, SelectKey, StepKind, Subject, Text,
+    Ty, Value, Var, Window,
 };
 
 use crate::assets::PartId;
@@ -823,8 +823,8 @@ impl<'a, 's> Machine<'a, 's> {
     /// From the entity's `born` date to the day of evaluation.
     fn age(&self, entity: Id<Entity>) -> Value {
         let born = self.env.plan.known.born.expect("a law that reads `.age` makes the model intern `born`");
-        match axiom_model::prop(&self.book().entities[entity].props, born, self.ctx.day) {
-            Some(Prop { value: Value::Day(day), .. }) => Value::Span(self.ctx.day.since(*day)),
+        match self.book().own(entity, born, self.ctx.day) {
+            Some(Value::Day(day)) => Value::Span(self.ctx.day.since(day)),
             _ => Value::Fault(Fault::Unset(born)),
         }
     }
@@ -895,11 +895,11 @@ impl<'a, 's> Machine<'a, 's> {
     /// A declared property: the thing's own, else its kind's default.
     fn prop(&self, base: Value, name: Sym) -> Value {
         let book = self.book();
-        let (props, kind, asset_property_applies) = match base {
-            Value::Place(place) => (book.places[place].props.as_ref(), Some(book.places[place].kind), true),
-            Value::Entity(entity) => (book.entities[entity].props.as_ref(), Some(book.entities[entity].kind), true),
-            Value::Unit(unit) => (book.commodities[unit].props.as_ref(), Some(book.commodities[unit].kind), true),
-            Value::Kind(kind) => (&[][..], Some(kind), true),
+        let (own, kind, asset_property_applies) = match base {
+            Value::Place(place) => (Some(Holder::Place(place)), book.places[place].kind, true),
+            Value::Entity(entity) => (Some(Holder::Entity(entity)), book.entities[entity].kind, true),
+            Value::Unit(unit) => (Some(Holder::Commodity(unit)), book.commodities[unit].kind, true),
+            Value::Kind(kind) => (None, kind, true),
             Value::Asset(asset) => {
                 let applies = if let Some(part) = self.ctx.asset_part {
                     let Some((owner, _)) = self.env.world.assets.part(part) else {
@@ -917,32 +917,16 @@ impl<'a, 's> Machine<'a, 's> {
                 } else {
                     true
                 };
-                (book.assets[asset].props.as_ref(), Some(book.assets[asset].kind), applies)
+                (Some(Holder::Asset(asset)), book.assets[asset].kind, applies)
             }
             _ => unreachable!("{TYPED}"),
         };
-        let explicit = axiom_model::prop(props, name, self.ctx.day).map(|property| property.value);
-        if asset_property_applies {
-            if let Some(value) = explicit {
-                if value != Value::Empty {
-                    return value;
-                }
-            }
+        let explicit = own.and_then(|thing| book.own(thing, name, self.ctx.day));
+        match explicit.filter(|_| asset_property_applies).or_else(|| book.by_kind(kind, name, self.ctx.day)) {
+            Some(value) => value,
+            None if explicit.is_some() => Value::Empty,
+            None => Value::Fault(Fault::Unset(name)),
         }
-        if let Some(kind) = kind {
-            for ancestor in book.kinds.lineage(kind) {
-                if let Some(value) = axiom_model::prop(&book.kinds[ancestor].props, name, self.ctx.day)
-                    .map(|property| property.value)
-                    .filter(|&value| value != Value::Empty)
-                {
-                    return value;
-                }
-            }
-        }
-        if !asset_property_applies && explicit.is_some() {
-            return Value::Empty;
-        }
-        Value::Fault(Fault::Unset(name))
     }
 
     /// `limit[year]`: among rows whose name keys equal the lookup's, the latest
@@ -1812,34 +1796,25 @@ entity employer
 
     #[test]
     fn asset_part_context_reads_each_basis_and_limits_asset_properties_to_acquisition() {
-        let fixture = crate::fixture::Fixture::new();
-        let me = fixture.me;
-        let checking = fixture.checking;
-        let usd = fixture.usd;
-        let mut book = fixture.book();
-        let name = book.names.intern("house");
-        let land = book.names.intern("land");
-        let in_service = book.names.intern("in-service");
-        let asset = book.assets.push(Asset {
-            name,
-            kind: book.roots.kinds.thing,
-            owner: me,
-            place: checking,
-            unit: usd,
-            part_of: None,
-            props: vec![
-                Prop { name: land, value: Value::Amount(Amount::new(Qty(12_000), usd)), since: Day::MIN, loc: None },
-                Prop {
-                    name: in_service,
-                    value: Value::Day(Day::from_ymd(2024, 3, 1).unwrap()),
-                    since: Day::MIN,
-                    loc: None,
-                },
-            ]
-            .into(),
-            doc: None,
-            loc: axiom_core::Loc::default(),
-        });
+        let text = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+  has land amount
+  has in-service date optional
+asset house : property
+  land 120 USD
+  in-service 2024-03-01
+";
+        let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
+        assert!(parsed.is_empty(), "{parsed:?}");
+        let (book, diagnostics) =
+            axiom_model::build(&[axiom_model::Source { path: "axiom.ax", file, embedded: false }]);
+        assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+        let (me, usd) = (book.roots.me, book.base);
+        let asset = book.asset("house").unwrap();
+        let land = book.names.get("land").unwrap();
         let plan = Plan::new(&book);
         let mut world = World::new(&book, &plan.watch);
         let origin = axiom_model::RuntimeTxn::journal(Id::new(0)).unwrap();

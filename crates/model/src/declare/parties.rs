@@ -232,7 +232,6 @@ pub(super) fn declare<'a, 's>(
             citizen: Box::default(),
             books: Books::default(),
             known_as: Box::default(),
-            props: Box::default(),
             doc,
             loc,
         }

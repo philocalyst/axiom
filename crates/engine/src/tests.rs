@@ -1586,7 +1586,6 @@ fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
         place,
         unit,
         part_of: None,
-        props: Box::default(),
         doc: None,
         loc: Loc::default(),
     });
@@ -1650,7 +1649,6 @@ fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
         place,
         unit,
         part_of: None,
-        props: Box::default(),
         doc: None,
         loc: Loc::default(),
     });
@@ -1998,7 +1996,6 @@ fn asset_law_scope_contains_each_parts_place_subtree() {
         place: checking,
         unit: usd,
         part_of: None,
-        props: Box::default(),
         doc: None,
         loc: Loc::new(FileId(0), 1, 2),
     });
@@ -2009,7 +2006,6 @@ fn asset_law_scope_contains_each_parts_place_subtree() {
         place: savings,
         unit: usd,
         part_of: Some(At { value: house, loc: Loc::default() }),
-        props: Box::default(),
         doc: None,
         loc: Loc::new(FileId(0), 3, 4),
     });

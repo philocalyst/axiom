@@ -24,18 +24,7 @@ pub(super) fn commodity(
     doc: Option<axiom_core::Sym>,
     loc: Option<axiom_core::Loc>,
 ) -> Commodity {
-    Commodity {
-        symbol,
-        kind,
-        scale,
-        title: None,
-        liquidity: None,
-        select: None,
-        growth: None,
-        props: Box::default(),
-        doc,
-        loc,
-    }
+    Commodity { symbol, kind, scale, title: None, liquidity: None, select: None, growth: None, doc, loc }
 }
 
 /// The commodities written, a USD of two decimals when none is, and the base currency chosen among them.

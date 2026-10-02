@@ -153,6 +153,22 @@ pub(crate) fn receiver(sort: Sort) -> Ty {
 }
 
 impl Schema {
+    /// A schema of slots that take one value each, numbered in the order given and declared by no kind: the slots of
+    /// a book that is built by hand, where nothing is written to declare them. Every sort of thing has them.
+    pub fn of_values(values: impl IntoIterator<Item = (Sym, Ty)>) -> Schema {
+        let mut schema = Schema::default();
+        for (name, ty) in values {
+            let range = Range::Value(ty);
+            let slot = Slot { name, range, mult: Mult::Optional, weight: None, loc: Loc::default() };
+            let id = schema.slots.push(slot);
+            let number = SlotId(schema.first.len() as u32);
+            assert!(schema.numbers.insert(name, number).is_none(), "a slot is declared once");
+            schema.first.push((id, ty));
+            schema.families.push(u8::MAX);
+        }
+        schema
+    }
+
     /// The slots `kind` declares itself.
     pub fn own(&self, kind: &Kind) -> &[Slot] {
         &self.slots[kind.slots]

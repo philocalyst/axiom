@@ -142,7 +142,6 @@ impl Cast {
             citizen: Box::default(),
             books: Books::Cash,
             known_as: Box::default(),
-            props: Box::default(),
             doc: None,
             loc: None,
         });
@@ -172,7 +171,6 @@ impl Cast {
             closed: None,
             shares: Box::default(),
             known_as: Box::default(),
-            props: Box::default(),
             doc: None,
             loc: (!path.starts_with("assets/vault")).then(|| line(1)),
         });
@@ -188,7 +186,6 @@ impl Cast {
                 liquidity: None,
                 select: None,
                 growth: None,
-                props: Box::default(),
                 doc: None,
                 loc: None,
             })
@@ -250,7 +247,6 @@ fn kind(name: Sym) -> Kind {
         sales_tax: None,
         shares: Box::default(),
         slots: axiom_core::Run::default(),
-        props: Box::default(),
         laws: Box::default(),
         doc: None,
         loc: None,
@@ -603,6 +599,8 @@ pub(crate) fn household() -> Household {
         entities: cast.entities,
         kinds: cast.kinds,
         schema: Default::default(),
+        holders: Default::default(),
+        facts: Default::default(),
         purposes,
         systems: cast.systems,
         commodities: cast.commodities,

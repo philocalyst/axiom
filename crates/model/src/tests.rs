@@ -8,8 +8,8 @@ use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
 use axiom_syntax::{Folder, parse};
 
 use crate::{
-    Amount, Book, Conversion, ConversionError, PurposeRoot, RatePolicy, RateSource, Residence, Role, Sort, Source,
-    Value, build, prop,
+    Amount, Book, Conversion, ConversionError, Holder, PurposeRoot, RatePolicy, RateSource, Residence, Role, Sort,
+    Source, Value, build,
 };
 
 const STD: &str = "\
@@ -79,7 +79,7 @@ asset condo : property
 }
 
 #[test]
-fn kind_defaults_inherit_by_reference_and_keep_the_written_source() {
+fn kind_defaults_inherit_by_reference_and_the_nearest_is_the_things() {
     let std = "\
 system std
 kind durable : thing
@@ -106,16 +106,76 @@ asset condo : rental-home
     let child = book.kind("rental-home").unwrap();
     let asset = book.asset("condo").unwrap();
     let name = book.names.get("service-life").unwrap();
-    let parent_default = prop(&book.kinds[parent].props, name, Day::MAX).unwrap();
-    let middle_default = prop(&book.kinds[middle].props, name, Day::MAX).unwrap();
-    let child_default = prop(&book.kinds[child].props, name, Day::MAX).unwrap();
+    let default = |kind| book.own(Holder::Kind(kind), name, Day::MAX);
 
-    assert_eq!(parent_default.value, Value::Num(Ratio::int(30)));
-    assert_eq!(middle_default.value, Value::Num(Ratio::int(24)));
-    assert_eq!(child_default.value, Value::Num(Ratio::int(18)));
-    assert!(parent_default.loc.is_some() && middle_default.loc.is_some() && child_default.loc.is_some());
+    assert_eq!(default(parent), Some(Value::Num(Ratio::int(30))));
+    assert_eq!(default(middle), Some(Value::Num(Ratio::int(24))));
+    assert_eq!(default(child), Some(Value::Num(Ratio::int(18))));
     assert!(book.schema.find(&book.kinds, child, name).is_some(), "a kind has the slots of its ancestors");
-    assert!(book.assets[asset].props.is_empty(), "defaults stay on their kinds");
+    assert_eq!(book.own(asset, name, Day::MAX), None, "defaults stay on their kinds");
+    assert_eq!(book.said(asset, name, Day::MAX), Some(Value::Num(Ratio::int(18))), "and the nearest is its things'");
+}
+
+fn said_by_day(book: &Book, thing: impl Into<Holder>, name: &str, days: &[(i32, u32, u32)]) -> Vec<Option<Value>> {
+    let name = book.names.get(name).unwrap();
+    let thing = thing.into();
+    days.iter().map(|&(year, month, date)| book.said(thing, name, Day::from_ymd(year, month, date).unwrap())).collect()
+}
+
+#[test]
+fn a_change_that_ends_uncovers_the_latest_one_still_in_force() {
+    let std = "\
+system std
+kind flagged : asset
+  has flag bool
+kind currency : commodity
+";
+    let project = "\
+use std
+base USD
+commodity USD : currency
+account a : flagged
+  flag false
+2026-01-01 a now flag true until 2026-01-10
+2026-01-05 a now flag false until 2026-01-06
+";
+    let (book, diagnostics) = build_book(std, project);
+    assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+
+    let said = said_by_day(
+        &book,
+        book.place("a").unwrap(),
+        "flag",
+        &[(2025, 12, 31), (2026, 1, 1), (2026, 1, 5), (2026, 1, 6), (2026, 1, 7), (2026, 1, 10), (2026, 1, 11)],
+    );
+    let (yes, no) = (Some(Value::Bool(true)), Some(Value::Bool(false)));
+    assert_eq!(said, [no, yes, no, no, yes, yes, no], "the outer change returns when the inner one ends");
+}
+
+#[test]
+fn a_change_that_ends_without_a_value_of_the_thing_lets_the_kind_show_through() {
+    let std = "\
+system std
+kind flagged : asset
+  has flag bool
+  flag false
+kind currency : commodity
+";
+    let project = "\
+use std
+base USD
+commodity USD : currency
+account a : flagged
+2026-03-01 a now flag true until 2026-03-07
+";
+    let (book, diagnostics) = build_book(std, project);
+    assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+
+    let (a, name) = (book.place("a").unwrap(), book.names.get("flag").unwrap());
+    let day = |date| Day::from_ymd(2026, 3, date).unwrap();
+    assert_eq!(book.own(a, name, day(1)), Some(Value::Bool(true)));
+    assert_eq!(book.own(a, name, day(8)), None, "the thing says nothing again");
+    assert_eq!(book.said(a, name, day(8)), Some(Value::Bool(false)), "and its kind's default is its own");
 }
 
 #[test]

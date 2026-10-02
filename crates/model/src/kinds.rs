@@ -33,7 +33,6 @@ impl Kind {
             sales_tax: None,
             shares: Box::default(),
             slots: Run::default(),
-            props: Box::default(),
             laws: Box::default(),
             doc: None,
             loc: None,

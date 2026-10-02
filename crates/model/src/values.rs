@@ -1,10 +1,11 @@
 //! Constants: the literal values written in properties, params and laws.
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, Dim, Id, Loc, Qty, Ratio};
+use axiom_core::tagless::Datum;
+use axiom_core::{Diagnostic, Dim, Id, Loc, Qty, Ratio, Tag};
 use axiom_syntax::{Bracket as WrittenBracket, Expr, ExprId, ExprKind, File, Many};
 
-use crate::book::{Bracket, Commodity, Schedule};
+use crate::book::{Amount, Bracket, Commodity, Schedule, Text};
 use crate::declare::World;
 use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
@@ -34,6 +35,60 @@ impl Value {
             Value::Glob(_) => Ty::Glob,
             Value::Flow => Ty::Flow,
             Value::Fault(_) => return None,
+        })
+    }
+}
+
+impl Value {
+    /// The value as a datum, as a fact stores it. `empty` and what is no fact's value (a code, a pattern, a fault)
+    /// have none.
+    pub fn datum(self) -> Option<Datum> {
+        Some(match self {
+            Value::Bool(value) => Datum::of(value),
+            Value::Num(value) => Datum::of(value),
+            Value::Amount(value) => Datum::of((value.qty, value.unit)),
+            Value::Day(value) => Datum::of(value),
+            Value::Span(value) => Datum::of(value),
+            Value::Text(Text::Borrowed(value)) | Value::Name(value) => Datum::of(value),
+            Value::Text(Text::Owned(value)) => Datum::of(value),
+            Value::Place(value) => Datum::of(value),
+            Value::Entity(value) => Datum::of(value),
+            Value::Kind(value) => Datum::of(value),
+            Value::Unit(value) => Datum::of(value),
+            Value::Purpose(value, None) => Datum::of(value),
+            Value::Asset(value) => Datum::of(value),
+            Value::Purpose(_, Some(_))
+            | Value::Empty
+            | Value::Schedule(_)
+            | Value::Code(_)
+            | Value::Glob(_)
+            | Value::Flow
+            | Value::Fault(_) => return None,
+        })
+    }
+
+    /// The value a datum holds, for a slot whose values are of type `ty`: what [`Value::datum`] stored. `None` for a
+    /// type no fact holds, and for a datum that is not of the type.
+    pub fn of(datum: Datum, ty: Ty) -> Option<Value> {
+        Some(match ty {
+            Ty::Bool => Value::Bool(datum.read()?),
+            Ty::Num => Value::Num(datum.read()?),
+            Ty::Amount(_) => {
+                let (qty, unit) = datum.read::<(Qty, Id<Commodity>)>()?;
+                Value::Amount(Amount::new(qty, unit))
+            }
+            Ty::Day => Value::Day(datum.read()?),
+            Ty::Span => Value::Span(datum.read()?),
+            Ty::Text if datum.tag() == Tag::Id => Value::Text(Text::Owned(datum.read()?)),
+            Ty::Text => Value::Text(Text::Borrowed(datum.read()?)),
+            Ty::Name => Value::Name(datum.read()?),
+            Ty::Place => Value::Place(datum.read()?),
+            Ty::Entity => Value::Entity(datum.read()?),
+            Ty::Kind => Value::Kind(datum.read()?),
+            Ty::Unit => Value::Unit(datum.read()?),
+            Ty::Purpose => Value::Purpose(datum.read()?, None),
+            Ty::Asset => Value::Asset(datum.read()?),
+            Ty::Schedule | Ty::Code | Ty::Glob | Ty::Flow | Ty::Empty => return None,
         })
     }
 }

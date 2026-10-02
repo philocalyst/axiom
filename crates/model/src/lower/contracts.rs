@@ -1639,19 +1639,10 @@ fn add_share(total: Ratio, rate: Ratio, loc: Loc, diags: &mut Vec<Diagnostic>) -
 
 fn asset_area(world: &World<'_>, asset: Id<Asset>, day: Day) -> Option<Amount> {
     let area = world.book.names.get("area")?;
-    let asset = &world.book.assets[asset];
-    let own = crate::book::prop(&asset.props, area, day).and_then(|property| match property.value {
+    match world.book.said(asset, area, day)? {
         crate::law::Value::Amount(amount) => Some(amount),
         _ => None,
-    });
-    own.or_else(|| {
-        world.book.kinds.lineage(asset.kind).find_map(|kind| {
-            crate::book::prop(&world.book.kinds[kind].props, area, day).and_then(|property| match property.value {
-                crate::law::Value::Amount(amount) => Some(amount),
-                _ => None,
-            })
-        })
-    })
+    }
 }
 
 #[cfg(test)]

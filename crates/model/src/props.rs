@@ -10,6 +10,7 @@
 //! order their lines need: an amount is only exact once its commodity's
 //! precision is settled.
 
+use axiom_core::tagless::Datum;
 use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, SlotId, Span, Sym, Tree};
 use axiom_syntax::{
     Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting, Statement,
@@ -17,14 +18,13 @@ use axiom_syntax::{
 };
 
 use crate::book::{
-    Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Prop, Purpose, RatePolicy, Residence, Role, Share, Sort,
-    Take,
+    Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Purpose, RatePolicy, Residence, Role, Share, Sort, Take,
 };
 use crate::collect::{Collected, Written};
-use crate::declare::{MAX_SCALE, PropTarget, World};
+use crate::declare::{MAX_SCALE, World};
 use crate::errors::{Reported, Word, article, list, suggest};
-use crate::fill::{self, Filled};
-use crate::law::Value;
+use crate::fill::{self, Filled, Said};
+use crate::holders::Holder;
 use crate::problem;
 use crate::scope::Home;
 use crate::slots::{Range, Slot};
@@ -89,8 +89,6 @@ enum Assign {
     Deferred,
     Claim,
     Basis(Basis),
-    /// A value for a property a kind declared.
-    Prop(Prop),
 }
 
 impl Assign {
@@ -158,16 +156,6 @@ const POLICIES: [(&str, Policy); 4] =
 
 // ─── Applying ───────────────────────────────────────────────────────────────
 
-/// Replaces the property `prop` names, or adds it.
-fn put(props: &mut Box<[Prop]>, prop: Prop) {
-    let mut all = std::mem::take(props).into_vec();
-    match all.iter_mut().find(|held| held.name == prop.name) {
-        Some(held) => *held = prop,
-        None => all.push(prop),
-    }
-    *props = all.into();
-}
-
 impl Kind {
     /// What flows down from `above`, before this kind's own lines say more.
     fn inherit(&mut self, above: &Kind) {
@@ -182,7 +170,6 @@ impl Kind {
         self.sales_tax = self.sales_tax.or(above.sales_tax);
         self.takes = merge_takes(&above.takes, &self.takes);
         self.shares = merge_shares(&above.shares, &self.shares);
-        self.props = above.props.clone();
     }
 
     fn set(&mut self, assign: &Assign) {
@@ -198,7 +185,6 @@ impl Kind {
             Assign::Takes(take) => self.takes = merge_takes(&self.takes, std::slice::from_ref(take)),
             Assign::SalesTax(rate) => self.sales_tax = Some(*rate),
             Assign::Share(share) => self.shares = merge_shares(&self.shares, std::slice::from_ref(share)),
-            Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
         }
     }
@@ -259,7 +245,6 @@ impl Commodity {
             Assign::Select(policy) => self.select = Some(*policy),
             Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Grows(rate) => self.growth = Some(*rate),
-            Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
         }
     }
@@ -275,7 +260,6 @@ impl Entity {
             Assign::Currency(currency) => self.currency = *currency,
             Assign::Citizen(citizen) => self.citizen = citizen.clone(),
             Assign::Books(books) => self.books = *books,
-            Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
         }
     }
@@ -289,7 +273,6 @@ impl Place {
             Assign::Opened(day) => self.opened = Some(*day),
             Assign::Closed(day) => self.closed = Some(*day),
             Assign::Liquidity(span) => self.liquidity = Some(*span),
-            Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
         }
     }
@@ -593,43 +576,45 @@ fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, wor
 
 #[derive(Clone, Copy)]
 struct NativeTarget {
-    target: PropTarget,
+    holder: Holder,
     kind: Id<Kind>,
     sort: Sort,
 }
 
-#[derive(Clone, Copy)]
+/// What a `now PROPERTY VALUE` statement says of a slot, from its day until the day it says, if it says.
 struct PropertyChange {
-    target: PropTarget,
-    name: Sym,
-    since: Day,
-    until: Option<Day>,
-    value: Value,
-    loc: Loc,
+    holder: Holder,
+    slot: SlotId,
+    days: Days,
+    said: Said,
     order: usize,
 }
 
-/// Resolves custom `has` properties and their values directly from the S5 AST.
-/// Kind defaults stay on their kind and are inherited by the law evaluator via
-/// the kind tree; this pass never clones a default into every instance.
+type Seen = Map<(Holder, Sym, Day), Loc>;
+
+/// Resolves the properties written under things, and what each says of the slot it fills, into the facts. A kind's
+/// lines are its things' defaults: they are said of the kind, and the facts look up the kind chain when a thing says
+/// nothing.
 pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
     native_builtins(world, collected, diags);
-    let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
+    let mut seen = Seen::default();
     let mut filled = Filled::default();
     stage_declared_values(world, collected, &mut seen, &mut filled, diags);
     let changes = property_changes(world, collected, &mut seen, diags);
-    stage_changes(world, changes);
+    paint_changes(world, changes);
     missing_roles(world, collected, &filled, diags);
 }
 
-/// The values the property lines of declarations give, from the beginning of time.
+/// The values the property lines of declarations give, from the beginning of time. A slot of several is said once,
+/// whole, however many lines fill it.
 fn stage_declared_values<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    seen: &mut Seen,
     filled: &mut Filled,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let mut sets: Map<(Holder, SlotId), Vec<Datum>> = Map::default();
     for &written in &collected.decls {
         if written.node.what == DeclKind::Purpose {
             continue;
@@ -644,31 +629,53 @@ fn stage_declared_values<'a, 's>(
             let Some(has) = has_named(world, target.kind, line.name.0) else {
                 diags.push(unknown_native_property(world, target, line));
                 // A near miss of a slot's name is an attempt to fill it: the typo is said, and the slot not again.
-                let key = target_key(target.target);
-                filled.extend(near_slot(world, target.kind, line.name.0).map(|number| (key.0, key.1, number)));
+                filled.extend(near_slot(world, target.kind, line.name.0).map(|number| (target.holder, number)));
                 continue;
             };
             // A line that is wrong is still an attempt to fill the slot: it is said, and the slot not again.
-            let key = target_key(target.target);
-            filled.insert((key.0, key.1, has.number));
+            filled.insert((target.holder, has.number));
             let at = fill::At { home: written.home(), file: written.file(), line };
             let Some(filling) = fill::fill(world, &at, &has.slot).or_report(diags) else {
                 continue;
             };
-            // A slot that holds several is stored once the facts are (the next change); one value is a row.
-            if let (true, [value]) = (fill::holds_one(has.slot.mult), &filling.values[..]) {
-                let prop = Prop { name: has.name, value: *value, since: Day::MIN, loc: Some(line.loc) };
-                stage_unique(world, seen, target.target, prop, diags);
+            match filling.said(has.slot.mult) {
+                Said::One(datum) => {
+                    if note_once(world, seen, target.holder, has.name, Day::MIN, line.loc, diags) {
+                        world.paint(target.holder, has.number, Days::ALWAYS, datum);
+                    }
+                }
+                Said::Set(members) => sets.entry((target.holder, has.number)).or_default().extend(members),
             }
         }
     }
+    for ((holder, slot), members) in sets {
+        world.paint_set(holder, slot, Days::ALWAYS, members);
+    }
+}
+
+/// Whether a value is the first said of the slot on the day, and said, if not, to be the second.
+fn note_once(
+    world: &World<'_>,
+    seen: &mut Seen,
+    holder: Holder,
+    name: Sym,
+    day: Day,
+    loc: Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some(first) = seen.get(&(holder, name, day)).copied() else {
+        seen.insert((holder, name, day), loc);
+        return true;
+    };
+    diags.push(problem::filled_twice(world.book.name(name), loc, first));
+    false
 }
 
 /// The changes `now PROPERTY VALUE` statements make, in the order written.
 fn property_changes<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    seen: &mut Seen,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<PropertyChange> {
     let mut changes = Vec::new();
@@ -692,7 +699,7 @@ fn property_change<'a, 's>(
     written: &Written<'a, 's, Statement<'s>>,
     line: &Line<'s>,
     order: usize,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    seen: &mut Seen,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<PropertyChange> {
     let (file, statement) = (written.file(), written.node);
@@ -707,34 +714,38 @@ fn property_change<'a, 's>(
     };
     let at = fill::At { home: written.home(), file, line };
     let filling = fill::fill(world, &at, &has.slot).or_report(diags)?;
-    let [value] = filling.values[..] else { return None };
     let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
         ClauseKind::Until(day) => Some(day),
         _ => None,
     });
-    if until.is_some_and(|day| day < statement.date) {
+    let Some(days) = Days::new(statement.date, until.unwrap_or(Day::MAX)) else {
         diags.push(
             Diagnostic::error("property-until-order", "this property change ends before it begins")
                 .label(line.loc, "`until` is earlier than the change")
                 .help("move the end date to the change date or later"),
         );
         return None;
-    }
-    let key = (target_key(target.target), has.name, statement.date);
+    };
+    let key = (target.holder, has.name, statement.date);
     if let Some(first) = seen.get(&key).copied() {
         diags.push(problem::twice("property change", line.loc, first));
         return None;
     }
     seen.insert(key, line.loc);
-    Some(PropertyChange {
-        target: target.target,
-        name: has.name,
-        since: statement.date,
-        until,
-        value,
-        loc: line.loc,
-        order,
-    })
+    let said = filling.said(has.slot.mult);
+    Some(PropertyChange { holder: target.holder, slot: has.number, days, said, order })
+}
+
+/// Paints the changes over the declarations: a change overrides what it covers from its day, and what held before
+/// resumes when it ends. Day by day, the one begun last is in force, which is the order of painting.
+fn paint_changes(world: &mut World<'_>, mut changes: Vec<PropertyChange>) {
+    changes.sort_by_key(|change| (change.days.first(), change.order));
+    for change in changes {
+        match change.said {
+            Said::One(datum) => world.paint(change.holder, change.slot, change.days, datum),
+            Said::Set(members) => world.paint_set(change.holder, change.slot, change.days, members),
+        }
+    }
 }
 
 /// Reads built-in kind defaults and applies them oldest-ancestor first to the
@@ -761,12 +772,12 @@ fn written_by<'a, 's>(world: &World<'s>, collected: &Collected<'a, 's>) -> Writt
         let Some(target) = native_target(world, written) else {
             continue;
         };
-        match target.target {
-            PropTarget::Kind(id) => by.kinds.entry(id).or_insert(written),
-            PropTarget::Entity(id) => by.entities.entry(id).or_insert(written),
-            PropTarget::Commodity(id) => by.commodities.entry(id).or_insert(written),
-            PropTarget::Place(id) => by.places.entry(id).or_insert(written),
-            PropTarget::Asset(id) => by.assets.entry(id).or_insert(written),
+        match target.holder {
+            Holder::Kind(id) => by.kinds.entry(id).or_insert(written),
+            Holder::Entity(id) => by.entities.entry(id).or_insert(written),
+            Holder::Commodity(id) => by.commodities.entry(id).or_insert(written),
+            Holder::Place(id) => by.places.entry(id).or_insert(written),
+            Holder::Asset(id) => by.assets.entry(id).or_insert(written),
         };
     }
     by
@@ -1094,29 +1105,29 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
 }
 
 impl NativeTarget {
-    fn of(world: &World<'_>, target: PropTarget) -> NativeTarget {
-        let kind = match target {
-            PropTarget::Place(id) => world.book.places[id].kind,
-            PropTarget::Entity(id) => world.book.entities[id].kind,
-            PropTarget::Commodity(id) => world.book.commodities[id].kind,
-            PropTarget::Asset(id) => world.book.assets[id].kind,
-            PropTarget::Kind(id) => id,
+    fn of(world: &World<'_>, holder: Holder) -> NativeTarget {
+        let kind = match holder {
+            Holder::Place(id) => world.book.places[id].kind,
+            Holder::Entity(id) => world.book.entities[id].kind,
+            Holder::Commodity(id) => world.book.commodities[id].kind,
+            Holder::Asset(id) => world.book.assets[id].kind,
+            Holder::Kind(id) => id,
         };
-        NativeTarget { target, kind, sort: world.book.kinds[kind].sort }
+        NativeTarget { holder, kind, sort: world.book.kinds[kind].sort }
     }
 }
 
 fn native_target(world: &World<'_>, written: Written<'_, '_, Decl<'_>>) -> Option<NativeTarget> {
     let word = Word { text: written.node.name.0, loc: written.item.loc };
-    let target = match written.node.what {
-        DeclKind::Account => PropTarget::Place(world.place(word).ok()?),
-        DeclKind::Entity => PropTarget::Entity(world.entity(written.home(), word).ok()?),
-        DeclKind::Commodity => PropTarget::Commodity(world.commodity_of(word).ok()?),
-        DeclKind::Asset => PropTarget::Asset(world.book.asset(word.text)?),
-        DeclKind::Kind => PropTarget::Kind(world.kind(written.home(), word).ok()?),
+    let holder = match written.node.what {
+        DeclKind::Account => Holder::Place(world.place(word).ok()?),
+        DeclKind::Entity => Holder::Entity(world.entity(written.home(), word).ok()?),
+        DeclKind::Commodity => Holder::Commodity(world.commodity_of(word).ok()?),
+        DeclKind::Asset => Holder::Asset(world.book.asset(word.text)?),
+        DeclKind::Kind => Holder::Kind(world.kind(written.home(), word).ok()?),
         DeclKind::Purpose => return None,
     };
-    Some(NativeTarget::of(world, target))
+    Some(NativeTarget::of(world, holder))
 }
 
 /// What a property statement is about: the one thing with a property of that name among those its subject may
@@ -1150,17 +1161,17 @@ fn subject_candidates(world: &World<'_>, home: Home, subject: Subject<'_>, loc: 
     let mut targets = Vec::new();
     match subject {
         Subject::Unit(unit) => {
-            targets.extend(world.commodity_of(Word { text: unit.0, loc }).ok().map(PropTarget::Commodity));
+            targets.extend(world.commodity_of(Word { text: unit.0, loc }).ok().map(Holder::Commodity));
         }
         Subject::Name(subject) => {
             let names = &world.book.names;
             targets.extend(
-                world.book.lookup.places.find(names, subject.0, |_| true).into_ids().into_iter().map(PropTarget::Place),
+                world.book.lookup.places.find(names, subject.0, |_| true).into_ids().into_iter().map(Holder::Place),
             );
             let entities = world.book.lookup.entities.find(names, world.scopes.of(home), subject.0);
-            targets.extend(entities.into_ids().into_iter().map(PropTarget::Entity));
-            targets.extend(world.book.asset(subject.0).map(PropTarget::Asset));
-            targets.extend(world.kind(home, Word { text: subject.0, loc }).ok().map(PropTarget::Kind));
+            targets.extend(entities.into_ids().into_iter().map(Holder::Entity));
+            targets.extend(world.book.asset(subject.0).map(Holder::Asset));
+            targets.extend(world.kind(home, Word { text: subject.0, loc }).ok().map(Holder::Kind));
         }
         Subject::Code(_) | Subject::Purpose(_) => {}
     }
@@ -1225,124 +1236,39 @@ pub(crate) fn is_builtin_line(name: &str) -> bool {
 
 fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<'_>) -> Diagnostic {
     let kind_name = world.book.name(world.book.kinds[target.kind].name);
-    let noun = match target.target {
-        PropTarget::Kind(_) => "kind",
-        PropTarget::Entity(_) => "entity",
-        PropTarget::Commodity(_) => "commodity",
-        PropTarget::Place(_) => "account",
-        PropTarget::Asset(_) => "asset",
+    let noun = match target.holder {
+        Holder::Kind(_) => "kind",
+        Holder::Entity(_) => "entity",
+        Holder::Commodity(_) => "commodity",
+        Holder::Place(_) => "account",
+        Holder::Asset(_) => "asset",
     };
     let mut valid: Vec<&str> = BUILTINS
         .iter()
-        .filter(|builtin| match (builtin.1.contains(&Target::Kind), target.sort, target.target) {
-            (true, _, PropTarget::Kind(_)) => true,
-            (false, Sort::Place(_), PropTarget::Place(_)) => builtin.1.contains(&Target::Place),
-            (false, Sort::Entity, PropTarget::Entity(_)) => builtin.1.contains(&Target::Entity),
-            (false, Sort::Commodity, PropTarget::Commodity(_)) => builtin.1.contains(&Target::Commodity),
+        .filter(|builtin| match (builtin.1.contains(&Target::Kind), target.sort, target.holder) {
+            (true, _, Holder::Kind(_)) => true,
+            (false, Sort::Place(_), Holder::Place(_)) => builtin.1.contains(&Target::Place),
+            (false, Sort::Entity, Holder::Entity(_)) => builtin.1.contains(&Target::Entity),
+            (false, Sort::Commodity, Holder::Commodity(_)) => builtin.1.contains(&Target::Commodity),
             _ => false,
         })
         .map(|builtin| builtin.0)
         .collect();
     valid.extend(declared_names(world, target.kind));
-    if matches!(target.target, PropTarget::Asset(_)) {
+    if matches!(target.holder, Holder::Asset(_)) {
         valid.extend(["owner", "known-as", "share", "at", "part", "also"]);
     }
     valid.sort_unstable();
     valid.dedup();
     let text = line.name.0;
-    let owner = match target.target {
-        PropTarget::Kind(_) => format!("kind `{kind_name}`"),
+    let owner = match target.holder {
+        Holder::Kind(_) => format!("kind `{kind_name}`"),
         _ => format!("{} of kind `{kind_name}`", article(noun)),
     };
     let error = Diagnostic::error("unknown-property", format!("`{text}` is not a property of {owner}"))
         .label(line.loc, "no such property");
     let error = suggest(error, line.loc, text, valid.iter().copied());
     error.note(format!("its properties are {}", list(&valid)))
-}
-
-fn target_key(target: PropTarget) -> (u8, u32) {
-    match target {
-        PropTarget::Kind(id) => (0, id.index() as u32),
-        PropTarget::Entity(id) => (1, id.index() as u32),
-        PropTarget::Commodity(id) => (2, id.index() as u32),
-        PropTarget::Place(id) => (3, id.index() as u32),
-        PropTarget::Asset(id) => (4, id.index() as u32),
-    }
-}
-
-fn stage_unique(
-    world: &mut World<'_>,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
-    target: PropTarget,
-    prop: Prop,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let key = (target_key(target), prop.name, prop.since);
-    let line = prop.loc.unwrap_or_default();
-    if let Some(first) = seen.get(&key).copied() {
-        diags.push(problem::filled_twice(world.book.name(prop.name), line, first));
-        return;
-    }
-    seen.insert(key, line);
-    world.set_prop(target, prop);
-}
-
-fn stage_changes(world: &mut World<'_>, mut updates: Vec<PropertyChange>) {
-    let mut groups: Map<((u8, u32), Sym), Vec<PropertyChange>> = Map::default();
-    for update in updates.drain(..) {
-        groups.entry((target_key(update.target), update.name)).or_default().push(update);
-    }
-    for ((_target_key, name), mut changes) in groups {
-        changes.sort_by_key(|change| (change.since, change.order));
-        let target = changes[0].target;
-        let base = world
-            .prop_writes
-            .iter()
-            .find(|(candidate, prop)| *candidate == target && prop.name == name && prop.since == Day::MIN)
-            .map(|(_, prop)| prop.value)
-            .unwrap_or(Value::Empty);
-        for (day, value, loc) in property_timeline(base, &changes) {
-            let prop = Prop { name, value, since: day, loc: Some(loc) };
-            world.set_prop(target, prop);
-        }
-    }
-}
-
-/// The effective rows for a sequence of dated overrides. An expired override
-/// uncovers the latest still-active override, then the declaration value (or
-/// `empty`, which lets an inherited kind default show through).
-fn property_timeline(base: Value, changes: &[PropertyChange]) -> Vec<(Day, Value, Loc)> {
-    let mut boundaries = Vec::with_capacity(changes.len() * 2);
-    for change in changes {
-        boundaries.push(change.since);
-        if let Some(until) = change.until.filter(|&until| until < Day::MAX) {
-            boundaries.push(until.add_days(1));
-        }
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    let mut timeline = Vec::with_capacity(boundaries.len());
-    let mut visible = base;
-    for day in boundaries {
-        let winner = changes
-            .iter()
-            .filter(|change| change.since <= day && change.until.is_none_or(|until| day <= until))
-            .fold(None, |best: Option<&PropertyChange>, change| match best {
-                None => Some(change),
-                Some(old) if change.since > old.since || (change.since == old.since && change.order < old.order) => {
-                    Some(change)
-                }
-                Some(old) => Some(old),
-            });
-        let value = winner.map_or(base, |change| change.value);
-        if value == visible {
-            continue;
-        }
-        let loc = winner.map_or(changes[0].loc, |change| change.loc);
-        timeline.push((day, value, loc));
-        visible = value;
-    }
-    timeline
 }
 
 /// Required slots that nothing fills: not the thing, and not a kind above it.
@@ -1358,14 +1284,10 @@ fn missing_roles<'a, 's>(
             continue;
         }
         let Some(target) = native_target(world, written) else { continue };
-        let key = target_key(target.target);
         for slot in book.schema.effective(&book.kinds, target.kind).filter(|slot| fill::is_required(slot.mult)) {
             let number = book.schema.number(slot.name).expect("a declared slot is numbered");
-            let by_kind = |above: Id<Kind>| {
-                let kind = target_key(PropTarget::Kind(above));
-                filled.contains(&(kind.0, kind.1, number))
-            };
-            if filled.contains(&(key.0, key.1, number)) || book.kinds.lineage(target.kind).any(by_kind) {
+            let by_kind = |above: Id<Kind>| filled.contains(&(Holder::Kind(above), number));
+            if filled.contains(&(target.holder, number)) || book.kinds.lineage(target.kind).any(by_kind) {
                 continue;
             }
             diags.push(missing_role(world, written, target.kind, slot));
@@ -1392,10 +1314,6 @@ fn missing_role(world: &World<'_>, written: Written<'_, '_, Decl<'_>>, kind: Id<
 mod native_property_tests {
     use super::*;
 
-    fn day(year: i32, month: u32, date: u32) -> Day {
-        Day::from_ymd(year, month, date).unwrap()
-    }
-
     fn place(role: Role, name: Sym) -> Place {
         Place {
             path: name,
@@ -1413,7 +1331,6 @@ mod native_property_tests {
             closed: None,
             shares: Box::default(),
             known_as: Box::default(),
-            props: Box::default(),
             doc: None,
             loc: None,
         }
@@ -1439,7 +1356,6 @@ mod native_property_tests {
             sales_tax: None,
             shares: Box::default(),
             slots: axiom_core::Run::default(),
-            props: Box::default(),
             laws: Box::default(),
             doc: None,
             loc: None,
@@ -1451,106 +1367,6 @@ mod native_property_tests {
         let mut account = place(Role::Account { institution: None }, empty);
         inherit_place_traits(&mut account, &kind);
         assert!(!account.claim);
-    }
-
-    fn update(name: Sym, since: Day, until: Option<Day>, value: bool, order: usize) -> PropertyChange {
-        PropertyChange {
-            target: PropTarget::Kind(Id::new(0)),
-            name,
-            since,
-            until,
-            value: Value::Bool(value),
-            loc: Loc::default(),
-            order,
-        }
-    }
-
-    #[test]
-    fn an_expiring_property_override_uncovers_the_latest_live_value() {
-        let mut names = axiom_core::Interner::default();
-        let name = names.intern("flag");
-        let start = day(2026, 1, 1);
-        let short = day(2026, 1, 5);
-        let restore_short = day(2026, 1, 7);
-        let restore_outer = day(2026, 1, 11);
-        let changes = [
-            update(name, start, Some(day(2026, 1, 10)), true, 0),
-            update(name, short, Some(day(2026, 1, 6)), false, 1),
-        ];
-        assert_eq!(
-            property_timeline(Value::Bool(false), &changes),
-            [
-                (start, Value::Bool(true), Loc::default()),
-                (short, Value::Bool(false), Loc::default()),
-                (restore_short, Value::Bool(true), Loc::default()),
-                (restore_outer, Value::Bool(false), Loc::default()),
-            ]
-        );
-    }
-
-    #[test]
-    fn an_expiring_property_without_an_instance_value_clears_to_inherit() {
-        let mut names = axiom_core::Interner::default();
-        let name = names.intern("flag");
-        let start = day(2026, 3, 1);
-        let restore = day(2026, 3, 8);
-        let changes = [update(name, start, Some(day(2026, 3, 7)), true, 0)];
-        assert_eq!(
-            property_timeline(Value::Empty, &changes),
-            [(start, Value::Bool(true), Loc::default()), (restore, Value::Empty, Loc::default()),]
-        );
-    }
-
-    #[test]
-    fn deep_kind_defaults_apply_oldest_to_nearest_and_keep_the_nearest_source() {
-        let mut names = axiom_core::Interner::default();
-        let property = names.intern("rate");
-        let kinds = (0..3)
-            .map(|at| Kind {
-                name: names.intern(["base", "middle", "leaf"][at]),
-                sort: Sort::Thing,
-                system: None,
-                restricted: false,
-                deferred: false,
-                basis: None,
-                claim: false,
-                select: None,
-                liquidity: None,
-                purpose: None,
-                pays: None,
-                takes: Box::default(),
-                sales_tax: None,
-                shares: Box::default(),
-                slots: axiom_core::Run::default(),
-                props: Box::default(),
-                laws: Box::default(),
-                doc: None,
-                loc: None,
-            })
-            .collect::<Vec<_>>();
-        let (tree, ids) = Tree::build(kinds, &[None, Some(0), Some(1)]).unwrap();
-        let mut defaults = Defaults::empty(3);
-        for (at, value) in [10, 20, 30].into_iter().enumerate() {
-            defaults.by_kind[at].push(Assign::Prop(Prop {
-                name: property,
-                value: Value::Num(Ratio::int(value)),
-                since: Day::MIN,
-                loc: Some(Loc::new(axiom_core::FileId(0), at as u32, at as u32 + 1)),
-            }));
-        }
-
-        let mut path = Vec::new();
-        let mut props = Box::<[Prop]>::default();
-        defaults.apply(&tree, ids[2], &mut path, |assign| {
-            if let Assign::Prop(prop) = assign {
-                put(&mut props, *prop);
-            }
-        });
-
-        assert_eq!(path, [ids[0], ids[1], ids[2]]);
-        assert_eq!(props.len(), 1);
-        assert_eq!(props[0].value, Value::Num(Ratio::int(30)));
-        assert_eq!(props[0].loc, Some(Loc::new(axiom_core::FileId(0), 2, 3)));
     }
 
     #[test]
@@ -1566,7 +1382,6 @@ mod native_property_tests {
             place: Id::new(0),
             unit: Id::new(0),
             part_of: None,
-            props: Box::default(),
             doc: None,
             loc: Loc::default(),
         };

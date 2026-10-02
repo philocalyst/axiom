@@ -151,10 +151,7 @@ fn trace_from<'p, 'b, 's>(
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
     let place = &lens.book().places[holding.place];
-    let has_term = lens
-        .known()
-        .maturity
-        .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
+    let has_term = lens.known().maturity.is_some_and(|name| lens.book().says(holding.place, name));
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),
         _ if place.class == Class::Debt && !has_term => holding.qty(),

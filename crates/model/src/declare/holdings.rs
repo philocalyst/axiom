@@ -132,7 +132,6 @@ pub(super) fn declare_assets<'a, 's>(
             place: Id::new(0),
             unit,
             part_of: None,
-            props: Box::default(),
             doc: written.item.doc.map(|doc| names.intern(doc.0)),
             loc: file.loc(path),
         });

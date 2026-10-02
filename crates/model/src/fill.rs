@@ -9,12 +9,14 @@
 //! A required slot that nothing fills, neither the thing nor any kind above it, is said once all the declarations are
 //! read.
 
+use axiom_core::tagless::Datum;
 use axiom_core::{Diagnostic, Id, Loc, Ratio, Set, SlotId};
 use axiom_syntax::{ExprId, ExprKind, File, Mult, Prop as Line};
 
 use crate::book::{Amount, Kind};
 use crate::declare::World;
 use crate::errors::{Word, article};
+use crate::holders::Holder;
 use crate::law::{Ty, Value};
 use crate::problem;
 use crate::scope::Home;
@@ -33,6 +35,24 @@ pub(crate) enum Measure {
 pub(crate) struct Filling {
     pub values: Vec<Value>,
     pub weights: Vec<Measure>,
+}
+
+/// What a filling says of a slot, as the facts hold it: the one value of a slot of one, the members of a slot of
+/// several.
+pub(crate) enum Said {
+    One(Datum),
+    Set(Vec<Datum>),
+}
+
+impl Filling {
+    /// The values as the facts of a slot with this count hold them.
+    pub fn said(&self, mult: Mult) -> Said {
+        let mut data = self.values.iter().map(|&value| value.datum().expect("a line gives values that facts hold"));
+        match (holds_one(mult), data.next()) {
+            (true, Some(datum)) => Said::One(datum),
+            (_, first) => Said::Set(first.into_iter().chain(data).collect()),
+        }
+    }
 }
 
 /// The line being read, and where it is written.
@@ -248,8 +268,8 @@ fn weighed<'s>(
     }
 }
 
-/// The slots of a thing that something has filled, by the thing and the slot's number.
-pub(crate) type Filled = Set<(u8, u32, SlotId)>;
+/// The slots of things that something has filled, by the thing and the slot's number.
+pub(crate) type Filled = Set<(Holder, SlotId)>;
 
 #[cfg(test)]
 mod tests {

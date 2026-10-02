@@ -5,7 +5,7 @@
 //! laws and rules are added by the test. Flows must be added in day order (the
 //! book's contract), and `book()` assembles the tables the engine reads.
 
-use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Severity, Sym, Tree};
+use axiom_core::{Arena, Day, Days, Facts, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Severity, Sym, Tree};
 use axiom_model::*;
 
 /// The days from `first` to `last`, as day numbers.
@@ -57,6 +57,8 @@ pub(crate) struct Fixture {
     pub always: Vec<(Id<Place>, Rule)>,
     pub on_spend: Vec<(Id<Entity>, Rule)>,
     pub timed: Vec<Rule>,
+    /// What is said of places, in the order said: the place, the slot's name, the day it holds from, the value.
+    said: Vec<(Id<Place>, Sym, Day, Value)>,
 }
 
 impl Fixture {
@@ -78,7 +80,6 @@ impl Fixture {
             citizen: Box::new([]),
             books: Books::Cash,
             known_as: Box::new([]),
-            props: Box::new([]),
             doc: None,
             loc: None,
         };
@@ -108,7 +109,6 @@ impl Fixture {
             closed: None,
             shares: Box::new([]),
             known_as: Box::new([]),
-            props: Box::new([]),
             doc: None,
             loc: None,
         };
@@ -187,6 +187,7 @@ impl Fixture {
             always: Vec::new(),
             on_spend: Vec::new(),
             timed: Vec::new(),
+            said: Vec::new(),
         }
     }
 
@@ -435,11 +436,27 @@ impl Fixture {
         self.laws.push(law.build())
     }
 
+    /// `value` holds of the place's slot `name` from day `since`.
     pub fn property(&mut self, place: Id<Place>, name: Sym, since: i32, value: Value) {
-        let mut props = self.places[place].props.to_vec();
-        props.push(Prop { name, value, since: Day(since), loc: None });
-        props.sort_by_key(|prop| (prop.name, prop.since));
-        self.places[place].props = props.into();
+        self.said.push((place, name, Day(since), value));
+    }
+
+    /// The slots, the numbering of holders and what is said, from what the test said of places.
+    fn facts(&self, kinds: usize) -> (Schema, HolderIndex, Facts) {
+        let mut slots: Vec<(Sym, Ty)> = Vec::new();
+        for &(_, name, _, value) in &self.said {
+            if !slots.iter().any(|&(slot, _)| slot == name) {
+                slots.push((name, value.ty().expect("a value that has a type")));
+            }
+        }
+        let schema = Schema::of_values(slots);
+        let holders = HolderIndex::new(kinds, self.places.len(), self.entities.len(), self.commodities.len(), 0);
+        let mut facts = Facts::builder(holders.len());
+        for &(place, name, since, value) in &self.said {
+            let (slot, datum) = (schema.number(name).expect("a numbered slot"), value.datum().expect("a datum"));
+            facts.paint_datum(holders.number(place), slot, Days::new(since, Day::MAX).expect("a day"), datum);
+        }
+        (schema, holders, facts.freeze())
     }
 
     /// A rule that applies for all time.
@@ -465,13 +482,13 @@ impl Fixture {
             sales_tax: None,
             shares: Box::new([]),
             slots: axiom_core::Run::default(),
-            props: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
         };
         let market = Kind { name: self.names.intern("market"), sort: Sort::Place(Class::Outside), ..kind.clone() };
         let (kinds, _) = Tree::build(vec![kind, market], &[None, None]).expect("no cycles");
+        let (schema, holders, facts) = self.facts(kinds.len());
         let k = Id::new(0);
         let (purposes, [income, spending, capital, transfer]) = Purpose::roots(&mut self.names);
         let roots = Roots {
@@ -515,7 +532,9 @@ impl Fixture {
             places: self.places,
             entities: self.entities,
             kinds,
-            schema: Schema::default(),
+            schema,
+            holders,
+            facts,
             purposes,
             systems: Tree::default(),
             commodities: self.commodities,
@@ -565,7 +584,6 @@ fn commodity(symbol: Sym, scale: u8) -> Commodity {
         liquidity: None,
         select: None,
         growth: None,
-        props: Box::new([]),
         doc: None,
         loc: None,
     }

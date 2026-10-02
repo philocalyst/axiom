@@ -122,14 +122,11 @@ asset condo : property
 ";
     with_run(text, day(2026, 1, 31), |book, run| {
         let asset = book.asset("condo").unwrap();
-        assert!(book.assets[asset].props.iter().any(|property| {
-            property.name == book.names.get("land").unwrap()
-                && matches!(
-                    property.value,
-                    axiom_model::Value::Amount(amount)
-                        if amount.qty == axiom_core::Qty(120_00) && amount.unit == book.base
-                )
-        }));
+        let land = book.names.get("land").unwrap();
+        assert_eq!(
+            book.own(asset, land, day(2026, 1, 31)),
+            Some(axiom_model::Value::Amount(axiom_model::Amount::new(axiom_core::Qty(120_00), book.base)))
+        );
         assert!(run.diagnostics.iter().any(|diagnostic| diagnostic.code == "assertion"));
         assert!(
             run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion-expression"),
