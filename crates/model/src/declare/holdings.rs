@@ -62,7 +62,7 @@ pub(super) fn declare_accounts<'a, 's>(
             |share| share.entity,
         );
         let institution = decl.at.and_then(|name| {
-            let scope = resolving.scopes.of(written.home());
+            let scope = resolving.seeing.scopes.of(written.home());
             entities
                 .index
                 .resolve(names, scope, name.0)

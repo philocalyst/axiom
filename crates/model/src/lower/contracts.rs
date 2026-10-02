@@ -7,22 +7,26 @@ use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
 use super::also::{AlsoCx, lower_alsos};
+use super::infer::infer_for_flow;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
-    AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Loan, Prepay,
-    Relative, Reset, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent, TemplateLeg,
-    TemplateProgram, TemplateQuantity, Terms, TermsState,
+    Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
+    FlowSide, Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, TemplateAmount, TemplateFlow,
+    TemplateItem, TemplateItemParent, TemplateLeg, TemplateProgram, TemplateQuantity, Terms, TermsState, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
+use crate::laws::Placement;
 use crate::problem::{self, Noun};
+use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
 
+/// A contract as written, with the id reserved for it and its name.
 #[derive(Clone, Copy)]
 struct WrittenContract<'a, 's> {
     site: &'a Site<'a, 's>,
@@ -30,6 +34,16 @@ struct WrittenContract<'a, 's> {
     id: Id<Contract>,
     name: Sym,
     loc: Loc,
+}
+
+impl<'a, 's> WrittenContract<'a, 's> {
+    fn file(&self) -> &'a ast::File<'s> {
+        &self.site.source.file
+    }
+
+    fn home(&self) -> Home {
+        self.site.home
+    }
 }
 
 /// Reserves every contract id before compiling any contract body. Terms and
@@ -51,8 +65,7 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
     }
 
     for written in written.iter().copied() {
-        let file = &written.site.source.file;
-        if let Some(contract) = lower_contract(world, written, file, diags) {
+        if let Some(contract) = lower_contract(world, written, diags) {
             world.book.contracts[written.id] = contract;
         }
     }
@@ -60,26 +73,17 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
     // Nested contract laws follow their parent contract's declaration, after
     // its id exists and before the shared law index is finalized.
     for written in written.iter().copied() {
-        let file = &written.site.source.file;
+        let file = written.file();
+        let placement = Placement { file, home: written.home(), owner: Owner::Contract(written.id), subject: Ty::Flow };
         let mut laws = Vec::new();
         for law in &file[written.node.laws] {
-            if let Some(id) = crate::laws::compile_native(
-                world,
-                diags,
-                file,
-                written.site.home,
-                Owner::Contract(written.id),
-                Ty::Flow,
-                law,
-            ) {
-                laws.push(id);
-            }
+            laws.extend(crate::laws::compile_native(world, diags, &placement, law));
         }
         world.book.contracts[written.id].laws = laws.into_boxed_slice();
     }
 }
 
-fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<crate::book::Entity>) -> Contract {
+fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
     Contract {
         name,
         party: me,
@@ -105,27 +109,26 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<crate::book::Entity>) 
 /// What a contract says before its schedules are read: who it is with, when, how much space it is about, what it
 /// is for, and the inputs its templates take.
 struct Facts {
-    party: Id<crate::book::Entity>,
+    party: Id<Entity>,
     days: Days,
     area: Option<Amount>,
     purpose: Option<At<Purposed>>,
-    description: Option<crate::book::Text>,
+    description: Option<Text>,
     inputs: Box<[Input]>,
 }
 
 fn contract_facts<'a, 's>(
     world: &mut World<'s>,
     written: WrittenContract<'a, 's>,
-    file: &ast::File<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Facts> {
-    let node = written.node;
+    let (node, file) = (written.node, written.file());
     let name_word = Word::of(file, node.name.0);
     let party_word = node.party.map_or(name_word, |party| Word::of(file, party.0));
     let party = world.entity(written.site.home, party_word).or_report(diags)?;
     let days = contract_days(file, node.props, diags)?;
     let area = contract_area(world, file, node.props, diags).ok()?;
-    let purpose = contract_purpose(world, written, file, diags)?;
+    let purpose = contract_purpose(world, written, diags)?;
     let description = node.description.map(|description| world.book.quoted_text(description.0));
     let inputs = inputs(world, file, node.props, diags);
     Some(Facts { party, days, area, purpose, description, inputs })
@@ -134,15 +137,13 @@ fn contract_facts<'a, 's>(
 fn lower_contract<'a, 's>(
     world: &mut World<'s>,
     written: WrittenContract<'a, 's>,
-    file: &ast::File<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Contract> {
-    let node = written.node;
+    let (node, file, home) = (written.node, written.file(), written.home());
     let Facts { party, days, area, purpose, description, inputs: contract_inputs } =
-        contract_facts(world, written, file, diags)?;
+        contract_facts(world, written, diags)?;
     let anchor = days.first();
     let roots = contract_roots(file, node);
-    let home = written.site.home;
     let compile = |world: &mut World<'s>, roots: &_, diags: &mut Vec<Diagnostic>| {
         compile_roots(world, file, home, Ty::Flow, written.name, &contract_inputs, roots, diags)
     };
@@ -156,7 +157,7 @@ fn lower_contract<'a, 's>(
         .schedule
         .or(node.standing)
         .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at)));
-    let deposit = contract_deposit(world, file, node.props, home, owner, default_holding, diags).ok()?;
+    let deposit = contract_deposit(world, written, Keeping { owner, default_holding }, diags).ok()?;
     let also_cx = AlsoCx {
         file,
         home,
@@ -166,7 +167,7 @@ fn lower_contract<'a, 's>(
         currency: world.book.entities[owner].currency,
     };
     let also = lower_alsos(world, &also_cx, node.alsos, diags);
-    let loan = contract_loan(world, file, node.props, party, owner, home, diags)?;
+    let loan = contract_loan(world, written, party, owner, diags)?;
     let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
     contract.party = party;
     contract.owner = owner;
@@ -212,13 +213,12 @@ fn lower_contract<'a, 's>(
 fn contract_purpose<'a, 's>(
     world: &mut World<'s>,
     written: WrittenContract<'a, 's>,
-    file: &ast::File<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<At<Purposed>>> {
     let Some(purpose) = written.node.purpose else {
         return Some(None);
     };
-    let home = written.site.home;
+    let (file, home) = (written.file(), written.home());
     let word = Word::of(file, purpose.name.0);
     let id = world.purpose(home, word).or_report(diags)?;
     let of = purpose.of.and_then(|object| resolve_object(world, home, file, object, Reach::Parties, diags));
@@ -227,14 +227,13 @@ fn contract_purpose<'a, 's>(
 
 fn contract_loan<'s>(
     world: &World<'s>,
-    file: &ast::File<'s>,
-    props: ast::Many<ast::Prop<'s>>,
-    party: axiom_core::Id<crate::book::Entity>,
-    owner: axiom_core::Id<crate::book::Entity>,
-    home: Home,
+    contract: WrittenContract<'_, 's>,
+    party: Id<Entity>,
+    owner: Id<Entity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<(Loan, Ratio)>> {
-    let mut written = file[props].iter().filter(|prop| prop.name.0 == "loan");
+    let (file, home) = (contract.file(), contract.home());
+    let mut written = file[contract.node.props].iter().filter(|prop| prop.name.0 == "loan");
     let Some(prop) = written.next() else {
         return Some(None);
     };
@@ -255,7 +254,7 @@ struct LoanFields {
     on: Day,
     rate: Ratio,
     term: Span,
-    asset: Option<Id<crate::book::Asset>>,
+    asset: Option<Id<Asset>>,
 }
 
 fn loan_fields<'s>(
@@ -359,7 +358,7 @@ fn loan_asset<'s>(
     keyword: ast::ExprId,
     named: ast::ExprId,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Id<crate::book::Asset>> {
+) -> Option<Id<Asset>> {
     if !matches!(file.exprs[keyword].kind, ExprKind::Name(name) if name.0 == "for") {
         diags.push(
             Diagnostic::error("contract-loan-asset", "a financed asset follows `for`")
@@ -511,7 +510,7 @@ fn reset_index<'s>(
     file: &ast::File<'s>,
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Id<crate::book::Param>> {
+) -> Option<Id<Param>> {
     let word = Word::of(file, name.0);
     let index = match world.seek_param(home, word) {
         Ok(Some(index)) => index,
@@ -606,12 +605,12 @@ struct TermsCx<'a, 's> {
     file: &'a ast::File<'s>,
     inputs: &'a [Input],
     anchor: Day,
-    party: Id<crate::book::Entity>,
+    party: Id<Entity>,
     purpose: Option<At<Purposed>>,
-    description: Option<crate::book::Text>,
+    description: Option<Text>,
     area: Option<Amount>,
     loan_rate: Option<Ratio>,
-    also: &'a [Id<crate::book::Also>],
+    also: &'a [Id<Also>],
 }
 
 /// The header flow of a schedule, with what the legs and the items under it are made against.
@@ -620,11 +619,11 @@ struct Header {
     out: TemplateQuantity,
     arrive: TemplateQuantity,
     /// The end the legs are paid from, which is the header's.
-    from: Id<crate::book::Place>,
-    from_party: Option<Id<crate::book::Entity>>,
+    from: Id<Place>,
+    from_party: Option<Id<Entity>>,
     side: FlowSide,
-    owner: Id<crate::book::Entity>,
-    unit: Id<crate::book::Commodity>,
+    owner: Id<Entity>,
+    unit: Id<Commodity>,
 }
 
 fn lower_terms<'a, 's>(
@@ -639,7 +638,7 @@ fn lower_terms<'a, 's>(
     let header = template_header(world, cx, schedule, &roots, diags)?;
     let legs = template_legs(world, cx, &header, node.body.legs, &roots, diags)?;
     let lower = |world: &mut World<'s>, item, diags: &mut Vec<Diagnostic>| {
-        lower_item(world, home, file, item, TemplateItemParent::Header, header.side, header.unit, &roots, diags)
+        lower_header_item(world, cx, &header, &roots, item, diags)
     };
     let items: Vec<_> = file[node.body.items].iter().filter_map(|item| lower(world, item, diags)).collect();
     let template = TemplateFlow {
@@ -705,24 +704,14 @@ fn template_header<'a, 's>(
     };
     let owner = world.book.places[holding].owner;
     let ((out, arrive), amount, buys) = schedule_amount(world, file, schedule, roots, diags)?;
-    let mut flow = template_flow(
-        cx.anchor,
-        from,
-        to,
-        amount,
-        owner,
-        Some(party),
-        cx.purpose.map(|at| at.value),
-        cx.description,
-        schedule.at,
-    );
+    let mut flow = cx.flow(from, to, amount, owner, schedule.at);
     let (from_party, to_party) = match hold.direction {
         Direction::From => (None, Some(party)),
         Direction::Into => (Some(party), None),
     };
     let purpose = cx.purpose.map(|at| (at.value, at.loc));
-    flow.purpose =
-        super::record::infer_for_flow(world, from, from_party, to, to_party, purpose, schedule.at, diags).ok()?;
+    let (from_end, to_end) = (End { place: from, entity: from_party }, End { place: to, entity: to_party });
+    flow.purpose = infer_for_flow(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
     let arrive = buys.map_or(arrive, TemplateQuantity::Unknown);
     Some(Header { flow, out, arrive, from, from_party, side, owner, unit: amount.unit })
 }
@@ -743,26 +732,14 @@ fn template_legs<'a, 's>(
     for leg in &file[legs] {
         let to = resolve_endpoint(world, home, file, leg.end.name, diags)?;
         let (quantity, amount) = template_quantity(world, file, leg.amount, roots, header.unit, diags)?;
-        let purpose = cx.purpose.map(|at| at.value);
-        let mut flow = template_flow(
-            cx.anchor,
-            header.from,
-            to,
-            amount,
-            header.owner,
-            Some(cx.party),
-            purpose,
-            cx.description,
-            leg.loc,
-        );
+        let mut flow = cx.flow(header.from, to, amount, header.owner, leg.loc);
         let tail = lower_term_tail(world, home, file, leg.tail, diags);
         flow.codes = tail.codes;
         flow.select = tail.select;
         flow.waive = tail.waive;
         let inferred = tail.purpose.or(cx.purpose).map(|at| (at.value, at.loc));
-        flow.purpose =
-            super::record::infer_for_flow(world, header.from, header.from_party, to, None, inferred, leg.loc, diags)
-                .ok()?;
+        let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
+        flow.purpose = infer_for_flow(world, ends.0, ends.1, inferred, leg.loc, diags).ok()?;
         flow.description = tail.description.or(flow.description);
         lowered.push(TemplateLeg { flow, side: header.side, quantity });
     }
@@ -775,7 +752,7 @@ fn schedule_amount<'s>(
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<((TemplateQuantity, TemplateQuantity), Amount, Option<Id<crate::book::Commodity>>)> {
+) -> Option<((TemplateQuantity, TemplateQuantity), Amount, Option<Id<Commodity>>)> {
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
             let (quantity, amount) = template_amount(world, file, amount, roots, world.book.base, diags)?;
@@ -791,38 +768,33 @@ fn schedule_amount<'s>(
     Some(((quantity, quantity), amount, buys))
 }
 
-fn template_flow(
-    day: Day,
-    from: Id<crate::book::Place>,
-    to: Id<crate::book::Place>,
-    amount: Amount,
-    owner: Id<crate::book::Entity>,
-    payee: Option<Id<crate::book::Entity>>,
-    purpose: Option<Purposed>,
-    description: Option<crate::book::Text>,
-    loc: Loc,
-) -> Flow {
-    Flow {
-        day,
-        recognized: Days::on(day),
-        from,
-        to,
-        out: amount,
-        arrive: amount,
-        mode: Mode::Planned,
-        infer: Infer::Known,
-        txn: TEMPLATE_TXN,
-        payee,
-        owner,
-        purpose,
-        description,
-        origin: Origin::Written,
-        select: Run::new(Id::new(0), 0),
-        header_codes: Run::new(Id::new(0), 0),
-        codes: Run::new(Id::new(0), 0),
-        loc,
-        waive: None,
-        detail: None,
+impl TermsCx<'_, '_> {
+    /// A flow the contract promises between two places: the party is the payee, and the purpose and description
+    /// the contract gives its flows are the flow's own until a line says otherwise.
+    fn flow(&self, from: Id<Place>, to: Id<Place>, amount: Amount, owner: Id<Entity>, loc: Loc) -> Flow {
+        let day = self.anchor;
+        Flow {
+            day,
+            recognized: Days::on(day),
+            from,
+            to,
+            out: amount,
+            arrive: amount,
+            mode: Mode::Planned,
+            infer: Infer::Known,
+            txn: TEMPLATE_TXN,
+            payee: Some(self.party),
+            owner,
+            purpose: self.purpose.map(|at| at.value),
+            description: self.description,
+            origin: Origin::Written,
+            select: Run::new(Id::new(0), 0),
+            header_codes: Run::new(Id::new(0), 0),
+            codes: Run::new(Id::new(0), 0),
+            loc,
+            waive: None,
+            detail: None,
+        }
     }
 }
 
@@ -831,7 +803,7 @@ fn template_quantity<'s>(
     file: &ast::File<'s>,
     quantity: ast::Quantity<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
-    fallback: Id<crate::book::Commodity>,
+    fallback: Id<Commodity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(TemplateQuantity, Amount)> {
     if let ast::Quantity::Amount(ast::Amount::Computed(expr)) = quantity
@@ -899,7 +871,7 @@ fn template_amount<'s>(
     file: &ast::File<'s>,
     amount: ast::Amount<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
-    fallback: Id<crate::book::Commodity>,
+    fallback: Id<Commodity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(TemplateQuantity, Amount)> {
     match amount {
@@ -920,17 +892,17 @@ fn template_amount<'s>(
     }
 }
 
-fn lower_item<'s>(
+/// One item under a schedule's header: carved from it, added to it or taken from it.
+fn lower_header_item<'s>(
     world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    item: &ast::LineItem<'s>,
-    parent: TemplateItemParent,
-    side: FlowSide,
-    fallback: Id<crate::book::Commodity>,
+    cx: &TermsCx<'_, 's>,
+    header: &Header,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
+    item: &ast::LineItem<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<TemplateItem> {
+    let (file, home) = (cx.file, cx.written.site.home);
+    let (parent, side, fallback) = (TemplateItemParent::Header, header.side, header.unit);
     let (quantity, literal) = template_amount(world, file, item.amount, roots, fallback, diags)?;
     let amount = match quantity {
         TemplateQuantity::Amount(Some(root)) => TemplateAmount::Computed(root),
@@ -961,7 +933,7 @@ struct TermTail {
     codes: Run<Sym>,
     select: Run<Select>,
     purpose: Option<At<Purposed>>,
-    description: Option<crate::book::Text>,
+    description: Option<Text>,
     waive: Option<Waive>,
 }
 
@@ -1010,7 +982,7 @@ fn resolve_commodity<'s>(
     file: &ast::File<'s>,
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Id<crate::book::Commodity>> {
+) -> Option<Id<Commodity>> {
     world.commodity_of(Word::of(file, name.0)).or_report(diags)
 }
 
@@ -1020,7 +992,7 @@ fn resolve_endpoint<'s>(
     file: &ast::File<'s>,
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Id<crate::book::Place>> {
+) -> Option<Id<Place>> {
     world.end(home, Word::of(file, name.0)).or_report(diags).map(|end| end.place)
 }
 
@@ -1030,7 +1002,7 @@ fn schedule_owner<'s>(
     file: &ast::File<'s>,
     schedule: Option<ast::Schedule<'s>>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Id<crate::book::Entity>> {
+) -> Option<Id<Entity>> {
     let holding = schedule?.terms.holding?;
     let place = resolve_endpoint(world, home, file, holding.name, diags)?;
     Some(world.book.places[place].owner)
@@ -1343,18 +1315,24 @@ fn contract_area<'s>(
     Ok(area)
 }
 
+/// Where a contract's deposit may be kept: by whom, and in the holding its schedule has, for a deposit that names
+/// none.
+#[derive(Clone, Copy)]
+struct Keeping<'s> {
+    owner: Id<Entity>,
+    default_holding: Option<(ast::Name<'s>, Loc)>,
+}
+
 fn contract_deposit<'s>(
     world: &mut World<'s>,
-    file: &ast::File<'s>,
-    props: axiom_syntax::Many<ast::Prop<'s>>,
-    home: Home,
-    owner: Id<crate::book::Entity>,
-    default_holding: Option<(ast::Name<'s>, Loc)>,
+    contract: WrittenContract<'_, 's>,
+    keeping: Keeping<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Result<Option<(Amount, Id<crate::book::Place>)>, ()> {
+) -> Result<Option<(Amount, Id<Place>)>, ()> {
+    let (file, owner) = (contract.file(), keeping.owner);
     let mut deposit = None;
     let mut first_loc = None;
-    for prop in file[props].iter().filter(|prop| prop.name.0 == "deposit") {
+    for prop in file[contract.node.props].iter().filter(|prop| prop.name.0 == "deposit") {
         if let Some(first) = first_loc {
             diags.push(problem::twice("deposit", prop.loc, first));
             return Err(());
@@ -1369,7 +1347,7 @@ fn contract_deposit<'s>(
             return Err(());
         }
         let amount = deposit_amount(world, file, args[0], owner, diags)?;
-        let place = deposit_holding(world, home, file, prop, owner, default_holding, amount, diags)?;
+        let place = deposit_holding(world, contract, prop, keeping, amount, diags)?;
         deposit = Some((amount, place));
     }
     Ok(deposit)
@@ -1380,7 +1358,7 @@ fn deposit_amount<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
     expr: ast::ExprId,
-    owner: Id<crate::book::Entity>,
+    owner: Id<Entity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Result<Amount, ()> {
     let ExprKind::Amount(literal) = file.exprs[expr].kind else {
@@ -1404,55 +1382,62 @@ fn deposit_amount<'s>(
     }
 }
 
+/// The name of the account a deposit is kept in, and where it is written: the one after `into`, or the schedule's.
+fn holding_name<'s>(
+    file: &ast::File<'s>,
+    prop: &ast::Prop<'s>,
+    default_holding: Option<(ast::Name<'s>, Loc)>,
+    diags: &mut Vec<Diagnostic>,
+) -> Result<(ast::Name<'s>, Loc), ()> {
+    let args = &file[prop.args];
+    if args.len() != 3 {
+        return default_holding.ok_or_else(|| {
+            diags.push(
+                Diagnostic::error("contract-deposit-holding-required", "a deposit needs a holding account")
+                    .label(prop.loc, "name `into HOLDING` or give this contract an active schedule with a holding"),
+            );
+        });
+    }
+    let into = matches!(file.exprs[args[1]].kind, ExprKind::Name(name) if name.0 == "into");
+    let ExprKind::Name(name) = file.exprs[args[2]].kind else {
+        diags.push(
+            Diagnostic::error("contract-deposit-holding", "a deposit holding needs a place name")
+                .label(file.exprs[args[2]].loc, "name the account or holding that keeps the deposit"),
+        );
+        return Err(());
+    };
+    if !into {
+        diags.push(
+            Diagnostic::error("contract-deposit-holding", "name a deposit holding after `into`")
+                .label(file.exprs[args[1]].loc, "write `into` here"),
+        );
+        return Err(());
+    }
+    Ok((name, file.exprs[args[2]].loc))
+}
+
 /// The account that keeps a deposit: the one named after `into`, else the holding of the contract's schedule,
 /// which must be an account of the owner's that accepts the unit.
 fn deposit_holding<'s>(
     world: &World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
+    contract: WrittenContract<'_, 's>,
     prop: &ast::Prop<'s>,
-    owner: Id<crate::book::Entity>,
-    default_holding: Option<(ast::Name<'s>, Loc)>,
+    keeping: Keeping<'s>,
     amount: Amount,
     diags: &mut Vec<Diagnostic>,
-) -> Result<Id<crate::book::Place>, ()> {
-    let args = &file[prop.args];
-    let (name, name_loc) = if args.len() == 3 {
-        let into = matches!(file.exprs[args[1]].kind, ExprKind::Name(name) if name.0 == "into");
-        let ExprKind::Name(name) = file.exprs[args[2]].kind else {
-            diags.push(
-                Diagnostic::error("contract-deposit-holding", "a deposit holding needs a place name")
-                    .label(file.exprs[args[2]].loc, "name the account or holding that keeps the deposit"),
-            );
-            return Err(());
-        };
-        if !into {
-            diags.push(
-                Diagnostic::error("contract-deposit-holding", "name a deposit holding after `into`")
-                    .label(file.exprs[args[1]].loc, "write `into` here"),
-            );
-            return Err(());
-        }
-        (name, file.exprs[args[2]].loc)
-    } else if let Some((name, loc)) = default_holding {
-        (name, loc)
-    } else {
-        diags.push(
-            Diagnostic::error("contract-deposit-holding-required", "a deposit needs a holding account")
-                .label(prop.loc, "name `into HOLDING` or give this contract an active schedule with a holding"),
-        );
-        return Err(());
-    };
+) -> Result<Id<Place>, ()> {
+    let (file, home) = (contract.file(), contract.home());
+    let (name, name_loc) = holding_name(file, prop, keeping.default_holding, diags)?;
     let place = resolve_endpoint(world, home, file, name, diags).ok_or(())?;
     let kept = &world.book.places[place];
-    if !matches!(kept.role, crate::book::Role::Account { .. } | crate::book::Role::Holding(_)) {
+    if !matches!(kept.role, Role::Account { .. } | Role::Holding(_)) {
         diags.push(
             Diagnostic::error("contract-deposit-holding", "a deposit is held in an account")
                 .label(name_loc, "choose an account or holding, not an asset or party"),
         );
         return Err(());
     }
-    if kept.owner != owner {
+    if kept.owner != keeping.owner {
         diags.push(
             Diagnostic::error("contract-deposit-owner", "the deposit holding belongs to another owner")
                 .label(name_loc, "choose a holding owned by the contract owner")
@@ -1463,7 +1448,7 @@ fn deposit_holding<'s>(
     if kept.holds.as_ref().is_some_and(|units| !units.contains(&amount.unit)) {
         diags.push(
             Diagnostic::error("contract-deposit-unit", "the deposit holding does not accept this unit")
-                .label(file.exprs[args[0]].loc, "choose a unit the holding can keep"),
+                .label(file.exprs[file[prop.args][0]].loc, "choose a unit the holding can keep"),
         );
         return Err(());
     }
@@ -1644,7 +1629,7 @@ fn add_share(total: Ratio, rate: Ratio, loc: Loc, diags: &mut Vec<Diagnostic>) -
     Some(next)
 }
 
-fn asset_area(world: &World<'_>, asset: Id<crate::book::Asset>, day: Day) -> Option<Amount> {
+fn asset_area(world: &World<'_>, asset: Id<Asset>, day: Day) -> Option<Amount> {
     let area = world.book.names.get("area")?;
     let asset = &world.book.assets[asset];
     let own = crate::book::prop(&asset.props, area, day).and_then(|property| match property.value {

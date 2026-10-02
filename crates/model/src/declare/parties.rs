@@ -4,15 +4,14 @@ use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Set, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind};
 
 use super::commodities::Commodities;
-use super::{Resolving, add_path_spellings, owner_names_in, strict_path_suffixes};
+use super::{Resolving, Said, add_path_spellings, owner_names_in, strict_path_suffixes};
 use crate::book::{At, Books, Entity, Sort};
 use crate::collect::{Collected, Written};
 use crate::errors::Word;
-use crate::lower::{JournalSurvey, Mention};
+use crate::lower::Mention;
 use crate::names::Scoped;
 use crate::problem::{self, Noun};
 use crate::scope::Home;
-use crate::sources::Site;
 
 /// The entities every book has: the owner, the unknown party, where openings come from, and the market.
 const BUILT_IN: [&str; 4] = ["me", "?", "opening", "market"];
@@ -52,16 +51,14 @@ pub(super) struct Entities<'s> {
 
 /// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones.
 pub(super) fn find<'a, 's>(
-    sites: &[Site<'a, 's>],
-    collected: &Collected<'a, 's>,
-    survey: &JournalSurvey<'s>,
+    said: Said<'_, 'a, 's>,
     resolving: &Resolving<'_>,
     commodities: &Commodities<'s>,
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Parties<'a, 's> {
-    let (written, first_paths, owner_names) = written_entities(collected, names, diags);
-    let implied = implied_parties(sites, survey, collected, resolving, commodities, names, &written);
+    let (written, first_paths, owner_names) = written_entities(said.collected, names, diags);
+    let implied = implied_parties(said, resolving, commodities, names, &written);
     // A written suffix such as `acme` can resolve to one implied path such as `vendors/acme`; a second `acme`
     // entity would make that reference ambiguous. All full paths are kept, so genuinely ambiguous suffixes are
     // diagnosed by the scoped entity resolver.
@@ -117,15 +114,14 @@ fn written_entities<'a, 's>(
 /// The parties that endpoint names and claims, contracts and `for` clauses mention and nothing declares, each with
 /// where it is first mentioned: a name that is an account, an asset, a kind or any such thing is not a party.
 fn implied_parties<'a, 's>(
-    sites: &[Site<'a, 's>],
-    survey: &JournalSurvey<'s>,
-    collected: &Collected<'a, 's>,
+    said: Said<'_, 'a, 's>,
     resolving: &Resolving<'_>,
     commodities: &Commodities<'s>,
     names: &Interner<'s>,
     written: &Map<&'s str, Written_<'a, 's>>,
 ) -> Map<&'s str, Loc> {
-    let (mentioned, roles) = mentions(sites, survey);
+    let collected = said.collected;
+    let (mentioned, roles) = mentions(said);
     let mut places = Set::default();
     for decl in collected.decls.iter().filter(|decl| matches!(decl.node.what, DeclKind::Account | DeclKind::Asset)) {
         add_path_spellings(&mut places, decl.node.name.0);
@@ -142,7 +138,7 @@ fn implied_parties<'a, 's>(
     for &name in commodities.by_name.keys() {
         add_path_spellings(&mut others, name);
     }
-    for (_, system) in resolving.systems.iter() {
+    for (_, system) in resolving.seeing.systems.iter() {
         add_path_spellings(&mut others, names.name(system.path));
     }
     for decl in collected.decls_of(DeclKind::Asset) {
@@ -168,14 +164,14 @@ fn implied_parties<'a, 's>(
 
 /// Every name the endpoints of the journal and the survey mention, with where it is first mentioned, and the
 /// names mentioned as parties (a claim's, a `for`'s, a promise's) rather than only as ends.
-fn mentions<'a, 's>(sites: &[Site<'a, 's>], survey: &JournalSurvey<'s>) -> (Map<&'s str, Loc>, Set<&'s str>) {
+fn mentions<'s>(said: Said<'_, '_, 's>) -> (Map<&'s str, Loc>, Set<&'s str>) {
     // Only one borrowed name and its first source location is kept, even when it occurs in many journal rows.
     let mut mentioned: Map<&'s str, Loc> = Map::default();
     let mut roles: Set<&'s str> = Set::default();
-    crate::lower::visit_endpoints(sites, |_, name, loc, _| {
+    crate::lower::visit_endpoints(said.sites, |_, name, loc, _| {
         mentioned.entry(name.0).or_insert(loc);
     });
-    for mention in &survey.mentions {
+    for mention in &said.survey.mentions {
         match *mention {
             Mention::Claim { subject, creditor, loc } => {
                 mentioned.entry(subject.0).or_insert(loc);

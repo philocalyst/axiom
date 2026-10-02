@@ -18,7 +18,7 @@ use crate::problem::{self, Among, Noun};
 use crate::props::PropTable;
 use crate::purposes::NativePurposes;
 use crate::resolve::End;
-use crate::scope::{Home, Scopes};
+use crate::scope::{Home, Scopes, Seeing};
 use crate::sources::{Site, SystemIndex};
 
 /// Quanta are `i64`; eighteen decimals is as fine as one can count.
@@ -451,28 +451,41 @@ fn contract_party_name_exception(a: &NameClaim<'_>, b: &NameClaim<'_>, spelling:
     contract.declared == spelling && contract.contract_party == Some(spelling) && entity.declared == spelling
 }
 
+/// What the sources say, three ways: in the order they are written, by kind of item, and as the mentions the
+/// journal makes of parties and ends.
+#[derive(Clone, Copy)]
+pub(crate) struct Said<'c, 'a, 's> {
+    pub sites: &'c [Site<'a, 's>],
+    pub collected: &'c Collected<'a, 's>,
+    pub survey: &'c crate::lower::JournalSurvey<'s>,
+}
+
+/// The systems of a build: as a tree, by what they define, and what each home of them sees.
+pub(crate) struct Systems<'s> {
+    pub tree: Tree<System>,
+    pub index: SystemIndex<'s>,
+    pub scopes: Scopes,
+}
+
 /// Construct a native v4 Book from the syntax sites and a small survey of only
 /// claim-bearing journal relationships. No v3 chart-account collection is used.
 pub(crate) fn declare<'a, 's>(
-    sites: &[Site<'a, 's>],
-    collected: &Collected<'a, 's>,
+    said: Said<'_, 'a, 's>,
     settings: &Settings<'s>,
     mut names: Interner<'s>,
-    systems_tree: Tree<System>,
-    systems: SystemIndex<'s>,
-    scopes: Scopes,
-    survey: &crate::lower::JournalSurvey<'s>,
+    systems: Systems<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> World<'s> {
+    let Said { collected, survey, .. } = said;
+    let Systems { tree: systems_tree, index: systems, scopes } = systems;
     let native_kinds = kinds::declare_sites(collected, &mut names, &systems_tree, &scopes, diags);
-    let native_purposes =
-        crate::purposes::declare_sites(collected, &mut names, &systems_tree, &scopes, &native_kinds.index, diags);
+    let seeing = Seeing { systems: &systems_tree, scopes: &scopes };
+    let native_purposes = crate::purposes::declare_sites(collected, &mut names, seeing, &native_kinds.index, diags);
     check_cross_namespace_names(collected, &scopes, &systems_tree, diags);
-    let resolving =
-        Resolving { systems: &systems_tree, scopes: &scopes, kinds: &native_kinds, purposes: &native_purposes };
+    let resolving = Resolving { seeing, kinds: &native_kinds, purposes: &native_purposes };
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
-    let parties = parties::find(sites, collected, survey, &resolving, &commodities, &mut names, diags);
+    let parties = parties::find(said, &resolving, &commodities, &mut names, diags);
     let mut entities = parties::declare(collected, parties, &resolving, commodities.base, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
@@ -669,8 +682,7 @@ use self::places::{PlaceInputs, Places};
 
 /// What the words of a declaration are resolved against once the kinds and the purposes are built.
 struct Resolving<'a> {
-    systems: &'a Tree<System>,
-    scopes: &'a Scopes,
+    seeing: Seeing<'a>,
     kinds: &'a NativeKinds,
     purposes: &'a NativePurposes,
 }
@@ -689,11 +701,11 @@ impl Resolving<'_> {
             return fallback;
         };
         let loc = written.file().loc(word.0);
-        let (kinds, scope) = (self.kinds, self.scopes.of(written.home()));
+        let (kinds, scope) = (self.kinds, self.seeing.scopes.of(written.home()));
         let kind = match kinds.index.resolve(names, scope, word.0) {
             Ok(kind) => kind,
             Err(miss) => {
-                let among = Among { index: &kinds.index, names, systems: self.systems };
+                let among = Among { index: &kinds.index, names, systems: self.seeing.systems };
                 diags.push(kinds::unresolved(miss, Word { text: word.0, loc }, &among, |id| &kinds.tree[id]));
                 return fallback;
             }
@@ -723,11 +735,11 @@ impl Resolving<'_> {
         home: Home,
         diags: &mut Vec<Diagnostic>,
     ) -> Option<Id<Purpose>> {
-        let (purposes, scope) = (self.purposes, self.scopes.of(home));
+        let (purposes, scope) = (self.purposes, self.seeing.scopes.of(home));
         match purposes.index.resolve(names, scope, name) {
             Ok(purpose) => Some(purpose),
             Err(miss) => {
-                let among = Among { index: &purposes.index, names, systems: self.systems };
+                let among = Among { index: &purposes.index, names, systems: self.seeing.systems };
                 let describe = |ids: &[Id<Purpose>]| {
                     problem::shortest(
                         names,
@@ -784,10 +796,10 @@ impl Resolving<'_> {
         for &arg in &file[line.args] {
             let expr = &file.exprs[arg];
             match expr.kind {
-                ExprKind::Name(name) => match index.resolve(names, self.scopes.of(written.home()), name.0) {
+                ExprKind::Name(name) => match index.resolve(names, self.seeing.scopes.of(written.home()), name.0) {
                     Ok(entity) => resolved.push((entity, None, expr.loc)),
                     Err(miss) => {
-                        let among = Among { index, names, systems: self.systems };
+                        let among = Among { index, names, systems: self.seeing.systems };
                         let describe = |ids: &[Id<Entity>]| {
                             problem::shortest(names, &index.names, ids, |id| entities[id].path, |id| entities[id].loc)
                         };

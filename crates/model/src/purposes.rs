@@ -7,13 +7,13 @@
 use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
 use axiom_syntax::{Decl, DeclKind, ExprKind};
 
-use crate::book::{At, Kind, Purpose, PurposeRoot, System};
+use crate::book::{At, Kind, Purpose, PurposeRoot};
 use crate::collect::{Collected, Written};
 use crate::errors::Word;
 use crate::kinds;
 use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
-use crate::scope::{Home, Scopes};
+use crate::scope::{Home, Seeing};
 
 pub(crate) struct NativePurposes {
     pub tree: Tree<Purpose>,
@@ -35,17 +35,16 @@ const TRANSFER: usize = 3;
 pub(crate) fn declare_sites<'s>(
     collected: &Collected<'_, 's>,
     names: &mut Interner<'s>,
-    systems: &Tree<System>,
-    scopes: &Scopes,
+    seeing: Seeing<'_>,
     kind_index: &Scoped<Kind>,
     diags: &mut Vec<Diagnostic>,
 ) -> NativePurposes {
     let mut drafts = Drafts::of(collected, names, diags);
     let draft_index = drafts.index(names);
-    drafts.link_parents(&draft_index, names, systems, scopes, diags);
+    drafts.link_parents(&draft_index, names, seeing, diags);
     drafts.cut_cycles(names, diags);
     let (mut tree, remap) = drafts.freeze();
-    drafts.attach_objects(&mut tree, &remap, names, systems, scopes, kind_index, diags);
+    drafts.attach_objects(&mut tree, &remap, names, seeing, kind_index, diags);
     let index = drafts.index_of(&tree, &remap, names);
     let root = |at: usize| remap[at];
     let roots =
@@ -152,8 +151,7 @@ impl<'a, 's> Drafts<'a, 's> {
         &mut self,
         index: &Scoped<Purpose>,
         names: &Interner<'s>,
-        systems: &Tree<System>,
-        scopes: &Scopes,
+        seeing: Seeing<'_>,
         diags: &mut Vec<Diagnostic>,
     ) {
         let Drafts { purposes, parents, declared, .. } = self;
@@ -171,10 +169,10 @@ impl<'a, 's> Drafts<'a, 's> {
                 parents[*draft] = Some(TRANSFER);
                 continue;
             };
-            parents[*draft] = Some(match index.resolve(names, scopes.of(written.home()), parent.0) {
+            parents[*draft] = Some(match index.resolve(names, seeing.scopes.of(written.home()), parent.0) {
                 Ok(parent_id) => parent_id.index(),
                 Err(miss) => {
-                    let among = Among { index, names, systems };
+                    let among = Among { index, names, systems: seeing.systems };
                     let describe = |ids: &[Id<Purpose>]| {
                         let (name, loc) =
                             (|id: Id<Purpose>| purposes[id.index()].name, |id: Id<Purpose>| purposes[id.index()].loc);
@@ -224,8 +222,7 @@ impl<'a, 's> Drafts<'a, 's> {
         tree: &mut Tree<Purpose>,
         remap: &[Id<Purpose>],
         names: &Interner<'s>,
-        systems: &Tree<System>,
-        scopes: &Scopes,
+        seeing: Seeing<'_>,
         kind_index: &Scoped<Kind>,
         diags: &mut Vec<Diagnostic>,
     ) {
@@ -250,8 +247,8 @@ impl<'a, 's> Drafts<'a, 's> {
                     );
                     continue;
                 };
-                let scope = scopes.of(written.home());
-                match kinds::find(kind_index, names, systems, kind_name.0, |visible| scope.sees(visible)) {
+                let scope = seeing.scopes.of(written.home());
+                match kinds::find(kind_index, names, seeing.systems, kind_name.0, |visible| scope.sees(visible)) {
                     Ok(kind) => tree[id].of = Some(At { value: kind, loc: prop.loc }),
                     Err(_) => diags.push(
                         Diagnostic::error("unknown-kind", format!("kind `{}` is not known here", kind_name.0))

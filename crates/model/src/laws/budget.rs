@@ -322,9 +322,8 @@ fn lower_budget_limit<'s>(
             Some(BudgetLimit::Ready(Limit::Amount(amount)))
         }
         ast::Limit::Amount(ast::Amount::Computed(root)) => {
-            let name = world.book.purposes[entry.purpose].name;
             let (program, local_root) =
-                compile::compile_budget_limit(world, diags, entry.file, entry.home, entry.purpose, name, root)?;
+                compile::compile_budget_limit(world, diags, entry.file, entry.home, entry.purpose, root)?;
             let law_offset = nodes.len() as u32;
             for (_, node) in program.nodes.iter() {
                 nodes.push(Node {

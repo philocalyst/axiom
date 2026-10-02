@@ -72,8 +72,9 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let settings = declare::settings(&collected, &mut diags);
     let scopes = declare::scopes(&collected, &systems, &systems_tree, &mut diags);
     let survey = lower::survey(&sites);
-    let mut world =
-        declare::declare(&sites, &collected, &settings, names, systems_tree, systems, scopes, &survey, &mut diags);
+    let said = declare::Said { sites: &sites, collected: &collected, survey: &survey };
+    let systems = declare::Systems { tree: systems_tree, index: systems, scopes };
+    let mut world = declare::declare(said, &settings, names, systems, &mut diags);
     props::declare(&mut world, &collected, &mut diags);
     world.finish_props();
     params::declare(&mut world, &collected, &mut diags);

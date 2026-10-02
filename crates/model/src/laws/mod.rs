@@ -18,8 +18,9 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id, Set};
 use axiom_syntax::{self as ast, DeclKind, ItemKind, Trigger as Written};
 
+pub(crate) use self::compile::Placement;
+use self::compile::compile;
 pub(crate) use self::compile::compile_template;
-use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
 use crate::book::{AlsoOn, Kind, Sort, System};
 use crate::declare::World;
@@ -43,7 +44,12 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
                         Home::System(system) => Owner::System(system),
                         Home::Project | Home::Builtin => Owner::Book,
                     };
-                    compile_native(world, diags, file, site.home, owner, Ty::Entity, &file[id]);
+                    compile_native(
+                        world,
+                        diags,
+                        &Placement { file, home: site.home, owner, subject: Ty::Entity },
+                        &file[id],
+                    );
                 }
                 ItemKind::Decl(id) => declare_in(world, site, &file[id], &mut seen, diags),
                 // Contract laws are compiled by the contract pass after every
@@ -87,11 +93,12 @@ fn declare_in<'s>(
         return;
     };
     if seen.insert((decl.what, key)) {
+        let placement = Placement { file, home: site.home, owner, subject };
         for law in &file[decl.laws] {
-            compile_native(world, diags, file, site.home, owner, subject, law);
+            compile_native(world, diags, &placement, law);
         }
     }
-    declare_alsos(world, diags, file, site.home, decl, owner, decl.what);
+    declare_alsos(world, diags, site, decl, owner);
 }
 
 /// What a declaration's laws govern, or None after saying why they govern nothing.
@@ -148,12 +155,10 @@ fn governed<'s>(
 pub(crate) fn compile_native<'s>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
-    file: &ast::File<'s>,
-    home: Home,
-    owner: Owner,
-    subject: Ty,
+    site: &Placement<'_, 's>,
     law: &ast::Law<'s>,
 ) -> Option<Id<Law>> {
+    let owner = site.owner;
     if let Err(problem) = fits(world, owner, law) {
         diags.push(problem);
         return None;
@@ -161,8 +166,7 @@ pub(crate) fn compile_native<'s>(
     if law.damaged {
         return None;
     }
-    let site = Placement { file, home, owner, subject };
-    let compiled = compile(world, diags, &site, law)?;
+    let compiled = compile(world, diags, site, law)?;
     Some(push(world, compiled))
 }
 
@@ -254,12 +258,11 @@ fn set_specificity(world: &mut World<'_>) {
 fn declare_alsos<'s>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
-    file: &ast::File<'s>,
-    home: Home,
+    site: &Site<'_, 's>,
     decl: &ast::Decl<'s>,
     owner: Owner,
-    what: DeclKind,
 ) {
+    let (file, home, what) = (&site.source.file, site.home, decl.what);
     if file[decl.alsos].is_empty() {
         return;
     }

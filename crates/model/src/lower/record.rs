@@ -1,14 +1,14 @@
 //! Native S5 journal records. This pass reads the source AST directly and
 //! appends resolved records to the pooled Book arenas.
 
-use axiom_core::{Day, Days, Diagnostic, Groups, Id, Loc, Map, Run, Sym};
+use axiom_core::{Day, Days, Diagnostic, Groups, Id, Loc, Map, Run};
 use axiom_syntax as ast;
 use axiom_syntax::{Quantity, Subject};
 
 use super::flow::{
-    Codes, Ends, FlowCx, OtherSide, Parent, ResolvedEnd, ResolvedQuantity, Shape, empty_codes, flow_roots, journal_end,
-    lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root, push_tail_roots,
-    resolve_amount, resolve_end, resolve_quantity,
+    Codes, Ends, FlowCx, OtherSide, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, flow_roots,
+    journal_end, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root,
+    push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
 };
 use super::push_amount_root;
 use super::staged::Staged;
@@ -16,14 +16,13 @@ use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
-use super::tail::Tail;
 use crate::book::{Amount, FlowSide, Place, ScheduleKind, TemplateAmount};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
     Action, Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram,
-    JournalQuantity, Mode, OccurrenceTail, Origin, Provenance, Purposed, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
+    JournalQuantity, Mode, OccurrenceTail, Origin, Txn, TxnKind, WrittenGroup, WrittenOccurrence,
 };
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
@@ -67,12 +66,6 @@ impl<'a, 's> Record<'a, 's> {
             Record::Statement(_) => 0,
         }
     }
-}
-
-#[derive(Clone, Copy)]
-struct PurposeEvidence {
-    purposed: Purposed,
-    loc: Loc,
 }
 
 struct OccurrenceGroupDraft {
@@ -217,14 +210,6 @@ impl Built {
     }
 }
 
-/// A transaction being lowered: what its flows are made against, and what its header says, which each carries.
-struct TxnCx<'c, 's> {
-    cx: FlowCx<'c, 's>,
-    flow: &'c ast::Flow<'s>,
-    tail: Tail,
-    codes: Run<Sym>,
-}
-
 fn lower_txn<'a, 's>(
     world: &mut World<'s>,
     record: Written<'a, 's, ast::Txn<'s>>,
@@ -320,9 +305,9 @@ fn lower_named_flow<'s>(
     built: &mut Built,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let TxnCx { cx, flow: written, tail, codes } = txn;
+    let (cx, written, codes) = (txn.cx, txn.flow, txn.codes);
     let flow_at = staged.flows().len();
-    let Some((flow, exprs)) = make_flow(staged, &cx, written, ends, tail, codes, diags) else {
+    let Some((flow, exprs)) = make_flow(staged, txn, ends, diags) else {
         built.successful = false;
         return;
     };
@@ -1581,147 +1566,6 @@ fn merge_detail_pool(
         Some(override_detail)
     } else {
         Some(world.book.details.push(merged))
-    }
-}
-
-/// The party at an endpoint classifies flows through its own purpose or the
-/// applicable purpose of its kind. A commodity issuer contributes `pays`;
-/// an account recipient can transform that source through `takes` below.
-fn endpoint_purpose(
-    world: &World<'_>,
-    place: Id<Place>,
-    named_entity: Option<Id<crate::book::Entity>>,
-    source: bool,
-) -> Option<PurposeEvidence> {
-    if let crate::book::Role::Issuer(unit) = world.book.places[place].role {
-        if !source {
-            return None;
-        }
-        let mut kind = world.book.commodities[unit].kind;
-        let pays = world.book.kinds[kind].pays?;
-        while let Some(parent) = world.book.kinds.parent(kind) {
-            if world.book.kinds[parent].pays == Some(pays) {
-                kind = parent;
-            } else {
-                break;
-            }
-        }
-        return Some(PurposeEvidence {
-            purposed: Purposed { purpose: pays.value, of: None, source: Provenance::Commodity(kind) },
-            loc: pays.loc,
-        });
-    }
-
-    let role_entity = match world.book.places[place].role {
-        crate::book::Role::Outside(Some(entity)) | crate::book::Role::Tab(entity) => Some(entity),
-        _ => None,
-    };
-    let entity = named_entity.or(role_entity)?;
-    let party = &world.book.entities[entity];
-    let kind_id = party.kind;
-    let kind = &world.book.kinds[kind_id];
-    if let Some(purpose) = party.purpose {
-        // The declaration builder may carry an inherited kind value on an
-        // entity. Preserve its true provenance so explanations name the kind.
-        if kind.purpose != Some(purpose) && kind.pays != Some(purpose) {
-            return Some(PurposeEvidence {
-                purposed: Purposed { purpose: purpose.value, of: None, source: Provenance::Entity(entity) },
-                loc: purpose.loc,
-            });
-        }
-    }
-
-    let purpose = if source { kind.pays.or(kind.purpose) } else { kind.purpose }?;
-    Some(PurposeEvidence {
-        purposed: Purposed { purpose: purpose.value, of: None, source: Provenance::Party(party.kind) },
-        loc: purpose.loc,
-    })
-}
-
-/// Resolve purpose sources once for ordinary and contract flow templates. The
-/// returned purpose is absent when no source classifies the flow; conflicting
-/// sources return an error and retain both declaration locations.
-pub(super) fn infer_for_flow(
-    world: &World<'_>,
-    from: Id<Place>,
-    from_entity: Option<Id<crate::book::Entity>>,
-    to: Id<Place>,
-    to_entity: Option<Id<crate::book::Entity>>,
-    written: Option<(Purposed, Loc)>,
-    loc: Loc,
-    diags: &mut Vec<Diagnostic>,
-) -> Result<Option<Purposed>, ()> {
-    let from_purpose = endpoint_purpose(world, from, from_entity, true);
-    let to_purpose = endpoint_purpose(world, to, to_entity, false);
-    if let (Some(from), Some(to)) = (from_purpose, to_purpose)
-        && !same_purpose(world, from.purposed, to.purposed)
-    {
-        diags.push(purpose_disagreement(world, loc, from, to));
-        return Err(());
-    }
-    let inferred = from_purpose.or(to_purpose).map(|source| taken_purpose(world, to, source).unwrap_or(source));
-    if let (Some((written, written_loc)), Some(inferred)) = (written, inferred)
-        && !same_purpose(world, written, inferred.purposed)
-    {
-        diags.push(purpose_disagreement(world, loc, PurposeEvidence { purposed: written, loc: written_loc }, inferred));
-        return Err(());
-    }
-    Ok(written.map(|(purpose, _)| purpose).or(inferred.map(|source| source.purposed)))
-}
-
-fn taken_purpose(world: &World<'_>, destination: Id<Place>, source: PurposeEvidence) -> Option<PurposeEvidence> {
-    if !matches!(world.book.places[destination].role, crate::book::Role::Account { .. }) {
-        return None;
-    }
-    let kind_id = world.book.places[destination].kind;
-    let take = world.book.kinds[kind_id].takes.iter().find(|take| take.value.from == source.purposed.purpose)?;
-    Some(PurposeEvidence {
-        purposed: Purposed { purpose: take.value.to, of: source.purposed.of, source: Provenance::Account(kind_id) },
-        loc: take.loc,
-    })
-}
-
-/// Ancestor and descendant purposes refine the same classification; sibling
-/// purposes remain distinct even when they share a broad spending/income root.
-fn same_purpose(world: &World<'_>, left: Purposed, right: Purposed) -> bool {
-    let related = world.book.purposes.covers(left.purpose, right.purpose)
-        || world.book.purposes.covers(right.purpose, left.purpose);
-    let object_compatible = match (left.of, right.of) {
-        (Some(left), Some(right)) => left == right,
-        // An unqualified purpose carries no object fact to contradict an
-        // explicit `of` target from another source.
-        _ => true,
-    };
-    related && object_compatible
-}
-
-fn purpose_disagreement(world: &World<'_>, loc: Loc, first: PurposeEvidence, second: PurposeEvidence) -> Diagnostic {
-    Diagnostic::error("purpose-disagreement", "this flow's purpose sources disagree")
-        .label(first.loc, purpose_evidence_label(world, first))
-        .label(second.loc, purpose_evidence_label(world, second))
-        .label(loc, "these sources classify the same flow differently")
-}
-
-fn purpose_evidence_label(world: &World<'_>, evidence: PurposeEvidence) -> String {
-    let purpose = world.book.name(world.book.purposes[evidence.purposed.purpose].name);
-    match evidence.purposed.source {
-        Provenance::Written => format!("the written purpose is `#{purpose}`"),
-        Provenance::Contract(contract) => {
-            format!("contract `{}` gives purpose `#{purpose}`", world.book.name(world.book.contracts[contract].name),)
-        }
-        Provenance::Entity(entity) => {
-            format!("party `{}` gives purpose `#{purpose}`", world.book.name(world.book.entities[entity].path),)
-        }
-        Provenance::Party(kind) => {
-            format!("party kind `{}` gives purpose `#{purpose}`", world.book.name(world.book.kinds[kind].name),)
-        }
-        Provenance::Commodity(kind) => {
-            format!("commodity kind `{}` gives purpose `#{purpose}`", world.book.name(world.book.kinds[kind].name),)
-        }
-        Provenance::Account(kind) => {
-            format!("account kind `{}` takes the flow as `#{purpose}`", world.book.name(world.book.kinds[kind].name),)
-        }
-        Provenance::Derived => format!("the derived flow has purpose `#{purpose}`"),
     }
 }
 

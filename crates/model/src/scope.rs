@@ -19,6 +19,13 @@ pub(crate) enum Home {
     System(Id<System>),
 }
 
+/// The systems that declare names, and what each home sees of them: what a name is looked up from.
+#[derive(Clone, Copy)]
+pub(crate) struct Seeing<'a> {
+    pub systems: &'a Tree<System>,
+    pub scopes: &'a Scopes,
+}
+
 /// The point of view of one project or system.
 pub(crate) struct Scope {
     /// Where the looking happens, then (for a system) its ancestors, nearest

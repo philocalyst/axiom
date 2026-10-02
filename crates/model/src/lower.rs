@@ -8,6 +8,7 @@
 pub(crate) mod also;
 mod contracts;
 mod flow;
+mod infer;
 mod record;
 mod staged;
 mod statements;

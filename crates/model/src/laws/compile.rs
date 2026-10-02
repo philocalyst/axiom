@@ -285,9 +285,9 @@ pub(crate) fn compile_budget_limit<'s>(
     file: &File<'s>,
     home: Home,
     purpose: axiom_core::Id<crate::book::Purpose>,
-    name: Sym,
     root: ExprId,
 ) -> Option<(TemplateProgram, NodeId)> {
+    let name = world.book.purposes[purpose].name;
     let mut compiler = Compiler {
         world,
         diags,

@@ -73,14 +73,14 @@ pub(crate) fn declare<'a, 's>(
         if entry.loc != file.loc(source.name.0) {
             continue;
         }
-        let program =
-            match compile_pattern(file, source.pattern, &mut world.book, &named, &world.scopes, written.home()) {
-                Ok(program) => program,
-                Err(problem) => {
-                    diags.push(problem);
-                    continue;
-                }
-            };
+        let lookup = Lookup { file, home: written.home(), scopes: &world.scopes, named: &named };
+        let program = match compile_pattern(&lookup, source.pattern, &mut world.book) {
+            Ok(program) => program,
+            Err(problem) => {
+                diags.push(problem);
+                continue;
+            }
+        };
         world.book.patterns[entry.id].program = program.into_boxed_slice();
     }
     validate_pattern_calls(&world.book.patterns, &named, diags);
@@ -159,59 +159,57 @@ fn validate_pattern_calls(arena: &axiom_core::Arena<Pattern>, named: &[Named<Pat
     }
 }
 
-/// The pattern or format `name` stands for at `from`: the nearest declaration of it that `from` can see.
-fn resolve_named<T>(
-    noun: Noun,
-    file: &ast::File<'_>,
-    names: &Interner<'_>,
-    named: &[Named<T>],
-    scopes: &Scopes,
-    from: Home,
-    name: ast::Name<'_>,
-) -> Result<Id<T>, Diagnostic> {
-    let scope = scopes.of(from);
-    let word = Word::of(file, name.0);
-    let visible = || named.iter().filter(|candidate| scope.sees(candidate.home));
-    let sym = names.get(name.0);
-    let here: Vec<_> = visible().filter(|candidate| Some(candidate.name) == sym).collect();
-    let Some(rank) = here.iter().map(|candidate| scope.rank(candidate.home)).min() else {
-        let nearest = closest(name.0, visible().map(|candidate| names.name(candidate.name)));
-        return Err(problem::unknown(noun, word, nearest));
-    };
-    let best: Vec<_> = here.into_iter().filter(|candidate| scope.rank(candidate.home) == rank).collect();
-    match best[..] {
-        [only] => Ok(only.id),
-        _ => {
-            let describe = |candidate: &&Named<T>| Candidate {
-                is: format!("`{}`", name.0),
-                declared: Some(candidate.loc),
-                write: None,
-            };
-            Err(problem::ambiguous(noun, word, &best.iter().map(describe).collect::<Vec<_>>()))
+/// What a name in a pattern or a format is looked up among: the declarations of its kind, from where it is written.
+struct Lookup<'c, 's, T> {
+    file: &'c ast::File<'s>,
+    home: Home,
+    scopes: &'c Scopes,
+    named: &'c [Named<T>],
+}
+
+impl<T> Lookup<'_, '_, T> {
+    /// The declaration `name` stands for: the nearest of that name that `home` can see.
+    fn resolve(&self, noun: Noun, names: &Interner<'_>, name: ast::Name<'_>) -> Result<Id<T>, Diagnostic> {
+        let scope = self.scopes.of(self.home);
+        let word = Word::of(self.file, name.0);
+        let visible = || self.named.iter().filter(|candidate| scope.sees(candidate.home));
+        let sym = names.get(name.0);
+        let here: Vec<_> = visible().filter(|candidate| Some(candidate.name) == sym).collect();
+        let Some(rank) = here.iter().map(|candidate| scope.rank(candidate.home)).min() else {
+            let nearest = closest(name.0, visible().map(|candidate| names.name(candidate.name)));
+            return Err(problem::unknown(noun, word, nearest));
+        };
+        let best: Vec<_> = here.into_iter().filter(|candidate| scope.rank(candidate.home) == rank).collect();
+        match best[..] {
+            [only] => Ok(only.id),
+            _ => {
+                let describe = |candidate: &&Named<T>| Candidate {
+                    is: format!("`{}`", name.0),
+                    declared: Some(candidate.loc),
+                    write: None,
+                };
+                Err(problem::ambiguous(noun, word, &best.iter().map(describe).collect::<Vec<_>>()))
+            }
         }
     }
 }
 
+/// A pattern's program, its named calls resolved against `lookup`.
 fn compile_pattern<'s>(
-    file: &ast::File<'s>,
+    lookup: &Lookup<'_, 's, Pattern>,
     pattern: ast::Pattern<'s>,
     book: &mut Book<'s>,
-    named: &[Named<Pattern>],
-    scopes: &Scopes,
-    home: Home,
 ) -> Result<Vec<Op>, Diagnostic> {
-    compile_pattern_at(file, pattern, book, named, scopes, home, 0)
+    compile_pattern_at(lookup, pattern, book, 0)
 }
 
 fn compile_pattern_at<'s>(
-    file: &ast::File<'s>,
+    lookup: &Lookup<'_, 's, Pattern>,
     pattern: ast::Pattern<'s>,
     book: &mut Book<'s>,
-    named: &[Named<Pattern>],
-    scopes: &Scopes,
-    home: Home,
     depth: u8,
 ) -> Result<Vec<Op>, Diagnostic> {
+    let file = lookup.file;
     if depth > 32 {
         return Err(Diagnostic::error("pattern-too-deep", "a pattern may nest at most 32 groups")
             .label(file.loc(file.src), "this pattern is nested too deeply"));
@@ -220,73 +218,92 @@ fn compile_pattern_at<'s>(
     for choice in &file[pattern.choices] {
         let mut sequence = Vec::new();
         for term in &file[choice.terms] {
-            let mut body = match term.atom {
-                ast::PatternAtom::Literal(text) => vec![Op::Literal(book.quoted_text(text.0))],
-                ast::PatternAtom::Class(class) => vec![Op::Class(match class {
-                    ast::Class::Digit => CharClass::Digit,
-                    ast::Class::Letter => CharClass::Letter,
-                    ast::Class::Space => CharClass::Space,
-                    ast::Class::Alnum => CharClass::Alnum,
-                    ast::Class::Any => CharClass::Any,
-                    ast::Class::Rest => CharClass::Rest,
-                    ast::Class::Start => CharClass::Start,
-                    ast::Class::End => CharClass::End,
-                })],
-                ast::PatternAtom::Named(reference) => {
-                    vec![Op::Call(resolve_named(Noun::Pattern, file, &book.names, named, scopes, home, reference)?)]
-                }
-                ast::PatternAtom::Group(group) => {
-                    let choices = file[group.choices].len();
-                    let mut program = compile_pattern_at(file, group, book, named, scopes, home, depth + 1)?;
-                    if choices > 1 {
-                        let len = op_len(file, file.loc(file.src), program.len())?;
-                        program.insert(0, Op::Repeat { min: 1, max: Some(1), len });
-                    }
-                    program
-                }
-            };
-            if term.repeat != ast::Repeat::One {
-                let len = op_len(file, file.loc(file.src), body.len())?;
-                let (min, max) = match term.repeat {
-                    ast::Repeat::One => (1, Some(1)),
-                    ast::Repeat::Optional => (0, Some(1)),
-                    ast::Repeat::Many => (0, None),
-                    ast::Repeat::Some => (1, None),
-                };
-                body.insert(0, Op::Repeat { min, max, len });
-            }
-            if let Some(capture) = term.capture {
-                let len = op_len(file, file.loc(file.src), body.len())?;
-                let capture = match capture.0 {
-                    "payee" => Capture::Payee,
-                    "code" => Capture::Code,
-                    "amount" => Capture::Amount,
-                    "date" => Capture::Date,
-                    "original" => Capture::Original,
-                    _ => Capture::Named(book.names.intern(capture.0)),
-                };
-                body.insert(0, Op::Capture { name: capture, len });
-            }
-            sequence.extend(body);
+            sequence.extend(compile_term(lookup, term, book, depth)?);
         }
         choices.push(sequence);
     }
-
     let mut program = Vec::new();
     for (at, choice) in choices.iter().enumerate() {
         if at + 1 < choices.len() {
-            let len = op_len(file, file.loc(file.src), choice.len())?;
-            program.push(Op::Choice { len });
+            program.push(Op::Choice { len: op_len(file, choice.len())? });
         }
         program.extend_from_slice(choice);
     }
     Ok(program)
 }
 
-fn op_len(_file: &ast::File<'_>, loc: Loc, len: usize) -> Result<u16, Diagnostic> {
+/// One term of a sequence: its atom, repeated as written and captured under the name written.
+fn compile_term<'s>(
+    lookup: &Lookup<'_, 's, Pattern>,
+    term: &ast::PatternTerm<'s>,
+    book: &mut Book<'s>,
+    depth: u8,
+) -> Result<Vec<Op>, Diagnostic> {
+    let file = lookup.file;
+    let mut body = compile_atom(lookup, term.atom, book, depth)?;
+    if term.repeat != ast::Repeat::One {
+        let len = op_len(file, body.len())?;
+        let (min, max) = match term.repeat {
+            ast::Repeat::One => (1, Some(1)),
+            ast::Repeat::Optional => (0, Some(1)),
+            ast::Repeat::Many => (0, None),
+            ast::Repeat::Some => (1, None),
+        };
+        body.insert(0, Op::Repeat { min, max, len });
+    }
+    if let Some(capture) = term.capture {
+        let len = op_len(file, body.len())?;
+        let name = match capture.0 {
+            "payee" => Capture::Payee,
+            "code" => Capture::Code,
+            "amount" => Capture::Amount,
+            "date" => Capture::Date,
+            "original" => Capture::Original,
+            _ => Capture::Named(book.names.intern(capture.0)),
+        };
+        body.insert(0, Op::Capture { name, len });
+    }
+    Ok(body)
+}
+
+fn compile_atom<'s>(
+    lookup: &Lookup<'_, 's, Pattern>,
+    atom: ast::PatternAtom<'s>,
+    book: &mut Book<'s>,
+    depth: u8,
+) -> Result<Vec<Op>, Diagnostic> {
+    Ok(match atom {
+        ast::PatternAtom::Literal(text) => vec![Op::Literal(book.quoted_text(text.0))],
+        ast::PatternAtom::Class(class) => vec![Op::Class(match class {
+            ast::Class::Digit => CharClass::Digit,
+            ast::Class::Letter => CharClass::Letter,
+            ast::Class::Space => CharClass::Space,
+            ast::Class::Alnum => CharClass::Alnum,
+            ast::Class::Any => CharClass::Any,
+            ast::Class::Rest => CharClass::Rest,
+            ast::Class::Start => CharClass::Start,
+            ast::Class::End => CharClass::End,
+        })],
+        ast::PatternAtom::Named(reference) => {
+            vec![Op::Call(lookup.resolve(Noun::Pattern, &book.names, reference)?)]
+        }
+        ast::PatternAtom::Group(group) => {
+            let fenced = lookup.file[group.choices].len() > 1;
+            let mut program = compile_pattern_at(lookup, group, book, depth + 1)?;
+            if fenced {
+                let len = op_len(lookup.file, program.len())?;
+                program.insert(0, Op::Repeat { min: 1, max: Some(1), len });
+            }
+            program
+        }
+    })
+}
+
+/// The length of a branch as the runtime counts it, which is how far a jump over it goes.
+fn op_len(file: &ast::File<'_>, len: usize) -> Result<u16, Diagnostic> {
     u16::try_from(len).map_err(|_| {
         Diagnostic::error("pattern-too-large", "a pattern branch exceeds the runtime's 65,535 operation limit")
-            .label(loc, "this pattern is too large")
+            .label(file.loc(file.src), "this pattern is too large")
     })
 }
 
@@ -338,8 +355,8 @@ fn known_as_decl<'s>(
             return;
         }
     };
-    let mut patterns =
-        anonymous_patterns(file, &mut world.book, &decl.known_as, item.loc, named, &world.scopes, site.home, diags);
+    let lookup = Lookup { file, home: site.home, scopes: &world.scopes, named };
+    let mut patterns = anonymous_patterns(&lookup, &mut world.book, &decl.known_as, item.loc, diags);
     let word = Word::of(file, decl.name.0);
     let found = if is_entity {
         world.entity(site.home, word).map(Bearer::Entity)
@@ -381,8 +398,8 @@ fn lower_code_rule<'s>(
 ) {
     let file = &site.source.file;
     let pattern = world.book.names.intern(rule.pattern.0);
-    let known_as =
-        anonymous_patterns(file, &mut world.book, &rule.known_as, item.loc, named, &world.scopes, site.home, diags);
+    let lookup = Lookup { file, home: site.home, scopes: &world.scopes, named };
+    let known_as = anonymous_patterns(&lookup, &mut world.book, &rule.known_as, item.loc, diags);
     let mut on = Vec::new();
     for name in &file[rule.on] {
         let text = name.0;
@@ -511,8 +528,11 @@ fn decode_quoted(raw: &str) -> Result<std::borrow::Cow<'_, str>, usize> {
     Ok(std::borrow::Cow::Owned(decoded))
 }
 
-/// What the lines of a format have said so far.
-struct FormatParts {
+/// A format being read: the lines it has been given and what they have said so far.
+struct FormatReader<'c, 'b, 's> {
+    file: &'c ast::File<'s>,
+    book: &'b mut Book<'s>,
+    shape: Shape,
     specs: Vec<Spec>,
     categories: Vec<(Text, Id<crate::book::Purpose>)>,
     /// Which fields have been given, by `Field as usize`.
@@ -528,24 +548,16 @@ fn lower_format<'s>(
 ) -> Option<Format> {
     let lines = &file[source.lines];
     let shape = format_shape(file, lines, book, diags);
-    let mut parts = FormatParts { specs: Vec::new(), categories: Vec::new(), seen: [false; 17] };
+    let mut reader = FormatReader { file, book, shape, specs: Vec::new(), categories: Vec::new(), seen: [false; 17] };
     for (line_at, line) in lines.iter().enumerate() {
-        read_format_line(
-            file,
-            line,
-            &shape,
-            category_purposes.get(line_at).copied().flatten(),
-            book,
-            &mut parts,
-            diags,
-        );
+        reader.read_line(line, category_purposes.get(line_at).copied().flatten(), diags);
     }
-    require_format_fields(file, source, &parts.seen, diags);
+    require_format_fields(file, source, &reader.seen, diags);
     Some(Format {
-        name: book.names.intern(source.name.0),
-        shape,
-        specs: parts.specs.into_boxed_slice(),
-        categories: parts.categories.into_boxed_slice(),
+        name: reader.book.names.intern(source.name.0),
+        shape: reader.shape,
+        specs: reader.specs.into_boxed_slice(),
+        categories: reader.categories.into_boxed_slice(),
         loc: file.loc(source.name.0),
     })
 }
@@ -576,129 +588,126 @@ fn format_error(line: &ast::FormatLine<'_>, code: &'static str, message: String)
     Diagnostic::error(code, message).label(line.loc, "this format line")
 }
 
-/// One line of a format: a category, or the spec of a field. `purpose` is what a category line's `#purpose` named,
-/// if it named one.
-fn read_format_line<'s>(
-    file: &ast::File<'s>,
-    line: &ast::FormatLine<'s>,
-    shape: &Shape,
-    purpose: Option<Id<crate::book::Purpose>>,
-    book: &mut Book<'s>,
-    parts: &mut FormatParts,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let key = line.key.0;
-    let args = format_args(file, line);
-    if args.iter().any(|arg| arg.quoted && decode_quoted(arg.text).is_err()) {
-        diags.push(format_error(line, "bad-string-escape", "a quoted format value has an invalid escape".into()));
-        return;
-    }
-    match key {
-        "records" => {}
-        "category" => {
-            if args.len() != 3 || args[1].text != "is" || !args[2].text.starts_with('#') {
-                diags.push(format_error(line, "bad-format", "a category line is `category VALUE is #purpose`".into()));
-            } else if let Some(purpose) = purpose {
-                parts.categories.push((format_text(book, args[0]), purpose));
-            }
+impl<'s> FormatReader<'_, '_, 's> {
+    /// One line of a format: a category, or the spec of a field. `purpose` is what a category line's `#purpose`
+    /// named, if it named one.
+    fn read_line(
+        &mut self,
+        line: &ast::FormatLine<'s>,
+        purpose: Option<Id<crate::book::Purpose>>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let key = line.key.0;
+        let args = format_args(self.file, line);
+        if args.iter().any(|arg| arg.quoted && decode_quoted(arg.text).is_err()) {
+            diags.push(format_error(line, "bad-string-escape", "a quoted format value has an invalid escape".into()));
+            return;
         }
-        _ => {
-            let Some(field) = field(key) else {
-                diags.push(format_error(line, "unknown-format-field", format!("`{key}` is not a field of a format")));
-                return;
-            };
-            if parts.seen[field as usize] {
-                diags.push(format_error(line, "duplicate-format-field", format!("`{key}` is given twice")));
-                return;
+        match key {
+            "records" => {}
+            "category" => {
+                if args.len() != 3 || args[1].text != "is" || !args[2].text.starts_with('#') {
+                    let message = "a category line is `category VALUE is #purpose`";
+                    diags.push(format_error(line, "bad-format", message.into()));
+                } else if let Some(purpose) = purpose {
+                    let value = format_text(self.book, args[0]);
+                    self.categories.push((value, purpose));
+                }
             }
-            parts.seen[field as usize] = true;
-            if args.is_empty() {
-                diags.push(format_error(line, "bad-format", format!("`{key}` needs a column or field path")));
-                return;
-            }
-            if let Some(spec) = read_spec(line, field, &args, shape, book, diags) {
-                parts.specs.push(spec);
-            }
+            _ => self.read_field(line, &args, diags),
         }
     }
-}
 
-/// A column: a position or a header in rows, a path in tagged records.
-fn format_column<'s>(
-    book: &mut Book<'s>,
-    line: &ast::FormatLine<'s>,
-    shape: &Shape,
-    arg: FormatArg<'s>,
-) -> Result<Column, Diagnostic> {
-    let text = format_text(book, arg);
-    match shape {
-        Shape::Tagged { .. } => Ok(Column::Path(text)),
-        Shape::Rows if !arg.quoted => match arg.text.parse::<u16>() {
-            Ok(0) => Err(format_error(line, "bad-format", "columns are counted from 1".into())),
-            Ok(index) => Ok(Column::Index(index)),
-            Err(_) => Ok(Column::Header(text)),
-        },
-        Shape::Rows => Ok(Column::Header(text)),
+    /// A line that gives a field a column: once only, and with something to read it from.
+    fn read_field(&mut self, line: &ast::FormatLine<'s>, args: &[FormatArg<'s>], diags: &mut Vec<Diagnostic>) {
+        let key = line.key.0;
+        let Some(field) = field(key) else {
+            diags.push(format_error(line, "unknown-format-field", format!("`{key}` is not a field of a format")));
+            return;
+        };
+        if self.seen[field as usize] {
+            diags.push(format_error(line, "duplicate-format-field", format!("`{key}` is given twice")));
+            return;
+        }
+        self.seen[field as usize] = true;
+        if args.is_empty() {
+            diags.push(format_error(line, "bad-format", format!("`{key}` needs a column or field path")));
+            return;
+        }
+        if let Some(spec) = self.read_spec(line, field, args, diags) {
+            self.specs.push(spec);
+        }
     }
-}
 
-/// What a field's line says: the columns it is read from, and its date layout or rule.
-fn read_spec<'s>(
-    line: &ast::FormatLine<'s>,
-    field: Field,
-    args: &[FormatArg<'s>],
-    shape: &Shape,
-    book: &mut Book<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Spec> {
-    let key = line.key.0;
-    let fail = |message: String| format_error(line, "bad-format", message);
-    let place = format_column(book, line, shape, args[0]).or_report(diags)?;
-    let mut rule = Rule::None;
-    let mut layout = None;
-    match field {
-        Field::Date if args.len() > 1 => {
-            if args.len() != 2 {
-                diags.push(fail("`date` takes a column and one date layout".into()));
-                return None;
-            }
-            let text = format_text(book, args[1]);
-            layout = DateLayout::parse(book.text(text));
-            if layout.is_none() {
-                diags.push(format_error(
-                    line,
-                    "bad-date-layout",
-                    format!("`{}` is not a date layout", book.text(text)),
-                ));
-                return None;
-            }
+    /// A column: a position or a header in rows, a path in tagged records.
+    fn column(&mut self, line: &ast::FormatLine<'s>, arg: FormatArg<'s>) -> Result<Column, Diagnostic> {
+        let text = format_text(self.book, arg);
+        match self.shape {
+            Shape::Tagged { .. } => Ok(Column::Path(text)),
+            Shape::Rows if !arg.quoted => match arg.text.parse::<u16>() {
+                Ok(0) => Err(format_error(line, "bad-format", "columns are counted from 1".into())),
+                Ok(index) => Ok(Column::Index(index)),
+                Err(_) => Ok(Column::Header(text)),
+            },
+            Shape::Rows => Ok(Column::Header(text)),
         }
-        Field::Amount => match args.get(1).map(|arg| arg.text) {
-            None => {}
-            Some("flipped") if args.len() == 2 => rule = Rule::Flipped,
-            Some("sign") if args.len() == 4 => {
-                let marker = format_column(book, line, shape, args[2]).or_report(diags)?;
-                rule = Rule::Sign { place: marker, into: format_text(book, args[3]) };
-            }
-            Some(_) => {
-                diags.push(fail("amount takes `flipped` or `sign COLUMN VALUE`".into()));
-                return None;
-            }
-        },
-        Field::Pending if args.len() == 2 => rule = Rule::Is(format_text(book, args[1])),
-        Field::Memo => {}
-        _ if args.len() != 1 => {
-            diags.push(fail(format!("`{key}` takes one column")));
-            return None;
-        }
-        _ => {}
     }
-    let places = if field == Field::Memo {
-        args.iter().map(|arg| format_column(book, line, shape, *arg)).collect::<Result<Vec<_>, _>>().or_report(diags)?
-    } else {
-        vec![place]
-    };
-    Some(Spec { field, places: places.into_boxed_slice(), layout, rule, loc: line.loc })
+
+    /// What a field's line says: the columns it is read from, and its date layout or rule.
+    fn read_spec(
+        &mut self,
+        line: &ast::FormatLine<'s>,
+        field: Field,
+        args: &[FormatArg<'s>],
+        diags: &mut Vec<Diagnostic>,
+    ) -> Option<Spec> {
+        let key = line.key.0;
+        let fail = |message: String| format_error(line, "bad-format", message);
+        let place = self.column(line, args[0]).or_report(diags)?;
+        let mut rule = Rule::None;
+        let mut layout = None;
+        match field {
+            Field::Date if args.len() > 1 => {
+                if args.len() != 2 {
+                    diags.push(fail("`date` takes a column and one date layout".into()));
+                    return None;
+                }
+                let text = format_text(self.book, args[1]);
+                layout = DateLayout::parse(self.book.text(text));
+                if layout.is_none() {
+                    let message = format!("`{}` is not a date layout", self.book.text(text));
+                    diags.push(format_error(line, "bad-date-layout", message));
+                    return None;
+                }
+            }
+            Field::Amount => match args.get(1).map(|arg| arg.text) {
+                None => {}
+                Some("flipped") if args.len() == 2 => rule = Rule::Flipped,
+                Some("sign") if args.len() == 4 => {
+                    let marker = self.column(line, args[2]).or_report(diags)?;
+                    rule = Rule::Sign { place: marker, into: format_text(self.book, args[3]) };
+                }
+                Some(_) => {
+                    diags.push(fail("amount takes `flipped` or `sign COLUMN VALUE`".into()));
+                    return None;
+                }
+            },
+            Field::Pending if args.len() == 2 => rule = Rule::Is(format_text(self.book, args[1])),
+            Field::Memo => {}
+            _ if args.len() != 1 => {
+                diags.push(fail(format!("`{key}` takes one column")));
+                return None;
+            }
+            _ => {}
+        }
+        let places = if field == Field::Memo {
+            let columns = args.iter().map(|arg| self.column(line, *arg)).collect::<Result<Vec<_>, _>>();
+            columns.or_report(diags)?
+        } else {
+            vec![place]
+        };
+        Some(Spec { field, places: places.into_boxed_slice(), layout, rule, loc: line.loc })
+    }
 }
 
 /// A record format needs a date and an amount, or the debit and credit of one, or a gross.
@@ -862,9 +871,8 @@ fn source_format<'a, 's>(
     };
     let written_format = &file[reference];
     if file[written_format.lines].is_empty() {
-        let (names, scopes) = (&world.book.names, &world.scopes);
-        let id =
-            resolve_named(Noun::Format, file, names, formats, scopes, home, written_format.name).or_report(diags)?;
+        let lookup = Lookup { file, home, scopes: &world.scopes, named: formats };
+        let id = lookup.resolve(Noun::Format, &world.book.names, written_format.name).or_report(diags)?;
         return Some(Some(id));
     }
     let category_purposes = format_purposes(world, file, written_format, home, diags);
@@ -942,19 +950,16 @@ fn source_feed<'a, 's>(
 }
 
 fn anonymous_patterns<'s>(
-    file: &ast::File<'s>,
+    lookup: &Lookup<'_, 's, Pattern>,
     book: &mut Book<'s>,
     patterns: &ast::Many<ast::Pattern<'s>>,
     loc: Loc,
-    named: &[Named<Pattern>],
-    scopes: &Scopes,
-    home: Home,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Id<Pattern>> {
-    file[*patterns]
+    lookup.file[*patterns]
         .iter()
         .filter_map(|pattern| {
-            compile_pattern(file, *pattern, book, named, scopes, home)
+            compile_pattern(lookup, *pattern, book)
                 .or_report(diags)
                 .map(|program| book.patterns.push(Pattern { name: None, program: program.into_boxed_slice(), loc }))
         })
@@ -989,7 +994,8 @@ mod tests {
         let tree: Tree<crate::book::System> = Tree::default();
         let scopes = Scopes::new(&tree, |_| Vec::new());
         let mut book = book();
-        let program = compile_pattern(&file, file[id].pattern, &mut book, &[], &scopes, Home::Project).unwrap();
+        let lookup = Lookup { file: &file, home: Home::Project, scopes: &scopes, named: &[] };
+        let program = compile_pattern(&lookup, file[id].pattern, &mut book).unwrap();
         let (ach, debit, credit) = (book.intern_text("ACH "), book.intern_text("DEBIT"), book.intern_text("CREDIT"));
         assert_eq!(
             program,

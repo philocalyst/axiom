@@ -4,8 +4,9 @@ use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Ratio, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity};
 
+use super::infer::infer_for_flow;
 use super::push_amount_root;
-use super::record::{CodeIndex, infer_for_flow};
+use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::Tail;
 use crate::book::{Amount, Commodity, FlowSide, Place, Sign, TemplateAmount, TemplateItemParent};
@@ -15,6 +16,7 @@ use crate::journal::{
     Detail, Flow, FlowExpressions, Infer, JournalEnd, JournalItem, JournalQuantity, Mode, Origin, Select, Txn,
 };
 use crate::law::{NodeId, Ty};
+use crate::resolve::End;
 use crate::scope::Home;
 
 #[derive(Clone, Copy)]
@@ -22,6 +24,13 @@ pub(super) struct ResolvedEnd {
     pub place: Id<Place>,
     pub entity: Option<Id<crate::book::Entity>>,
     pub select: Run<Select>,
+}
+
+impl ResolvedEnd {
+    /// The end without its lot selectors: the place, and the party at it.
+    pub fn end(self) -> End {
+        End { place: self.place, entity: self.entity }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +55,14 @@ pub(super) struct FlowCx<'a, 's> {
     pub loc: Loc,
     pub roots: &'a Map<ast::ExprId, NodeId>,
     pub code_index: &'a CodeIndex,
+}
+
+/// A transaction being lowered: what its flows are made against, and what its header says, which each carries.
+pub(super) struct TxnCx<'c, 's> {
+    pub cx: FlowCx<'c, 's>,
+    pub flow: &'c ast::Flow<'s>,
+    pub tail: Tail,
+    pub codes: Run<Sym>,
 }
 
 /// The two ends of a flow.
@@ -203,13 +220,12 @@ fn stated_amount<'s>(
 /// its amounts and basis are computed by.
 pub(super) fn make_flow<'s>(
     world: &mut World<'s>,
-    cx: &FlowCx<'_, 's>,
-    written: &ast::Flow<'s>,
+    txn: TxnCx<'_, 's>,
     ends: Ends,
-    mut tail: Tail,
-    header_codes: Run<Sym>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Flow, Option<FlowExpressions>)> {
+    let TxnCx { cx, flow: written, mut tail, codes: header_codes } = txn;
+    let cx = &cx;
     let loc = cx.loc;
     let out = written
         .from
@@ -339,17 +355,8 @@ pub(super) fn make_resolved_flow(
 ) -> Option<Flow> {
     let Shape { ends: Ends { from, to }, out, arrive, infer, mode } = shape;
     let (day, txn) = (cx.day, cx.txn);
-    let purpose = infer_for_flow(
-        world,
-        from.place,
-        from.entity,
-        to.place,
-        to.entity,
-        tail.purpose.map(|purpose| (purpose, tail.purpose_loc.unwrap_or(loc))),
-        loc,
-        diags,
-    )
-    .ok()?;
+    let purpose = tail.purpose.map(|purpose| (purpose, tail.purpose_loc.unwrap_or(loc)));
+    let purpose = infer_for_flow(world, from.end(), to.end(), purpose, loc, diags).ok()?;
     let mut detail = tail.detail;
     detail.spender = from.entity;
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
