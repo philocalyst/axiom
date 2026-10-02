@@ -124,9 +124,20 @@ relator lands. Run every example, fix what is genuinely wrong, and list it.
 
 ### 5. `Facts`: one store, typed keys
 
-`core::facts` is the store (lane C2): a `Builder` that paints statements in source order and freezes by one counting
-sort, a frozen `Facts` read by `at`, `steps` and `days_where`, and `inherited` for the fall back up a chain. Read its
-module doc first. You do not build the store. You:
+`core::facts` is the store (lane C2, merged): a `Builder` that paints statements in source order (`paint`, `paint_always`,
+`paint_many` for set-valued slots) and freezes by one counting sort and parallel chunks, and a frozen `Facts` read by
+`at(key, holder, day)`, `steps`, `days_where(key, holder, window, holds) -> DaySet`, `at_first(key, chain, day)` (the
+first holder of a chain that says something: a thing, then its kind, then its kind's parents) and `slots(holder)`.
+A slot that holds a set (`lives`, `citizen`, `holds`) is a `Key<Many<V>>`; `facts.members(set)` opens it. Read its module
+doc first, and its `Datum` equality note: a value type must be canonical (equal values, equal bytes) to be stored.
+Two properties to design around:
+- a **cold random read is 15-25% slower** than nested vectors, and a read in holder order is 1.4-1.8x faster. So a value
+  the fold needs for every event (an owner's currency, a place's `select`) is resolved **once at plan build** into a dense
+  per-holder array, not read through `facts.at` per event;
+- a `Key` and a `Many` are **claims** the store cannot check, and a `Many` from one store means nothing in another.
+  The `Slots` struct below is where the claims are checked, once.
+
+You do not build the store. You:
 - **Number the holders.** The model still keeps separate arenas for places, entities, commodities, assets, kinds and
   contracts. Number them by concatenating them: a `HolderIndex` from a per-sort offset, so that `Id<Place>` and
   `Id<Entity>` map to a dense `u32` and back. K3 merges the arenas; you do not.

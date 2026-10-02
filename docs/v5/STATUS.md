@@ -12,8 +12,8 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K0a** model groundwork | `Staged`, one `problem` catalog, `Word::of`, one collect pass, dead code, short functions | **merged** (`5f99b98`) |
 | **K0b** outer groundwork | owners, JSON writers, sync dates, sync apply, `RuntimeRange`, short functions | **merged** (`daf104e`) |
 | **C3** `postings` SIMD | the `fearless_simd` block-compare kernel, kept only if it is 1.3× | running (resumed after a rate limit) |
-| **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral | running (resumed after a rate limit) |
-| **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | brief written; starts when C2 merges |
+| **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral, sets as `Many` | **merged** (after K0a) |
+| **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | running |
 | K3 positions and addresses | | after K12 |
 | K4 events | | after K3 |
 | K5 promises | | after K4 |
@@ -63,6 +63,17 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
   was not kept. Belongs to K7's position steppers.
 - A smaller or interned `Diagnostic` in `core` would remove the boxed-error aliases the groundwork needed.
 - The CLI and report render cells twice. K7.
+
+## Lane C2, in numbers
+
+| | |
+|---|---|
+| lines | +507 non-test in `core`; `facts.rs` is 757 lines before its tests, 439 of them code |
+| size | 26.5 bytes a step, 135 MB for 5.1M statements over a million holders; nested vectors: 61 bytes a step, 4.0M allocations |
+| build | 275-550 ms on 4 cores for 5.1M statements; 1.4-1.7 s for the nested layout |
+| `days_where` | 9-97x faster than sampling every day, and exact |
+| a read | warm sweep 15.5-17 ns (nested 22-25); **cold random read 55-70 ns (nested 47-52): the layout loses 15-25% cold**, so per-event reads must be resolved at plan build |
+| tests | 31 unit, 3 doc, a 2,550-book property test against a per-day model, ~20 hand-made mutants all caught |
 
 ## Operational note
 
