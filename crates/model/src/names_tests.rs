@@ -1,3 +1,6 @@
+//! What a name stands for when more than one thing answers to it, and what is said when none does: built from
+//! whole sources, as a user would write them.
+
 use axiom_core::{Diagnostic, FileId};
 use axiom_syntax::{Folder, parse};
 
