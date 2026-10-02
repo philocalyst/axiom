@@ -1,17 +1,18 @@
 //! Syntax trees to a [`Book`]: names resolved, kinds linked, laws compiled and
 //! type-checked, transactions elaborated into flows.
 //!
-//! | module      | job                                                          |
-//! |-------------|--------------------------------------------------------------|
-//! | `sources`   | which files are systems, the tree of systems, folder layout  |
-//! | `collect`   | every item of every source, sorted into typed buckets once   |
-//! | `declare`   | kinds, commodities, entities and places come to exist        |
-//! | `props`     | property lines, read once and applied down the kind chain    |
-//! | `params`    | dated tables                                                 |
-//! | `laws`      | laws compiled and typed, and the order they run in           |
-//! | `rules`     | which laws watch which place, households and residences      |
-//! | `flows`     | the journal elaborated, in parallel, into flows              |
-//! | `problem`   | the diagnostics that come in families, each worded once      |
+//! | module       | job                                                         |
+//! |--------------|-------------------------------------------------------------|
+//! | `sources`    | which files are systems, the tree of systems, folder layout |
+//! | `collect`    | every item of every source, sorted into typed buckets once  |
+//! | `declare`    | kinds, commodities, entities and places come to exist       |
+//! | `props`      | property lines, read once and applied down the kind chain   |
+//! | `params`     | dated tables                                                |
+//! | `laws`       | laws compiled and typed, and the order they run in          |
+//! | `rules`      | which laws watch which place, households and residences     |
+//! | `lower`      | the journal and the contracts elaborated into flows         |
+//! | `sync_lower` | patterns, formats, code rules and sources of `sync`         |
+//! | `problem`    | the diagnostics that come in families, each worded once     |
 
 pub mod book;
 pub mod journal;

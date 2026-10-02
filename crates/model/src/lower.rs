@@ -4,6 +4,17 @@
 //! raw relationships that may require a party tab. Ordinary journal ends stay
 //! in their syntax tables and are resolved by the recording pass; this survey
 //! does not copy the journal into a second per-item plan.
+//!
+//! | module       | job                                                                          |
+//! |--------------|------------------------------------------------------------------------------|
+//! | `record`     | the journal in order: transactions, openings, occurrences and claims         |
+//! | `statements` | the dated statements that are not flows: values, measures, endings, basis    |
+//! | `flow`       | one flow: its quantities, its ends, its items                                |
+//! | `tail`       | the clauses after an amount, read once for flows, term lines and `also`      |
+//! | `infer`      | a flow's purpose, when it names none, from what its ends say                 |
+//! | `also`       | `also` lines, which add flows to the flows of a kind, entity or contract     |
+//! | `contracts`  | a contract's facts, schedules, loan, deposit and shares                      |
+//! | `staged`     | the guard that takes back what a rejected record had already added           |
 
 pub(crate) mod also;
 mod contracts;
