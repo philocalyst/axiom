@@ -20,7 +20,7 @@ pub fn intersect(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
     if short.len() * SKEW <= long.len() {
         gallop(short, long, out);
     } else {
-        merge(short, long, out);
+        merge_scalar(short, long, out);
     }
 }
 
@@ -41,11 +41,18 @@ pub fn intersect_all(lists: &mut [&[u32]], out: &mut Vec<u32>) {
     }
 }
 
+/// The merge, an id at a time, over the whole of both lists.
+fn merge_scalar(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
+    out.resize(a.len().min(b.len()), 0);
+    let found = merge_into(a, b, out);
+    out.truncate(found);
+}
+
 /// Two cursors that advance by comparisons turned into arithmetic: whichever list has the smaller id moves on, both
 /// if they are equal, and the id is written down either way and kept only when they were. No branch depends on the
-/// data, so none is mispredicted: 2 to 3 times faster than the match on the comparison, in the benchmark.
-fn merge(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
-    out.resize(a.len().min(b.len()), 0);
+/// data, so none is mispredicted: 2 to 3 times faster than the match on the comparison, in the benchmark. The ids
+/// kept start at `out[0]`, which must have room for as many as the shorter list; returns how many.
+fn merge_into(a: &[u32], b: &[u32], out: &mut [u32]) -> usize {
     let (mut at_a, mut at_b, mut found) = (0, 0, 0);
     while at_a < a.len() && at_b < b.len() {
         let (x, y) = (a[at_a], b[at_b]);
@@ -54,7 +61,7 @@ fn merge(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
         at_a += usize::from(x <= y);
         at_b += usize::from(x >= y);
     }
-    out.truncate(found);
+    found
 }
 
 /// For each id of `short`, finds it in what is left of `long`.
@@ -138,7 +145,7 @@ mod tests {
             let (a, b) = (random_list(&mut rng, len_a, domain), random_list(&mut rng, len_b, domain));
             let expected = by_sets(&a, &b);
             let (mut by_merge, mut by_gallop) = (Vec::new(), Vec::new());
-            merge(&a, &b, &mut by_merge);
+            merge_scalar(&a, &b, &mut by_merge);
             let (short, long) = if a.len() <= b.len() { (&a, &b) } else { (&b, &a) };
             gallop(short, long, &mut by_gallop);
             assert_eq!(
@@ -212,7 +219,7 @@ mod tests {
             for overlap in [1, 50] {
                 let (a, b) = pair_sharing(&mut rng, len, overlap);
                 let classic = time(9, |out| classic_merge(&a, &b, out));
-                let branchless = time(9, |out| merge(&a, &b, out));
+                let branchless = time(9, |out| merge_scalar(&a, &b, out));
                 let n = (a.len() + b.len()) as f64;
                 eprintln!(
                     "{len:>9} ids, {overlap:>2}% shared: classic {:.2} ns/id, branchless {:.2} ns/id ({:.2}x)",
@@ -232,7 +239,7 @@ mod tests {
         let long = random_list(&mut rng, 1_000_000, 4_000_000);
         for skew in [2, 4, 8, 16, 32, 64, 128, 1024] {
             let short: Vec<u32> = random_list(&mut rng, long.len() / skew, 4_000_000);
-            let merged = time(9, |out| merge(&short, &long, out));
+            let merged = time(9, |out| merge_scalar(&short, &long, out));
             let galloped = time(9, |out| gallop(&short, &long, out));
             eprintln!(
                 "one list {skew:>4}x the other: merge {:>10.0} ns, gallop {:>10.0} ns ({:.2}x)",
