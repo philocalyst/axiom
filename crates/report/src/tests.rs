@@ -987,7 +987,6 @@ pub(crate) fn household() -> Household {
         measures: Arena::new(),
         readings: Vec::new(),
         filed: Vec::new(),
-        plans: Arena::new(),
         sources: Vec::new(),
     };
     let run = Run {

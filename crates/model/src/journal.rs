@@ -1,11 +1,11 @@
 //! What the journal records: flows grouped into transactions, balance
-//! assertions, measures, settlement events, prices, returns as filed, and plans.
+//! assertions, measures, settlement events, prices, and returns as filed.
 
-use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
+use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, On, Place,
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, Place,
     Policy, Purpose, ScheduleKind, Sign, System, TemplateAmount, TemplateItemParent, TemplateProgram, Text,
 };
 use crate::law::{Law, NodeId, Subject};
@@ -935,20 +935,6 @@ pub struct ClaimChange {
 pub enum ClaimChangeAction {
     /// Forgive the remaining amount of the referenced claim.
     WriteOff,
-}
-
-/// `every month on 1 checking -> landlord 2_400 USD until 2027-06`, or a named
-/// one, `plan paycheck every 2w …`, which the journal can also instantiate.
-pub struct Plan {
-    pub name: Option<Sym>,
-    pub every: Span,
-    pub on: Option<On>,
-    pub from: Option<Day>,
-    pub until: Option<Day>,
-    /// The flows of one occurrence, mode `Planned`, dated at `from` (or the
-    /// day the plan was declared relative to). Forecasts re-date copies.
-    pub template: Box<[Flow]>,
-    pub loc: Loc,
 }
 
 /// Prices by commodity pair and day.

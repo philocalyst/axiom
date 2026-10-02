@@ -548,7 +548,6 @@ impl Fixture {
             measures: Arena::new(),
             readings: Vec::new(),
             filed: Vec::new(),
-            plans: Arena::new(),
             sources: Vec::new(),
             lookup: Default::default(),
             issuer_places: Default::default(),

@@ -303,6 +303,35 @@ account checking
 }
 
 #[test]
+fn written_purchase_object_refines_unqualified_party_kind_purpose() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose purchase : spending
+kind retailer : entity
+  purpose purchase
+entity store : retailer
+kind property : thing
+asset laptop : property
+account checking
+2026-01-01 checking -> store 1_200 USD #purchase of laptop
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
+    assert_eq!(purpose.purpose, book.purpose("purchase").unwrap());
+    assert_eq!(purpose.of, Some(axiom_model::Object::Asset(book.asset("laptop").unwrap())));
+}
+
+#[test]
 fn account_takes_maps_the_source_purpose_on_incoming_flows() {
     let path = "journal/2026/01.ax";
     let text = "\

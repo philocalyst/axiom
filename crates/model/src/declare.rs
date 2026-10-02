@@ -1629,7 +1629,6 @@ pub(crate) fn declare<'a, 's>(
         measures: Arena::new(),
         readings: Vec::new(),
         filed: Vec::new(),
-        plans: Arena::new(),
         sources: Vec::new(),
         lookup,
     };

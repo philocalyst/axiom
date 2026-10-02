@@ -4069,7 +4069,13 @@ fn taken_purpose(
 }
 
 fn same_purpose(left: Purposed, right: Purposed) -> bool {
-    left.purpose == right.purpose && left.of == right.of
+    left.purpose == right.purpose
+        && match (left.of, right.of) {
+            (Some(left), Some(right)) => left == right,
+            // An unqualified purpose carries no object fact to contradict an
+            // explicit `of` target from another source.
+            _ => true,
+        }
 }
 
 fn purpose_disagreement(

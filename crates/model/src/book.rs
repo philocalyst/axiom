@@ -16,7 +16,7 @@ use axiom_core::{
 
 use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure,
-    Plan, Prices, Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
+    Prices, Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
     WrittenOccurrence,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
@@ -115,9 +115,6 @@ pub struct Book<'s> {
     pub readings: Vec<Reading>,
     /// Returns as filed, in the order they were written.
     pub filed: Vec<Filed>,
-    /// v3's plans. The v3 model still fills it; the v4 model leaves it empty,
-    /// and it is deleted once nothing reads it.
-    pub plans: Arena<Plan>,
     /// The `sync` declarations: where facts from outside come from.
     pub sources: Vec<Source>,
     /// How names are found. [`build`](crate::build) fills it; in a book made by
