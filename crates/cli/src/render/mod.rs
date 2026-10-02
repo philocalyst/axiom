@@ -48,15 +48,16 @@ impl<'a> Renderer<'a> {
     /// [`SHOWN`] are drawn, and the rest are counted. Also how many of every
     /// kind there were, drawn or not.
     pub fn present(&self, diagnostics: &[&Diagnostic], all: bool) -> (String, Tally) {
-        let groups = arrange(diagnostics, |diagnostic| self.lead(diagnostic));
-        let shown = if all { groups.len() } else { groups.len().min(SHOWN) };
+        let findings = arrange(diagnostics, |diagnostic| self.lead(diagnostic));
+        let shown = if all { findings.keys() } else { findings.keys().min(SHOWN) };
         let mut text = String::new();
-        for group in &groups[..shown] {
+        for (_, group) in findings.iter().take(shown) {
             let mut first = group[0].clone();
             first.notes.extend(self.also(group[0], &group[1..]));
             text += &(self.diagnostic(&first) + "\n");
         }
-        let hidden: Vec<&Diagnostic> = groups[shown..].iter().flatten().copied().collect();
+        let hidden: Vec<&Diagnostic> =
+            findings.iter().skip(shown).flat_map(|(_, group)| group.iter().copied()).collect();
         if !hidden.is_empty() {
             let counts = Tally::of(hidden.iter().copied()).counts();
             let counted = if counts.is_empty() { String::new() } else { format!(" ({counts})") };
