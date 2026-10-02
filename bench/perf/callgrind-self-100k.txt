@@ -1,41 +1,41 @@
 --------------------------------------------------------------------------------
-1,048,483,447 (100.0%)  PROGRAM TOTALS
+1,810,810,428 (100.0%)  PROGRAM TOTALS
 
 --------------------------------------------------------------------------------
-Ir                   file:function
+Ir                    file:function
 --------------------------------------------------------------------------------
-80,202,426 ( 7.65%)  ???:axiom_syntax::parser::Parser::begin_line
-79,083,465 ( 7.54%)  ???:axiom_engine::post::<impl axiom_engine::ledger::Ledger>::post
-64,154,693 ( 6.12%)  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:__memcpy_avx_unaligned_erms
-63,825,974 ( 6.09%)  ???:axiom_syntax::lex::Lexer::scan_word
-54,856,973 ( 5.23%)  ???:axiom_engine::eval::Machine::scan
-49,800,884 ( 4.75%)  ???:axiom_report::history::Balances::at
-34,834,649 ( 3.32%)  ???:axiom_model::flows::txn::elaborate
-33,892,438 ( 3.23%)  ???:axiom_core::sym::Interner::get
-30,690,237 ( 2.93%)  ???:axiom_model::flows::txn::Elaborator::emit
-28,889,515 ( 2.76%)  ???:axiom_model::flows::record
-22,880,475 ( 2.18%)  ???:<core::str::pattern::CharSearcher as core::str::pattern::Searcher>::next_match
-22,413,653 ( 2.14%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::fire
-21,006,998 ( 2.00%)  ???:axiom_engine::totals::Totals::watched_sides::{{closure}}
-18,640,255 ( 1.78%)  ???:axiom_engine::ledger::Ledger::advance_through
-18,367,964 ( 1.75%)  ???:axiom_core::num::Dec::parse
-17,768,708 ( 1.69%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::side
-17,488,135 ( 1.67%)  ???:axiom_syntax::item::<impl axiom_syntax::parser::Parser>::item
-14,615,276 ( 1.39%)  ???:axiom_syntax::lines::Lines::scan
-14,518,998 ( 1.38%)  ???:axiom_model::resolve::<impl axiom_model::world::World>::seek_place
-13,751,690 ( 1.31%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::evaluate
-13,165,752 ( 1.26%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::flow_head
-13,120,602 ( 1.25%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::place
-13,071,114 ( 1.25%)  ./string/../sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S:__memcmp_avx2_movbe
-11,893,958 ( 1.13%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::enforce
-11,478,204 ( 1.09%)  ???:axiom_model::survey::Survey::unit
-11,033,412 ( 1.05%)  ???:axiom_model::resolve::<impl axiom_model::world::World>::amount
-10,361,484 ( 0.99%)  ???:axiom_syntax::amount::<impl axiom_syntax::parser::Parser>::measured
- 9,832,819 ( 0.94%)  ???:core::slice::sort::stable::quicksort::quicksort'2
- 9,715,251 ( 0.93%)  ???:axiom_core::day::Day::parse
- 9,057,867 ( 0.86%)  ???:axiom_engine::holdings::Holdings::entry
- 8,828,519 ( 0.84%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::flow_legs
- 8,775,392 ( 0.84%)  ???:axiom_model::layout::Layout::check_date
- 8,642,760 ( 0.82%)  ???:axiom_model::resolve::<impl axiom_model::world::World>::commodity
- 8,464,304 ( 0.81%)  ???:axiom_model::resolve::<impl axiom_model::world::World>::end
- 8,220,646 ( 0.78%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::quantity
+171,285,076 ( 9.46%)  ???:axiom_syntax::lex::Lexer::scan_token
+120,295,156 ( 6.64%)  ???:axiom_core::sym::Interner::get
+116,939,164 ( 6.46%)  ???:axiom_engine::totals::History::read
+ 95,036,196 ( 5.25%)  ???:axiom_model::lower::record::record
+ 94,793,739 ( 5.23%)  ???:axiom_engine::post::<impl axiom_engine::ledger::Ledger>::post
+ 71,303,217 ( 3.94%)  ???:axiom_engine::eval::Machine::scan
+ 60,528,975 ( 3.34%)  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:__memcpy_avx_unaligned_erms
+ 56,126,738 ( 3.10%)  ???:axiom_core::calendar::Window::containing
+ 49,940,451 ( 2.76%)  ???:core::slice::sort::unstable::quicksort::quicksort'2
+ 41,483,534 ( 2.29%)  ???:axiom_model::lower::record::lower_tail
+ 39,768,942 ( 2.20%)  ???:axiom_model::resolve::<impl axiom_model::declare::World>::end
+ 31,324,753 ( 1.73%)  ./string/../sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S:__memcmp_avx2_movbe
+ 27,010,813 ( 1.49%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::enforce
+ 24,705,549 ( 1.36%)  ???:axiom_syntax::journal::<impl axiom_syntax::parser::Parser>::journal_entry
+ 24,385,034 ( 1.35%)  ???:axiom_engine::ledger::Ledger::post_journal
+ 23,801,698 ( 1.31%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::flow_head
+ 21,432,547 ( 1.18%)  ???:axiom_engine::explain::Frame::purpose_contributors
+ 20,988,181 ( 1.16%)  ???:axiom_engine::calc::Calc::typed_value
+ 19,888,034 ( 1.10%)  ???:hashbrown::rustc_entry::<impl hashbrown::map::HashMap<K,V,S,A>>::rustc_entry
+ 19,748,389 ( 1.09%)  ???:axiom_model::lower::record::resolve_quantity::{{closure}}
+ 19,029,544 ( 1.05%)  ???:axiom_engine::budget::segment_start
+ 18,679,593 ( 1.03%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::end
+ 17,202,456 ( 0.95%)  ???:axiom_model::lower::record::make_resolved_flow
+ 16,629,895 ( 0.92%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::read
+ 16,356,887 ( 0.90%)  ???:axiom_model::lower::visit_flow_ends
+ 15,377,546 ( 0.85%)  ???:axiom_syntax::parse_in::{{closure}}
+ 14,823,359 ( 0.82%)  ???:axiom_syntax::lines::Lines::scan
+ 13,972,587 ( 0.77%)  ???:axiom_model::lower::record::resolve_end
+ 13,456,101 ( 0.74%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::fire_as_with_done
+ 13,412,203 ( 0.74%)  ???:axiom_model::declare::declare
+ 13,021,766 ( 0.72%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::clauses
+ 12,675,637 ( 0.70%)  ???:axiom_engine::eval::Machine::step
+ 12,454,124 ( 0.69%)  ???:axiom_core::num::Dec::parse
+ 12,032,269 ( 0.66%)  ???:memchr::arch::x86_64::avx2::memchr::One::find_raw_avx2
+ 11,823,405 ( 0.65%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::evaluate
