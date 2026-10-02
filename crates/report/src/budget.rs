@@ -28,6 +28,14 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
             .into_iter()
             .chain(["Spent", "Limit", "Left", "Used"].map(Column::right)),
     );
+    if !book.budgets.is_empty() && query.first() > end {
+        table.note("The requested budget window is beyond the run horizon.");
+        return Report::new(format!(
+            "Budgets for {}",
+            Periods::covering(by, at, at).title(0)
+        ))
+        .with(table);
+    }
     let mut unpriced = 0;
 
     let mut budgets: Vec<_> = book.budgets.iter().map(|(_, budget)| budget).collect();

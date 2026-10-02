@@ -1199,6 +1199,9 @@ fn native_asset_law_forecast_changes_basis_without_moving_cash() {
             .find(|state| state.asset == house)
             .unwrap();
         assert_eq!(house_state.total_basis(), Ok(Qty(11_940_000)));
+        assert!(run.holdings.iter().all(|holding| {
+            holding.place != book.assets[house].place || holding.unit != book.base
+        }));
         let historical_tally: Qty = run
             .effects
             .iter()
@@ -1209,17 +1212,23 @@ fn native_asset_law_forecast_changes_basis_without_moving_cash() {
             })
             .sum();
         assert_eq!(historical_tally, Qty(60_000));
-        let consumed: Qty = run
+        let consumed: Vec<_> = run
             .adjustments
             .iter()
             .filter_map(|adjustment| match adjustment.kind {
                 axiom_engine::AdjustmentKind::Consumed { asset, .. } if asset == house => {
-                    Some(adjustment.amount)
+                    Some((adjustment.day, adjustment.amount))
                 }
                 _ => None,
             })
-            .sum();
-        assert_eq!(consumed, Qty(60_000));
+            .collect();
+        assert_eq!(
+            consumed,
+            [
+                (day(2026, 1, 31), Qty(30_000)),
+                (day(2026, 2, 28), Qty(30_000))
+            ]
+        );
 
         let forecast = Query::Forecast {
             until: Some(day(2026, 12, 31)),
@@ -1804,6 +1813,36 @@ budget meals 50 EUR monthly
             ["1 budget total left out for lack of a price."]
         );
     });
+}
+
+#[test]
+fn a_future_budget_window_does_not_invent_headroom_past_the_run() {
+    with_run(
+        "base USD\npurpose meals : spending\nbudget meals 50 USD monthly\n",
+        day(2026, 3, 31),
+        |book, run| {
+            let report = crate::report(
+                book,
+                run,
+                &Query::Budget {
+                    at: Some(day(2027, 2, 1)),
+                    by: axiom_model::Period::Year,
+                },
+                None,
+            )
+            .unwrap();
+            let section = &report.sections[0];
+            assert!(section.rows.is_empty());
+            assert_eq!(
+                section
+                    .notes
+                    .iter()
+                    .map(crate::tests::cell)
+                    .collect::<Vec<_>>(),
+                ["The requested budget window is beyond the run horizon."]
+            );
+        },
+    );
 }
 
 // ─── Looking ahead to the day a return closes ───────────────────────────────
