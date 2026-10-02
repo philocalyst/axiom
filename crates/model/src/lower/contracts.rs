@@ -123,9 +123,13 @@ struct Facts {
 }
 
 /// The entity a contract is with: the one written after `with`, else the one the contract's own name says.
-fn contract_party<'s>(world: &World<'s>, written: WrittenContract<'_, 's>) -> Result<Id<Entity>, Diagnostic> {
+fn contract_party<'s>(
+    world: &World<'s>,
+    written: WrittenContract<'_, 's>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Id<Entity>> {
     let name = written.node.party.unwrap_or(written.node.name);
-    world.entity(written.home(), Word::of(written.file(), name.0))
+    world.entity(written.home(), Word::of(written.file(), name.0)).or_report(diags)
 }
 
 /// The owner of a contract: whoever owns the place its schedule is paid from or into, else the book's owner.
@@ -146,8 +150,10 @@ fn contract_owner<'s>(
 /// also the borrower among it, is said then.
 fn loan_endpoint<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>) -> Option<End> {
     let loan = written.file()[written.node.props].iter().find(|prop| prop.name.0 == "loan")?;
-    let party = contract_party(world, written).ok()?;
-    let owner = contract_owner(world, written, &mut Vec::new()).filter(|&owner| owner != party)?;
+    // What is wrong with the header is said when the contract is lowered, so what this finds out is not.
+    let said = &mut Vec::new();
+    let party = contract_party(world, written, said)?;
+    let owner = contract_owner(world, written, said).filter(|&owner| owner != party)?;
     Some(End { place: world.tab(party, owner, Class::Debt, loan.loc), entity: Some(party) })
 }
 
@@ -157,7 +163,7 @@ fn contract_facts<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Facts> {
     let (node, file) = (written.node, written.file());
-    let party = contract_party(world, written).or_report(diags)?;
+    let party = contract_party(world, written, diags)?;
     let days = contract_days(file, node.props, diags)?;
     let area = contract_area(world, file, node.props, diags).ok()?;
     let purpose = contract_purpose(world, written, diags)?;
