@@ -90,6 +90,7 @@ kind tax-deferred : asset
     on in
     when self.deductible
     when from is asset and not from is tax-deferred
+    when not purpose is #pretax-benefit | #pre-tax-deferral
     when not purpose is #nondeductible
     count amount as adjustments
 

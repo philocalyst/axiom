@@ -62,8 +62,11 @@ The 529 calculation begins with the opening statement's 24,600.00 USD value and
 19,850.00 USD basis. The 6,000.00 USD of 2025 contributions increase basis. The
 4,800.00 USD tuition payment is qualified; the 1,500.00 USD October transfer to
 checking is not, and releases 392.94 USD of earnings. The separate 620.00 USD HSA
-reimbursement is included in this historical return calculation because it is an
-unqualified distribution in the source example.
+transfer is also included as taxable income: the receipt is mentioned in a
+comment, but this source flow has no `against` link to the dentist payment and
+no medical purpose. Its `!` waives the penalty only. A linked reimbursement is
+a different, explicitly representable case and does not belong in this source's
+taxable-distribution oracle.
 
 The tax calculation uses the displayed 2025 federal and California schedules in
 `verify05.py`, rounds each bracket slice to cents, and uses the source's one-child

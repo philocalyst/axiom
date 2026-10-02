@@ -29,6 +29,11 @@ use std
 entity ftb : government
   purpose state-tax
 
+/// A California payment made this calendar year for a prior tax year. It is
+/// still a state tax paid for federal cash-basis itemizing, but it is not a
+/// payment toward the current year's California liability.
+purpose prior-year-state-tax : state-tax
+
 /// California income tax withheld from pay, or paid to the FTB directly.
 /// Every arrival counts as California tax already paid.
 
@@ -42,8 +47,8 @@ entity ftb : government
 law credit-ca-payments
   on in
   when to is ftb
+  when not purpose is #prior-year-state-tax
   count amount as ca-withheld
-  count amount as salt
 
 /// California personal income tax for the year (R&TC §17041), on federal
 /// adjusted gross income less the state standard deduction. Long-term gains

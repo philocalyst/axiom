@@ -8,8 +8,9 @@
 2025-11-05 joint-checking -> car-loan 528.76 USD // principal
 2025-11-05 joint-checking -> honda-finance 73.65 USD #interest // interest
 
-/// Reimbursing myself from the HSA for May's dentist bill (kept receipt). Tax-free by law,
-/// but it goes to checking, not to a medical place, so Axiom flags it: waived with `!`.
+/// The receipt is described here, but this flow does not link to the May bill
+/// with `against` or carry its medical purpose. It is therefore a taxable
+/// distribution in this example; the waiver covers the penalty only.
 2025-11-05 hsa -> joint-checking 620 USD ! "reimburses 2025-05-09 dentist, receipt kept"
 2025-11-05 dcfsa -> kids-club 416.66 USD #childcare
 2025-11-05 joint-checking -> kids-club 473.34 USD #childcare

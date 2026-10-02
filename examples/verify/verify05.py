@@ -83,7 +83,7 @@ def total(predicate):
 wages = total(lambda f: tagged(f, "wages"))
 pretax = total(lambda f: tagged(f, "household-pre-tax") or tagged(f, "household-deferral"))
 federal = total(lambda f: tagged(f, "federal-tax"))
-state = total(lambda f: tagged(f, "state-tax"))
+state = total(lambda f: tagged(f, "state-tax") or tagged(f, "prior-year-state-tax"))
 sdi = total(lambda f: tagged(f, "state-disability"))
 interest = total(lambda f: tagged(f, "interest-income"))
 mortgage_interest = total(lambda f: tagged(f, "mortgage-interest"))
@@ -175,9 +175,7 @@ ca_schedule = [(0, "0.01"), (22_158, "0.02"), (52_528, "0.04"),
                (742_958, "0.103")]
 ca_taxable = agi - D(11_412)
 ca_tax = progressive(ca_schedule, ca_taxable)
-state_prior_payment = total(
-    lambda f: tagged(f, "state-tax") and "2024 state balance due" in f["comment"]
-)
+state_prior_payment = total(lambda f: tagged(f, "prior-year-state-tax"))
 state_withholding = state - state_prior_payment
 ca_owed = ca_tax - state_withholding
 
