@@ -675,6 +675,36 @@ contract lease with dana
 }
 
 #[test]
+fn contract_deposit_defaults_to_its_first_schedule_holding() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity me : person
+entity dana : person
+account checking
+  owner me
+contract lease with dana
+  1_200 USD monthly on 1 into checking
+  from 2025-07-01
+  deposit 2_350 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    assert_eq!(contract.deposit, Some(axiom_model::Amount::new(axiom_core::Qty(2_350), book.base)));
+    assert_eq!(contract.deposit_holding, Some(book.place("checking").unwrap()));
+}
+
+#[test]
 fn invalid_contract_deposits_do_not_leave_active_terms() {
     let path = "contracts.ax";
     let cases = [
