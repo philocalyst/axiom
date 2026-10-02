@@ -50,6 +50,9 @@ pub struct Book<'s> {
     pub holders: HolderIndex,
     /// Everything the book says of its things, as steps on days: the values of the slots.
     pub facts: Facts,
+    /// Where the lines of the language that a diagnostic points back to were written, by the number of the thing, the
+    /// number of the slot and, for a slot of several, the member: see [`Book::site`].
+    pub sites: Map<(u32, u32, u32), Loc>,
     /// What flows are for: `income`, `spending`, `capital` and the tree beneath
     /// them, pre-ordered so "is groceries food" is an interval test.
     pub purposes: Tree<Purpose>,
@@ -271,8 +274,6 @@ pub enum Role {
 pub struct Entity {
     pub path: Sym,
     pub kind: Id<Kind>,
-    /// The entity's own purpose, before the purpose on its kind.
-    pub purpose: Option<At<Id<Purpose>>>,
     /// Its place as a flow's end: an owner's `Holding`, a party's `Outside`.
     pub place: Option<Id<Place>>,
     /// `owner me` on a business: it is one of the owners, owned by that one.
@@ -317,20 +318,6 @@ pub struct Kind {
     pub sort: Sort,
     /// The system that declared it; `None` for built-ins and project kinds.
     pub system: Option<Id<System>>,
-    // Resolved down the kind chain.
-    /// On a party kind: what flows with its parties are for (`grocer`:
-    /// groceries).
-    pub purpose: Option<At<Id<Purpose>>>,
-    /// On a commodity kind: what its issuer pays is for (`fund`: dividend).
-    pub pays: Option<At<Id<Purpose>>>,
-    /// On an account kind: what arrives from flows of the second purpose is
-    /// the first (`401k`: pre-tax-deferral from wages).
-    pub takes: Box<[At<Take>]>,
-    /// On a party kind: the tax inside every price paid to its parties.
-    pub sales_tax: Option<Ratio>,
-    /// `business 60% for studio` on a party kind: every flow with its parties
-    /// is shared.
-    pub shares: Box<[Share]>,
     /// The slots this kind declares itself, a run of [`Schema`]'s: its things have these and its ancestors'.
     pub slots: Run<Slot>,
     /// Only this kind's own laws; ancestors' laws are found through the tree.
@@ -347,14 +334,6 @@ pub enum Sort {
     Thing,
     Commodity,
     Entity,
-}
-
-/// An account-kind purpose mapping: incoming flows with `from` purpose become
-/// `to` purpose while reaching this kind of account.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Take {
-    pub to: Id<Purpose>,
-    pub from: Id<Purpose>,
 }
 
 /// A declared relationship together with the line that established it.

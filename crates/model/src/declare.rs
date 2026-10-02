@@ -12,6 +12,7 @@ use axiom_core::{
 use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
 use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Roots, Share, Sort, System};
+use crate::builtin;
 use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
 use crate::holders::{Holder, HolderIndex};
@@ -51,6 +52,12 @@ impl World<'_> {
     /// What a line of the language says of `thing`, from the beginning of time: a declaration of one of its own slots.
     pub(crate) fn say<V: Field>(&mut self, thing: impl Into<Holder>, key: Key<V>, value: V) {
         self.painter.paint_always(self.book.holders.number(thing), key, value);
+    }
+
+    /// Where a line of the language is written, for a diagnostic that points back to it: of a thing's slot, and for a
+    /// slot of several of the member the line is about.
+    pub(crate) fn say_site(&mut self, thing: impl Into<Holder>, slot: SlotId, member: u32, loc: Loc) {
+        self.book.sites.insert((self.book.holders.number(thing), slot.0, member), loc);
     }
 
     /// What a line of the language says of `thing`: the whole set a slot of several holds.
@@ -403,11 +410,18 @@ pub(crate) fn declare<'a, 's>(
     let places = places::declare(&inputs, &mut entities, &mut assets, &mut names);
     let contract_endpoints = contract_endpoints(survey, &entities, &account_owners, &places.tabs, &mut names);
 
+    let entity_purposes = std::mem::take(&mut entities.purposes);
     let made = Made { commodities, entities, assets, places, kinds: native_kinds, purposes: native_purposes };
     let tabs = made.places.tabs.clone();
     let book = book(made, names, systems_tree, settings);
     let painter = Facts::builder(book.holders.len());
-    World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints }
+    let mut world = World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints };
+    // What an entity's own declaration says its purpose is, said as a line under it would.
+    for (entity, purpose) in entity_purposes {
+        world.say(entity, builtin::PURPOSE, purpose.value);
+        world.say_site(entity, builtin::PURPOSE.slot(), 0, purpose.loc);
+    }
+    world
 }
 
 /// What the passes made, to be put together into a book.
@@ -460,6 +474,7 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
         schema: Default::default(),
         holders,
         facts: Facts::default(),
+        sites: Map::default(),
         purposes: purposes.tree,
         systems,
         commodities: commodities.arena,

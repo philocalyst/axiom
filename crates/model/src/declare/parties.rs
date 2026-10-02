@@ -5,7 +5,7 @@ use axiom_syntax::{Decl, DeclKind};
 
 use super::commodities::Commodities;
 use super::{Resolving, Said, add_path_spellings, owner_names_in, strict_path_suffixes};
-use crate::book::{At, Entity, Sort};
+use crate::book::{At, Entity, Purpose, Sort};
 use crate::collect::{Collected, Written};
 use crate::errors::Word;
 use crate::lower::Mention;
@@ -47,6 +47,8 @@ pub(super) struct Entities<'s> {
     /// Whether each entity holds what it owns, which it does when something is written as owned by it; the
     /// others keep an outside endpoint. `me` always holds.
     pub holds: Vec<bool>,
+    /// The purposes written after entities, by the entity, and where.
+    pub purposes: Vec<(Id<Entity>, At<Id<Purpose>>)>,
 }
 
 /// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones.
@@ -202,6 +204,7 @@ pub(super) fn declare<'a, 's>(
 ) -> Entities<'s> {
     let Parties { drafts, written, implied, owner_names } = parties;
     let home_of: Map<&str, Home> = drafts.iter().map(|draft| (draft.path, draft.home)).collect();
+    let mut purposes: Vec<(&str, At<Id<Purpose>>)> = Vec::new();
     let (mut tree, ids) = crate::paths::build(drafts.iter().map(|draft| draft.path), |path| {
         let (kind, purpose, doc, loc) = match written.get(path) {
             Some((decl, doc)) => {
@@ -216,10 +219,10 @@ pub(super) fn declare<'a, 's>(
             }
             None => (resolving.kind_roots.entity, None, None, implied.get(path).copied()),
         };
+        purposes.extend(purpose.map(|purpose| (path, purpose)));
         Entity {
             path: names.intern(path),
             kind,
-            purpose,
             place: None,
             owner: None,
             client_of: None,
@@ -255,5 +258,6 @@ pub(super) fn declare<'a, 's>(
     for (path, &id) in &ids {
         holds[id.index()] = *path == "me" || owner_names.contains(path);
     }
-    Entities { tree, ids, index, me, unknown, opening, market, holds }
+    let purposes = purposes.into_iter().map(|(path, purpose)| (ids[path], purpose)).collect();
+    Entities { tree, ids, index, me, unknown, opening, market, holds, purposes }
 }

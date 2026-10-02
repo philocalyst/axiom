@@ -242,7 +242,7 @@ commodity USD : currency
     let (book, diagnostics) = build_book(std, project);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let payroll = book.kinds[book.kind("payroll").unwrap()].purpose.unwrap().value;
+    let payroll = book.fact(builtin::PURPOSE, Holder::Kind(book.kind("payroll").unwrap())).unwrap();
     assert_eq!(book.name(book.purposes[payroll].name), "wages");
     let retirement = book.kind("retirement").unwrap();
     let roth = book.kind("roth").unwrap();
@@ -250,11 +250,16 @@ commodity USD : currency
     let wages = book.purpose("wages").unwrap();
     let groceries = book.purpose("groceries").unwrap();
     let transfer = book.purpose("transfer").unwrap();
-    assert_eq!(book.kinds[retirement].takes.len(), 1);
-    assert_eq!(book.kinds[retirement].takes[0].value.to, transfer);
-    assert_eq!(book.kinds[roth].takes.len(), 1);
-    assert_eq!(book.kinds[roth].takes[0].value, crate::Take { to: groceries, from: wages });
-    assert_eq!(book.kinds[college].pays.unwrap().value, groceries);
+    assert_eq!(book.take(retirement, wages), Some((transfer, Holder::Kind(retirement))));
+    assert_eq!(
+        book.take(roth, wages),
+        Some((groceries, Holder::Kind(roth))),
+        "a kind's own take replaces its parent's"
+    );
+    assert_eq!(book.take(roth, groceries), None);
+    assert_eq!(book.fact(builtin::PAYS, Holder::Kind(college)), Some(groceries));
+    let line = book.site(Holder::Kind(retirement), builtin::TAKES.slot(), wages.index() as u32);
+    assert!(line.is_some(), "and where each is written is kept");
 }
 
 #[test]

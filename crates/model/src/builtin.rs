@@ -20,7 +20,7 @@
 use axiom_core::{Day, Id, Key, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Books, Commodity, Entity, Place, System};
+use crate::book::{Basis, Books, Commodity, Entity, Place, Purpose, System};
 
 /// Declares the keys, numbered in the order written.
 macro_rules! own_slots {
@@ -70,6 +70,16 @@ own_slots! {
     TITLE: Sym;
     /// How a commodity grows, a year at a time.
     GROWS: Ratio;
+    /// What flows with a party or its kind are for.
+    PURPOSE: Id<Purpose>;
+    /// What a commodity kind's issuer pays is for.
+    PAYS: Id<Purpose>;
+    /// What an account kind takes a flow of one purpose as another: pairs of the purpose and what it becomes.
+    TAKES: Many<(u32, u32)>;
+    /// The tax inside every price paid to the parties of a kind.
+    SALES_TAX: Ratio;
+    /// Whom the flows with the parties of a kind are shared with.
+    SHARE: Many<Id<Entity>>;
 }
 
 /// A property that is one of a few words, held as the place of its word.
@@ -107,8 +117,8 @@ mod tests {
     #[test]
     fn the_keys_are_numbered_in_the_order_written_from_zero() {
         assert_eq!(HOLDS.slot(), SlotId(0));
-        assert_eq!(GROWS.slot(), SlotId(COUNT - 1));
-        assert_eq!(COUNT, 17);
+        assert_eq!(SHARE.slot(), SlotId(COUNT - 1));
+        assert_eq!(COUNT, 22);
     }
 
     #[test]

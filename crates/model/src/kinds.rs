@@ -17,20 +17,7 @@ use crate::taxonomy::{Node, Repeated};
 impl Kind {
     /// A kind that says nothing yet.
     pub(crate) fn blank(name: Sym, sort: Sort) -> Kind {
-        Kind {
-            name,
-            sort,
-            system: None,
-            purpose: None,
-            pays: None,
-            takes: Box::default(),
-            sales_tax: None,
-            shares: Box::default(),
-            slots: Run::default(),
-            laws: Box::default(),
-            doc: None,
-            loc: None,
-        }
+        Kind { name, sort, system: None, slots: Run::default(), laws: Box::default(), doc: None, loc: None }
     }
 }
 

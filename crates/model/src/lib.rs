@@ -12,7 +12,7 @@
 //! | `holders`    | the things a book says things about, numbered for the facts |
 //! | `said`       | what a book says of a thing: a slot's value on a day        |
 //! | `fill`       | what a line gives a slot: range, count and weights, checked |
-//! | `props`      | property lines, read once and applied down the kind chain   |
+//! | `props`      | property lines, read once and said into the facts           |
 //! | `params`     | dated tables                                                |
 //! | `laws`       | laws compiled and typed, and the order they run in          |
 //! | `rules`      | which laws watch which place, households and residences     |

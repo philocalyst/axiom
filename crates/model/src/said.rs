@@ -6,10 +6,10 @@
 //! the store does not know, so the walk is here and the store is asked once per step of it.
 
 use axiom_core::tagless::Field;
-use axiom_core::{Day, Days, Id, Key, Many, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Book, Commodity, Entity, Kind, Place, Role, System};
+use crate::book::{Basis, Book, Commodity, Entity, Kind, Place, Purpose, Role, System};
 use crate::builtin::{self, Coded};
 use crate::holders::Holder;
 use crate::law::Value;
@@ -58,6 +58,32 @@ impl Book<'_> {
         let kinds = self.kinds.lineage(thing.kind(self)).map(|kind| self.holders.number(Holder::Kind(kind)));
         let own = (!matches!(thing, Holder::Kind(_))).then(|| self.holders.number(thing));
         self.facts.at_first(key, own.into_iter().chain(kinds), Day::MIN)
+    }
+
+    /// What the nearest of `thing` and its kinds that says anything of one of the language's own slots says, and
+    /// which of them says it.
+    pub fn saying<V: Field>(&self, key: Key<V>, thing: impl Into<Holder>) -> Option<(V, Holder)> {
+        let thing = thing.into();
+        let own = (!matches!(thing, Holder::Kind(_))).then_some(thing);
+        let kinds = self.kinds.lineage(thing.kind(self)).map(Holder::Kind);
+        let says = |holder: Holder| Some((self.facts.at(key, self.holders.number(holder), Day::MIN)?, holder));
+        own.into_iter().chain(kinds).find_map(says)
+    }
+
+    /// Where a line of the language was written, as it was said of `thing`'s slot (and of `member` of it, for a slot of
+    /// several).
+    pub fn site(&self, thing: impl Into<Holder>, slot: SlotId, member: u32) -> Option<Loc> {
+        self.sites.get(&(self.holders.number(thing), slot.0, member)).copied()
+    }
+
+    /// What an account kind takes a flow of purpose `from` as, and the kind that says so: the nearest.
+    pub fn take(&self, kind: Id<Kind>, from: Id<Purpose>) -> Option<(Id<Purpose>, Holder)> {
+        let from = from.index() as u32;
+        self.kinds.lineage(kind).find_map(|above| {
+            let set = self.facts.at(builtin::TAKES, self.holders.number(Holder::Kind(above)), Day::MIN)?;
+            let (_, to) = self.facts.members(set).find(|&(taken, _)| taken == from)?;
+            Some((Id::new(to), Holder::Kind(above)))
+        })
     }
 
     /// How `thing`, a place or a commodity, has its parcels relieved, where it says.
