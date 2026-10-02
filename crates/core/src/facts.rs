@@ -1037,6 +1037,412 @@ mod tests {
         assert_eq!(facts.at_first(Key::<u32>::new(SlotId(99)), [0, 1, 2], Day(0)), None);
     }
 
+    /// The store checked against a model that is as slow and as plain as can be: for each slot of each holder, one cell
+    /// for each day of a few years, painted by filling the days of each statement in the order they were made.
+    mod model {
+        use super::*;
+        use crate::num::{Qty, Ratio};
+
+        /// The days there are cells for. Cell 0 stands for every day up to its own and the last for every day from its
+        /// own, which only a statement with an unbounded end paints: the two are where the ends of time are.
+        const DAYS: usize = 2 * 366 + 2;
+
+        /// Slots there are: a shape each, and the last of them is one that nobody says anything of.
+        const SLOTS: usize = 7;
+
+        /// What the test needs of a type of slot, as a table of the typed calls to make, so that one generator serves
+        /// every type. Values cross as lists of data: one for a plain value, the members for a set.
+        struct Shape {
+            /// How many different things a slot of this shape is made to say, so that equal ones meet often.
+            universe: usize,
+            many: bool,
+            member: fn(usize) -> Datum,
+            /// What each of the values says, worked out once: see `Shape::tabulated`.
+            table: Vec<Vec<Datum>>,
+            paint: fn(&mut Builder, u32, SlotId, Days, &[Datum]),
+            at: fn(&Facts, SlotId, u32, Day, &mut Vec<Datum>) -> bool,
+            at_first: fn(&Facts, SlotId, &[u32], Day, &mut Vec<Datum>) -> bool,
+            steps: fn(&Facts, SlotId, u32) -> Seen,
+            days_where: fn(&Facts, SlotId, u32, Days, Holds<'_>) -> DaySet,
+        }
+
+        /// The question `days_where` is asked, of what is said as a list of data.
+        type Holds<'a> = &'a mut dyn FnMut(&[Datum]) -> bool;
+
+        /// What was painted of a slot, in order, as a list of data for each value: read forwards, read backwards, and
+        /// as counted before it was read.
+        struct Seen {
+            forward: Vec<(Days, Vec<Datum>)>,
+            backward: Vec<(Days, Vec<Datum>)>,
+            counted: usize,
+        }
+
+        fn seen<V: Field>(steps: Steps<'_, V>, open: impl Fn(V) -> Vec<Datum>) -> Seen {
+            let opened = |(days, value)| (days, open(value));
+            Seen {
+                forward: steps.clone().map(opened).collect(),
+                backward: steps.clone().rev().map(opened).collect(),
+                counted: steps.len(),
+            }
+        }
+
+        fn plain<V: Field>(universe: usize, member: fn(usize) -> Datum) -> Shape {
+            Shape {
+                universe,
+                many: false,
+                member,
+                table: Vec::new(),
+                paint: |builder, holder, slot, days, value| {
+                    builder.paint(
+                        holder,
+                        Key::new(slot),
+                        days,
+                        value[0].read::<V>().expect("a value of the slot's type"),
+                    );
+                },
+                at: |facts, slot, holder, day, out| {
+                    keep(facts.at(Key::<V>::new(slot), holder, day).map(|value| [Datum::of(value)]), out)
+                },
+                at_first: |facts, slot, chain, day, out| {
+                    keep(
+                        facts.at_first(Key::<V>::new(slot), chain.iter().copied(), day).map(|value| [Datum::of(value)]),
+                        out,
+                    )
+                },
+                steps: |facts, slot, holder| {
+                    seen(facts.steps(Key::<V>::new(slot), holder), |value| vec![Datum::of(value)])
+                },
+                days_where: |facts, slot, holder, within, holds| {
+                    facts.days_where(Key::<V>::new(slot), holder, within, |value| holds(&[Datum::of(value)]))
+                },
+            }
+        }
+
+        /// Sets of `u32`s. The members are said backwards and then again, to be put right.
+        fn sets(universe: usize) -> Shape {
+            fn members(facts: &Facts, set: Many<u32>) -> Vec<Datum> {
+                facts.members(set).map(Datum::of).collect()
+            }
+            Shape {
+                universe,
+                many: true,
+                member: |at| Datum::of(10 * at as u32),
+                table: Vec::new(),
+                paint: |builder, holder, slot, days, value| {
+                    let said = value.iter().rev().chain(value).map(|member| member.read::<u32>().unwrap());
+                    builder.paint_many(holder, Key::new(slot), days, said);
+                },
+                at: |facts, slot, holder, day, out| {
+                    keep(
+                        facts.at(Key::<Many<u32>>::new(slot), holder, day).map(|set| facts.members(set).map(Datum::of)),
+                        out,
+                    )
+                },
+                at_first: |facts, slot, chain, day, out| {
+                    let found = facts.at_first(Key::<Many<u32>>::new(slot), chain.iter().copied(), day);
+                    keep(found.map(|set| facts.members(set).map(Datum::of)), out)
+                },
+                steps: |facts, slot, holder| seen(facts.steps(Key::new(slot), holder), |set| members(facts, set)),
+                days_where: |facts, slot, holder, within, holds| {
+                    facts.days_where(Key::new(slot), holder, within, |set| holds(&members(facts, set)))
+                },
+            }
+        }
+
+        /// Puts what was read in `out`, and says whether there was anything.
+        fn keep<T: IntoIterator<Item = Datum>>(found: Option<T>, out: &mut Vec<Datum>) -> bool {
+            out.clear();
+            let present = found.is_some();
+            out.extend(found.into_iter().flatten());
+            present
+        }
+
+        fn shapes() -> [Shape; SLOTS] {
+            let shapes = [
+                plain::<u32>(4, |at| Datum::of(100 + at as u32)),
+                plain::<bool>(2, |at| Datum::of(at == 0)),
+                plain::<Day>(4, |at| Datum::of(Day(7 * at as i32 - 3))),
+                // Values of the ratios -1/3, 0, 1/3 and 2/3, said as sixths: the store sees lowest terms, and one value.
+                plain::<Ratio>(4, |at| Datum::of(Ratio::new(at as i128 * 2 - 2, 6).unwrap())),
+                plain::<(Qty, Id<()>)>(4, |at| Datum::of((Qty(at as i64 * 100 - 50), Id::<()>::new(at as u32 % 2)))),
+                sets(4),
+                plain::<u32>(4, |at| Datum::of(at as u32)),
+            ];
+            shapes.map(Shape::tabulated)
+        }
+
+        impl Shape {
+            /// How many different values: a set is any subset of the universe.
+            fn values(&self) -> usize {
+                if self.many { 1 << self.universe } else { self.universe }
+            }
+
+            /// The same shape, with what each value says worked out: a member, or the members whose bits are set, in order.
+            fn tabulated(mut self) -> Shape {
+                let says = |choice: usize| {
+                    let members = (0..self.universe).map(self.member);
+                    if self.many {
+                        members.enumerate().filter(|&(at, _)| choice >> at & 1 == 1).map(|(_, member)| member).collect()
+                    } else {
+                        members.skip(choice).take(1).collect()
+                    }
+                };
+                self.table = (0..self.values()).map(says).collect();
+                self
+            }
+
+            /// What value number `choice` says.
+            fn said(&self, choice: usize) -> &[Datum] {
+                &self.table[choice]
+            }
+
+            /// Whether what is said has a member among the members of the universe that `wanted` has bits for: the
+            /// test every `days_where` is asked.
+            fn holds(&self, said: &[Datum], wanted: usize) -> bool {
+                let class = |datum: Datum| (0..self.universe).find(|&at| (self.member)(at) == datum).unwrap();
+                said.iter().any(|&datum| wanted >> class(datum) & 1 == 1)
+            }
+        }
+
+        /// Which value a cell says, or nothing.
+        type Cell = Option<usize>;
+
+        /// The day of cell `at`, when cell 0 is `base`.
+        fn day(base: i32, at: usize) -> Day {
+            Day(base + at as i32)
+        }
+
+        /// The days of cells `first..=last`, where `first` of 0 is the beginning of time and `last` of the last cell is
+        /// the end.
+        fn days_of(base: i32, first: usize, last: usize) -> Days {
+            let begin = if first == 0 { Day::MIN } else { day(base, first) };
+            let end = if last == DAYS - 1 { Day::MAX } else { day(base, last) };
+            Days::new(begin, end).unwrap()
+        }
+
+        /// The days of a statement, and the cells it fills: every kind of window the language can say.
+        fn random_statement(rng: &mut Rng, base: i32) -> (Days, std::ops::RangeInclusive<usize>) {
+            let last = DAYS - 1;
+            let inside = |rng: &mut Rng| 1 + rng.below(DAYS - 2);
+            match rng.below(10) {
+                0 => (Days::ALWAYS, 0..=last),
+                1 | 2 => {
+                    let first = inside(rng);
+                    (Days::new(day(base, first), Day::MAX).unwrap(), first..=last)
+                }
+                3 => {
+                    let end = inside(rng);
+                    (Days::new(Day::MIN, day(base, end)).unwrap(), 0..=end)
+                }
+                _ => {
+                    let first = inside(rng);
+                    let length = [rng.below(3), rng.below(20), rng.below(200), rng.below(DAYS)][rng.below(4)];
+                    let end = (first + length).min(DAYS - 2);
+                    (Days::new(day(base, first), day(base, end)).unwrap(), first..=end)
+                }
+            }
+        }
+
+        /// The maximal runs of equal values in `cells`, as `(first cell, last cell, value)`.
+        fn runs(cells: &[Cell]) -> Vec<(usize, usize, usize)> {
+            let mut runs: Vec<(usize, usize, usize)> = Vec::new();
+            for (at, &cell) in cells.iter().enumerate() {
+                match (cell, runs.last_mut()) {
+                    (Some(value), Some(run)) if run.1 + 1 == at && run.2 == value => run.1 = at,
+                    (Some(value), _) => runs.push((at, at, value)),
+                    (None, _) => {}
+                }
+            }
+            runs
+        }
+
+        /// One random book and the cells it makes, to check a store against.
+        struct Case<'a> {
+            number: usize,
+            base: i32,
+            shapes: &'a [Shape],
+            /// What each slot of each holder says, a cell for each day: holder, then slot, then day.
+            cells: Vec<Cell>,
+        }
+
+        impl Case<'_> {
+            fn timeline(&self, holder: usize, slot: usize) -> &[Cell] {
+                let start = (holder * SLOTS + slot) * DAYS;
+                &self.cells[start..start + DAYS]
+            }
+
+            /// What the cells say of `slot` of `holder` on cell `at`, as a list of data.
+            fn said(&self, holder: usize, slot: usize, at: usize) -> Option<&[Datum]> {
+                self.timeline(holder, slot)[at].map(|choice| self.shapes[slot].said(choice))
+            }
+
+            fn check_reads(&self, facts: &Facts, holder: usize, slot: usize) {
+                let (id, who, mut got) = (SlotId(slot as u32), holder as u32, Vec::new());
+                let mut check = |day: Day, at: usize, what: &str| {
+                    let present = (self.shapes[slot].at)(facts, id, who, day, &mut got);
+                    let read = present.then_some(got.as_slice());
+                    let expected = self.said(holder, slot, at);
+                    let case = self.number;
+                    assert!(
+                        read == expected,
+                        "case {case}: holder {holder} slot {slot} {what} {at}: {read:?}, not {expected:?}"
+                    );
+                };
+                // A slot nobody said anything of is nothing on every day, which three days show as well as all of them.
+                let silent = self.timeline(holder, slot).iter().all(Option::is_none);
+                let checked: Vec<usize> = if silent { vec![0, DAYS / 2, DAYS - 1] } else { (0..DAYS).collect() };
+                for at in checked {
+                    check(day(self.base, at), at, "cell");
+                }
+                check(Day::MIN, 0, "Day::MIN, as cell");
+                check(Day::MAX, DAYS - 1, "Day::MAX, as cell");
+            }
+
+            fn steps_expected(&self, holder: usize, slot: usize) -> Vec<(Days, Vec<Datum>)> {
+                let shape = &self.shapes[slot];
+                let runs = runs(self.timeline(holder, slot));
+                runs.iter()
+                    .map(|&(first, last, choice)| (days_of(self.base, first, last), shape.said(choice).to_vec()))
+                    .collect()
+            }
+
+            fn check_steps(&self, facts: &Facts, holder: usize, slot: usize) {
+                let got = (self.shapes[slot].steps)(facts, SlotId(slot as u32), holder as u32);
+                let (expected, case) = (self.steps_expected(holder, slot), self.number);
+                assert_eq!(got.forward, expected, "case {case}: holder {holder} slot {slot}");
+                assert_eq!(got.backward.into_iter().rev().collect::<Vec<_>>(), expected, "case {case}: read backwards");
+                assert_eq!(got.counted, expected.len(), "case {case}: the count of steps");
+            }
+
+            /// `days_where` over cells `first..=last`, for the members `wanted` has bits for, against the cells' days.
+            fn check_days_where(
+                &self,
+                facts: &Facts,
+                holder: usize,
+                slot: usize,
+                cells: (usize, usize),
+                wanted: usize,
+            ) {
+                let (shape, (first, last)) = (&self.shapes[slot], cells);
+                let all_time = (first, last) == (0, DAYS - 1);
+                let within = if all_time { Days::ALWAYS } else { days_of(self.base, first, last) };
+                let (id, who) = (SlotId(slot as u32), holder as u32);
+                let got = (shape.days_where)(facts, id, who, within, &mut |said| shape.holds(said, wanted));
+                // Whether each value satisfies it, asked once, and the cells of the window that hold one that does.
+                let satisfies: Vec<bool> = (0..shape.values()).map(|at| shape.holds(shape.said(at), wanted)).collect();
+                let satisfying: Vec<Cell> = self.timeline(holder, slot)[first..=last]
+                    .iter()
+                    .map(|cell| cell.filter(|&value| satisfies[value]).map(|_| 0))
+                    .collect();
+                let expected: DaySet = runs(&satisfying)
+                    .into_iter()
+                    .map(|(a, b, _)| days_of(self.base, first + a, first + b).intersect(within).unwrap())
+                    .collect();
+                let (case, bits) = (self.number, format!("{wanted:b}"));
+                assert_eq!(
+                    got, expected,
+                    "case {case}: holder {holder} slot {slot} cells {first}..={last} wanting {bits}"
+                );
+            }
+
+            /// A chain of holders gives the first answer there is, whatever slot and day.
+            fn check_chains(&self, facts: &Facts, holders: usize, rng: &mut Rng) {
+                let mut got = Vec::new();
+                for _ in 0..30 {
+                    let chain: Vec<u32> = (0..rng.below(4)).map(|_| rng.below(holders) as u32).collect();
+                    let (slot, at) = (rng.below(SLOTS), rng.below(DAYS));
+                    let expected = chain.iter().find_map(|&holder| self.said(holder as usize, slot, at));
+                    let found =
+                        (self.shapes[slot].at_first)(facts, SlotId(slot as u32), &chain, day(self.base, at), &mut got);
+                    assert_eq!(found.then_some(got.as_slice()), expected, "case {}: chain {chain:?}", self.number);
+                }
+            }
+        }
+
+        /// Random books: statements about random holders and slots, in random order, painted into a builder and onto
+        /// the cells; and the stores that come out are checked against the cells.
+        fn run_cases(base: i32, cases: usize, rng: &mut Rng) {
+            let shapes = shapes();
+            for number in 0..cases {
+                let holders = 1 + rng.below(4);
+                let (mut builder, mut cells) = (Facts::builder(holders), vec![None; holders * SLOTS * DAYS]);
+                for _ in 0..rng.below(40) {
+                    let (holder, slot) = (rng.below(holders), rng.below(SLOTS - 1));
+                    let (days, filled) = random_statement(rng, base);
+                    let choice = rng.below(shapes[slot].values());
+                    (shapes[slot].paint)(
+                        &mut builder,
+                        holder as u32,
+                        SlotId(slot as u32),
+                        days,
+                        shapes[slot].said(choice),
+                    );
+                    let start = (holder * SLOTS + slot) * DAYS;
+                    cells[start + filled.start()..=start + filled.end()].fill(Some(choice));
+                }
+                check_case(&Case { number, base, shapes: &shapes, cells }, &builder, holders, rng);
+            }
+        }
+
+        fn check_case(case: &Case, builder: &Builder, holders: usize, rng: &mut Rng) {
+            let facts = builder.freeze();
+            // The same statements frozen in other chunks make the same store, found timeline by timeline.
+            let chunked = builder.freeze_in_chunks(1 + rng.below(holders + 1));
+            for holder in 0..holders {
+                for slot in 0..SLOTS {
+                    case.check_reads(&facts, holder, slot);
+                    case.check_steps(&facts, holder, slot);
+                    case.check_steps(&chunked, holder, slot);
+                    for _ in 0..2 {
+                        let (a, b) = (rng.below(DAYS), rng.below(DAYS));
+                        case.check_days_where(&facts, holder, slot, (a.min(b), a.max(b)), rng.below(16));
+                    }
+                    case.check_days_where(&facts, holder, slot, (0, DAYS - 1), rng.below(16));
+                }
+            }
+            case.check_chains(&facts, holders, rng);
+        }
+
+        #[test]
+        fn rows_longer_than_a_scan_find_every_slot_they_say_and_no_other() {
+            let mut rng = Rng::new(0xD1B5_4A32_D192_ED03);
+            for case in 0..300 {
+                let (holders, slots) = (1 + rng.below(4), 1 + rng.below(120));
+                let mut builder = Facts::builder(holders);
+                let mut said = Vec::new();
+                for slot in (0..slots).rev() {
+                    for holder in 0..holders {
+                        if rng.chance(40) {
+                            let key = Key::<u32>::new(SlotId(slot as u32 * 3));
+                            let (declared, later) = (rng.below(50) as u32, rng.below(50) as u32);
+                            builder.paint_always(holder as u32, key, declared);
+                            builder.paint(holder as u32, key, from(10), later);
+                            said.push((holder, slot, declared, later));
+                        }
+                    }
+                }
+                let facts = builder.freeze();
+                for holder in 0..holders {
+                    for slot in 0..slots * 3 + 3 {
+                        let key = Key::<u32>::new(SlotId(slot as u32));
+                        let expected = said.iter().find(|&&(h, s, ..)| (h, s * 3) == (holder, slot));
+                        let got = (facts.at(key, holder as u32, Day(0)), facts.at(key, holder as u32, Day(10)));
+                        assert_eq!(got, (expected.map(|e| e.2), expected.map(|e| e.3)), "case {case}: {holder} {slot}");
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn the_store_agrees_with_a_cell_for_every_day_of_every_slot_of_every_holder() {
+            let mut rng = Rng::new(0x2545_F491_4F6C_DD1D);
+            // In the middle of the days there are, and with the cells pressed against each end of them.
+            for base in [Day::from_ymd(2026, 1, 1).unwrap().0, i32::MIN, i32::MAX - DAYS as i32 + 1] {
+                run_cases(base, 850, &mut rng);
+            }
+        }
+    }
+
     /// One statement of a generated book: `(holder, slot, days, letter)`.
     type Statement = (u32, u32, Days, u32);
 
