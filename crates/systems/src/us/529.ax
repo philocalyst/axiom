@@ -27,7 +27,7 @@ kind 529-plan : tax-deferred
   select prorata
   liquidity 5d
   pays education
-  has beneficiary entity
+  has beneficiary person
 
   /// Contributions above the annual gift-tax exclusion count as a gift to the
   /// beneficiary, which may need a gift-tax return (Form 709, IRC §2503(b)).

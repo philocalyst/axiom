@@ -5,7 +5,7 @@ use axiom_syntax::{Decl, DeclKind};
 
 use super::commodities::Commodities;
 use super::{Resolving, Said, add_path_spellings, owner_names_in, strict_path_suffixes};
-use crate::book::{At, Books, Entity, Sort};
+use crate::book::{At, Entity, Purpose, Sort};
 use crate::collect::{Collected, Written};
 use crate::errors::Word;
 use crate::lower::Mention;
@@ -47,6 +47,8 @@ pub(super) struct Entities<'s> {
     /// Whether each entity holds what it owns, which it does when something is written as owned by it; the
     /// others keep an outside endpoint. `me` always holds.
     pub holds: Vec<bool>,
+    /// The purposes written after entities, by the entity, and where.
+    pub purposes: Vec<(Id<Entity>, At<Id<Purpose>>)>,
 }
 
 /// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones.
@@ -197,17 +199,17 @@ pub(super) fn declare<'a, 's>(
     collected: &Collected<'a, 's>,
     parties: Parties<'a, 's>,
     resolving: &Resolving<'_>,
-    base: Id<crate::book::Commodity>,
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Entities<'s> {
     let Parties { drafts, written, implied, owner_names } = parties;
     let home_of: Map<&str, Home> = drafts.iter().map(|draft| (draft.path, draft.home)).collect();
+    let mut purposes: Vec<(&str, At<Id<Purpose>>)> = Vec::new();
     let (mut tree, ids) = crate::paths::build(drafts.iter().map(|draft| draft.path), |path| {
         let (kind, purpose, doc, loc) = match written.get(path) {
             Some((decl, doc)) => {
                 let (file, node) = (decl.file(), decl.node);
-                let kind = resolving.kind(names, decl, Sort::Entity, resolving.kinds.roots.entity, diags);
+                let kind = resolving.kind(names, decl, Sort::Entity, resolving.kind_roots.entity, diags);
                 let purpose = node.purpose.and_then(|name| {
                     resolving
                         .purpose(names, name.0, file.loc(name.0), decl.home(), diags)
@@ -215,24 +217,17 @@ pub(super) fn declare<'a, 's>(
                 });
                 (kind, purpose, *doc, Some(file.loc(node.name.0)))
             }
-            None => (resolving.kinds.roots.entity, None, None, implied.get(path).copied()),
+            None => (resolving.kind_roots.entity, None, None, implied.get(path).copied()),
         };
+        purposes.extend(purpose.map(|purpose| (path, purpose)));
         Entity {
             path: names.intern(path),
             kind,
-            purpose,
             place: None,
-            restricted: false,
-            lives: Box::default(),
-            member: None,
             owner: None,
             client_of: None,
             owned_by: Box::default(),
-            currency: base,
-            citizen: Box::default(),
-            books: Books::default(),
             known_as: Box::default(),
-            props: Box::default(),
             doc,
             loc,
         }
@@ -263,5 +258,6 @@ pub(super) fn declare<'a, 's>(
     for (path, &id) in &ids {
         holds[id.index()] = *path == "me" || owner_names.contains(path);
     }
-    Entities { tree, ids, index, me, unknown, opening, market, holds }
+    let purposes = purposes.into_iter().map(|(path, purpose)| (ids[path], purpose)).collect();
+    Entities { tree, ids, index, me, unknown, opening, market, holds, purposes }
 }

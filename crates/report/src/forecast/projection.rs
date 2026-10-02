@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, Id, Qty, Ratio};
 use axiom_engine::{Checkpoint, Holding, Ledger, Options, Plan};
-use axiom_model::{Book, Class, Commodity, Flow, Place, RuntimeDetail, RuntimeFlow, Value};
+use axiom_model::{Book, Class, Commodity, Flow, Place, RuntimeDetail, RuntimeFlow};
 
 use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};
@@ -151,10 +151,7 @@ fn trace_from<'p, 'b, 's>(
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
     let place = &lens.book().places[holding.place];
-    let has_term = lens
-        .known()
-        .maturity
-        .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
+    let has_term = lens.known().maturity.is_some_and(|name| lens.book().says(holding.place, name));
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),
         _ if place.class == Class::Debt && !has_term => holding.qty(),
@@ -226,7 +223,7 @@ fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTr
 /// ahead, compounding, rounded half to even each month. The base currency is
 /// the yardstick and does not grow.
 fn compound(book: &Book, unit: Id<Commodity>, value: Qty, months: i32) -> Qty {
-    let yearly = book.commodities[unit].growth.filter(|_| unit != book.base);
+    let yearly = book.growth(unit).filter(|_| unit != book.base);
     let monthly = yearly.and_then(|yearly| Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?));
     monthly.map_or(value, |factor| (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth)))
 }
@@ -242,7 +239,14 @@ mod tests {
     fn growth_compounds_monthly_and_leaves_the_yardstick_alone() {
         let mut house = household();
         let (usd, vti) = (house.book.base, Id::new(1));
-        house.book.commodities[vti].growth = Ratio::percent(5, 0);
+        let mut said = axiom_core::Facts::builder(house.book.holders.len());
+        let growth = Ratio::percent(5, 0).unwrap();
+        said.paint_always(
+            house.book.holders.number(axiom_model::Holder::Commodity(vti)),
+            axiom_model::builtin::GROWS,
+            growth,
+        );
+        house.book.facts = said.freeze();
         // 100,000.00 at 241/240 a month for a year, rounded half-even each month.
         assert_eq!(compound(&house.book, vti, Qty(10_000_000), 12), Qty(10_511_619));
         assert_eq!(compound(&house.book, usd, Qty(10_000_000), 12), Qty(10_000_000));

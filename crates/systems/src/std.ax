@@ -20,8 +20,8 @@ kind brokerage : asset
 kind escrow : asset
   liquidity 365d
 kind loan : debt
-  has rate percent
-  has maturity date
+  has rate percent optional
+  has maturity date optional
   law payoff
     by self.maturity
     require self.balance == empty "balance still owed at maturity"
@@ -136,11 +136,11 @@ kind lender : org
 kind tenant : org
 
 kind taxpayer : entity
-  has filing name
+  has filing one of single | joint
   has children number
   children 0
 kind person : taxpayer
-  has born date
+  has born date optional
   filing single
 kind household : taxpayer
   filing joint
@@ -149,8 +149,8 @@ kind envelope : entity
   restricted
 kind grant : entity
   restricted
-  has grant-purpose purpose
-  has until date
+  has grant-purpose purpose optional
+  has until date optional
   law purpose
     on spend
     require purpose is self.grant-purpose "grant money spent outside its purpose"

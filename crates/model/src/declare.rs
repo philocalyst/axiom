@@ -4,22 +4,25 @@
 //! first so forward references from entities, commodities and accounts resolve
 //! against complete scoped indexes, then freezes the place tree once.
 
-use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Ratio, Set, Sym, Tree};
+use axiom_core::facts::Builder;
+use axiom_core::tagless::{Datum, Field};
+use axiom_core::{
+    Arena, Days, Diagnostic, Facts, Groups, Id, Interner, Key, Loc, Many, Map, Ratio, Set, SlotId, Sym, Tree,
+};
 use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
-use crate::book::{
-    Asset, Book, Class, Commodity, Entity, Kind, Lookup, Place, Prop, Purpose, Roots, Share, Sort, System,
-};
+use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Roots, Share, Sort, System};
+use crate::builtin;
 use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
-use crate::kinds::{self, NativeKinds};
+use crate::holders::{Holder, HolderIndex};
 use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
-use crate::props::PropTable;
-use crate::purposes::NativePurposes;
 use crate::resolve::End;
 use crate::scope::{Home, Scopes, Seeing};
 use crate::sources::{Site, SystemIndex};
+use crate::taxonomy::{self, Taxonomy};
+use crate::{kinds, purposes};
 
 /// Quanta are `i64`; eighteen decimals is as fine as one can count.
 pub(crate) const MAX_SCALE: u8 = 18;
@@ -29,8 +32,8 @@ pub(crate) struct World<'s> {
     pub book: Book<'s>,
     pub scopes: Scopes,
     pub systems: SystemIndex<'s>,
-    pub props: PropTable,
-    pub prop_writes: Vec<(PropTarget, Prop)>,
+    /// Everything said of the things so far: frozen into the book once it is all said.
+    pub painter: Builder,
     pub tallies: Set<&'s str>,
     /// Claim tabs allocated from the bounded syntax survey before place IDs
     /// freeze. A later lookup that was not surveyed is an error.
@@ -40,74 +43,52 @@ pub(crate) struct World<'s> {
     pub(crate) contract_endpoints: Map<Sym, End>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum PropTarget {
-    Kind(Id<Kind>),
-    Entity(Id<Entity>),
-    Commodity(Id<Commodity>),
-    Place(Id<Place>),
-    Asset(Id<Asset>),
-}
-
-impl PropTarget {
-    fn key(self) -> (u8, u32) {
-        match self {
-            PropTarget::Kind(id) => (0, id.index() as u32),
-            PropTarget::Entity(id) => (1, id.index() as u32),
-            PropTarget::Commodity(id) => (2, id.index() as u32),
-            PropTarget::Place(id) => (3, id.index() as u32),
-            PropTarget::Asset(id) => (4, id.index() as u32),
-        }
-    }
-}
-
 impl World<'_> {
-    pub(crate) fn set_prop(&mut self, target: PropTarget, prop: Prop) {
-        self.prop_writes.push((target, prop));
+    /// `value` holds of `thing`'s slot over `days`: a statement of the facts, painted in the order made.
+    pub(crate) fn paint(&mut self, thing: impl Into<Holder>, slot: SlotId, days: Days, value: Datum) {
+        self.painter.paint_datum(self.book.holders.number(thing), slot, days, value);
     }
 
-    /// Freeze staged custom-property rows once, grouped by their typed owner.
-    pub(crate) fn finish_props(&mut self) {
-        let names = &self.book.names;
-        self.prop_writes.sort_by(|(ta, a), (tb, b)| {
-            ta.key()
-                .cmp(&tb.key())
-                .then_with(|| names.name(a.name).cmp(names.name(b.name)))
-                .then_with(|| a.since.cmp(&b.since))
-        });
-        let mut start = 0;
-        while start < self.prop_writes.len() {
-            let target = self.prop_writes[start].0;
-            let mut end = start + 1;
-            while end < self.prop_writes.len() && self.prop_writes[end].0 == target {
-                end += 1;
-            }
-            let additions = &self.prop_writes[start..end];
-            match target {
-                PropTarget::Kind(id) => {
-                    let rows = merge_props(names, &self.book.kinds[id].props, additions);
-                    self.book.kinds[id].props = rows;
-                }
-                PropTarget::Entity(id) => {
-                    let rows = merge_props(names, &self.book.entities[id].props, additions);
-                    self.book.entities[id].props = rows;
-                }
-                PropTarget::Commodity(id) => {
-                    let rows = merge_props(names, &self.book.commodities[id].props, additions);
-                    self.book.commodities[id].props = rows;
-                }
-                PropTarget::Place(id) => {
-                    let rows = merge_props(names, &self.book.places[id].props, additions);
-                    self.book.places[id].props = rows;
-                }
-                PropTarget::Asset(id) => {
-                    let rows = merge_props(names, &self.book.assets[id].props, additions);
-                    self.book.assets[id].props = rows;
-                }
-            }
-            start = end;
-        }
-        self.prop_writes.clear();
+    /// What a line of the language says of `thing`, from the beginning of time: a declaration of one of its own slots.
+    pub(crate) fn say<V: Field>(&mut self, thing: impl Into<Holder>, key: Key<V>, value: V) {
+        self.painter.paint_always(self.book.holders.number(thing), key, value);
+    }
+
+    /// Where a line of the language is written, for a diagnostic that points back to it: of a thing's slot, and for a
+    /// slot of several of the member the line is about.
+    pub(crate) fn say_site(&mut self, thing: impl Into<Holder>, slot: SlotId, member: u32, loc: Loc) {
+        self.book.sites.insert((self.book.holders.number(thing), slot.0, member), loc);
+    }
+
+    /// What a line of the language says of `thing`: the whole set a slot of several holds.
+    pub(crate) fn say_set<V: Field>(
+        &mut self,
+        thing: impl Into<Holder>,
+        key: Key<Many<V>>,
+        members: impl IntoIterator<Item = V>,
+    ) {
+        self.painter.paint_many(self.book.holders.number(thing), key, Days::ALWAYS, members);
+    }
+
+    /// What a line of the language says of `thing` over `days`: the set a slot of several holds then.
+    pub(crate) fn say_set_over<V: Field>(
+        &mut self,
+        thing: impl Into<Holder>,
+        key: Key<Many<V>>,
+        days: Days,
+        members: impl IntoIterator<Item = V>,
+    ) {
+        self.painter.paint_many(self.book.holders.number(thing), key, days, members);
+    }
+
+    /// The set of `members` holds of `thing`'s slot over `days`.
+    pub(crate) fn paint_set(&mut self, thing: impl Into<Holder>, slot: SlotId, days: Days, members: Vec<Datum>) {
+        self.painter.paint_set_datum(self.book.holders.number(thing), slot, days, members);
+    }
+
+    /// The facts, frozen from everything painted: the book says no more of its things after this.
+    pub(crate) fn freeze_facts(&mut self) {
+        self.book.facts = self.painter.freeze();
     }
 
     pub(crate) fn tab(
@@ -122,78 +103,6 @@ impl World<'_> {
                 .label(loc, "a claim relationship must be visible before the place tree is frozen")
                 .help("check that the party, owner and flow direction match the claim or contract declaration")
         })
-    }
-}
-
-/// Merge another frozen property batch without discarding earlier rows. The
-/// stable sort preserves write order for same-name, same-day rows, so an
-/// earlier value remains the one in force as specified by [`crate::prop`].
-fn merge_props(names: &Interner<'_>, existing: &[Prop], additions: &[(PropTarget, Prop)]) -> Box<[Prop]> {
-    let mut rows = Vec::with_capacity(existing.len() + additions.len());
-    rows.extend_from_slice(existing);
-    rows.extend(additions.iter().map(|(_, prop)| *prop));
-    rows.sort_by(|a, b| names.name(a.name).cmp(names.name(b.name)).then_with(|| a.since.cmp(&b.since)));
-    rows.into_boxed_slice()
-}
-
-#[cfg(test)]
-mod property_finalization_tests {
-    use super::{PropTarget, merge_props};
-    use crate::{Prop, Value, prop};
-    use axiom_core::{Day, FileId, Id, Interner, Loc, Ratio};
-
-    #[test]
-    fn successive_property_finalization_preserves_rows_and_first_same_day_value() {
-        let mut names = Interner::default();
-        let label = names.intern("label");
-        let amount = names.intern("amount");
-        let first_day = Day::from_ymd(2026, 1, 1).unwrap();
-        let later_day = Day::from_ymd(2026, 2, 1).unwrap();
-        let first_batch = [Prop {
-            name: label,
-            value: Value::Num(Ratio::int(1)),
-            since: first_day,
-            loc: Some(Loc::new(FileId(0), 1, 2)),
-        }];
-        let first_writes = [(PropTarget::Kind(Id::new(0)), first_batch[0])];
-        let once = merge_props(&names, &[], &first_writes);
-
-        let second_batch = [
-            Prop {
-                name: label,
-                value: Value::Num(Ratio::int(2)),
-                since: first_day,
-                loc: Some(Loc::new(FileId(0), 3, 4)),
-            },
-            Prop {
-                name: label,
-                value: Value::Num(Ratio::int(3)),
-                since: later_day,
-                loc: Some(Loc::new(FileId(0), 5, 6)),
-            },
-            Prop {
-                name: amount,
-                value: Value::Num(Ratio::int(4)),
-                since: first_day,
-                loc: Some(Loc::new(FileId(0), 7, 8)),
-            },
-        ];
-        let second_writes = second_batch.map(|prop| (PropTarget::Kind(Id::new(0)), prop));
-        let twice = merge_props(&names, &once, &second_writes);
-
-        assert_eq!(twice.len(), 4);
-        assert_eq!(names.name(twice[0].name), "amount");
-        assert_eq!(prop(&twice, label, first_day).unwrap().value, Value::Num(Ratio::int(1)));
-        assert_eq!(prop(&twice, label, later_day).unwrap().value, Value::Num(Ratio::int(3)));
-
-        let again = merge_props(&names, &twice, &[]);
-        assert_eq!(again.len(), twice.len());
-        for (again, twice) in again.iter().zip(twice.iter()) {
-            assert_eq!(again.name, twice.name);
-            assert_eq!(again.value, twice.value);
-            assert_eq!(again.since, twice.since);
-            assert_eq!(again.loc, twice.loc);
-        }
     }
 }
 
@@ -481,15 +390,17 @@ pub(crate) fn declare<'a, 's>(
 ) -> World<'s> {
     let Said { collected, survey, .. } = said;
     let Systems { tree: systems_tree, index: systems, scopes } = systems;
-    let native_kinds = kinds::declare_sites(collected, &mut names, &systems_tree, &scopes, diags);
     let seeing = Seeing { systems: &systems_tree, scopes: &scopes };
-    let native_purposes = crate::purposes::declare_sites(collected, &mut names, seeing, &native_kinds.index, diags);
+    let native_kinds = taxonomy::declare::<Kind>(collected, &mut names, seeing, diags);
+    let mut native_purposes = taxonomy::declare::<Purpose>(collected, &mut names, seeing, diags);
+    purposes::attach_objects(&mut native_purposes, collected, &names, seeing, &native_kinds.index, diags);
     check_cross_namespace_names(collected, &scopes, &systems_tree, diags);
-    let resolving = Resolving { seeing, kinds: &native_kinds, purposes: &native_purposes };
+    let kind_roots = kinds::roots(&native_kinds.roots);
+    let resolving = Resolving { seeing, kinds: &native_kinds, kind_roots, purposes: &native_purposes };
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
     let parties = parties::find(said, &resolving, &commodities, &mut names, diags);
-    let mut entities = parties::declare(collected, parties, &resolving, commodities.base, &mut names, diags);
+    let mut entities = parties::declare(collected, parties, &resolving, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
     let account_owners = holdings::owners_by_path(&accounts);
@@ -499,19 +410,18 @@ pub(crate) fn declare<'a, 's>(
     let places = places::declare(&inputs, &mut entities, &mut assets, &mut names);
     let contract_endpoints = contract_endpoints(survey, &entities, &account_owners, &places.tabs, &mut names);
 
+    let entity_purposes = std::mem::take(&mut entities.purposes);
     let made = Made { commodities, entities, assets, places, kinds: native_kinds, purposes: native_purposes };
     let tabs = made.places.tabs.clone();
     let book = book(made, names, systems_tree, settings);
-    World {
-        book,
-        scopes,
-        systems,
-        props: PropTable::default(),
-        prop_writes: Vec::new(),
-        tallies: Set::default(),
-        tabs,
-        contract_endpoints,
+    let painter = Facts::builder(book.holders.len());
+    let mut world = World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints };
+    // What an entity's own declaration says its purpose is, said as a line under it would.
+    for (entity, purpose) in entity_purposes {
+        world.say(entity, builtin::PURPOSE, purpose.value);
+        world.say_site(entity, builtin::PURPOSE.slot(), 0, purpose.loc);
     }
+    world
 }
 
 /// What the passes made, to be put together into a book.
@@ -520,20 +430,27 @@ struct Made<'s> {
     entities: Entities<'s>,
     assets: Assets<'s>,
     places: Places,
-    kinds: NativeKinds,
-    purposes: NativePurposes,
+    kinds: Taxonomy<Kind>,
+    purposes: Taxonomy<Purpose>,
 }
 
 /// The book the passes made, empty of everything the lowerers will fill in.
 fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, settings: &Settings<'s>) -> Book<'s> {
     let Made { commodities, entities, assets, places, kinds, purposes } = made;
+    let holders = HolderIndex::new(
+        kinds.tree.len(),
+        places.tree.len(),
+        entities.tree.len(),
+        commodities.arena.len(),
+        assets.arena.len(),
+    );
     let roots = Roots {
         me: entities.me,
         unknown: entities.unknown,
         opening: entities.opening,
         market: entities.market,
-        kinds: kinds.roots,
-        purposes: purposes.roots,
+        kinds: kinds::roots(&kinds.roots),
+        purposes: purposes::roots(&purposes.roots),
     };
     let lookup = Lookup {
         places: places.names,
@@ -554,6 +471,10 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
         issuer_places: places.issuers,
         entities: entities.tree,
         kinds: kinds.tree,
+        schema: Default::default(),
+        holders,
+        facts: Facts::default(),
+        sites: Map::default(),
         purposes: purposes.tree,
         systems,
         commodities: commodities.arena,
@@ -688,8 +609,9 @@ use self::places::{PlaceInputs, Places};
 /// What the words of a declaration are resolved against once the kinds and the purposes are built.
 struct Resolving<'a> {
     seeing: Seeing<'a>,
-    kinds: &'a NativeKinds,
-    purposes: &'a NativePurposes,
+    kinds: &'a Taxonomy<Kind>,
+    kind_roots: KindRoots,
+    purposes: &'a Taxonomy<Purpose>,
 }
 
 impl Resolving<'_> {

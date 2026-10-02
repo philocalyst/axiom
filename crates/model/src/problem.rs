@@ -5,6 +5,7 @@
 //! A caller decides that something is wrong and says what; it never words it. One-off diagnostics stay where
 //! they arise, for the catalog is for families.
 
+use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id, Interner, Loc, Sym, Tree};
 
 use crate::book::{Miss, System};
@@ -186,6 +187,203 @@ pub(crate) fn twice(what: &str, again: Loc, first: Loc) -> Diagnostic {
     Diagnostic::error(format!("duplicate-{}", what.replace(' ', "-")), format!("{} is written twice", article(what)))
         .label(again, "written again here")
         .context(first, "first written here")
+}
+
+/// A name in a tree of names that every node must give a parent, declared with none: `kind x` and not `kind x : entity`.
+pub(crate) fn parentless(noun: Noun, word: Word, question: &str, roots: &[&str]) -> Diagnostic {
+    let name = noun.words().0;
+    let roots: Vec<String> = roots.iter().map(|root| format!("`: {root}`")).collect();
+    Diagnostic::error(format!("{name}-parent"), format!("{name} `{}` needs a parent", word.text))
+        .label(word.loc, question)
+        .help(format!("write {}, or another {name}", roots.join(", ")))
+}
+
+/// A chain of parents that never reaches a root, as the names on it with where each is declared, in the order each
+/// inherits from the next.
+pub(crate) fn cycle(noun: Noun, route: &[(&str, Option<Loc>)], root: &str) -> Diagnostic {
+    let name = noun.words().0;
+    let chain: Vec<&str> = route.iter().chain(&route[..1]).map(|&(member, _)| member).collect();
+    let mut diagnostic =
+        Diagnostic::error(format!("{name}-cycle"), format!("{name} `{}` inherits from itself", chain[0]))
+            .note(format!("the chain is {}", chain.join(" -> ")))
+            .help(format!("give one of them a parent outside the loop, such as a root {name} like `{root}`"));
+    if let Some(loc) = route[0].1 {
+        diagnostic = diagnostic.label(loc, "its parent chain never reaches a root");
+    }
+    for (&(member, declared), parent) in route.iter().zip(&chain[1..]).skip(1) {
+        if let Some(loc) = declared {
+            diagnostic = diagnostic.context(loc, format!("`{member}` inherits from `{parent}` here"));
+        }
+    }
+    diagnostic
+}
+
+/// A slot declared twice in one kind.
+pub(crate) fn slot_twice(name: &str, again: Loc, first: Loc) -> Diagnostic {
+    Diagnostic::error("duplicate-property-declaration", format!("property `{name}` is declared twice on this kind"))
+        .label(again, "declared again here")
+        .context(first, "first declared here")
+}
+
+/// A slot that takes one sort of value in one kind and another in another: laws read `.name` without knowing the kind.
+pub(crate) fn slot_type(name: &str, now: &str, then: &str, loc: Loc, first: Loc) -> Diagnostic {
+    Diagnostic::error("property-type", format!("`{name}` takes {now} here, but {then} elsewhere"))
+        .label(loc, format!("takes {now} here"))
+        .context(first, format!("takes {then} here"))
+        .note(format!("a slot takes one sort of value wherever it is declared, so that `.{name}` means the same thing wherever it is written"))
+}
+
+/// What a slot repeated beneath its first declaration takes more of.
+#[derive(Clone, Copy)]
+pub(crate) enum Widening {
+    Range,
+    Count,
+    Weight,
+}
+
+/// A kind repeats a slot of one above it and takes more than it does; `narrowed` is the line that would not.
+pub(crate) fn slot_widening(name: &str, how: Widening, narrowed: &str, loc: Loc, above: Loc) -> Diagnostic {
+    let wider = match how {
+        Widening::Range => "takes things the slot above does not",
+        Widening::Count => "takes more values than the slot above",
+        Widening::Weight => "weighs its values differently from the slot above",
+    };
+    Diagnostic::error("slot-widening", format!("`{name}` is wider here than the slot it repeats"))
+        .label(loc, wider)
+        .context(above, "the slot above is declared here")
+        .note("a kind may repeat a slot of the kinds above it only to narrow it: fewer kinds or words, or a tighter count")
+        .fix("narrow it to what the slot above takes", loc, narrowed)
+}
+
+/// `entity` or `name` as a slot's whole range, which takes anything of its sort; `proposal` is what the book's own
+/// things say the slot takes, if they say.
+pub(crate) fn untyped_slot(slot: Word, wide: Word, proposal: Option<&str>) -> Diagnostic {
+    let what = if wide.text == "name" { "word" } else { "entity" };
+    let diagnostic = Diagnostic::error("untyped-slot", format!("`{}` takes any {what}", slot.text))
+        .label(wide.loc, format!("every {what} is one"))
+        .note("a slot takes the kinds of thing it is for, or the words it knows, so that a wrong one is an error where it is written");
+    match proposal {
+        Some(text) => diagnostic.fix(format!("write `{text}`, which is what the book fills it with"), wide.loc, text),
+        None => diagnostic.help(format!(
+            "name the kinds it takes, as in `has {0} person | household`, or the words, as in `has {0} one of a | b`",
+            slot.text
+        )),
+    }
+}
+
+/// A range of kinds of different sorts of thing: `person | 401k`.
+pub(crate) fn mixed_sorts(word: Word, kind: &str) -> Diagnostic {
+    Diagnostic::error(
+        "slot-range-sorts",
+        format!("`{kind}` is not the sort of thing the other kinds of this range are"),
+    )
+    .label(word.loc, "a different sort of thing")
+    .note("a slot takes things of one sort: people and households, or accounts, but not both")
+}
+
+/// A weight on a slot that takes one value, which there is nothing to weigh against.
+pub(crate) fn weighted_one(slot: Word, line: Loc) -> Diagnostic {
+    Diagnostic::error("weight-on-one", format!("`{}` takes one value, so there is nothing to weigh", slot.text))
+        .label(line, "only a slot that is `some` or `many` is weighed")
+        .help("write `some` or `many` before `by`, or remove the weight")
+}
+
+/// A value that is not of a kind the slot takes: `found` says what it is, `takes` what the slot takes, and `fitting`
+/// are the things of a kind that fits, the closest of which is the fix.
+pub(crate) fn wrong_kind(slot: &str, value: Word, found: &str, takes: &str, fitting: &[&str]) -> Diagnostic {
+    let diagnostic =
+        Diagnostic::error("wrong-kind", format!("`{}` is {found}, and `{slot}` takes {takes}", value.text))
+            .label(value.loc, format!("{found}, not {takes}"));
+    match (closest(value.text, fitting.iter().copied()), fitting) {
+        (Some(near), _) => diagnostic.fix(format!("did you mean `{near}`?"), value.loc, near),
+        (None, [only]) => diagnostic.fix(format!("`{only}` is the only one that fits"), value.loc, *only),
+        (None, []) => diagnostic.help(format!("declare {takes}, and write its name: `{slot} NAME`")),
+        (None, some) => diagnostic
+            .note(format!("it could be {}", list_names(&some[..some.len().min(5)])))
+            .help(format!("write one of them, as in `{slot} {}`", some[0])),
+    }
+}
+
+/// A word that is not one of the words a slot takes.
+pub(crate) fn wrong_word(slot: &str, value: Word, words: &[&str]) -> Diagnostic {
+    let diagnostic =
+        Diagnostic::error("wrong-word", format!("`{}` is not one of the words `{slot}` takes", value.text))
+            .label(value.loc, format!("not {}", list_names(words)))
+            .note(format!("`{slot}` takes one of {}", list_names(words)));
+    match (closest(value.text, words.iter().copied()), words.first()) {
+        (Some(near), _) => diagnostic.fix(format!("did you mean `{near}`?"), value.loc, near),
+        (None, Some(first)) => diagnostic.help(format!("write one of them, as in `{slot} {first}`")),
+        (None, None) => diagnostic,
+    }
+}
+
+/// `a`, `b` or `c`, each in backticks.
+fn list_names(names: &[&str]) -> String {
+    crate::errors::list(names)
+}
+
+/// A line that gives a slot of one value more than one; `remove` is the extra values and what separates them.
+pub(crate) fn too_many(slot: &str, given: usize, extra: Loc, remove: Loc) -> Diagnostic {
+    Diagnostic::error("too-many", format!("`{slot}` takes one value, and this line gives {given}"))
+        .label(extra, "more than it takes")
+        .note(format!("to take several, declare the slot `some` or `many`, as in `has {slot} person many`"))
+        .fix("keep the first", remove, "")
+}
+
+/// A slot of one value filled by two lines.
+pub(crate) fn filled_twice(slot: &str, again: Loc, first: Loc) -> Diagnostic {
+    Diagnostic::error("too-many", format!("`{slot}` takes one value, and it is filled twice"))
+        .label(again, "filled again here")
+        .context(first, "first filled here")
+        .help("keep the line you mean and delete the other")
+}
+
+/// A value of a slot that weighs its values, with no weight after it.
+pub(crate) fn missing_weight(slot: &str, weight: &str, last: Loc) -> Diagnostic {
+    Diagnostic::error("missing-weight", format!("`{slot}` is weighed by {weight}, and this value has none"))
+        .label(last, format!("write its {weight} after it"))
+        .help(format!("each value takes its weight: `{slot} dana 60%, theo 40%`"))
+}
+
+/// A weight that is not a rate, or not an amount of the commodity the slot weighs in.
+pub(crate) fn weight_type(slot: &str, unit: Option<&str>, loc: Loc) -> Diagnostic {
+    let (message, want) = match unit {
+        Some(unit) => (format!("`{slot}` is weighed in {unit}"), format!("an amount in {unit}, such as `100 {unit}`")),
+        None => (
+            format!("`{slot}` is weighed by a rate"),
+            "a percentage, a fraction or a number, such as `60%`".to_string(),
+        ),
+    };
+    Diagnostic::error("weight-type", message).label(loc, "not a weight").help(format!("write {want}"))
+}
+
+/// A required slot that no line of the thing or of a kind above it fills. `candidates` are the things that fit; with
+/// exactly one, the line that fills the slot with it is the fix, written at `insert`.
+pub(crate) fn missing_role(
+    thing: Word,
+    kind: &str,
+    slot: &str,
+    takes: &str,
+    candidates: &[&str],
+    insert: Loc,
+) -> Diagnostic {
+    let diagnostic = Diagnostic::error("missing-role", format!("`{}` has no `{slot}`", thing.text))
+        .label(thing.loc, format!("a {kind} takes {takes} as its `{slot}`"))
+        .note("a slot that is not `optional` is filled by the thing or by its kind");
+    match candidates {
+        [only] => diagnostic.fix(format!("fill `{slot}` with `{only}`"), insert, format!("\n  {slot} {only}")),
+        [] => diagnostic.help(format!("add a line giving {takes}: `{slot} VALUE`")),
+        some => diagnostic
+            .note(format!("it could be {}", list_names(&some[..some.len().min(5)])))
+            .help(format!("add a line giving {takes}, as in `{slot} {}`", some[0])),
+    }
+}
+
+/// A slot declared under a thing and not under its kind.
+pub(crate) fn slot_on_a_thing(line: Loc, noun: &str) -> Diagnostic {
+    Diagnostic::error("unknown-property", format!("`has` is not a property of {}", article(noun)))
+        .label(line, "only a kind declares slots")
+        .help("write the slot under the kind this one is of")
 }
 
 /// A property a kind may not declare because every kind has it.

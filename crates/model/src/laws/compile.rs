@@ -756,8 +756,8 @@ impl<'s> Compiler<'_, '_, 's> {
             return Ok((Op::Field(node, field), ty));
         }
         let sym = self.world.book.names.intern(field.text);
-        if let Some(has) = self.world.props.get(ty, sym) {
-            return Ok((Op::Field(node, Field::Prop(sym)), has.ty));
+        if let Some(ty) = self.world.book.schema.field(ty, sym) {
+            return Ok((Op::Field(node, Field::Prop(sym)), ty));
         }
         Err(self.unknown_field(ty, field, receiver).into())
     }
@@ -800,15 +800,15 @@ impl<'s> Compiler<'_, '_, 's> {
     /// currencies, so those contexts remain genuinely dynamic.
     fn owner_amount_ty(&self) -> Ty {
         let currency = match self.owner {
-            Some(Owner::Place(place)) => Some(self.world.book.entities[self.world.book.places[place].owner].currency),
-            Some(Owner::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+            Some(Owner::Place(place)) => Some(self.world.book.currency(self.world.book.places[place].owner)),
+            Some(Owner::Entity(entity)) => Some(self.world.book.currency(entity)),
             Some(Owner::Asset(asset)) => {
                 let owner = self.world.book.assets[asset].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
             Some(Owner::Contract(contract)) => {
                 let owner = self.world.book.contracts[contract].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
             // A system's currency is only the default for its residents;
             // individual entities may set another one.
@@ -824,26 +824,26 @@ impl<'s> Compiler<'_, '_, 's> {
         let currency = match self.nodes[node].op {
             Op::Const(Value::Place(place)) => {
                 let owner = self.world.book.places[place].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
-            Op::Const(Value::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+            Op::Const(Value::Entity(entity)) => Some(self.world.book.currency(entity)),
             Op::Const(Value::Asset(asset)) => {
                 let owner = self.world.book.assets[asset].owner;
-                Some(self.world.book.entities[owner].currency)
+                Some(self.world.book.currency(owner))
             }
             Op::Var(Var::Subject) => match self.owner {
                 Some(Owner::Place(place)) => {
                     let owner = self.world.book.places[place].owner;
-                    Some(self.world.book.entities[owner].currency)
+                    Some(self.world.book.currency(owner))
                 }
-                Some(Owner::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+                Some(Owner::Entity(entity)) => Some(self.world.book.currency(entity)),
                 Some(Owner::Asset(asset)) => {
                     let owner = self.world.book.assets[asset].owner;
-                    Some(self.world.book.entities[owner].currency)
+                    Some(self.world.book.currency(owner))
                 }
                 Some(Owner::Contract(contract)) => {
                     let owner = self.world.book.contracts[contract].owner;
-                    Some(self.world.book.entities[owner].currency)
+                    Some(self.world.book.currency(owner))
                 }
                 Some(Owner::System(_)) => None,
                 _ => None,
@@ -858,9 +858,7 @@ impl<'s> Compiler<'_, '_, 's> {
     /// conversion with `value(amount, UNIT)` before comparing unlike units.
     fn flow_amount_ty(&self) -> Ty {
         let unit = match self.owner {
-            Some(Owner::Place(place)) => {
-                self.world.book.places[place].holds.as_deref().and_then(|holds| (holds.len() == 1).then_some(holds[0]))
-            }
+            Some(Owner::Place(place)) => self.world.book.holds_only(place),
             Some(Owner::Asset(asset)) => Some(self.world.book.assets[asset].unit),
             _ => None,
         };
@@ -879,7 +877,7 @@ impl<'s> Compiler<'_, '_, 's> {
             _ => Vec::new(),
         };
         // In the order of the alphabet, not of the hash of their symbols, which every new name the book interns shuffles.
-        let mut declared: Vec<&str> = self.world.props.names(ty).map(|sym| self.world.book.name(sym)).collect();
+        let mut declared: Vec<&str> = self.world.book.schema.fields(ty).map(|sym| self.world.book.name(sym)).collect();
         declared.sort_unstable();
         valid.extend(declared);
         let mut diagnostic =

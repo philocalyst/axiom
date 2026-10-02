@@ -164,7 +164,7 @@ fn lower_contract<'a, 's>(
         owner: Owner::Contract(written.id),
         on: AlsoOn::Contract(written.id),
         inputs: &contract_inputs,
-        currency: world.book.entities[owner].currency,
+        currency: world.book.currency(owner),
     };
     let also = lower_alsos(world, &also_cx, node.alsos, diags);
     let loan = contract_loan(world, written, party, owner, diags)?;
@@ -1376,7 +1376,7 @@ fn deposit_amount<'s>(
         );
         return Err(());
     };
-    let currency = Some(world.book.entities[owner].currency);
+    let currency = Some(world.book.currency(owner));
     match world.literal_amount(file, literal, currency).or_report(diags) {
         Some(amount) if amount.qty.0 > 0 => Ok(amount),
         Some(_) => {
@@ -1453,7 +1453,7 @@ fn deposit_holding<'s>(
         );
         return Err(());
     }
-    if kept.holds.as_ref().is_some_and(|units| !units.contains(&amount.unit)) {
+    if world.book.holds(place).is_some_and(|mut units| !units.any(|unit| unit == amount.unit)) {
         diags.push(
             Diagnostic::error("contract-deposit-unit", "the deposit holding does not accept this unit")
                 .label(file.exprs[file[prop.args][0]].loc, "choose a unit the holding can keep"),
@@ -1639,19 +1639,10 @@ fn add_share(total: Ratio, rate: Ratio, loc: Loc, diags: &mut Vec<Diagnostic>) -
 
 fn asset_area(world: &World<'_>, asset: Id<Asset>, day: Day) -> Option<Amount> {
     let area = world.book.names.get("area")?;
-    let asset = &world.book.assets[asset];
-    let own = crate::book::prop(&asset.props, area, day).and_then(|property| match property.value {
+    match world.book.said(asset, area, day)? {
         crate::law::Value::Amount(amount) => Some(amount),
         _ => None,
-    });
-    own.or_else(|| {
-        world.book.kinds.lineage(asset.kind).find_map(|kind| {
-            crate::book::prop(&world.book.kinds[kind].props, area, day).and_then(|property| match property.value {
-                crate::law::Value::Amount(amount) => Some(amount),
-                _ => None,
-            })
-        })
-    })
+    }
 }
 
 #[cfg(test)]

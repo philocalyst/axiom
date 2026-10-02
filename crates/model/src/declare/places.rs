@@ -10,7 +10,7 @@ use super::commodities::Commodities;
 use super::holdings::{AccountDraft, Assets, TabDraft};
 use super::parties::Entities;
 use super::{Resolving, Tabs, is_path_child, path_key};
-use crate::book::{Asset, Basis, Class, Commodity, Entity, Place, Role, Sort};
+use crate::book::{Asset, Class, Commodity, Entity, Place, Role, Sort};
 use crate::collect::Collected;
 use crate::names::Names;
 
@@ -195,17 +195,8 @@ impl<'x, 's> Nodes<'x, 's> {
             role: origin.role,
             kind: origin.kind,
             owner: origin.owner,
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Basis::Cost,
-            claim: false,
-            liquidity: None,
-            opened: None,
-            closed: None,
             shares,
             known_as: Box::default(),
-            props: Box::default(),
             doc: None,
             loc: origin.loc,
         };
@@ -221,7 +212,7 @@ impl<'x, 's> Nodes<'x, 's> {
         account: Option<&AccountDraft<'s>>,
         asset: Option<Id<Asset>>,
     ) -> Origin {
-        let (roots, me) = (&self.inputs.resolving.kinds.roots, self.entities.me);
+        let (roots, me) = (&self.inputs.resolving.kind_roots, self.entities.me);
         let entity = (namespace == ENTITY_PLACES).then(|| self.entities.ids.get(path).copied()).flatten();
         if let Some(account) = account {
             let role = Role::Account { institution: account.institution };
@@ -295,19 +286,10 @@ fn issuer_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, unit: 
         path: commodity.symbol,
         class: Class::Outside,
         role: Role::Issuer(unit),
-        kind: inputs.resolving.kinds.roots.entity,
+        kind: inputs.resolving.kind_roots.entity,
         owner: entities.me,
-        holds: None,
-        select: None,
-        deferred: false,
-        basis: Basis::Cost,
-        claim: false,
-        liquidity: None,
-        opened: None,
-        closed: None,
         shares: Box::default(),
         known_as: Box::default(),
-        props: Box::default(),
         doc: commodity.doc,
         loc: commodity.loc,
     }
@@ -315,24 +297,15 @@ fn issuer_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, unit: 
 
 /// A claim's place. Its printed label is the party's name, while its identity is the typed (party, owner, class).
 fn tab_node(inputs: &PlaceInputs<'_, '_, '_>, entities: &Entities<'_>, tab: &TabDraft) -> Place {
-    let roots = &inputs.resolving.kinds.roots;
+    let roots = &inputs.resolving.kind_roots;
     Place {
         path: entities.tree[tab.party].path,
         class: tab.class,
         role: Role::Tab(tab.party),
         kind: if tab.class == Class::Debt { roots.debt } else { roots.asset },
         owner: tab.owner,
-        holds: None,
-        select: None,
-        deferred: false,
-        basis: Basis::Cost,
-        claim: true,
-        liquidity: None,
-        opened: None,
-        closed: None,
         shares: Box::default(),
         known_as: Box::default(),
-        props: Box::default(),
         doc: None,
         loc: Some(tab.loc),
     }

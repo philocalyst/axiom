@@ -4,12 +4,13 @@
 //! lowerers and by the engine. These tests focus on the model boundary: typed
 //! names, stable trees, ownership and once-stored property defaults.
 
-use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
+use axiom_core::{Day, Days, Diagnostic, FileId, Id, Many, Ratio};
 use axiom_syntax::{Folder, parse};
 
+use crate::builtin::{self, Coded};
 use crate::{
-    Amount, Book, Conversion, ConversionError, PurposeRoot, RatePolicy, RateSource, Residence, Role, Sort, Source,
-    Value, build, prop,
+    Amount, Basis, Book, Conversion, ConversionError, Entity, Holder, PurposeRoot, RatePolicy, RateSource, Role, Sort,
+    Source, Value, build,
 };
 
 const STD: &str = "\
@@ -79,7 +80,7 @@ asset condo : property
 }
 
 #[test]
-fn kind_defaults_inherit_by_reference_and_keep_the_written_source() {
+fn kind_defaults_inherit_by_reference_and_the_nearest_is_the_things() {
     let std = "\
 system std
 kind durable : thing
@@ -106,16 +107,76 @@ asset condo : rental-home
     let child = book.kind("rental-home").unwrap();
     let asset = book.asset("condo").unwrap();
     let name = book.names.get("service-life").unwrap();
-    let parent_default = prop(&book.kinds[parent].props, name, Day::MAX).unwrap();
-    let middle_default = prop(&book.kinds[middle].props, name, Day::MAX).unwrap();
-    let child_default = prop(&book.kinds[child].props, name, Day::MAX).unwrap();
+    let default = |kind| book.own(Holder::Kind(kind), name, Day::MAX);
 
-    assert_eq!(parent_default.value, Value::Num(Ratio::int(30)));
-    assert_eq!(middle_default.value, Value::Num(Ratio::int(24)));
-    assert_eq!(child_default.value, Value::Num(Ratio::int(18)));
-    assert!(parent_default.loc.is_some() && middle_default.loc.is_some() && child_default.loc.is_some());
-    assert!(book.kinds[child].has.iter().any(|has| has.name == name));
-    assert!(book.assets[asset].props.is_empty(), "defaults stay on their kinds");
+    assert_eq!(default(parent), Some(Value::Num(Ratio::int(30))));
+    assert_eq!(default(middle), Some(Value::Num(Ratio::int(24))));
+    assert_eq!(default(child), Some(Value::Num(Ratio::int(18))));
+    assert!(book.schema.find(&book.kinds, child, name).is_some(), "a kind has the slots of its ancestors");
+    assert_eq!(book.own(asset, name, Day::MAX), None, "defaults stay on their kinds");
+    assert_eq!(book.said(asset, name, Day::MAX), Some(Value::Num(Ratio::int(18))), "and the nearest is its things'");
+}
+
+fn said_by_day(book: &Book, thing: impl Into<Holder>, name: &str, days: &[(i32, u32, u32)]) -> Vec<Option<Value>> {
+    let name = book.names.get(name).unwrap();
+    let thing = thing.into();
+    days.iter().map(|&(year, month, date)| book.said(thing, name, Day::from_ymd(year, month, date).unwrap())).collect()
+}
+
+#[test]
+fn a_change_that_ends_uncovers_the_latest_one_still_in_force() {
+    let std = "\
+system std
+kind flagged : asset
+  has flag bool
+kind currency : commodity
+";
+    let project = "\
+use std
+base USD
+commodity USD : currency
+account a : flagged
+  flag false
+2026-01-01 a now flag true until 2026-01-10
+2026-01-05 a now flag false until 2026-01-06
+";
+    let (book, diagnostics) = build_book(std, project);
+    assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+
+    let said = said_by_day(
+        &book,
+        book.place("a").unwrap(),
+        "flag",
+        &[(2025, 12, 31), (2026, 1, 1), (2026, 1, 5), (2026, 1, 6), (2026, 1, 7), (2026, 1, 10), (2026, 1, 11)],
+    );
+    let (yes, no) = (Some(Value::Bool(true)), Some(Value::Bool(false)));
+    assert_eq!(said, [no, yes, no, no, yes, yes, no], "the outer change returns when the inner one ends");
+}
+
+#[test]
+fn a_change_that_ends_without_a_value_of_the_thing_lets_the_kind_show_through() {
+    let std = "\
+system std
+kind flagged : asset
+  has flag bool
+  flag false
+kind currency : commodity
+";
+    let project = "\
+use std
+base USD
+commodity USD : currency
+account a : flagged
+2026-03-01 a now flag true until 2026-03-07
+";
+    let (book, diagnostics) = build_book(std, project);
+    assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+
+    let (a, name) = (book.place("a").unwrap(), book.names.get("flag").unwrap());
+    let day = |date| Day::from_ymd(2026, 3, date).unwrap();
+    assert_eq!(book.own(a, name, day(1)), Some(Value::Bool(true)));
+    assert_eq!(book.own(a, name, day(8)), None, "the thing says nothing again");
+    assert_eq!(book.said(a, name, day(8)), Some(Value::Bool(false)), "and its kind's default is its own");
 }
 
 #[test]
@@ -145,14 +206,157 @@ account retirement : residential
     let durable = book.kind("durable").unwrap();
     let residential = book.kind("residential").unwrap();
     let account = book.place("retirement").unwrap();
-    assert!(book.kinds[durable].deferred);
-    assert!(book.kinds[durable].claim);
-    assert_eq!(book.kinds[durable].basis, Some(crate::Basis::Zero));
-    assert_eq!(book.kinds[residential].basis, Some(crate::Basis::Cost));
-    assert_eq!(book.kinds[residential].select, Some(crate::Policy::Hifo));
-    assert!(book.places[account].deferred && book.places[account].claim);
-    assert_eq!(book.places[account].basis, crate::Basis::Cost);
-    assert_eq!(book.places[account].select, Some(crate::Policy::Hifo));
+    let (durable, residential) = (Holder::Kind(durable), Holder::Kind(residential));
+    assert_eq!(book.fact(builtin::DEFERRED, durable), Some(true));
+    assert_eq!(book.fact(builtin::CLAIM, durable), Some(true));
+    assert_eq!(book.fact(builtin::BASIS, durable).and_then(Basis::decode), Some(Basis::Zero));
+    assert_eq!(book.fact(builtin::BASIS, residential).and_then(Basis::decode), Some(Basis::Cost));
+    assert_eq!(book.select(residential), Some(crate::Policy::Hifo));
+    assert!(book.is_deferred(account) && book.is_claim(account), "a place has what its kinds say");
+    assert_eq!(book.basis(account), Basis::Cost, "and the nearest kind that says it");
+    assert_eq!(book.select(account), Some(crate::Policy::Hifo));
+}
+
+#[test]
+fn an_entity_counts_in_the_currency_of_where_it_lives_else_the_books() {
+    let std = "\
+system std
+kind person : entity
+kind currency : commodity
+commodity USD : currency
+commodity EUR : currency
+";
+    let germany = "system de\nuse std\ncurrency EUR\n";
+    let project = "\
+use std
+use de
+base USD
+entity me : person
+  lives de
+entity jo : person
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "de.ax", germany, true),
+        parsed_source(2, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let unit = |name| book.commodity(name).unwrap();
+    assert_eq!(book.currency(book.entity("me").unwrap()), unit("EUR"), "what the system it lives under counts in");
+    assert_eq!(book.currency(book.entity("jo").unwrap()), unit("USD"), "and the book's where nothing says");
+}
+
+#[test]
+fn a_kinds_share_says_whom_the_flows_with_its_parties_are_shared_with() {
+    let project = "\
+use std
+base USD
+kind grocer : entity
+  share 60% for me
+  sales-tax 8%
+entity me : person
+entity shop : grocer
+";
+    let (book, diagnostics) = build_project(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let grocer = Holder::Kind(book.kind("grocer").unwrap());
+    let sharing: Option<Many<Id<Entity>>> = book.fact(builtin::SHARE, grocer);
+    let members: Vec<_> = book.facts.members(sharing.unwrap()).collect();
+    assert_eq!(members, [book.entity("me").unwrap()]);
+    assert_eq!(book.fact(builtin::SALES_TAX, grocer), Ratio::percent(8, 0));
+    assert_eq!(
+        book.fact(builtin::SALES_TAX, book.entity("shop").unwrap()),
+        Ratio::percent(8, 0),
+        "and so do its things"
+    );
+}
+
+#[test]
+fn a_things_residences_add_to_its_kinds_and_a_place_may_hold_any_where_its_kind_holds_one() {
+    let std = "\
+system std
+kind person : entity
+kind bank : asset
+kind currency : commodity
+commodity USD : currency
+commodity EUR : currency
+";
+    let abroad = "system abroad\nuse std\n";
+    let home = "system home\nuse std\n";
+    let project = "\
+use std
+use home
+use abroad
+base USD
+kind resident : person
+  lives home
+kind usd-only : bank
+  holds USD
+entity jo : resident
+  lives abroad from 2026-02-01 until 2026-02-28
+account kept : usd-only
+account anything : usd-only
+  holds any
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "abroad.ax", abroad, true),
+        parsed_source(2, "home.ax", home, true),
+        parsed_source(3, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let jo = book.entity("jo").unwrap();
+    let on = |month, date| {
+        let day = Day::from_ymd(2026, month, date).unwrap();
+        let mut systems: Vec<&str> =
+            book.residing(jo, day).map(|system| book.name(book.systems[system].path)).collect();
+        systems.sort_unstable();
+        systems
+    };
+    assert_eq!(on(1, 15), ["home"], "what its kind says, from the beginning");
+    assert_eq!(on(2, 10), ["abroad", "home"], "and its own, while they last");
+    assert_eq!(on(3, 1), ["home"]);
+    let usd = book.commodity("USD").unwrap();
+    assert_eq!(book.holds(book.place("kept").unwrap()).map(Iterator::collect::<Vec<_>>), Some(vec![usd]));
+    assert!(book.holds(book.place("anything").unwrap()).is_none(), "`holds any` says it may hold anything");
+}
+
+#[test]
+fn the_days_an_entity_lives_somewhere_are_counted_from_its_residences_whole() {
+    let std = "\
+system std
+kind person : entity
+kind currency : commodity
+commodity USD : currency
+";
+    let abroad = "system abroad\nuse std\n";
+    let home = "system home\nuse std\n";
+    let project = "\
+use std
+base USD
+entity jo : person
+  lives home until 2026-02-28
+  lives abroad from 2026-02-01 until 2026-03-31
+  lives home from 2026-07-01
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "abroad.ax", abroad, true),
+        parsed_source(2, "home.ax", home, true),
+        parsed_source(3, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let jo = book.entity("jo").unwrap();
+    let system =
+        |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
+    let (abroad, home) = (system("abroad"), system("home"));
+    let year = Days::new(Day::from_ymd(2026, 1, 1).unwrap(), Day::from_ymd(2026, 12, 31).unwrap()).unwrap();
+    assert_eq!(book.days_residing(jo, &[abroad], year).len(), 28 + 31, "February and March, the whole of both");
+    assert_eq!(book.days_residing(jo, &[home], year).len(), 59 + 184, "overlap counts for each, and what follows");
+    assert_eq!(book.days_residing(jo, &[home, abroad], year).len(), 59 + 31 + 184, "and once for both together");
 }
 
 #[test]
@@ -180,7 +384,7 @@ commodity USD : currency
     let (book, diagnostics) = build_book(std, project);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let payroll = book.kinds[book.kind("payroll").unwrap()].purpose.unwrap().value;
+    let payroll = book.fact(builtin::PURPOSE, Holder::Kind(book.kind("payroll").unwrap())).unwrap();
     assert_eq!(book.name(book.purposes[payroll].name), "wages");
     let retirement = book.kind("retirement").unwrap();
     let roth = book.kind("roth").unwrap();
@@ -188,11 +392,16 @@ commodity USD : currency
     let wages = book.purpose("wages").unwrap();
     let groceries = book.purpose("groceries").unwrap();
     let transfer = book.purpose("transfer").unwrap();
-    assert_eq!(book.kinds[retirement].takes.len(), 1);
-    assert_eq!(book.kinds[retirement].takes[0].value.to, transfer);
-    assert_eq!(book.kinds[roth].takes.len(), 1);
-    assert_eq!(book.kinds[roth].takes[0].value, crate::Take { to: groceries, from: wages });
-    assert_eq!(book.kinds[college].pays.unwrap().value, groceries);
+    assert_eq!(book.take(retirement, wages), Some((transfer, Holder::Kind(retirement))));
+    assert_eq!(
+        book.take(roth, wages),
+        Some((groceries, Holder::Kind(roth))),
+        "a kind's own take replaces its parent's"
+    );
+    assert_eq!(book.take(roth, groceries), None);
+    assert_eq!(book.fact(builtin::PAYS, Holder::Kind(college)), Some(groceries));
+    let line = book.site(Holder::Kind(retirement), builtin::TAKES.slot(), wages.index() as u32);
+    assert!(line.is_some(), "and where each is written is kept");
 }
 
 #[test]
@@ -476,16 +685,27 @@ entity jo : person
     let (book, diagnostics) = build(&sources);
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let residences = &book.entities[book.entity("jo").unwrap()].lives;
-    assert_eq!(residences.len(), 2);
-    assert_eq!(book.name(book.systems[residences[0].system].path), "us/ca");
-    assert_eq!(book.name(book.systems[residences[1].system].path), "us/ny");
-    assert_eq!(book.systems[residences[0].system].currency, book.commodity("CAD"));
-    assert_eq!(book.systems[residences[1].system].currency, book.commodity("USD"));
-    assert_eq!(residences[0].days.first(), Day::from_ymd(2025, 1, 1).unwrap());
-    assert_eq!(residences[0].days.last(), Day::from_ymd(2025, 12, 31).unwrap());
-    assert_eq!(residences[1].days.first(), Day::from_ymd(2025, 7, 1).unwrap());
-    assert_eq!(residences[1].days.last(), Day::MAX);
+    let jo = book.entity("jo").unwrap();
+    let on = |year, month, date| {
+        let day = Day::from_ymd(year, month, date).unwrap();
+        let mut systems: Vec<&str> =
+            book.residing(jo, day).map(|system| book.name(book.systems[system].path)).collect();
+        systems.sort_unstable();
+        systems
+    };
+    assert_eq!(on(2024, 12, 31), Vec::<&str>::new(), "nowhere before the first residence");
+    assert_eq!(on(2025, 6, 30), ["us/ca"]);
+    assert_eq!(on(2025, 7, 1), ["us/ca", "us/ny"], "overlapping residences are kept");
+    assert_eq!(on(2026, 1, 1), ["us/ny"], "and one that has no end does not");
+    let (ca, ny) = (
+        book.systems.iter().find(|(_, node)| book.name(node.path) == "us/ca").unwrap().0,
+        book.systems.iter().find(|(_, node)| book.name(node.path) == "us/ny").unwrap().0,
+    );
+    assert_eq!(book.systems[ca].currency, book.commodity("CAD"));
+    assert_eq!(book.systems[ny].currency, book.commodity("USD"));
+    assert_eq!(book.currency(jo), book.commodity("CAD").unwrap(), "the currency of the first system it lives under");
+    let first = book.residences(jo).next().unwrap();
+    assert_eq!((first.0.first(), first.1), (Day::from_ymd(2025, 1, 1).unwrap(), ca));
 }
 
 fn build_rate_book<'s>(project: &'s str) -> (Book<'s>, Vec<Diagnostic>) {
@@ -620,70 +840,46 @@ entity me : person
     ));
 }
 
+/// The project of an entity that lives under the systems named, in that order.
+fn living_under(paths: &[&str]) -> String {
+    let lines: String = paths.iter().map(|path| format!("  lives {path}\n")).collect();
+    format!(
+        "use std\nuse us\nuse de\nbase USD\ncommodity USD : currency\n  precision 2\ncommodity EUR : currency\n  precision 2\nentity me : person\n{lines}"
+    )
+}
+
 #[test]
 fn descendant_residence_policy_supersedes_ancestor_independent_of_order() {
-    let project = "\
-use std
-use us
-use de
-base USD
-commodity USD : currency
-  precision 2
-commodity EUR : currency
-  precision 2
-entity me : person
-";
-    let (mut book, diagnostics) = build_rate_book(project);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let owner = book.roots.me;
-    let system = |book: &Book<'_>, path| {
-        book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap()
-    };
-    let (us, de) = (system(&book, "us"), system(&book, "de"));
-    let child = system(&book, "us/ca");
-    let param = book.params.iter().next().unwrap().0;
-    book.systems[child].rates = Some(RatePolicy::Param(param));
-    let residences = [
-        Residence { days: Days::ALWAYS, system: de },
-        Residence { days: Days::ALWAYS, system: us },
-        Residence { days: Days::ALWAYS, system: child },
-    ];
-    let day = Day::from_ymd(2026, 6, 30).unwrap();
-    let amount = Amount::new(axiom_core::Qty(1_000), book.commodity("EUR").unwrap());
-    for lives in [residences, [residences[2], residences[0], residences[1]]] {
-        book.entities[owner].lives = lives.into();
+    for order in [["de", "us", "us/ca"], ["us/ca", "de", "us"], ["us", "us/ca", "de"]] {
+        let project = living_under(&order);
+        let (mut book, diagnostics) = build_rate_book(&project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let owner = book.roots.me;
+        let child = book.systems.iter().find_map(|(id, node)| (book.name(node.path) == "us/ca").then_some(id)).unwrap();
+        let param = book.params.iter().next().unwrap().0;
+        book.systems[child].rates = Some(RatePolicy::Param(param));
+        let day = Day::from_ymd(2026, 6, 30).unwrap();
+        let amount = Amount::new(axiom_core::Qty(1_000), book.commodity("EUR").unwrap());
         let converted = book.convert_for(amount, book.base, owner, day, None).unwrap();
-        assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()));
+        assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()), "{order:?}");
     }
 }
 
 #[test]
 fn conflicting_overlapping_residence_rate_policies_are_reported_deterministically() {
-    let project = "\
-use std
-use us
-use de
-base USD
-commodity USD : currency
-  precision 2
-commodity EUR : currency
-  precision 2
-entity me : person
-";
-    let (mut book, diagnostics) = build_rate_book(project);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let owner = book.roots.me;
-    let system =
-        |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
-    let (us, de) = (system("us"), system("de"));
-    book.entities[owner].lives =
-        vec![Residence { days: Days::ALWAYS, system: us }, Residence { days: Days::ALWAYS, system: de }].into();
-    let amount = Amount::new(axiom_core::Qty(100), book.commodity("EUR").unwrap());
-    let day = Day::from_ymd(2026, 6, 30).unwrap();
-    let expected = Err(ConversionError::PolicyConflict { first: us.min(de), second: us.max(de) });
-    assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected);
-    book.entities[owner].lives.reverse();
-    assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected);
+    for order in [["us", "de"], ["de", "us"]] {
+        let project = living_under(&order);
+        let (book, diagnostics) = build_rate_book(&project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let owner = book.roots.me;
+        let system =
+            |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
+        let (us, de) = (system("us"), system("de"));
+        let amount = Amount::new(axiom_core::Qty(100), book.commodity("EUR").unwrap());
+        let day = Day::from_ymd(2026, 6, 30).unwrap();
+        let expected = Err(ConversionError::PolicyConflict { first: us.min(de), second: us.max(de) });
+        assert_eq!(book.convert_for(amount, book.base, owner, day, None), expected, "{order:?}");
+    }
 }
 
 #[test]

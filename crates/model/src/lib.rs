@@ -6,7 +6,13 @@
 //! | `sources`    | which files are systems, the tree of systems, folder layout |
 //! | `collect`    | every item of every source, sorted into typed buckets once  |
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
-//! | `props`      | property lines, read once and applied down the kind chain   |
+//! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
+//! | `slots`      | what the things of a kind have: ranges, counts and weights  |
+//! | `builtin`    | the language's own slots, as typed keys of the facts        |
+//! | `holders`    | the things a book says things about, numbered for the facts |
+//! | `said`       | what a book says of a thing: a slot's value on a day        |
+//! | `fill`       | what a line gives a slot: range, count and weights, checked |
+//! | `props`      | property lines, read once and said into the facts           |
 //! | `params`     | dated tables                                                |
 //! | `laws`       | laws compiled and typed, and the order they run in          |
 //! | `rules`      | which laws watch which place, households and residences     |
@@ -19,9 +25,12 @@ pub mod journal;
 pub mod law;
 pub mod sync;
 
+pub mod builtin;
 mod collect;
 mod declare;
 mod errors;
+mod fill;
+mod holders;
 mod kinds;
 mod laws;
 mod lower;
@@ -36,16 +45,21 @@ mod props;
 mod purposes;
 mod resolve;
 mod rules;
+mod said;
 mod scope;
+mod slots;
 mod sources;
 mod sync_lower;
+mod taxonomy;
 #[cfg(test)]
 mod tests;
 mod values;
 
 pub use book::*;
+pub use holders::{Holder, HolderIndex};
 pub use journal::*;
 pub use law::*;
+pub use slots::{Mult, Range, Schema, Slot, View, Weight};
 
 use axiom_core::{Diagnostic, Interner, Set};
 use axiom_syntax::File;
@@ -76,8 +90,10 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let said = declare::Said { sites: &sites, collected: &collected, survey: &survey };
     let systems = declare::Systems { tree: systems_tree, index: systems, scopes };
     let mut world = declare::declare(said, &settings, names, systems, &mut diags);
+    slots::declare(&mut world, &collected, &mut diags);
     props::declare(&mut world, &collected, &mut diags);
-    world.finish_props();
+    world.freeze_facts();
+    props::place_entities(&mut world);
     params::declare(&mut world, &collected, &mut diags);
     props::system_rates(&mut world, &collected, &mut diags);
     sync_lower::declare(&mut world, &sites, &collected, &mut diags);
@@ -85,6 +101,8 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     lower::contracts(&mut world, &collected, &mut diags);
     laws::register_native(&mut world, &mut diags);
     lower::record(&mut world, &collected, &mut diags);
+    // `end` statements say more of places, once the rest is lowered.
+    world.freeze_facts();
     // One cause is reported once, however many declarations shared the line.
     let mut seen = Set::default();
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));

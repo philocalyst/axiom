@@ -41,7 +41,7 @@ pub(super) fn declare_accounts<'a, 's>(
             continue;
         }
         declared.insert(path, file.loc(path));
-        let kind = resolving.kind(names, written, Sort::Place(Class::Asset), resolving.kinds.roots.asset, diags);
+        let kind = resolving.kind(names, written, Sort::Place(Class::Asset), resolving.kind_roots.asset, diags);
         let class = match resolving.kinds.tree[kind].sort {
             Sort::Place(class) => class,
             found => {
@@ -118,10 +118,10 @@ pub(super) fn declare_assets<'a, 's>(
             diags.push(problem::duplicate(Noun::Asset, Word::of(file, path), Some(assets.arena[first].loc)));
             continue;
         }
-        let kind = resolving.kind(names, written, Sort::Thing, resolving.kinds.roots.thing, diags);
+        let kind = resolving.kind(names, written, Sort::Thing, resolving.kind_roots.thing, diags);
         let name = names.intern(path);
         let unit =
-            commodities.arena.push(commodity(name, resolving.kinds.roots.commodity, 0, None, Some(file.loc(path))));
+            commodities.arena.push(commodity(name, resolving.kind_roots.commodity, 0, None, Some(file.loc(path))));
         commodities.by_name.entry(path).or_insert(unit);
         let owners = resolving.owners(names, written, &entities.index, &entities.tree, entities.me, diags);
         let owner = owners.first().map_or(entities.me, |share| share.entity);
@@ -132,7 +132,6 @@ pub(super) fn declare_assets<'a, 's>(
             place: Id::new(0),
             unit,
             part_of: None,
-            props: Box::default(),
             doc: written.item.doc.map(|doc| names.intern(doc.0)),
             loc: file.loc(path),
         });
