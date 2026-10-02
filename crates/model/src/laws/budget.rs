@@ -6,7 +6,7 @@ use axiom_syntax::{self as ast, DeclKind, ItemKind};
 use super::compile;
 use crate::book::{Amount, Budget, BudgetTerms, Limit};
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::law::{BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var};
 use crate::scope::Home;
 use crate::sources::Site;
@@ -50,12 +50,8 @@ pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], 
                             continue;
                         }
                         let word = Word::of(file, decl.name.0);
-                        let purpose = match world.purpose(source.home, word) {
-                            Ok(purpose) => purpose,
-                            Err(problem) => {
-                                diags.push(problem);
-                                continue;
-                            }
+                        let Some(purpose) = world.purpose(source.home, word).or_report(diags) else {
+                            continue;
                         };
                         if !declared.insert(purpose) {
                             diags.push(
@@ -80,12 +76,8 @@ pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], 
                 ItemKind::Budget(reference) => {
                     let budget = &file[reference];
                     let word = Word::of(file, budget.purpose.0);
-                    let purpose = match world.purpose(source.home, word) {
-                        Ok(purpose) => purpose,
-                        Err(problem) => {
-                            diags.push(problem);
-                            continue;
-                        }
+                    let Some(purpose) = world.purpose(source.home, word).or_report(diags) else {
+                        continue;
                     };
                     if !declared.insert(purpose) {
                         diags.push(
@@ -119,12 +111,8 @@ pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], 
                         continue;
                     };
                     let word = Word::of(file, name.0);
-                    let purpose = match world.purpose(source.home, word) {
-                        Ok(purpose) => purpose,
-                        Err(problem) => {
-                            diags.push(problem);
-                            continue;
-                        }
+                    let Some(purpose) = world.purpose(source.home, word).or_report(diags) else {
+                        continue;
                     };
                     let mut until = None;
                     let mut invalid_until = false;
@@ -316,17 +304,8 @@ fn lower_budget_limit<'s>(
 ) -> Option<BudgetLimit> {
     match entry.allowance.limit {
         ast::Limit::Amount(ast::Amount::Literal(literal)) => {
-            let unit = match literal.unit() {
-                Some(unit) => {
-                    world.commodity_of(Word::of(entry.file, unit.0)).map_err(|problem| diags.push(problem)).ok()?
-                }
-                None => world.book.base,
-            };
-            world
-                .amount(literal.num(), unit, entry.file.loc(literal.0))
-                .map_err(|problem| diags.push(problem))
-                .ok()
-                .map(|amount| BudgetLimit::Ready(Limit::Amount(amount)))
+            let amount = world.literal_amount(entry.file, literal, Some(world.book.base)).or_report(diags)?;
+            Some(BudgetLimit::Ready(Limit::Amount(amount)))
         }
         ast::Limit::Amount(ast::Amount::Computed(root)) => {
             let (program, local_root) =
@@ -344,7 +323,7 @@ fn lower_budget_limit<'s>(
         }
         ast::Limit::Share { percent, of } => {
             let word = Word::of(entry.file, of.0);
-            let of = world.purpose(entry.home, word).map_err(|problem| diags.push(problem)).ok()?;
+            let of = world.purpose(entry.home, word).or_report(diags)?;
             let rate = Ratio::percent(percent.mantissa as i128, percent.scale)?;
             Some(BudgetLimit::Ready(Limit::Share { rate, of }))
         }
@@ -364,12 +343,8 @@ fn funding(
             match (from, to) {
                 (Ok(from), Ok(to)) => Some((from, to)),
                 (from, to) => {
-                    if let Err(problem) = from {
-                        diags.push(problem);
-                    }
-                    if let Err(problem) = to {
-                        diags.push(problem);
-                    }
+                    from.or_report(diags);
+                    to.or_report(diags);
                     None
                 }
             }

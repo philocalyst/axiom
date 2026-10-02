@@ -31,6 +31,17 @@ pub(crate) fn suggest<'a>(
     }
 }
 
+/// A lookup that fails with a diagnostic, whose failure is said and then gone on without.
+pub(crate) trait Reported<T> {
+    fn or_report(self, diags: &mut Vec<Diagnostic>) -> Option<T>;
+}
+
+impl<T> Reported<T> for Result<T, Diagnostic> {
+    fn or_report(self, diags: &mut Vec<Diagnostic>) -> Option<T> {
+        self.map_err(|problem| diags.push(problem)).ok()
+    }
+}
+
 /// One of the things an ambiguous name could mean.
 pub(crate) struct Candidate {
     /// What it is, ready to read in a sentence: `assets/bank/checking` in
@@ -62,4 +73,19 @@ pub(crate) fn list(words: &[&str]) -> String {
 /// One count in words: `1 line`, `3 lines`.
 pub(crate) fn count(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_lookup_is_said_once_and_leaves_no_value() {
+        let mut diags = Vec::new();
+        assert_eq!(Ok::<_, Diagnostic>(3).or_report(&mut diags), Some(3));
+        assert!(diags.is_empty());
+
+        assert_eq!(Err::<u8, _>(Diagnostic::error("x", "no")).or_report(&mut diags), None);
+        assert_eq!(diags.len(), 1);
+    }
 }

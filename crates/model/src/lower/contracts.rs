@@ -14,7 +14,7 @@ use crate::book::{
 };
 use crate::collect::Collected;
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Flow, Infer, Mode, Origin, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
 use crate::problem::{self, Noun};
@@ -109,12 +109,8 @@ fn lower_contract<'a, 's>(
     let node = written.node;
     let name_word = Word::of(file, node.name.0);
     let party_word = node.party.map_or(name_word, |party| Word::of(file, party.0));
-    let party = match world.entity(written.site.home, party_word) {
-        Ok(party) => party,
-        Err(problem) => {
-            diags.push(problem);
-            return None;
-        }
+    let Some(party) = world.entity(written.site.home, party_word).or_report(diags) else {
+        return None;
     };
     let days = contract_days(file, node.props, diags)?;
     let area = match contract_area(world, file, node.props, diags) {
@@ -413,7 +409,7 @@ fn contract_loan<'s>(
             }
         }
     }
-    let debt = world.tab(party, owner, Class::Debt, prop.loc).map_err(|problem| diags.push(problem)).ok()?;
+    let debt = world.tab(party, owner, Class::Debt, prop.loc).or_report(diags)?;
     Some(Some((Loan { principal, on, term, asset, debt, resets, prepay }, rate)))
 }
 
@@ -870,9 +866,7 @@ fn template_amount<'s>(
 ) -> Option<(TemplateQuantity, Amount)> {
     match amount {
         ast::Amount::Literal(literal) => {
-            let unit = literal.unit().map_or(Some(fallback), |unit| resolve_commodity(world, file, unit, diags))?;
-            let amount =
-                world.amount(literal.num(), unit, file.loc(literal.0)).map_err(|problem| diags.push(problem)).ok()?;
+            let amount = world.literal_amount(file, literal, Some(fallback)).or_report(diags)?;
             Some((TemplateQuantity::Amount(None), amount))
         }
         ast::Amount::Computed(root) => {
@@ -899,16 +893,10 @@ fn lower_item<'s>(
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<TemplateItem> {
-    let (amount, _) = template_amount(world, file, item.amount, roots, fallback, diags)?;
-    let (amount, _) = match amount {
-        TemplateQuantity::Amount(Some(root)) => (TemplateAmount::Computed(root), ()),
-        _ => (
-            TemplateAmount::Literal(match item.amount {
-                ast::Amount::Literal(literal) => resolve_amount(world, file, literal, fallback, diags)?,
-                ast::Amount::Computed(_) => return None,
-            }),
-            (),
-        ),
+    let (quantity, literal) = template_amount(world, file, item.amount, roots, fallback, diags)?;
+    let amount = match quantity {
+        TemplateQuantity::Amount(Some(root)) => TemplateAmount::Computed(root),
+        _ => TemplateAmount::Literal(literal),
     };
     let (codes, select, detail, waive, purpose, description) = lower_tail(world, home, file, item.tail, diags);
     Some(TemplateItem {
@@ -978,24 +966,13 @@ fn lower_tail<'s>(
     (codes, select, detail, waive, purpose, description)
 }
 
-fn resolve_amount<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    literal: ast::Literal<'s>,
-    fallback: Id<crate::book::Commodity>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Amount> {
-    let unit = literal.unit().map_or(Some(fallback), |unit| resolve_commodity(world, file, unit, diags))?;
-    world.amount(literal.num(), unit, file.loc(literal.0)).map_err(|problem| diags.push(problem)).ok()
-}
-
 fn resolve_commodity<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Commodity>> {
-    world.commodity_of(Word::of(file, name.0)).map_err(|problem| diags.push(problem)).ok()
+    world.commodity_of(Word::of(file, name.0)).or_report(diags)
 }
 
 fn resolve_endpoint<'s>(
@@ -1005,13 +982,7 @@ fn resolve_endpoint<'s>(
     name: Name<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Place>> {
-    match world.end(home, Word::of(file, name.0)) {
-        Ok(end) => Some(end.place),
-        Err(problem) => {
-            diags.push(problem);
-            None
-        }
-    }
+    world.end(home, Word::of(file, name.0)).or_report(diags).map(|end| end.place)
 }
 
 fn schedule_owner<'s>(
@@ -1086,13 +1057,7 @@ fn resolve_object<'s>(
     {
         return Some(crate::journal::Object::Asset(asset));
     }
-    match world.entity(home, Word::of(file, name.0)) {
-        Ok(entity) => Some(crate::journal::Object::Entity(entity)),
-        Err(problem) => {
-            diags.push(problem);
-            None
-        }
-    }
+    world.entity(home, Word::of(file, name.0)).or_report(diags).map(|entity| crate::journal::Object::Entity(entity))
 }
 
 fn node_doc<'s>(world: &mut World<'s>, site: &Site<'_, 's>, loc: Loc) -> Option<Sym> {
@@ -1326,12 +1291,8 @@ fn contract_area<'s>(
             );
             return Err(());
         };
-        let unit = match world.commodity_of(Word::of(file, unit_name.0)) {
-            Ok(unit) => unit,
-            Err(problem) => {
-                diags.push(problem);
-                return Err(());
-            }
+        let Some(unit) = world.commodity_of(Word::of(file, unit_name.0)).or_report(diags) else {
+            return Err(());
         };
         if !world.book.is_a(world.book.commodities[unit].kind, world.book.roots.kinds.measure) {
             diags.push(
@@ -1394,17 +1355,18 @@ fn contract_deposit<'s>(
             );
             return Err(());
         };
-        let amount = match resolve_amount(world, file, literal, world.book.entities[owner].currency, diags) {
-            Some(amount) if amount.qty.0 > 0 => amount,
-            Some(_) => {
-                diags.push(
-                    Diagnostic::error("contract-deposit-positive", "a contract deposit must be positive")
-                        .label(file.exprs[args[0]].loc, "write an amount greater than zero"),
-                );
-                return Err(());
-            }
-            None => return Err(()),
-        };
+        let amount =
+            match world.literal_amount(file, literal, Some(world.book.entities[owner].currency)).or_report(diags) {
+                Some(amount) if amount.qty.0 > 0 => amount,
+                Some(_) => {
+                    diags.push(
+                        Diagnostic::error("contract-deposit-positive", "a contract deposit must be positive")
+                            .label(file.exprs[args[0]].loc, "write an amount greater than zero"),
+                    );
+                    return Err(());
+                }
+                None => return Err(()),
+            };
         let (name, name_loc) = if args.len() == 3 {
             let into = matches!(file.exprs[args[1]].kind, ExprKind::Name(name) if name.0 == "into");
             let ExprKind::Name(name) = file.exprs[args[2]].kind else {
@@ -1499,12 +1461,8 @@ fn shares<'s>(
                 ExprKind::Fraction(top, bottom) => (Ratio::new(i128::from(top), i128::from(bottom)), None),
                 ExprKind::Amount(literal) => {
                     let numerator = literal.unit().and_then(|name| {
-                        let unit = match world.commodity_of(Word::of(file, name.0)) {
-                            Ok(unit) => unit,
-                            Err(problem) => {
-                                diags.push(problem);
-                                return None;
-                            }
+                        let Some(unit) = world.commodity_of(Word::of(file, name.0)).or_report(diags) else {
+                            return None;
                         };
                         if !world.book.is_a(world.book.commodities[unit].kind, world.book.roots.kinds.measure) {
                             diags.push(
@@ -1513,10 +1471,7 @@ fn shares<'s>(
                             );
                             return None;
                         }
-                        world
-                            .amount(literal.num(), unit, file.exprs[written_amount].loc)
-                            .map_err(|problem| diags.push(problem))
-                            .ok()
+                        world.amount(literal.num(), unit, file.exprs[written_amount].loc).or_report(diags)
                     });
                     let denominator = contract_area.or_else(|| {
                         purpose.and_then(|at| at.value.of).and_then(|object| match object {

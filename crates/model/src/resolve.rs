@@ -9,6 +9,7 @@
 use axiom_core::diag::closest;
 use axiom_core::num::DecError;
 use axiom_core::{Dec, Diagnostic, Id, Loc};
+use axiom_syntax::{File, Literal};
 
 use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, Place, Purpose, Role, System};
 use crate::declare::{World, near_place};
@@ -57,6 +58,25 @@ impl<'s> World<'s> {
         let scale = self.book.commodities[unit].scale;
         let quantity = number.to_qty(scale);
         quantity.map(|qty| Amount::new(qty, unit)).map_err(|error| self.not_an_amount(error, number, unit, loc))
+    }
+
+    /// A written literal as an amount of the unit it names, or of `fallback` when it names none; with no
+    /// fallback an amount without a unit is a mistake.
+    pub fn literal_amount(
+        &self,
+        file: &File<'s>,
+        literal: Literal<'s>,
+        fallback: Option<Id<Commodity>>,
+    ) -> Result<Amount, Diagnostic> {
+        let unit = match (literal.unit(), fallback) {
+            (Some(unit), _) => self.commodity_of(Word::of(file, unit.0))?,
+            (None, Some(unit)) => unit,
+            (None, None) => {
+                return Err(Diagnostic::error("amount-unit", "this amount needs an explicit unit")
+                    .label(file.loc(literal.0), "write a commodity after the amount"));
+            }
+        };
+        self.amount(literal.num(), unit, file.loc(literal.0))
     }
 
     /// Why a written number is not an amount of `unit`.

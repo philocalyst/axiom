@@ -22,7 +22,7 @@ use crate::book::{
 };
 use crate::collect::{Collected, Written};
 use crate::declare::{MAX_SCALE, PropTarget, World};
-use crate::errors::{Word, article, list, suggest};
+use crate::errors::{Reported, Word, article, list, suggest};
 use crate::law::{Ty, Value};
 use crate::problem;
 use crate::scope::Home;
@@ -1177,12 +1177,8 @@ fn read_has_lines<'s>(
         if line.name.0 != "has" {
             continue;
         }
-        let has = match parse_has(world, file, line) {
-            Ok(has) => has,
-            Err(problem) => {
-                diags.push(problem);
-                continue;
-            }
+        let Some(has) = parse_has(world, file, line).or_report(diags) else {
+            continue;
         };
         if is_builtin_line(world.book.name(has.name)) || FIELD_WORDS.contains(&world.book.name(has.name)) {
             let word = Word { text: world.book.name(has.name), loc: has.loc.unwrap_or(line.loc) };

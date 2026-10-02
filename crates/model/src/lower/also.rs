@@ -6,7 +6,7 @@ use axiom_syntax::ClauseKind;
 
 use crate::book::Text;
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Provenance, Purposed, Select, Waive};
 use crate::scope::Home;
 
@@ -73,9 +73,9 @@ pub(crate) fn tail<'s>(
                     .label(clause.at, "write `due YYYY-MM-DD` on an implied line"),
             ),
             ClauseKind::Basis(ast::Amount::Literal(literal)) => {
-                let Some(unit) = literal.unit().and_then(|unit| {
-                    world.commodity_of(Word::of(file, unit.0)).map_err(|problem| diags.push(problem)).ok()
-                }) else {
+                let Some(unit) =
+                    literal.unit().and_then(|unit| world.commodity_of(Word::of(file, unit.0)).or_report(diags))
+                else {
                     diags.push(
                         Diagnostic::error("basis-unit", "basis needs an explicit base-currency unit")
                             .label(file.loc(literal.0), "write the unit"),

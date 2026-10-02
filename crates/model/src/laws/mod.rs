@@ -23,7 +23,7 @@ use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
 use crate::book::{Also, AlsoOn, Amount, Implied, Input, Kind, Sign, Sort, System, TemplateAmount};
 use crate::declare::World;
-use crate::errors::{Candidate, Word};
+use crate::errors::{Candidate, Reported, Word};
 use crate::journal::Select as LotSelect;
 use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
 use crate::names::Rank as NameRank;
@@ -263,6 +263,26 @@ enum PendingAmount {
     Computed(usize),
 }
 
+/// An implied amount: a literal is resolved now, and an expression is compiled with the rest of its `also`.
+fn pending_amount<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    amount: ast::Amount<'s>,
+    currency: Id<crate::book::Commodity>,
+    roots: &mut Vec<(ExprId, Ty)>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<PendingAmount> {
+    match amount {
+        ast::Amount::Literal(literal) => {
+            world.literal_amount(file, literal, Some(currency)).or_report(diags).map(PendingAmount::Literal)
+        }
+        ast::Amount::Computed(root) => {
+            roots.push((root, Ty::AMOUNT));
+            Some(PendingAmount::Computed(roots.len() - 1))
+        }
+    }
+}
+
 /// Lower every declaration `also` while the complete declaration namespace is
 /// available. Its law is auxiliary: `register` deliberately leaves it out of
 /// the owner's ordinary law list, and the native group builder applies it to
@@ -324,32 +344,8 @@ pub(crate) fn lower_alsos<'s>(
         });
         let (what, amount_index, metadata_clauses, source_selectors) = match &also.line {
             ast::AlsoLine::Item(item) => {
-                let amount = match item.amount {
-                    ast::Amount::Literal(literal) => {
-                        let unit = match literal.unit() {
-                            Some(unit) => match world.commodity_of(Word::of(file, unit.0)) {
-                                Ok(unit) => unit,
-                                Err(problem) => {
-                                    diags.push(problem);
-                                    continue;
-                                }
-                            },
-                            None => currency,
-                        };
-                        let Some(amount) = world
-                            .amount(literal.num(), unit, file.loc(literal.0))
-                            .map_err(|problem| diags.push(problem))
-                            .ok()
-                        else {
-                            continue;
-                        };
-                        PendingAmount::Literal(amount)
-                    }
-                    ast::Amount::Computed(root) => {
-                        let index = roots.len();
-                        roots.push((root, Ty::AMOUNT));
-                        PendingAmount::Computed(index)
-                    }
+                let Some(amount) = pending_amount(world, file, item.amount, currency, &mut roots, diags) else {
+                    continue;
                 };
                 (
                     Some(Implied::Item {
@@ -457,32 +453,8 @@ pub(crate) fn lower_alsos<'s>(
                         continue;
                     }
                 };
-                let amount = match amount {
-                    ast::Amount::Literal(literal) => {
-                        let unit = match literal.unit() {
-                            Some(unit) => match world.commodity_of(Word::of(file, unit.0)) {
-                                Ok(unit) => unit,
-                                Err(problem) => {
-                                    diags.push(problem);
-                                    continue;
-                                }
-                            },
-                            None => currency,
-                        };
-                        let Some(amount) = world
-                            .amount(literal.num(), unit, file.loc(literal.0))
-                            .map_err(|problem| diags.push(problem))
-                            .ok()
-                        else {
-                            continue;
-                        };
-                        PendingAmount::Literal(amount)
-                    }
-                    ast::Amount::Computed(root) => {
-                        let index = roots.len();
-                        roots.push((root, Ty::AMOUNT));
-                        PendingAmount::Computed(index)
-                    }
+                let Some(amount) = pending_amount(world, file, amount, currency, &mut roots, diags) else {
+                    continue;
                 };
                 (
                     Some(Implied::Flow { from, to, amount: TemplateAmount::Literal(Amount::zero(currency)) }),

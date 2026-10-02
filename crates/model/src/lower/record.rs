@@ -13,7 +13,7 @@ use crate::book::{
 };
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::journal::{
     Action, Assert, ClaimChange, ClaimChangeAction, Detail, EndEvent, EndTarget, Event, Filed, Flow, FlowExpressions,
     Gap, Infer, JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object,
@@ -661,12 +661,8 @@ fn lower_statement<'a, 's>(
                 return;
             };
             let word = Word::of(file, unit.0);
-            let unit = match world.commodity_of(word) {
-                Ok(unit) => unit,
-                Err(problem) => {
-                    diags.push(problem);
-                    return;
-                }
+            let Some(unit) = world.commodity_of(word).or_report(diags) else {
+                return;
             };
             let Some(ratio) = numerator
                 .to_ratio()
@@ -1658,7 +1654,7 @@ fn lower_basis<'a, 's>(
     tail.detail.since = since.or(tail.detail.since);
     let basis_root = match written_amount {
         ast::Amount::Literal(literal) => {
-            let Some(amount) = literal_amount(&staged, file, literal, None, diags) else {
+            let Some(amount) = staged.literal_amount(file, literal, None).or_report(diags) else {
                 return;
             };
             if amount.unit != staged.book.base {
@@ -2101,12 +2097,8 @@ fn lower_filed<'a, 's>(
         unsupported_statement(loc, "a return needs a system subject", diags);
         return;
     };
-    let system = match world.system(Word::of(file, system_name.0)) {
-        Ok(system) => system,
-        Err(problem) => {
-            diags.push(problem);
-            return;
-        }
+    let Some(system) = world.system(Word::of(file, system_name.0)).or_report(diags) else {
+        return;
     };
     let fallback = world.book.systems[system].currency.unwrap_or(world.book.base);
     let start = diags.len();
@@ -2119,7 +2111,7 @@ fn lower_filed<'a, 's>(
             );
             continue;
         };
-        let Some(amount) = literal_amount(world, file, literal, Some(fallback), diags) else {
+        let Some(amount) = world.literal_amount(file, literal, Some(fallback)).or_report(diags) else {
             continue;
         };
         lines.push((world.book.names.intern(line.end.name.0), amount, line.loc));
@@ -2186,46 +2178,11 @@ fn statement_target<'s>(
             }
         }
         Subject::Code(code) => Some(StatementTarget::Code(world.book.names.intern(code.name()))),
-        Subject::Purpose(name) => world
-            .purpose(home, Word::of(file, name.0))
-            .map(|_| StatementTarget::Purpose)
-            .map_err(|problem| diags.push(problem))
-            .ok(),
-        Subject::Unit(name) => world
-            .commodity_of(Word::of(file, name.0))
-            .map(StatementTarget::Unit)
-            .map_err(|problem| diags.push(problem))
-            .ok(),
+        Subject::Purpose(name) => {
+            world.purpose(home, Word::of(file, name.0)).map(|_| StatementTarget::Purpose).or_report(diags)
+        }
+        Subject::Unit(name) => world.commodity_of(Word::of(file, name.0)).map(StatementTarget::Unit).or_report(diags),
     }
-}
-
-fn literal_amount<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    literal: ast::Literal<'s>,
-    fallback: Option<Id<crate::book::Commodity>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Amount> {
-    let unit = match literal.unit() {
-        Some(unit) => match world.commodity_of(Word::of(file, unit.0)) {
-            Ok(unit) => unit,
-            Err(problem) => {
-                diags.push(problem);
-                return None;
-            }
-        },
-        None => match fallback {
-            Some(unit) => unit,
-            None => {
-                diags.push(
-                    Diagnostic::error("amount-unit", "this amount needs an explicit unit")
-                        .label(file.loc(literal.0), "write a commodity after the amount"),
-                );
-                return None;
-            }
-        },
-    };
-    world.amount(literal.num(), unit, file.loc(literal.0)).map_err(|problem| diags.push(problem)).ok()
 }
 
 fn lower_value<'s>(
@@ -2287,7 +2244,7 @@ fn lower_value<'s>(
                 unsupported_computed_value(loc, "a named measure reading", diags);
                 return;
             };
-            let Some(amount) = literal_amount(world, file, literal, Some(world.book.base), diags) else {
+            let Some(amount) = world.literal_amount(file, literal, Some(world.book.base)).or_report(diags) else {
                 return;
             };
             world.book.readings.push(Reading { day: statement.date, code, amount, loc });
@@ -2304,12 +2261,8 @@ fn lower_value<'s>(
                 );
                 return;
             };
-            let quote = match world.commodity_of(Word::of(file, quote_name.0)) {
-                Ok(quote) => quote,
-                Err(problem) => {
-                    diags.push(problem);
-                    return;
-                }
+            let Some(quote) = world.commodity_of(Word::of(file, quote_name.0)).or_report(diags) else {
+                return;
             };
             let Some(rate) = literal.num().to_ratio().filter(|rate| *rate > axiom_core::Ratio::ZERO) else {
                 diags.push(
@@ -2337,7 +2290,7 @@ fn assertion_amount<'s>(
 ) -> Option<(Amount, Option<(Id<crate::book::TemplateProgram>, NodeId)>)> {
     match value {
         ast::Amount::Literal(literal) => {
-            literal_amount(world, file, literal, Some(fallback), diags).map(|amount| (amount, None))
+            world.literal_amount(file, literal, Some(fallback)).or_report(diags).map(|amount| (amount, None))
         }
         ast::Amount::Computed(root) => {
             let name = world.book.names.intern("assertion");
@@ -2416,7 +2369,7 @@ fn lower_measure<'s>(
             return;
         }
     };
-    let Some(quantity) = literal_amount(world, file, literal, None, diags) else {
+    let Some(quantity) = world.literal_amount(file, literal, None).or_report(diags) else {
         return;
     };
     let mut party = None;
@@ -2521,12 +2474,10 @@ fn resolve_quantity<'s>(
     roots: &Map<ast::ExprId, NodeId>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
+    // A literal that is no amount costs the whole quantity and says nothing: the diagnostic is dropped here, as it
+    // always was, and is not the caller's to report.
     let resolve_literal = |world: &World<'s>, literal: ast::Literal<'s>| -> Option<Amount> {
-        let unit = match literal.unit() {
-            Some(unit) => world.commodity_of(Word::of(file, unit.0)).ok(),
-            None => Some(fallback),
-        }?;
-        world.amount(literal.num(), unit, file.loc(literal.0)).ok()
+        world.literal_amount(file, literal, Some(fallback)).ok()
     };
     let resolved = match quantity {
         Quantity::Amount(amount) => {
@@ -2572,7 +2523,7 @@ fn resolve_quantity<'s>(
             }
         }
         Quantity::Unknown(unit) => {
-            let unit = world.commodity_of(Word::of(file, unit.0)).map_err(|problem| diags.push(problem)).ok()?;
+            let unit = world.commodity_of(Word::of(file, unit.0)).or_report(diags)?;
             let amount = Amount::zero(unit);
             ResolvedQuantity {
                 amount,
@@ -2584,9 +2535,7 @@ fn resolve_quantity<'s>(
         }
         Quantity::All(unit) => {
             let unit = match unit {
-                Some(unit) => {
-                    Some(world.commodity_of(Word::of(file, unit.0)).map_err(|problem| diags.push(problem)).ok()?)
-                }
+                Some(unit) => Some(world.commodity_of(Word::of(file, unit.0)).or_report(diags)?),
                 None => None,
             };
             let amount = Amount::zero(unit.unwrap_or(fallback));
@@ -3137,12 +3086,8 @@ fn resolve_end<'s>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedEnd> {
     let word = Word::of(file, written.name.0);
-    let end = match world.end(home, word) {
-        Ok(end) => end,
-        Err(problem) => {
-            diags.push(problem);
-            return None;
-        }
+    let Some(end) = world.end(home, word).or_report(diags) else {
+        return None;
     };
     let start = world.book.selectors.len();
     for selector in &file[written.select] {
@@ -3150,27 +3095,15 @@ fn resolve_end<'s>(
             ast::Select::Range(first, last, _) => Days::new(first, last).map(Select::Range),
             ast::Select::Code(code) => Some(Select::Code(world.book.names.intern(code.name()))),
             ast::Select::Policy(policy, _) => Some(Select::Policy(policy)),
-            ast::Select::Purpose(name) => match world.purpose(home, Word::of(file, name.0)) {
-                Ok(id) => Some(Select::Purpose(id)),
-                Err(problem) => {
-                    diags.push(problem);
-                    None
-                }
-            },
-            ast::Select::Unit(name) => match world.commodity_of(Word::of(file, name.0)) {
-                Ok(id) => Some(Select::Unit(id)),
-                Err(problem) => {
-                    diags.push(problem);
-                    None
-                }
-            },
-            ast::Select::End(name) => match world.end(home, Word::of(file, name.0)) {
-                Ok(id) => Some(Select::End(id.place)),
-                Err(problem) => {
-                    diags.push(problem);
-                    None
-                }
-            },
+            ast::Select::Purpose(name) => {
+                world.purpose(home, Word::of(file, name.0)).or_report(diags).map(|id| Select::Purpose(id))
+            }
+            ast::Select::Unit(name) => {
+                world.commodity_of(Word::of(file, name.0)).or_report(diags).map(|id| Select::Unit(id))
+            }
+            ast::Select::End(name) => {
+                world.end(home, Word::of(file, name.0)).or_report(diags).map(|id| Select::End(id.place))
+            }
         };
         match resolved {
             Some(select) => {
@@ -3291,15 +3224,7 @@ fn resolve_amount<'s>(
 ) -> Option<(Amount, Option<NodeId>)> {
     match amount {
         ast::Amount::Literal(literal) => {
-            let unit = match literal.unit() {
-                Some(unit) => world.commodity_of(Word::of(file, unit.0)).map_err(|problem| diags.push(problem)).ok()?,
-                None => fallback,
-            };
-            world
-                .amount(literal.num(), unit, file.loc(literal.0))
-                .map(|amount| (amount, None))
-                .map_err(|problem| diags.push(problem))
-                .ok()
+            world.literal_amount(file, literal, Some(fallback)).or_report(diags).map(|amount| (amount, None))
         }
         ast::Amount::Computed(root) => Some((Amount::zero(fallback), Some(*roots.get(&root)?))),
     }
@@ -3321,13 +3246,7 @@ pub(super) fn resolve_object<'s>(
     if let Ok(end) = world.end(home, word) {
         return Some(end.entity.map_or(Object::Place(end.place), Object::Entity));
     }
-    match world.place(word) {
-        Ok(place) => Some(Object::Place(place)),
-        Err(problem) => {
-            diags.push(problem);
-            None
-        }
-    }
+    world.place(word).or_report(diags).map(|place| Object::Place(place))
 }
 
 fn merge_tail(mut parent: Tail, child: Tail) -> Tail {

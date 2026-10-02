@@ -9,7 +9,7 @@ use axiom_syntax as ast;
 use crate::book::{Book, CodeRule, CodeScope, Role};
 use crate::collect::Collected;
 use crate::declare::World;
-use crate::errors::{Candidate, Word};
+use crate::errors::{Candidate, Reported, Word};
 use crate::problem::{self, Noun};
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
@@ -586,12 +586,8 @@ fn lower_format<'s>(
                 Shape::Rows => Ok(Column::Header(text)),
             }
         };
-        let place = match column(args[0], book) {
-            Ok(place) => place,
-            Err(problem) => {
-                diags.push(problem);
-                continue;
-            }
+        let Some(place) = column(args[0], book).or_report(diags) else {
+            continue;
         };
         let mut rule = Rule::None;
         let mut layout = None;
@@ -640,12 +636,8 @@ fn lower_format<'s>(
         } else {
             Ok(vec![place])
         };
-        let places = match places {
-            Ok(places) => places,
-            Err(problem) => {
-                diags.push(problem);
-                continue;
-            }
+        let Some(places) = places.or_report(diags) else {
+            continue;
         };
         specs.push(Spec { field, places: places.into_boxed_slice(), layout, rule, loc: line.loc });
     }
@@ -879,12 +871,10 @@ fn anonymous_patterns<'s>(
 ) -> Vec<Id<Pattern>> {
     file[*patterns]
         .iter()
-        .filter_map(|pattern| match compile_pattern(file, *pattern, book, named, scopes, home) {
-            Ok(program) => Some(book.patterns.push(Pattern { name: None, program: program.into_boxed_slice(), loc })),
-            Err(problem) => {
-                diags.push(problem);
-                None
-            }
+        .filter_map(|pattern| {
+            compile_pattern(file, *pattern, book, named, scopes, home)
+                .or_report(diags)
+                .map(|program| book.patterns.push(Pattern { name: None, program: program.into_boxed_slice(), loc }))
         })
         .collect()
 }
