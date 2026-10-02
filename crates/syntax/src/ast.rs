@@ -396,8 +396,11 @@ tables! {
     /// Runs of expression roots: property arguments, call arguments, index
     /// keys and the alternatives of `is`.
     ids: ExprId,
-    /// The globs and kinds of a code rule's `on` lines: [`CodeRule::on`].
+    /// The globs and kinds of a code rule's `on` lines: [`CodeRule::on`]. The kinds or words of a slot's range:
+    /// [`Takes`].
     names: Name<'s>,
+    /// The slots of declarations: [`Decl::slots`].
+    slots: Has<'s>,
 }
 
 // ─── Items ──────────────────────────────────────────────────────────────────
@@ -1072,6 +1075,8 @@ pub struct Decl<'s> {
     pub alsos: Many<Also<'s>>,
     /// The indented property lines: `&file[decl.props]`.
     pub props: Many<Prop<'s>>,
+    /// The slots a kind declares: `has employer employer`. `&file[decl.slots]`
+    pub slots: Many<Has<'s>>,
     /// The nested laws.
     pub laws: Many<Law<'s>>,
 }
@@ -1120,6 +1125,52 @@ pub struct Prop<'s> {
 /// A property line under a property.
 #[derive(Debug)]
 pub struct Nested<'s>(pub Prop<'s>);
+
+/// `has NAME RANGE [MULT] [by WEIGHT]`: a slot that the things of a kind have, what it takes, how many it takes and
+/// what weighs them. `has beneficiary person`, `has coverage one of self-only | family`, `has owners person some by
+/// share`.
+#[derive(Debug)]
+pub struct Has<'s> {
+    pub name: Name<'s>,
+    pub takes: Takes<'s>,
+    pub mult: Mult,
+    pub weight: Option<Weight<'s>>,
+    /// The whole line.
+    pub loc: Loc,
+}
+
+/// What a slot takes.
+#[derive(Clone, Copy, Debug)]
+pub enum Takes<'s> {
+    /// `person | household`, or the one word of a value type such as `date`: which a name is, is for the model, which
+    /// knows the kinds.
+    Names(Many<Name<'s>>),
+    /// `one of self-only | family`.
+    Words(Many<Name<'s>>),
+    /// `USD` or `USD/MI`: a quantity counted in a commodity, or in a rate between two.
+    Unit(Name<'s>),
+}
+
+/// How many values a slot takes. Written after its range: none means one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Mult {
+    /// Exactly one.
+    One,
+    /// `optional`: none or one.
+    Optional,
+    /// `some`: one or more.
+    Some,
+    /// `many`: any number.
+    Many,
+}
+
+/// `by share`, `by rent USD`, `by area SQFT`: what the values of a slot that holds several are weighed by.
+#[derive(Clone, Copy, Debug)]
+pub struct Weight<'s> {
+    pub name: Name<'s>,
+    /// The commodity a weight is an amount of, if it is one.
+    pub unit: Option<Name<'s>>,
+}
 
 /// `code GLOB` with indented `on PLACE-GLOB | KIND` lines.
 #[derive(Debug)]

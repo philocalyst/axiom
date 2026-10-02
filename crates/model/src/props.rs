@@ -1,31 +1,34 @@
-//! Properties: the lines written under kinds, accounts, entities and
-//! commodities.
+//! Properties: the lines written under kinds, accounts, entities and commodities.
 //!
-//! Each line is read once into an [`Assign`], a typed setting: the language's
-//! own (`owner`, `opened`, `via`, `precision`), or a value for a property that
-//! a kind declared with `has NAME TYPE`. A line naming neither is an error with
-//! a suggestion. A kind's lines are defaults for its instances: an instance is
-//! what its kind chain assigns, farthest kind first, and then what it says
-//! itself. Kinds are read before the things they describe, and the sorts in the
-//! order their lines need: an amount is only exact once its commodity's
-//! precision is settled.
+//! A line is read once and what it says goes straight into the facts. The language's own (`owner`, `opened`, `via`,
+//! `precision`) are read by the table of [`BUILTINS`], each into a typed key of [`builtin`](crate::builtin); a value
+//! for a property that a kind declared with `has NAME TYPE` is checked against its slot's range and count by [`fill`],
+//! and said as a datum. A line naming neither is an error with a suggestion. A kind's lines are said of the kind and its
+//! things have them through the kind chain, so a thing is never given a copy: nothing is built per thing but what takes
+//! every line to say ([`Pending`]).
+//!
+//! Lines are read kind before thing and sort by sort, so that what a line gives a commodity (its precision) is settled
+//! before an amount is written against it.
 
-use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
+use std::iter;
+
+use axiom_core::tagless::{Datum, Field};
+use axiom_core::{Day, Days, Diagnostic, Id, Key, Loc, Many, Map, Ratio, Set, SlotId, Span, Sym};
 use axiom_syntax::{
-    BinOp, Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting,
-    Statement, Subject, Verb,
+    Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting, Statement,
+    Subject, Verb,
 };
 
-use crate::book::{
-    Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy, Residence, Role, Share,
-    Sort, Take,
-};
+use crate::book::{Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Purpose, RatePolicy, Sort, System};
+use crate::builtin::{self as slot, Coded};
 use crate::collect::{Collected, Written};
-use crate::declare::{MAX_SCALE, PropTarget, World};
+use crate::declare::{MAX_SCALE, World};
 use crate::errors::{Reported, Word, article, list, suggest};
-use crate::law::{Ty, Value};
+use crate::fill::{self, Filled, Said};
+use crate::holders::Holder;
 use crate::problem;
 use crate::scope::Home;
+use crate::slots::{Range, Slot};
 use crate::values::describe;
 
 /// What a property line describes.
@@ -60,314 +63,233 @@ impl Target {
     }
 }
 
-/// One property line, read: a setting for whatever it is applied to.
-#[derive(Clone, Debug)]
-enum Assign {
-    Holds(Option<Box<[Id<Commodity>]>>),
-    Select(Policy),
-    Opened(Day),
-    Closed(Day),
-    Liquidity(Span),
-    Via(Id<Place>),
-    Lives(Residence),
-    Member(Id<Entity>),
-    Currency(Id<Commodity>),
-    Citizen(Box<[Id<crate::book::System>]>),
-    Books(Books),
-    Purpose(At<Id<Purpose>>),
-    Pays(At<Id<Purpose>>),
-    Takes(At<Take>),
-    SalesTax(Ratio),
-    Share(Share),
-    PartOf(At<Id<Asset>>),
-    Precision(u8),
-    Title(Sym),
-    Grows(Ratio),
-    Restricted,
-    Deferred,
-    Claim,
-    Basis(Basis),
-    Has,
-    /// A value for a property a kind declared.
-    Prop(Prop),
+/// How the arguments of one of the language's properties read, and what they say.
+type Reader = fn(&mut Args<'_, '_, '_>) -> Result<(), Diagnostic>;
+
+/// A line whose argument, as `Args::$read` reads it, is what it says of `$key`: through `$then` first, if the slot
+/// holds the word as a number.
+macro_rules! says {
+    ($key:expr, $read:ident) => {
+        |a| {
+            let value = a.$read()?;
+            a.say($key, value)
+        }
+    };
+    ($key:expr, $read:ident, $then:ident) => {
+        |a| {
+            let value = a.$read()?;
+            a.say($key, value.$then())
+        }
+    };
 }
 
-impl Assign {
-    /// Whether instances inherit it. Kinds keep the rest for themselves.
-    fn is_default(&self) -> bool {
-        !matches!(
-            self,
-            Assign::Restricted
-                | Assign::Deferred
-                | Assign::Claim
-                | Assign::Basis(_)
-                | Assign::Has
-                | Assign::Purpose(_)
-                | Assign::Pays(_)
-                | Assign::Takes(_)
-                | Assign::SalesTax(_)
-                | Assign::Share(_)
-                | Assign::PartOf(_)
-        )
-    }
+/// A line whose arguments, as `Args::$read` reads them, are the set it says of `$key`.
+macro_rules! says_all {
+    ($key:expr, $read:ident) => {
+        |a| {
+            let members = a.$read()?;
+            a.say_set($key, members)
+        }
+    };
 }
-
-/// How the arguments of one of the language's properties read.
-type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
-const BUILTINS: [(&str, &[Target], Reader); 25] = [
-    ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?))),
-    ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| a.policy().map(Assign::Select)),
-    ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?))),
-    ("closed", &[Target::Place], |a| Ok(Assign::Closed(a.day()?))),
-    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], |a| a.span().map(Assign::Liquidity)),
-    ("via", &[Target::Entity], |a| a.place().map(Assign::Via)),
-    ("lives", &[Target::Entity], |a| a.residence()),
-    ("member", &[Target::Entity], |a| Ok(Assign::Member(a.entity()?))),
-    ("currency", &[Target::Entity], |a| a.currency().map(Assign::Currency)),
-    ("citizen", &[Target::Entity], |a| a.citizens().map(Assign::Citizen)),
-    ("books", &[Target::Entity], |a| a.books().map(Assign::Books)),
-    ("purpose", &[Target::Kind, Target::Entity], |a| a.purpose().map(Assign::Purpose)),
-    ("pays", &[Target::Kind], |a| a.purpose().map(Assign::Pays)),
-    ("takes", &[Target::Kind], |a| a.takes().map(Assign::Takes)),
-    ("sales-tax", &[Target::Kind], |a| a.percent().map(Assign::SalesTax)),
-    ("share", &[Target::Kind], |a| a.share().map(Assign::Share)),
-    ("part", &[Target::Asset], |a| a.part_of().map(Assign::PartOf)),
-    ("precision", &[Target::Commodity], |a| a.count(MAX_SCALE).map(Assign::Precision)),
+const BUILTINS: [(&str, &[Target], Reader); 24] = [
+    ("holds", &[Target::Place], says_all!(slot::HOLDS, holds)),
+    ("select", &[Target::Place, Target::Commodity, Target::Asset], says!(slot::SELECT, policy, code)),
+    ("opened", &[Target::Place], says!(slot::OPENED, day)),
+    ("closed", &[Target::Place], says!(slot::CLOSED, day)),
+    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], says!(slot::LIQUIDITY, span)),
+    ("via", &[Target::Entity], says!(slot::VIA, place)),
+    ("lives", &[Target::Entity], |a| {
+        let residence = a.residence()?;
+        a.done()?;
+        a.pending.lives.entry(a.thing).or_default().push(residence);
+        Ok(())
+    }),
+    ("member", &[Target::Entity], says!(slot::MEMBER, entity)),
+    ("currency", &[Target::Entity], says!(slot::CURRENCY, currency)),
+    ("citizen", &[Target::Entity], says_all!(slot::CITIZEN, citizens)),
+    ("books", &[Target::Entity], says!(slot::BOOKS, books, code)),
+    ("purpose", &[Target::Kind, Target::Entity], |a| {
+        let (purpose, loc) = a.purpose()?;
+        a.say_at(slot::PURPOSE, purpose, loc)
+    }),
+    ("pays", &[Target::Kind], |a| {
+        let (purpose, loc) = a.purpose()?;
+        a.say_at(slot::PAYS, purpose, loc)
+    }),
+    ("takes", &[Target::Kind], |a| {
+        let (to, _) = a.purpose()?;
+        a.word(&["from"])?;
+        let (from, _) = a.purpose()?;
+        a.done()?;
+        let take = (from, to, a.line.loc);
+        let takes = a.pending.takes.entry(a.thing).or_default();
+        // A later line for the same purpose replaces the earlier.
+        match takes.iter_mut().find(|held| held.0 == from) {
+            Some(held) => *held = take,
+            None => takes.push(take),
+        }
+        Ok(())
+    }),
+    ("sales-tax", &[Target::Kind], says!(slot::SALES_TAX, percent)),
+    ("share", &[Target::Kind], |a| {
+        let entity = a.share()?;
+        a.done()?;
+        a.pending.shares.entry(a.thing).or_default().push(entity);
+        Ok(())
+    }),
+    ("part", &[Target::Asset], |a| {
+        let part = a.part_of()?;
+        a.done()?;
+        let Holder::Asset(asset) = a.thing else { unreachable!("`part` is written under assets") };
+        a.world.book.assets[asset].part_of = Some(part);
+        Ok(())
+    }),
+    ("precision", &[Target::Commodity], |a| {
+        let scale = a.count(MAX_SCALE)?;
+        a.done()?;
+        a.pending.precision.insert(a.thing, scale);
+        Ok(())
+    }),
     ("name", &[Target::Commodity], |a| {
         let title = a.text()?;
-        Ok(Assign::Title(a.world.book.names.intern(title)))
+        let title = a.world.book.names.intern(title);
+        a.say(slot::TITLE, title)
     }),
     ("grows", &[Target::Commodity], |a| {
         let rate = a.percent()?;
         a.word(&["yearly"])?;
-        Ok(Assign::Grows(rate))
+        a.say(slot::GROWS, rate)
     }),
-    ("restricted", &[Target::Kind], |_| Ok(Assign::Restricted)),
-    ("deferred", &[Target::Kind], |_| Ok(Assign::Deferred)),
-    ("basis", &[Target::Kind], |a| {
-        Ok(Assign::Basis(if a.word(&["zero", "cost"])? == "zero" { Basis::Zero } else { Basis::Cost }))
-    }),
-    ("claim", &[Target::Kind], |_| Ok(Assign::Claim)),
-    ("has", &[Target::Kind], |a| a.has()),
+    ("restricted", &[Target::Kind], |a| a.say(slot::RESTRICTED, true)),
+    ("deferred", &[Target::Kind], |a| a.say(slot::DEFERRED, true)),
+    ("basis", &[Target::Kind], says!(slot::BASIS, basis, code)),
+    ("claim", &[Target::Kind], |a| a.say(slot::CLAIM, true)),
 ];
 
-/// Words that read a value off a thing in a law (`self.balance`), so a
-/// declared property may not take them.
-const FIELD_WORDS: [&str; 8] = ["balance", "basis", "owner", "kind", "age", "unit", "year", "month"];
+/// What a `takes` line says: what is taken, what it becomes, and where it is written.
+type Take = (Id<Purpose>, Id<Purpose>, Loc);
 
-const POLICIES: [(&str, Policy); 4] =
-    [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
-
-const TYPES: [(&str, Ty); 14] = [
-    ("date", Ty::Day),
-    ("amount", Ty::AMOUNT),
-    ("number", Ty::Num),
-    ("percent", Ty::Num),
-    ("span", Ty::Span),
-    ("text", Ty::Text),
-    ("name", Ty::Name),
-    ("entity", Ty::Entity),
-    ("place", Ty::Place),
-    ("kind", Ty::Kind),
-    ("unit", Ty::Unit),
-    ("bool", Ty::Bool),
-    ("purpose", Ty::Purpose),
-    ("asset", Ty::Asset),
-];
-
-/// Every declared property, typed once for all things of its sort: two kinds
-/// that declare `filing` for entities agree on what it is, so `owner.filing`
-/// has one type wherever it is written.
+/// What the lines of the language say that is not said as they are read, because it takes all of them: the
+/// residences of an entity are its kinds' and its own, whole; a kind's `takes` replace one another by what they take;
+/// and a commodity's precision is its own, else its kinds'.
 #[derive(Default)]
-pub(crate) struct PropTable {
-    declared: Map<(Ty, Sym), Has>,
+struct Pending {
+    lives: Map<Holder, Vec<Residence>>,
+    takes: Map<Holder, Vec<Take>>,
+    shares: Map<Holder, Vec<Id<Entity>>>,
+    precision: Map<Holder, u8>,
 }
 
-impl PropTable {
-    /// The type family a sort's properties are typed in: places, entities or
-    /// commodities (as `Ty::Unit`), matching what a law's receiver is.
-    fn family(sort: Sort) -> Ty {
-        match sort {
-            Sort::Place(_) => Ty::Place,
-            Sort::Thing => Ty::Asset,
-            Sort::Commodity => Ty::Unit,
-            Sort::Entity => Ty::Entity,
+/// `lives us/ca from 2026-01-01 until 2026-06-30`: inclusive, and open-ended on either side when unwritten.
+#[derive(Clone, Copy, Debug)]
+struct Residence {
+    days: Days,
+    system: Id<System>,
+}
+
+impl Pending {
+    /// Says it all, now that every line is read.
+    fn say(self, world: &mut World<'_>) {
+        self.settle_precision(world);
+        self.settle_lives(world);
+        for (holder, takes) in &self.takes {
+            let pairs = takes.iter().map(|&(from, to, _)| (from.index() as u32, to.index() as u32));
+            world.say_set(*holder, slot::TAKES, pairs);
+            for &(from, _, loc) in takes {
+                world.say_site(*holder, slot::TAKES.slot(), from.index() as u32, loc);
+            }
+        }
+        for (holder, entities) in &self.shares {
+            world.say_set(*holder, slot::SHARE, entities.iter().copied());
         }
     }
 
-    pub fn get(&self, family: Ty, name: Sym) -> Option<Has> {
-        self.declared.get(&(family, name)).copied()
-    }
-
-    /// The declared property names of one family.
-    pub fn names(&self, family: Ty) -> impl Iterator<Item = Sym> {
-        self.declared.keys().filter(move |key| key.0 == family).map(|key| key.1)
-    }
-}
-
-// ─── Applying ───────────────────────────────────────────────────────────────
-
-/// Replaces the property `prop` names, or adds it.
-fn put(props: &mut Box<[Prop]>, prop: Prop) {
-    let mut all = std::mem::take(props).into_vec();
-    match all.iter_mut().find(|held| held.name == prop.name) {
-        Some(held) => *held = prop,
-        None => all.push(prop),
-    }
-    *props = all.into();
-}
-
-impl Kind {
-    /// What flows down from `above`, before this kind's own lines say more.
-    fn inherit(&mut self, above: &Kind) {
-        self.restricted |= above.restricted;
-        self.deferred |= above.deferred;
-        self.claim |= above.claim;
-        self.basis = self.basis.or(above.basis);
-        self.select = self.select.or(above.select);
-        self.liquidity = self.liquidity.or(above.liquidity);
-        self.purpose = self.purpose.or(above.purpose);
-        self.pays = self.pays.or(above.pays);
-        self.sales_tax = self.sales_tax.or(above.sales_tax);
-        self.takes = merge_takes(&above.takes, &self.takes);
-        self.shares = merge_shares(&above.shares, &self.shares);
-        self.props = above.props.clone();
-    }
-
-    fn set(&mut self, assign: &Assign) {
-        match assign {
-            Assign::Restricted => self.restricted = true,
-            Assign::Deferred => self.deferred = true,
-            Assign::Claim => self.claim = true,
-            Assign::Basis(basis) => self.basis = Some(*basis),
-            Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Liquidity(span) => self.liquidity = Some(*span),
-            Assign::Purpose(purpose) => self.purpose = Some(*purpose),
-            Assign::Pays(pays) => self.pays = Some(*pays),
-            Assign::Takes(take) => self.takes = merge_takes(&self.takes, std::slice::from_ref(take)),
-            Assign::SalesTax(rate) => self.sales_tax = Some(*rate),
-            Assign::Share(share) => self.shares = merge_shares(&self.shares, std::slice::from_ref(share)),
-            Assign::Prop(prop) => put(&mut self.props, *prop),
-            _ => {}
-        }
-    }
-}
-
-fn merge_takes(inherited: &[At<Take>], own: &[At<Take>]) -> Box<[At<Take>]> {
-    let mut merged = inherited.to_vec();
-    for take in own {
-        match merged.iter_mut().find(|held| held.value.from == take.value.from) {
-            Some(held) => *held = *take,
-            None => merged.push(*take),
-        }
-    }
-    merged.into_boxed_slice()
-}
-
-fn merge_shares(inherited: &[Share], own: &[Share]) -> Box<[Share]> {
-    let mut merged = inherited.to_vec();
-    for share in own {
-        match merged.iter_mut().find(|held| held.entity == share.entity) {
-            Some(held) => *held = *share,
-            None => merged.push(*share),
-        }
-    }
-    merged.into_boxed_slice()
-}
-
-/// Defaults written by each kind itself. Ancestors are walked when an instance
-/// is built, so a deep kind does not copy every ancestor's assignments.
-struct Defaults {
-    by_kind: Vec<Vec<Assign>>,
-}
-
-impl Defaults {
-    fn empty(kinds: usize) -> Defaults {
-        Defaults { by_kind: vec![Vec::new(); kinds] }
-    }
-
-    /// Applies defaults from the oldest ancestor through `kind`, reusing one
-    /// caller-owned path buffer across every instance of the same target.
-    fn apply(&self, kinds: &Tree<Kind>, kind: Id<Kind>, path: &mut Vec<Id<Kind>>, mut apply: impl FnMut(&Assign)) {
-        path.clear();
-        path.extend(kinds.lineage(kind));
-        path.reverse();
-        for ancestor in path.iter().copied() {
-            for assign in &self.by_kind[ancestor.index()] {
-                apply(assign);
+    fn settle_precision(&self, world: &mut World<'_>) {
+        for id in world.book.commodities.ids().collect::<Vec<_>>() {
+            let kinds = world.book.kinds.lineage(world.book.commodities[id].kind).map(Holder::Kind);
+            if let Some(&scale) =
+                iter::once(Holder::Commodity(id)).chain(kinds).find_map(|holder| self.precision.get(&holder))
+            {
+                world.book.commodities[id].scale = scale;
             }
         }
     }
-}
 
-impl Commodity {
-    fn set(&mut self, assign: &Assign) {
-        match assign {
-            Assign::Precision(scale) => self.scale = *scale,
-            Assign::Title(title) => self.title = Some(*title),
-            Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Liquidity(span) => self.liquidity = Some(*span),
-            Assign::Grows(rate) => self.growth = Some(*rate),
-            Assign::Prop(prop) => put(&mut self.props, *prop),
-            _ => {}
+    fn settle_lives(&self, world: &mut World<'_>) {
+        for id in world.book.entities.ids().collect::<Vec<_>>() {
+            let mut kinds: Vec<_> = world.book.kinds.lineage(world.book.entities[id].kind).collect();
+            kinds.reverse();
+            let above = kinds.into_iter().map(Holder::Kind);
+            let residences: Vec<Residence> = above
+                .chain([Holder::Entity(id)])
+                .flat_map(|holder| self.lives.get(&holder).into_iter().flatten().copied())
+                .collect();
+            paint_lives(world, id, &residences);
         }
     }
 }
 
-impl Entity {
-    fn set(&mut self, assign: &Assign) {
-        match assign {
-            Assign::Purpose(purpose) => self.purpose = Some(*purpose),
-            Assign::Via(place) => self.place = Some(*place),
-            Assign::Lives(residence) => self.lives = self.lives.iter().copied().chain([*residence]).collect(),
-            Assign::Member(entity) => self.member = Some(*entity),
-            Assign::Currency(currency) => self.currency = *currency,
-            Assign::Citizen(citizen) => self.citizen = citizen.clone(),
-            Assign::Books(books) => self.books = *books,
-            Assign::Prop(prop) => put(&mut self.props, *prop),
-            _ => {}
-        }
-    }
-}
-
-impl Place {
-    fn set(&mut self, assign: &Assign) {
-        match assign {
-            Assign::Holds(holds) => self.holds = holds.clone(),
-            Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Opened(day) => self.opened = Some(*day),
-            Assign::Closed(day) => self.closed = Some(*day),
-            Assign::Liquidity(span) => self.liquidity = Some(*span),
-            Assign::Prop(prop) => put(&mut self.props, *prop),
-            _ => {}
-        }
-    }
-}
-
-impl Asset {
-    fn set(&mut self, assign: &Assign) {
-        if let Assign::PartOf(parent) = assign {
-            self.part_of = Some(*parent);
+/// Says where an entity lives, day by day: the systems of every residence that holds on a day, and nothing where none
+/// does. Residences overlap and the facts hold sets, so the days are cut where one begins or ends.
+fn paint_lives(world: &mut World<'_>, entity: Id<Entity>, residences: &[Residence]) {
+    let mut cuts: Vec<Day> = residences.iter().map(|residence| residence.days.first()).collect();
+    let ends = residences.iter().map(|residence| residence.days.last()).filter(|&last| last < Day::MAX);
+    cuts.extend(ends.map(|last| last.add_days(1)));
+    cuts.sort_unstable();
+    cuts.dedup();
+    let stops = cuts.iter().skip(1).map(|&next| next.add_days(-1)).chain([Day::MAX]);
+    for (&from, to) in cuts.iter().zip(stops) {
+        let living = residences.iter().filter(|residence| residence.days.contains(from));
+        let systems: Vec<_> = living.map(|residence| residence.system).collect();
+        if let (false, Some(days)) = (systems.is_empty(), Days::new(from, to)) {
+            world.say_set_over(entity, slot::LIVES, days, systems);
         }
     }
 }
 
 // ─── Reading ────────────────────────────────────────────────────────────────
 
-/// The arguments of one property line, read in order.
+/// The arguments of one property line, read in order, and what the line is said of.
 struct Args<'w, 'a, 's> {
     world: &'w mut World<'s>,
+    pending: &'w mut Pending,
     file: &'a File<'s>,
     ids: &'a [ExprId],
     line: &'a Line<'s>,
     home: Home,
     next: usize,
+    /// The thing the line is written under.
+    thing: Holder,
+    /// What it says things of: the thing, or its place, for an asset's settings.
+    said_of: Holder,
 }
 
 impl<'a, 's> Args<'_, 'a, 's> {
+    /// The line says `value` of what it is written under.
+    fn say<V: Field>(&mut self, key: Key<V>, value: V) -> Result<(), Diagnostic> {
+        self.done()?;
+        self.world.say(self.said_of, key, value);
+        Ok(())
+    }
+
+    /// The line says `value`, and where it is written, which a diagnostic may point back to.
+    fn say_at<V: Field>(&mut self, key: Key<V>, value: V, loc: Loc) -> Result<(), Diagnostic> {
+        self.say(key, value)?;
+        self.world.say_site(self.said_of, key.slot(), 0, loc);
+        Ok(())
+    }
+
+    /// The line says the whole set of `members`.
+    fn say_set<V: Field>(&mut self, key: Key<Many<V>>, members: impl IntoIterator<Item = V>) -> Result<(), Diagnostic> {
+        self.done()?;
+        self.world.say_set(self.said_of, key, members);
+        Ok(())
+    }
+
     fn peek(&self) -> Option<&'a Expr<'s>> {
         self.ids.get(self.next).map(|&id| &self.file.exprs[id])
     }
@@ -471,7 +393,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
         self.world.commodity_of(word)
     }
 
-    fn citizens(&mut self) -> Result<Box<[Id<crate::book::System>]>, Diagnostic> {
+    fn citizens(&mut self) -> Result<Vec<Id<System>>, Diagnostic> {
         let mut systems = Vec::new();
         while self.peek().is_some() {
             let word = self.name("a system")?;
@@ -481,8 +403,12 @@ impl<'a, 's> Args<'_, 'a, 's> {
             Err(Diagnostic::error("property-argument", "`citizen` needs a system")
                 .label(self.line.loc, "name a system here"))
         } else {
-            Ok(systems.into_boxed_slice())
+            Ok(systems)
         }
+    }
+
+    fn basis(&mut self) -> Result<Basis, Diagnostic> {
+        Ok(if self.word(&["zero", "cost"])? == "zero" { Basis::Zero } else { Basis::Cost })
     }
 
     fn books(&mut self) -> Result<Books, Diagnostic> {
@@ -492,19 +418,14 @@ impl<'a, 's> Args<'_, 'a, 's> {
         })
     }
 
-    fn purpose(&mut self) -> Result<At<Id<Purpose>>, Diagnostic> {
+    /// A purpose, and where it is written.
+    fn purpose(&mut self) -> Result<(Id<Purpose>, Loc), Diagnostic> {
         let word = self.name("a purpose")?;
-        Ok(At { value: self.world.purpose(self.home, word)?, loc: word.loc })
+        Ok((self.world.purpose(self.home, word)?, word.loc))
     }
 
-    fn takes(&mut self) -> Result<At<Take>, Diagnostic> {
-        let to = self.purpose()?;
-        self.word(&["from"])?;
-        let from = self.purpose()?;
-        Ok(At { value: Take { to: to.value, from: from.value }, loc: self.line.loc })
-    }
-
-    fn share(&mut self) -> Result<Share, Diagnostic> {
+    /// `60% for studio`, whose rate is checked and whose entity is the share's.
+    fn share(&mut self) -> Result<Id<Entity>, Diagnostic> {
         let expr = &self.file.exprs[self.next_id("a percentage or fraction")?];
         let rate = match expr.kind {
             ExprKind::Pct(number) => Ratio::percent(number.mantissa.into(), number.scale),
@@ -518,8 +439,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
         validate_share_rate(rate, expr.loc)?;
         self.word(&["for"])?;
         let word = self.name("an entity")?;
-        let entity = self.world.entity(self.home, word)?;
-        Ok(Share { rate, entity, measure: None, loc: self.line.loc })
+        self.world.entity(self.home, word)
     }
 
     fn part_of(&mut self) -> Result<At<Id<Asset>>, Diagnostic> {
@@ -532,16 +452,16 @@ impl<'a, 's> Args<'_, 'a, 's> {
     }
 
     fn policy(&mut self) -> Result<Policy, Diagnostic> {
-        let words: Vec<&str> = POLICIES.iter().map(|policy| policy.0).collect();
+        let words: Vec<&str> = Policy::WORDS.iter().map(|policy| policy.0).collect();
         let word = self.word(&words)?;
-        Ok(POLICIES.iter().find(|policy| policy.0 == word).map_or(Policy::Fifo, |policy| policy.1))
+        Ok(Policy::WORDS.iter().find(|policy| policy.0 == word).map_or(Policy::Fifo, |policy| policy.1))
     }
 
     /// `holds USD, VTI`, or `holds any`.
-    fn holds(&mut self) -> Result<Option<Box<[Id<Commodity>]>>, Diagnostic> {
+    fn holds(&mut self) -> Result<Vec<Id<Commodity>>, Diagnostic> {
         if matches!(self.peek().map(|expr| &expr.kind), Some(ExprKind::Name(name)) if name.0 == "any") {
             self.word(&["any"])?;
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let mut units = Vec::new();
         while let Some(expr) = self.peek() {
@@ -554,12 +474,12 @@ impl<'a, 's> Args<'_, 'a, 's> {
         match units.is_empty() {
             true => Err(Diagnostic::error("property-argument", "`holds` needs commodities or `any`")
                 .label(self.line.loc, "name what it holds")),
-            false => Ok(Some(units.into())),
+            false => Ok(units),
         }
     }
 
     /// `lives us/ca`, or `lives us/ca from 2026-01-01 until 2026-06-30`.
-    fn residence(&mut self) -> Result<Assign, Diagnostic> {
+    fn residence(&mut self) -> Result<Residence, Diagnostic> {
         let word = self.name("a system")?;
         let system = self.world.system(word)?;
         let (mut from, mut until) = (Day::MIN, Day::MAX);
@@ -574,31 +494,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
                 .label(self.line.loc, "`until` is earlier than `from`")
                 .help("swap the two dates"));
         };
-        Ok(Assign::Lives(Residence { days, system }))
-    }
-
-    /// `has employer entity`
-    fn has(&mut self) -> Result<Assign, Diagnostic> {
-        let name = self.name("a property name")?;
-        let ty = |expr: &Expr| match expr.kind {
-            ExprKind::Name(written) => TYPES.iter().find(|ty| ty.0 == written.0).map(|ty| ty.1),
-            _ => None,
-        };
-        let wanted = format!("a type: {}", list(&TYPES.map(|ty| ty.0)));
-        self.arg(&wanted, ty)?;
-        if BUILTINS.iter().any(|builtin| builtin.0 == name.text) || FIELD_WORDS.contains(&name.text) {
-            return Err(problem::built_in_property(name));
-        }
-        self.world.book.names.intern(name.text);
-        Ok(Assign::Has)
-    }
-
-    /// The value of a property a kind declared.
-    fn declared(&mut self, has: Has) -> Result<Assign, Diagnostic> {
-        let id = self.next_id("a value")?;
-        let (value, _) = self.world.constant(self.home, self.file, id, Some(has.ty))?;
-        // v3 bridge: a property holds from the beginning; statements that change one come with the v4 model.
-        Ok(Assign::Prop(Prop { name: has.name, value, since: Day::MIN, loc: Some(self.line.loc) }))
+        Ok(Residence { days, system })
     }
 }
 
@@ -623,40 +519,41 @@ impl<'a, 's> Lines<'a, 's> {
     }
 }
 
-/// The setting a line makes: one of the language's for something it is
-/// written under (`targets`), or one a kind declared (`has`).
+/// Reads a line: one of the language's for something it is written under (`targets`), and says what it says.
 fn read_line<'s>(
     world: &mut World<'s>,
+    pending: &mut Pending,
     at: &Lines<'_, 's>,
     line: &Line<'s>,
+    under: NativeTarget,
     targets: &[Target],
-    has: &[Has],
-    kind: Id<Kind>,
-) -> Result<Assign, Diagnostic> {
+) -> Result<(), Diagnostic> {
     let word = line.name.0;
-    let builtin = BUILTINS.iter().find(|entry| entry.0 == word && targets.iter().any(|t| entry.1.contains(t)));
-    let declared = world.book.names.get(word).and_then(|sym| has.iter().find(|has| has.name == sym)).copied();
-    let read = match (builtin, declared) {
-        (Some(entry), _) => Ok(entry.2),
-        (None, Some(has)) => Err(has),
-        (None, None) => {
-            return Err(unknown_property(world, at.file.loc(word), targets[0], kind, has, word));
-        }
+    let Some(builtin) = BUILTINS.iter().find(|entry| entry.0 == word && targets.iter().any(|t| entry.1.contains(t)))
+    else {
+        return Err(unknown_property(world, at.file.loc(word), targets[0], under.kind, word));
     };
-    let mut args = Args { world, file: at.file, ids: &at.file[line.args], line, home: at.home, next: 0 };
-    let assign = match read {
-        Ok(read) => read(&mut args)?,
-        Err(has) => args.declared(has)?,
+    let ids = &at.file[line.args];
+    let mut args = Args {
+        world,
+        pending,
+        file: at.file,
+        ids,
+        line,
+        home: at.home,
+        next: 0,
+        thing: under.holder,
+        said_of: under.said_of,
     };
-    args.done()?;
-    Ok(assign)
+    (builtin.2)(&mut args)?;
+    args.done()
 }
 
 /// `benificiary` is not a property of an account of kind `529`.
-fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, has: &[Has], word: &str) -> Diagnostic {
+fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, word: &str) -> Diagnostic {
     let kind_name = world.book.name(world.book.kinds[kind].name);
     let mut valid: Vec<&str> = BUILTINS.iter().filter(|entry| entry.1.contains(&target)).map(|entry| entry.0).collect();
-    valid.extend(has.iter().map(|has| world.book.name(has.name)));
+    valid.extend(declared_names(world, kind));
     let of = match target {
         Target::Kind => format!("kind `{kind_name}`"),
         target => format!("{} of kind `{kind_name}`", article(target.noun())),
@@ -674,107 +571,51 @@ fn unknown_property(world: &World, loc: Loc, target: Target, kind: Id<Kind>, has
     .note(format!("its properties are {}", list(&valid)))
 }
 
-impl<'s> World<'s> {
-    /// Records the properties a kind declares. Two kinds that declare one name
-    /// for one sort of thing must give it the same type.
-    pub(crate) fn declare_props(&mut self, sort: Sort, own: &[Has], diags: &mut Vec<Diagnostic>) {
-        let family = PropTable::family(sort);
-        for &has in own {
-            let earlier = *self.props.declared.entry((family, has.name)).or_insert(has);
-            if earlier.ty != has.ty {
-                diags.push(disagreement(earlier, has, family, self.book.name(has.name)));
-            }
-        }
-    }
-}
-
-fn disagreement(first: Has, again: Has, family: Ty, name: &str) -> Diagnostic {
-    let noun = family.word();
-    let mut diagnostic = Diagnostic::error(
-        "property-type",
-        format!(
-            "`{name}` is declared as {} here, but as {} elsewhere",
-            article(again.ty.word()),
-            article(first.ty.word())
-        ),
-    );
-    if let Some(loc) = again.loc {
-        diagnostic = diagnostic.label(loc, format!("{} here", again.ty.word()));
-    }
-    if let Some(loc) = first.loc {
-        diagnostic = diagnostic.context(loc, format!("{} here", first.ty.word()));
-    }
-    diagnostic.note(format!(
-        "a property has one type for every {noun}, so that `.{name}` means the same thing wherever it is written"
-    ))
-}
-
 // ─── Native S5 declarations ────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 struct NativeTarget {
-    target: PropTarget,
+    holder: Holder,
+    /// What the settings written under it are said of: itself, but for an asset, whose place they are the settings of.
+    said_of: Holder,
     kind: Id<Kind>,
     sort: Sort,
 }
 
-#[derive(Clone, Copy)]
+/// What a `now PROPERTY VALUE` statement says of a slot, from its day until the day it says, if it says.
 struct PropertyChange {
-    target: PropTarget,
-    name: Sym,
-    since: Day,
-    until: Option<Day>,
-    value: Value,
-    loc: Loc,
+    holder: Holder,
+    slot: SlotId,
+    days: Days,
+    said: Said,
     order: usize,
 }
 
-/// Resolves custom `has` properties and their values directly from the S5 AST.
-/// Kind defaults stay on their kind and are inherited by the law evaluator via
-/// the kind tree; this pass never clones a default into every instance.
+type Seen = Map<(Holder, Sym, Day), Loc>;
+
+/// Resolves the properties written under things, and what each says of the slot it fills, into the facts. A kind's
+/// lines are its things' defaults: they are said of the kind, and the facts look up the kind chain when a thing says
+/// nothing.
 pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    declare_has(world, collected, diags);
     native_builtins(world, collected, diags);
-    let mut seen: Map<((u8, u32), Sym, Day), Loc> = Map::default();
-    stage_declared_values(world, collected, &mut seen, diags);
+    let mut seen = Seen::default();
+    let mut filled = Filled::default();
+    stage_declared_values(world, collected, &mut seen, &mut filled, diags);
     let changes = property_changes(world, collected, &mut seen, diags);
-    stage_changes(world, changes);
+    paint_changes(world, changes);
+    missing_roles(world, collected, &filled, diags);
 }
 
-/// The properties each kind says it has: its own `has` lines and every ancestor's.
-fn declare_has<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    let mut kind_decls: Map<Id<Kind>, Written<'a, 's, Decl<'s>>> = Map::default();
-    for written in collected.decls_of(DeclKind::Kind) {
-        let word = Word { text: written.node.name.0, loc: written.item.loc };
-        if let Ok(kind) = world.kind(written.home(), word) {
-            kind_decls.entry(kind).or_insert(*written);
-        }
-    }
-
-    // The kind tree is preordered, so a child's inherited declarations are
-    // available before its own declarations are checked.
-    let kinds: Vec<Id<Kind>> = world.book.kinds.ids().collect();
-    for kind in kinds {
-        let own = match kind_decls.get(&kind).copied() {
-            Some(written) => read_has_lines(world, written.file(), written.node, diags),
-            None => Vec::new(),
-        };
-        let sort = world.book.kinds[kind].sort;
-        world.declare_props(sort, &own, diags);
-        let inherited: Vec<Has> =
-            world.book.kinds.parent(kind).map(|parent| world.book.kinds[parent].has.to_vec()).unwrap_or_default();
-        let inherited = inherited.iter().filter(|above| !own.iter().any(|child| child.name == above.name));
-        world.book.kinds[kind].has = own.iter().chain(inherited).copied().collect();
-    }
-}
-
-/// The values the property lines of declarations give, from the beginning of time.
+/// The values the property lines of declarations give, from the beginning of time. A slot of several is said once,
+/// whole, however many lines fill it.
 fn stage_declared_values<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    seen: &mut Seen,
+    filled: &mut Filled,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let mut sets: Map<(Holder, SlotId), Vec<Datum>> = Map::default();
     for &written in &collected.decls {
         if written.node.what == DeclKind::Purpose {
             continue;
@@ -788,22 +629,54 @@ fn stage_declared_values<'a, 's>(
             }
             let Some(has) = has_named(world, target.kind, line.name.0) else {
                 diags.push(unknown_native_property(world, target, line));
+                // A near miss of a slot's name is an attempt to fill it: the typo is said, and the slot not again.
+                filled.extend(near_slot(world, target.kind, line.name.0).map(|number| (target.holder, number)));
                 continue;
             };
-            let Some(value) = property_value(world, written.home(), written.file(), line, has, diags) else {
+            // A line that is wrong is still an attempt to fill the slot: it is said, and the slot not again.
+            filled.insert((target.holder, has.number));
+            let at = fill::At { home: written.home(), file: written.file(), line };
+            let Some(filling) = fill::fill(world, &at, &has.slot).or_report(diags) else {
                 continue;
             };
-            let prop = Prop { name: has.name, value, since: Day::MIN, loc: Some(line.loc) };
-            stage_unique(world, seen, target.target, prop, diags);
+            match filling.said(has.slot.mult) {
+                Said::One(datum) => {
+                    if note_once(world, seen, target.holder, has.name, Day::MIN, line.loc, diags) {
+                        world.paint(target.holder, has.number, Days::ALWAYS, datum);
+                    }
+                }
+                Said::Set(members) => sets.entry((target.holder, has.number)).or_default().extend(members),
+            }
         }
     }
+    for ((holder, slot), members) in sets {
+        world.paint_set(holder, slot, Days::ALWAYS, members);
+    }
+}
+
+/// Whether a value is the first said of the slot on the day, and said, if not, to be the second.
+fn note_once(
+    world: &World<'_>,
+    seen: &mut Seen,
+    holder: Holder,
+    name: Sym,
+    day: Day,
+    loc: Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some(first) = seen.get(&(holder, name, day)).copied() else {
+        seen.insert((holder, name, day), loc);
+        return true;
+    };
+    diags.push(problem::filled_twice(world.book.name(name), loc, first));
+    false
 }
 
 /// The changes `now PROPERTY VALUE` statements make, in the order written.
 fn property_changes<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    seen: &mut Seen,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<PropertyChange> {
     let mut changes = Vec::new();
@@ -827,7 +700,7 @@ fn property_change<'a, 's>(
     written: &Written<'a, 's, Statement<'s>>,
     line: &Line<'s>,
     order: usize,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
+    seen: &mut Seen,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<PropertyChange> {
     let (file, statement) = (written.file(), written.node);
@@ -840,271 +713,83 @@ fn property_change<'a, 's>(
         diags.push(unknown_native_property(world, target, line));
         return None;
     };
-    let value = property_value(world, written.home(), file, line, has, diags)?;
+    let at = fill::At { home: written.home(), file, line };
+    let filling = fill::fill(world, &at, &has.slot).or_report(diags)?;
     let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
         ClauseKind::Until(day) => Some(day),
         _ => None,
     });
-    if until.is_some_and(|day| day < statement.date) {
+    let Some(days) = Days::new(statement.date, until.unwrap_or(Day::MAX)) else {
         diags.push(
             Diagnostic::error("property-until-order", "this property change ends before it begins")
                 .label(line.loc, "`until` is earlier than the change")
                 .help("move the end date to the change date or later"),
         );
         return None;
-    }
-    let key = (target_key(target.target), has.name, statement.date);
+    };
+    let key = (target.holder, has.name, statement.date);
     if let Some(first) = seen.get(&key).copied() {
         diags.push(problem::twice("property change", line.loc, first));
         return None;
     }
     seen.insert(key, line.loc);
-    Some(PropertyChange {
-        target: target.target,
-        name: has.name,
-        since: statement.date,
-        until,
-        value,
-        loc: line.loc,
-        order,
-    })
+    let said = filling.said(has.slot.mult);
+    Some(PropertyChange { holder: target.holder, slot: has.number, days, said, order })
 }
 
-/// Reads built-in kind defaults and applies them oldest-ancestor first to the
-/// native entities, commodities and places. Custom property values are read
-/// separately below and remain stored once on their declaring kind.
-/// The first declaration written for each thing that has properties.
-struct WrittenBy<'a, 's> {
-    kinds: Map<Id<Kind>, Written<'a, 's, Decl<'s>>>,
-    entities: Map<Id<Entity>, Written<'a, 's, Decl<'s>>>,
-    commodities: Map<Id<Commodity>, Written<'a, 's, Decl<'s>>>,
-    places: Map<Id<Place>, Written<'a, 's, Decl<'s>>>,
-    assets: Map<Id<Asset>, Written<'a, 's, Decl<'s>>>,
-}
-
-fn written_by<'a, 's>(world: &World<'s>, collected: &Collected<'a, 's>) -> WrittenBy<'a, 's> {
-    let mut by = WrittenBy {
-        kinds: Map::default(),
-        entities: Map::default(),
-        commodities: Map::default(),
-        places: Map::default(),
-        assets: Map::default(),
-    };
-    for &written in &collected.decls {
-        let Some(target) = native_target(world, written) else {
-            continue;
-        };
-        match target.target {
-            PropTarget::Kind(id) => by.kinds.entry(id).or_insert(written),
-            PropTarget::Entity(id) => by.entities.entry(id).or_insert(written),
-            PropTarget::Commodity(id) => by.commodities.entry(id).or_insert(written),
-            PropTarget::Place(id) => by.places.entry(id).or_insert(written),
-            PropTarget::Asset(id) => by.assets.entry(id).or_insert(written),
-        };
+/// Paints the changes over the declarations: a change overrides what it covers from its day, and what held before
+/// resumes when it ends. Day by day, the one begun last is in force, which is the order of painting.
+fn paint_changes(world: &mut World<'_>, mut changes: Vec<PropertyChange>) {
+    changes.sort_by_key(|change| (change.days.first(), change.order));
+    for change in changes {
+        match change.said {
+            Said::One(datum) => world.paint(change.holder, change.slot, change.days, datum),
+            Said::Set(members) => world.paint_set(change.holder, change.slot, change.days, members),
+        }
     }
-    by
 }
 
-/// The built-in properties of everything declared, inherited down the kind tree: a kind's own lines first, then
-/// each commodity, entity, place and asset has its kind's defaults and then its own.
+/// The built-in properties of everything declared: what a kind says it says of its things, and a thing says its own.
+/// Only the first declaration of a thing says them. Kinds are read before the things of their sort, and the sorts in
+/// the order their lines need.
 fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    let written = written_by(world, collected);
-    for target in [Target::Commodity, Target::Entity, Target::Place, Target::Asset] {
-        let defaults = kind_defaults(world, target, &written.kinds, diags);
-        match target {
-            Target::Commodity => {
-                builtin_commodities(world, &written.commodities, &defaults, diags);
-                native_system_currencies(world, collected, diags);
-            }
-            Target::Entity => builtin_entities(world, &written.entities, &defaults, diags),
-            Target::Place => builtin_places(world, &written.places, &defaults, diags),
-            Target::Asset => builtin_assets(world, &written.assets, &defaults, diags),
-            Target::Kind => unreachable!(),
-        }
-    }
-}
-
-/// What each kind of a sort sets: its parent's settings inherited, then its own lines, and the settings that
-/// instances inherit gathered for them.
-fn kind_defaults<'a, 's>(
-    world: &mut World<'s>,
-    target: Target,
-    written: &Map<Id<Kind>, Written<'a, 's, Decl<'s>>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Defaults {
-    let kind_ids: Vec<Id<Kind>> =
-        world.book.kinds.ids().filter(|&id| Target::of(world.book.kinds[id].sort) == target).collect();
-    let mut defaults = Defaults::empty(world.book.kinds.len());
-    for kind in kind_ids {
-        if world.book.kinds.parent(kind).is_some() {
-            let (above, child) = world.book.kinds.with_parent_mut(kind).expect("kind parent exists");
-            child.inherit(above);
-        }
-        let has = world.book.kinds[kind].has.clone();
-        if let Some(written) = written.get(&kind).copied() {
-            let at = Lines::from_native(written);
-            let assigns = read_builtin_lines(world, &at, &[Target::Kind, target], &has, kind, diags);
-            for assign in &assigns {
-                world.book.kinds[kind].set(assign);
-                if assign.is_default() {
-                    defaults.by_kind[kind.index()].push(assign.clone());
-                }
-            }
-        }
-    }
-    defaults
-}
-
-/// The lines a declaration writes for the built-in properties of a thing of `kind`, read.
-fn own_builtins<'a, 's>(
-    world: &mut World<'s>,
-    written: Option<Written<'a, 's, Decl<'s>>>,
-    target: Target,
-    kind: Id<Kind>,
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Assign> {
-    let Some(written) = written else {
-        return Vec::new();
+    let mut first = Set::default();
+    let mut work: Vec<_> = collected
+        .decls
+        .iter()
+        .filter_map(|&written| native_target(world, written).map(|under| (under, written)))
+        .filter(|(under, _)| first.insert(under.holder))
+        .collect();
+    let rank = |under: &NativeTarget| match Target::of(under.sort) {
+        Target::Commodity => 0,
+        Target::Entity => 1,
+        Target::Place => 2,
+        _ => 3,
     };
-    let at = Lines::from_native(written);
-    let has = world.book.kinds[kind].has.clone();
-    read_builtin_lines(world, &at, &[target], &has, kind, diags)
-}
-
-fn builtin_commodities<'a, 's>(
-    world: &mut World<'s>,
-    written: &Map<Id<Commodity>, Written<'a, 's, Decl<'s>>>,
-    defaults: &Defaults,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let ids: Vec<_> = world.book.commodities.ids().collect();
-    let mut path = Vec::new();
-    for id in ids {
-        let kind = world.book.commodities[id].kind;
-        let own = own_builtins(world, written.get(&id).copied(), Target::Commodity, kind, diags);
-        let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
-        defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
-        for assign in &own {
-            commodities[id].set(assign);
-        }
-    }
-}
-
-fn builtin_entities<'a, 's>(
-    world: &mut World<'s>,
-    written: &Map<Id<Entity>, Written<'a, 's, Decl<'s>>>,
-    defaults: &Defaults,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let ids: Vec<_> = world.book.entities.ids().collect();
-    let mut path = Vec::new();
-    let mut currency_set = vec![false; world.book.entities.len()];
-    for id in ids {
-        let kind = world.book.entities[id].kind;
-        let own = own_builtins(world, written.get(&id).copied(), Target::Entity, kind, diags);
-        let (kinds, entities) = (&world.book.kinds, &mut world.book.entities);
-        let entity = &mut entities[id];
-        defaults.apply(kinds, kind, &mut path, |assign| {
-            if matches!(assign, Assign::Currency(_)) {
-                currency_set[id.index()] = true;
-            }
-            entity.set(assign);
-        });
-        for assign in &own {
-            if matches!(assign, Assign::Currency(_)) {
-                currency_set[id.index()] = true;
-            }
-            entity.set(assign);
-        }
-        entity.purpose = entity.purpose.or(kinds[kind].purpose);
-        entity.restricted = kinds[kind].restricted;
-        let mut lives = entity.lives.to_vec();
-        lives.sort_by_key(|residence| residence.days.first());
-        entity.lives = lives.into_boxed_slice();
-    }
-    // An entity that sets no currency counts in that of the first system it lives under, else the book's.
-    for id in world.book.entities.ids().collect::<Vec<_>>() {
-        if !currency_set[id.index()] {
-            let residence_currency = world.book.entities[id]
-                .lives
-                .iter()
-                .find_map(|residence| world.book.systems[residence.system].currency);
-            world.book.entities[id].currency = residence_currency.unwrap_or(world.book.base);
-        }
-    }
-}
-
-fn builtin_places<'a, 's>(
-    world: &mut World<'s>,
-    written: &Map<Id<Place>, Written<'a, 's, Decl<'s>>>,
-    defaults: &Defaults,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let ids: Vec<_> = world.book.places.ids().collect();
-    let mut path = Vec::new();
-    for id in ids {
-        let kind = world.book.places[id].kind;
-        let own = own_builtins(world, written.get(&id).copied(), Target::Place, kind, diags);
-        let (kinds, places) = (&world.book.kinds, &mut world.book.places);
-        defaults.apply(kinds, kind, &mut path, |assign| places[id].set(assign));
-        for assign in &own {
-            places[id].set(assign);
-        }
-        inherit_place_traits(&mut places[id], &kinds[kind]);
-    }
-}
-
-fn builtin_assets<'a, 's>(
-    world: &mut World<'s>,
-    written: &Map<Id<Asset>, Written<'a, 's, Decl<'s>>>,
-    defaults: &Defaults,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let ids: Vec<_> = world.book.assets.ids().collect();
-    let mut path = Vec::new();
-    for id in ids {
-        let kind = world.book.assets[id].kind;
-        let own = own_builtins(world, written.get(&id).copied(), Target::Asset, kind, diags);
-        let (kinds, assets, places) = (&world.book.kinds, &mut world.book.assets, &mut world.book.places);
-        let asset = &mut assets[id];
-        let place = &mut places[asset.place];
-        // `part of` is the asset's; every other setting is its place's.
-        defaults.apply(kinds, kind, &mut path, |assign| match assign {
-            Assign::PartOf(_) => asset.set(assign),
-            _ => place.set(assign),
-        });
-        for assign in &own {
-            match assign {
-                Assign::PartOf(_) => asset.set(assign),
-                _ => place.set(assign),
-            }
-        }
-        inherit_place_traits(place, &kinds[kind]);
+    work.sort_by_key(|(under, _)| {
+        (rank(under), !matches!(under.holder, Holder::Kind(_)), world.book.holders.number(under.holder))
+    });
+    let mut pending = Pending::default();
+    for (under, written) in work {
+        read_builtin_lines(world, &mut pending, written, under, diags);
     }
     diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
+    native_system_currencies(world, collected, diags);
+    pending.say(world);
 }
 
-fn inherit_place_traits(place: &mut Place, kind: &Kind) {
-    place.deferred = kind.deferred;
-    place.basis = kind.basis.unwrap_or(if kind.deferred { Basis::Zero } else { Basis::Cost });
-    // Claim tabs keep separate parcels even though their synthetic root kinds
-    // do not declare the `claim` trait themselves.
-    place.claim = kind.claim || matches!(place.role, Role::Tab(_));
-}
-
-fn read_builtin_lines<'s>(
+/// The lines a declaration writes for the built-in properties of what it declares, read and said.
+fn read_builtin_lines<'a, 's>(
     world: &mut World<'s>,
-    at: &Lines<'_, 's>,
-    targets: &[Target],
-    has: &[Has],
-    kind: Id<Kind>,
+    pending: &mut Pending,
+    written: Written<'a, 's, Decl<'s>>,
+    under: NativeTarget,
     diags: &mut Vec<Diagnostic>,
-) -> Vec<Assign> {
-    let mut assigns = Vec::new();
+) {
+    let at = Lines::from_native(written);
+    let own = Target::of(under.sort);
+    let targets: &[Target] = if matches!(under.holder, Holder::Kind(_)) { &[Target::Kind, own] } else { &[own] };
     for line in at.lines {
-        if line.name.0 == "has" {
-            continue;
-        }
         if line.name.0 == "owner" {
             if targets.len() != 1 || !matches!(targets[0], Target::Entity | Target::Place | Target::Asset) {
                 diags.push(
@@ -1124,12 +809,10 @@ fn read_builtin_lines<'s>(
             );
             continue;
         }
-        match read_line(world, at, line, targets, has, kind) {
-            Ok(assign) => assigns.push(assign),
-            Err(problem) => diags.push(problem),
+        if let Err(problem) = read_line(world, pending, &at, line, under, targets) {
+            diags.push(problem);
         }
     }
-    assigns
 }
 
 /// Asset `part of` edges are followed by the engine when it walks an asset's
@@ -1181,7 +864,7 @@ fn diagnose_asset_cycles(
 }
 
 fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
-    let mut seen: Map<Id<crate::book::System>, Loc> = Map::default();
+    let mut seen: Map<Id<System>, Loc> = Map::default();
     for written in &collected.settings {
         let (Home::System(system), Setting::Currency(unit)) = (written.home(), *written.node) else {
             continue;
@@ -1198,10 +881,20 @@ fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_,
     }
 }
 
+/// Gives each entity the place `via` names, once the facts that say it are frozen: an entity's place is where a
+/// flow with it ends, and its name gives one unless a line says another.
+pub(crate) fn place_entities(world: &mut World<'_>) {
+    for id in world.book.entities.ids().collect::<Vec<_>>() {
+        if let Some(place) = world.book.fact(slot::VIA, id) {
+            world.book.entities[id].place = Some(place);
+        }
+    }
+}
+
 /// Completes each system's exchange-rate policy after params have been
 /// declared, so `rates param NAME` resolves with the system's visibility.
 pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
-    let mut seen: Map<Id<crate::book::System>, Loc> = Map::default();
+    let mut seen: Map<Id<System>, Loc> = Map::default();
     for written in &collected.settings {
         let (Home::System(system), Setting::Rates(policy)) = (written.home(), *written.node) else {
             continue;
@@ -1232,205 +925,34 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
     }
 }
 
-fn read_has_lines<'s>(
-    world: &mut World<'s>,
-    file: &File<'s>,
-    decl: &Decl<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Has> {
-    let mut own = Vec::new();
-    for line in &file[decl.props] {
-        if line.name.0 != "has" {
-            continue;
-        }
-        let Some(has) = parse_has(world, file, line).or_report(diags) else {
-            continue;
-        };
-        if is_builtin_line(world.book.name(has.name)) || FIELD_WORDS.contains(&world.book.name(has.name)) {
-            let word = Word { text: world.book.name(has.name), loc: has.loc.unwrap_or(line.loc) };
-            diags.push(problem::built_in_property(word));
-            continue;
-        }
-        if own.iter().any(|earlier: &Has| earlier.name == has.name) {
-            let earlier = own.iter().find(|earlier| earlier.name == has.name).copied().unwrap();
-            let mut diagnostic = Diagnostic::error(
-                "duplicate-property-declaration",
-                format!("property `{}` is declared twice on this kind", world.book.name(has.name)),
-            );
-            if let Some(loc) = has.loc {
-                diagnostic = diagnostic.label(loc, "declared again here");
-            }
-            if let Some(loc) = earlier.loc {
-                diagnostic = diagnostic.context(loc, "first declared here");
-            }
-            diags.push(diagnostic);
-            continue;
-        }
-        own.push(has);
-    }
-    own
-}
-
-fn parse_has<'s>(world: &mut World<'s>, file: &File<'s>, line: &Line<'s>) -> Result<Has, Diagnostic> {
-    let args = &file[line.args];
-    if args.len() != 2 {
-        return Err(Diagnostic::error("has-type", "`has` needs a property name and a type")
-            .label(line.loc, "write `has name type` or `has name UNIT`"));
-    }
-    let name_expr = &file.exprs[args[0]];
-    let ExprKind::Name(name) = name_expr.kind else {
-        return Err(Diagnostic::error("has-name", "a custom property needs a name")
-            .label(name_expr.loc, "write a lower-case property name"));
-    };
-    let type_expr = &file.exprs[args[1]];
-    let ty = match type_expr.kind {
-        ExprKind::Name(type_name) => match TYPES.iter().find(|(name, _)| *name == type_name.0).map(|(_, ty)| *ty) {
-            Some(ty) => ty,
-            None => {
-                let valid: Vec<&str> = TYPES.iter().map(|(name, _)| *name).collect();
-                return Err(suggest(
-                    Diagnostic::error("has-type", format!("`{}` is not a property type", type_name.0))
-                        .label(type_expr.loc, "unknown type"),
-                    type_expr.loc,
-                    type_name.0,
-                    valid,
-                ));
-            }
-        },
-        ExprKind::Unit(unit) => {
-            let commodity = world.commodity_of(Word { text: unit.0, loc: type_expr.loc })?;
-            Ty::Amount(Dim::Of(commodity))
-        }
-        ExprKind::Binary(BinOp::Div, top, bottom) => {
-            let numerator = unit_type(world, file, top)?;
-            let denominator = unit_type(world, file, bottom)?;
-            match numerator.div(denominator) {
-                Some(dim) if dim != Dim::Number && dim != Dim::Any => Ty::Amount(dim),
-                _ => {
-                    return Err(Diagnostic::error("has-unit", "this is not a supported amount unit")
-                        .label(type_expr.loc, "write one commodity or a rate such as `USD/MI`"));
-                }
-            }
-        }
-        _ => {
-            return Err(Diagnostic::error("has-type", "a property type must be a name or a unit")
-                .label(type_expr.loc, "write a built-in type or a commodity unit"));
-        }
-    };
-    let name = world.book.names.intern(name.0);
-    Ok(Has { name, ty, loc: Some(name_expr.loc) })
-}
-
-fn unit_type<'s>(world: &World<'s>, file: &File<'s>, id: ExprId) -> Result<Dim<Id<Commodity>>, Diagnostic> {
-    let expr = &file.exprs[id];
-    let (text, loc) = match expr.kind {
-        ExprKind::Unit(name) | ExprKind::Name(name) => (name.0, expr.loc),
-        _ => {
-            return Err(Diagnostic::error("has-unit", "this is not a commodity unit")
-                .label(expr.loc, "write a declared unit such as `USD`"));
-        }
-    };
-    world.commodity_of(Word { text, loc }).map(Dim::Of)
-}
-
-fn property_value<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &File<'s>,
-    line: &Line<'s>,
-    has: Has,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Value> {
-    let args = &file[line.args];
-    if args.len() != 1 {
-        diags.push(
-            Diagnostic::error("property-value", format!("`{}` needs one value", line.name.0))
-                .label(line.loc, "write one value here"),
-        );
-        return None;
-    }
-    if !file[line.lines].is_empty() {
-        diags.push(
-            Diagnostic::error("property-nested-lines", "a custom property value cannot have nested lines")
-                .label(line.loc, "remove the nested lines"),
-        );
-        return None;
-    }
-    let expr = &file.exprs[args[0]];
-    let wanted = match has.ty {
-        Ty::Amount(_) if matches!(expr.kind, ExprKind::Num(_) | ExprKind::Pct(_)) => Ty::Num,
-        Ty::Amount(_) => Ty::AMOUNT,
-        other => other,
-    };
-    let (value, found) = match world.constant(home, file, args[0], Some(wanted)) {
-        Ok(value) => value,
-        Err(problem) => {
-            diags.push(problem);
-            return None;
-        }
-    };
-    if !property_value_fits(has.ty, value, found) {
-        let expected = match has.ty {
-            Ty::Amount(dim) => format!("an amount in {}", dimension_name(world, dim)),
-            ty => article(ty.word()),
-        };
-        diags.push(
-            Diagnostic::error("property-type", format!("`{}` needs {expected}", line.name.0))
-                .label(expr.loc, format!("this is {}", describe(&expr.kind))),
-        );
-        return None;
-    }
-    Some(value)
-}
-
-fn property_value_fits(expected: Ty, value: Value, found: Ty) -> bool {
-    match (expected, value) {
-        (Ty::Amount(Dim::Any), Value::Amount(_)) | (Ty::Amount(Dim::Any), Value::Empty) => true,
-        (Ty::Amount(Dim::Of(want)), Value::Amount(amount)) => amount.unit == want,
-        (Ty::Amount(Dim::Of(_)), Value::Num(_)) => true,
-        (Ty::Amount(Dim::Per(_, _)), Value::Num(_)) => true,
-        (Ty::Amount(Dim::Rate(_, _)), Value::Num(_)) => true,
-        (Ty::Amount(Dim::Number), Value::Num(_)) => true,
-        (Ty::Amount(_), Value::Empty) => true,
-        (ty, _) => crate::values::fits(ty, found),
-    }
-}
-
-fn dimension_name(world: &World<'_>, dim: Dim<Id<Commodity>>) -> String {
-    let unit = |unit: Id<Commodity>| world.book.name(world.book.commodities[unit].symbol).to_owned();
-    match dim {
-        Dim::Number => "a number".to_owned(),
-        Dim::Of(id) => unit(id),
-        Dim::Per(top, bottom) => format!("{}/{}", unit(top), unit(bottom)),
-        Dim::Rate(id, period) => format!("{} per {period:?}", unit(id)),
-        Dim::Any => "an amount".to_owned(),
-    }
-}
-
 impl NativeTarget {
-    fn of(world: &World<'_>, target: PropTarget) -> NativeTarget {
-        let kind = match target {
-            PropTarget::Place(id) => world.book.places[id].kind,
-            PropTarget::Entity(id) => world.book.entities[id].kind,
-            PropTarget::Commodity(id) => world.book.commodities[id].kind,
-            PropTarget::Asset(id) => world.book.assets[id].kind,
-            PropTarget::Kind(id) => id,
+    fn of(world: &World<'_>, holder: Holder) -> NativeTarget {
+        let kind = match holder {
+            Holder::Place(id) => world.book.places[id].kind,
+            Holder::Entity(id) => world.book.entities[id].kind,
+            Holder::Commodity(id) => world.book.commodities[id].kind,
+            Holder::Asset(id) => world.book.assets[id].kind,
+            Holder::Kind(id) => id,
         };
-        NativeTarget { target, kind, sort: world.book.kinds[kind].sort }
+        let said_of = match holder {
+            Holder::Asset(id) => Holder::Place(world.book.assets[id].place),
+            other => other,
+        };
+        NativeTarget { holder, said_of, kind, sort: world.book.kinds[kind].sort }
     }
 }
 
 fn native_target(world: &World<'_>, written: Written<'_, '_, Decl<'_>>) -> Option<NativeTarget> {
     let word = Word { text: written.node.name.0, loc: written.item.loc };
-    let target = match written.node.what {
-        DeclKind::Account => PropTarget::Place(world.place(word).ok()?),
-        DeclKind::Entity => PropTarget::Entity(world.entity(written.home(), word).ok()?),
-        DeclKind::Commodity => PropTarget::Commodity(world.commodity_of(word).ok()?),
-        DeclKind::Asset => PropTarget::Asset(world.book.asset(word.text)?),
-        DeclKind::Kind => PropTarget::Kind(world.kind(written.home(), word).ok()?),
+    let holder = match written.node.what {
+        DeclKind::Account => Holder::Place(world.place(word).ok()?),
+        DeclKind::Entity => Holder::Entity(world.entity(written.home(), word).ok()?),
+        DeclKind::Commodity => Holder::Commodity(world.commodity_of(word).ok()?),
+        DeclKind::Asset => Holder::Asset(world.book.asset(word.text)?),
+        DeclKind::Kind => Holder::Kind(world.kind(written.home(), word).ok()?),
         DeclKind::Purpose => return None,
     };
-    Some(NativeTarget::of(world, target))
+    Some(NativeTarget::of(world, holder))
 }
 
 /// What a property statement is about: the one thing with a property of that name among those its subject may
@@ -1464,29 +986,49 @@ fn subject_candidates(world: &World<'_>, home: Home, subject: Subject<'_>, loc: 
     let mut targets = Vec::new();
     match subject {
         Subject::Unit(unit) => {
-            targets.extend(world.commodity_of(Word { text: unit.0, loc }).ok().map(PropTarget::Commodity));
+            targets.extend(world.commodity_of(Word { text: unit.0, loc }).ok().map(Holder::Commodity));
         }
         Subject::Name(subject) => {
             let names = &world.book.names;
             targets.extend(
-                world.book.lookup.places.find(names, subject.0, |_| true).into_ids().into_iter().map(PropTarget::Place),
+                world.book.lookup.places.find(names, subject.0, |_| true).into_ids().into_iter().map(Holder::Place),
             );
             let entities = world.book.lookup.entities.find(names, world.scopes.of(home), subject.0);
-            targets.extend(entities.into_ids().into_iter().map(PropTarget::Entity));
-            targets.extend(world.book.asset(subject.0).map(PropTarget::Asset));
-            targets.extend(world.kind(home, Word { text: subject.0, loc }).ok().map(PropTarget::Kind));
+            targets.extend(entities.into_ids().into_iter().map(Holder::Entity));
+            targets.extend(world.book.asset(subject.0).map(Holder::Asset));
+            targets.extend(world.kind(home, Word { text: subject.0, loc }).ok().map(Holder::Kind));
         }
         Subject::Code(_) | Subject::Purpose(_) => {}
     }
     targets.into_iter().map(|target| NativeTarget::of(world, target)).collect()
 }
 
-fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Has> {
-    let name = world.book.names.get(name)?;
-    world.book.kinds[kind].has.iter().find(|has| has.name == name).copied()
+/// The slot a property line fills, as the thing's kind declares it.
+#[derive(Clone, Copy)]
+struct Named {
+    name: Sym,
+    number: SlotId,
+    slot: Slot,
 }
 
-fn is_builtin_line(name: &str) -> bool {
+fn has_named(world: &World<'_>, kind: Id<Kind>, name: &str) -> Option<Named> {
+    let (schema, name) = (&world.book.schema, world.book.names.get(name)?);
+    let slot = *schema.find(&world.book.kinds, kind, name)?;
+    Some(Named { name, number: schema.number(name)?, slot })
+}
+
+/// The slot of things of `kind` whose name `word` is a near miss of.
+fn near_slot(world: &World<'_>, kind: Id<Kind>, word: &str) -> Option<SlotId> {
+    let near = axiom_core::diag::closest(word, declared_names(world, kind))?;
+    world.book.schema.number(world.book.names.get(near)?)
+}
+
+/// The names of the slots things of `kind` have.
+fn declared_names<'w>(world: &'w World<'_>, kind: Id<Kind>) -> impl Iterator<Item = &'w str> {
+    world.book.schema.effective(&world.book.kinds, kind).map(|slot| world.book.name(slot.name))
+}
+
+pub(crate) fn is_builtin_line(name: &str) -> bool {
     matches!(
         name,
         "owner"
@@ -1505,7 +1047,6 @@ fn is_builtin_line(name: &str) -> bool {
             | "deferred"
             | "basis"
             | "claim"
-            | "has"
             | "purpose"
             | "pays"
             | "takes"
@@ -1520,33 +1061,33 @@ fn is_builtin_line(name: &str) -> bool {
 
 fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<'_>) -> Diagnostic {
     let kind_name = world.book.name(world.book.kinds[target.kind].name);
-    let noun = match target.target {
-        PropTarget::Kind(_) => "kind",
-        PropTarget::Entity(_) => "entity",
-        PropTarget::Commodity(_) => "commodity",
-        PropTarget::Place(_) => "account",
-        PropTarget::Asset(_) => "asset",
+    let noun = match target.holder {
+        Holder::Kind(_) => "kind",
+        Holder::Entity(_) => "entity",
+        Holder::Commodity(_) => "commodity",
+        Holder::Place(_) => "account",
+        Holder::Asset(_) => "asset",
     };
     let mut valid: Vec<&str> = BUILTINS
         .iter()
-        .filter(|builtin| match (builtin.1.contains(&Target::Kind), target.sort, target.target) {
-            (true, _, PropTarget::Kind(_)) => true,
-            (false, Sort::Place(_), PropTarget::Place(_)) => builtin.1.contains(&Target::Place),
-            (false, Sort::Entity, PropTarget::Entity(_)) => builtin.1.contains(&Target::Entity),
-            (false, Sort::Commodity, PropTarget::Commodity(_)) => builtin.1.contains(&Target::Commodity),
+        .filter(|builtin| match (builtin.1.contains(&Target::Kind), target.sort, target.holder) {
+            (true, _, Holder::Kind(_)) => true,
+            (false, Sort::Place(_), Holder::Place(_)) => builtin.1.contains(&Target::Place),
+            (false, Sort::Entity, Holder::Entity(_)) => builtin.1.contains(&Target::Entity),
+            (false, Sort::Commodity, Holder::Commodity(_)) => builtin.1.contains(&Target::Commodity),
             _ => false,
         })
         .map(|builtin| builtin.0)
         .collect();
-    valid.extend(world.book.kinds[target.kind].has.iter().map(|has| world.book.name(has.name)));
-    if matches!(target.target, PropTarget::Asset(_)) {
+    valid.extend(declared_names(world, target.kind));
+    if matches!(target.holder, Holder::Asset(_)) {
         valid.extend(["owner", "known-as", "share", "at", "part", "also"]);
     }
     valid.sort_unstable();
     valid.dedup();
     let text = line.name.0;
-    let owner = match target.target {
-        PropTarget::Kind(_) => format!("kind `{kind_name}`"),
+    let owner = match target.holder {
+        Holder::Kind(_) => format!("kind `{kind_name}`"),
         _ => format!("{} of kind `{kind_name}`", article(noun)),
     };
     let error = Diagnostic::error("unknown-property", format!("`{text}` is not a property of {owner}"))
@@ -1555,261 +1096,48 @@ fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<
     error.note(format!("its properties are {}", list(&valid)))
 }
 
-fn target_key(target: PropTarget) -> (u8, u32) {
-    match target {
-        PropTarget::Kind(id) => (0, id.index() as u32),
-        PropTarget::Entity(id) => (1, id.index() as u32),
-        PropTarget::Commodity(id) => (2, id.index() as u32),
-        PropTarget::Place(id) => (3, id.index() as u32),
-        PropTarget::Asset(id) => (4, id.index() as u32),
-    }
-}
-
-fn stage_unique(
-    world: &mut World<'_>,
-    seen: &mut Map<((u8, u32), Sym, Day), Loc>,
-    target: PropTarget,
-    prop: Prop,
+/// Required slots that nothing fills: not the thing, and not a kind above it.
+fn missing_roles<'a, 's>(
+    world: &World<'s>,
+    collected: &Collected<'a, 's>,
+    filled: &Filled,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let key = (target_key(target), prop.name, prop.since);
-    if let Some(first) = seen.get(&key).copied() {
-        let mut diagnostic = Diagnostic::error(
-            "duplicate-property-value",
-            format!("property `{}` is assigned twice on the same day", world.book.name(prop.name)),
-        );
-        if let Some(loc) = prop.loc {
-            diagnostic = diagnostic.label(loc, "assigned again here");
-        }
-        diags.push(diagnostic.context(first, "first assigned here"));
-        return;
-    }
-    seen.insert(key, prop.loc.unwrap_or_default());
-    world.set_prop(target, prop);
-}
-
-fn stage_changes(world: &mut World<'_>, mut updates: Vec<PropertyChange>) {
-    let mut groups: Map<((u8, u32), Sym), Vec<PropertyChange>> = Map::default();
-    for update in updates.drain(..) {
-        groups.entry((target_key(update.target), update.name)).or_default().push(update);
-    }
-    for ((_target_key, name), mut changes) in groups {
-        changes.sort_by_key(|change| (change.since, change.order));
-        let target = changes[0].target;
-        let base = world
-            .prop_writes
-            .iter()
-            .find(|(candidate, prop)| *candidate == target && prop.name == name && prop.since == Day::MIN)
-            .map(|(_, prop)| prop.value)
-            .unwrap_or(Value::Empty);
-        for (day, value, loc) in property_timeline(base, &changes) {
-            let prop = Prop { name, value, since: day, loc: Some(loc) };
-            world.set_prop(target, prop);
-        }
-    }
-}
-
-/// The effective rows for a sequence of dated overrides. An expired override
-/// uncovers the latest still-active override, then the declaration value (or
-/// `empty`, which lets an inherited kind default show through).
-fn property_timeline(base: Value, changes: &[PropertyChange]) -> Vec<(Day, Value, Loc)> {
-    let mut boundaries = Vec::with_capacity(changes.len() * 2);
-    for change in changes {
-        boundaries.push(change.since);
-        if let Some(until) = change.until.filter(|&until| until < Day::MAX) {
-            boundaries.push(until.add_days(1));
-        }
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    let mut timeline = Vec::with_capacity(boundaries.len());
-    let mut visible = base;
-    for day in boundaries {
-        let winner = changes
-            .iter()
-            .filter(|change| change.since <= day && change.until.is_none_or(|until| day <= until))
-            .fold(None, |best: Option<&PropertyChange>, change| match best {
-                None => Some(change),
-                Some(old) if change.since > old.since || (change.since == old.since && change.order < old.order) => {
-                    Some(change)
-                }
-                Some(old) => Some(old),
-            });
-        let value = winner.map_or(base, |change| change.value);
-        if value == visible {
+    let book = &world.book;
+    for &written in &collected.decls {
+        if matches!(written.node.what, DeclKind::Kind | DeclKind::Purpose) {
             continue;
         }
-        let loc = winner.map_or(changes[0].loc, |change| change.loc);
-        timeline.push((day, value, loc));
-        visible = value;
+        let Some(target) = native_target(world, written) else { continue };
+        for slot in book.schema.effective(&book.kinds, target.kind).filter(|slot| fill::is_required(slot.mult)) {
+            let number = book.schema.number(slot.name).expect("a declared slot is numbered");
+            let by_kind = |above: Id<Kind>| filled.contains(&(Holder::Kind(above), number));
+            if filled.contains(&(target.holder, number)) || book.kinds.lineage(target.kind).any(by_kind) {
+                continue;
+            }
+            diags.push(missing_role(world, written, target.kind, slot));
+        }
     }
-    timeline
+}
+
+/// `college` is a 529-plan, which takes a person as its `beneficiary`, and none is written.
+fn missing_role(world: &World<'_>, written: Written<'_, '_, Decl<'_>>, kind: Id<Kind>, slot: &Slot) -> Diagnostic {
+    let book = &world.book;
+    let thing = Word::of(written.file(), written.node.name.0);
+    let candidates: Vec<&str> = match slot.range {
+        Range::Kinds(run) => fill::fitting(world, book.schema.kinds_of(run)),
+        Range::Words(run) => book.schema.words_of(run).iter().map(|&word| book.name(word)).collect(),
+        Range::Value(_) => Vec::new(),
+    };
+    let takes = book.schema.view(slot.range).describe(book);
+    let header = written.item.loc;
+    let insert = Loc::new(header.file, header.end, header.end);
+    problem::missing_role(thing, book.name(book.kinds[kind].name), book.name(slot.name), &takes, &candidates, insert)
 }
 
 #[cfg(test)]
 mod native_property_tests {
     use super::*;
-
-    fn day(year: i32, month: u32, date: u32) -> Day {
-        Day::from_ymd(year, month, date).unwrap()
-    }
-
-    fn place(role: Role, name: Sym) -> Place {
-        Place {
-            path: name,
-            class: crate::book::Class::Asset,
-            role,
-            kind: Id::new(0),
-            owner: Id::new(0),
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Basis::Cost,
-            claim: false,
-            liquidity: None,
-            opened: None,
-            closed: None,
-            shares: Box::default(),
-            known_as: Box::default(),
-            props: Box::default(),
-            doc: None,
-            loc: None,
-        }
-    }
-
-    #[test]
-    fn synthetic_claim_tabs_keep_their_claim_trait_without_a_kind_default() {
-        let mut names = axiom_core::Interner::default();
-        let empty = names.intern("");
-        let kind = Kind {
-            name: empty,
-            sort: Sort::Place(crate::book::Class::Asset),
-            system: None,
-            restricted: false,
-            deferred: false,
-            basis: None,
-            claim: false,
-            select: None,
-            liquidity: None,
-            purpose: None,
-            pays: None,
-            takes: Box::default(),
-            sales_tax: None,
-            shares: Box::default(),
-            has: Box::default(),
-            props: Box::default(),
-            laws: Box::default(),
-            doc: None,
-            loc: None,
-        };
-        let mut tab = place(Role::Tab(Id::new(0)), empty);
-        inherit_place_traits(&mut tab, &kind);
-        assert!(tab.claim);
-
-        let mut account = place(Role::Account { institution: None }, empty);
-        inherit_place_traits(&mut account, &kind);
-        assert!(!account.claim);
-    }
-
-    fn update(name: Sym, since: Day, until: Option<Day>, value: bool, order: usize) -> PropertyChange {
-        PropertyChange {
-            target: PropTarget::Kind(Id::new(0)),
-            name,
-            since,
-            until,
-            value: Value::Bool(value),
-            loc: Loc::default(),
-            order,
-        }
-    }
-
-    #[test]
-    fn an_expiring_property_override_uncovers_the_latest_live_value() {
-        let mut names = axiom_core::Interner::default();
-        let name = names.intern("flag");
-        let start = day(2026, 1, 1);
-        let short = day(2026, 1, 5);
-        let restore_short = day(2026, 1, 7);
-        let restore_outer = day(2026, 1, 11);
-        let changes = [
-            update(name, start, Some(day(2026, 1, 10)), true, 0),
-            update(name, short, Some(day(2026, 1, 6)), false, 1),
-        ];
-        assert_eq!(
-            property_timeline(Value::Bool(false), &changes),
-            [
-                (start, Value::Bool(true), Loc::default()),
-                (short, Value::Bool(false), Loc::default()),
-                (restore_short, Value::Bool(true), Loc::default()),
-                (restore_outer, Value::Bool(false), Loc::default()),
-            ]
-        );
-    }
-
-    #[test]
-    fn an_expiring_property_without_an_instance_value_clears_to_inherit() {
-        let mut names = axiom_core::Interner::default();
-        let name = names.intern("flag");
-        let start = day(2026, 3, 1);
-        let restore = day(2026, 3, 8);
-        let changes = [update(name, start, Some(day(2026, 3, 7)), true, 0)];
-        assert_eq!(
-            property_timeline(Value::Empty, &changes),
-            [(start, Value::Bool(true), Loc::default()), (restore, Value::Empty, Loc::default()),]
-        );
-    }
-
-    #[test]
-    fn deep_kind_defaults_apply_oldest_to_nearest_and_keep_the_nearest_source() {
-        let mut names = axiom_core::Interner::default();
-        let property = names.intern("rate");
-        let kinds = (0..3)
-            .map(|at| Kind {
-                name: names.intern(["base", "middle", "leaf"][at]),
-                sort: Sort::Thing,
-                system: None,
-                restricted: false,
-                deferred: false,
-                basis: None,
-                claim: false,
-                select: None,
-                liquidity: None,
-                purpose: None,
-                pays: None,
-                takes: Box::default(),
-                sales_tax: None,
-                shares: Box::default(),
-                has: Box::default(),
-                props: Box::default(),
-                laws: Box::default(),
-                doc: None,
-                loc: None,
-            })
-            .collect::<Vec<_>>();
-        let (tree, ids) = Tree::build(kinds, &[None, Some(0), Some(1)]).unwrap();
-        let mut defaults = Defaults::empty(3);
-        for (at, value) in [10, 20, 30].into_iter().enumerate() {
-            defaults.by_kind[at].push(Assign::Prop(Prop {
-                name: property,
-                value: Value::Num(Ratio::int(value)),
-                since: Day::MIN,
-                loc: Some(Loc::new(axiom_core::FileId(0), at as u32, at as u32 + 1)),
-            }));
-        }
-
-        let mut path = Vec::new();
-        let mut props = Box::<[Prop]>::default();
-        defaults.apply(&tree, ids[2], &mut path, |assign| {
-            if let Assign::Prop(prop) = assign {
-                put(&mut props, *prop);
-            }
-        });
-
-        assert_eq!(path, [ids[0], ids[1], ids[2]]);
-        assert_eq!(props.len(), 1);
-        assert_eq!(props[0].value, Value::Num(Ratio::int(30)));
-        assert_eq!(props[0].loc, Some(Loc::new(axiom_core::FileId(0), 2, 3)));
-    }
 
     #[test]
     fn asset_part_cycles_are_reported_and_cut_before_engine_walks() {
@@ -1824,7 +1152,6 @@ mod native_property_tests {
             place: Id::new(0),
             unit: Id::new(0),
             part_of: None,
-            props: Box::default(),
             doc: None,
             loc: Loc::default(),
         };

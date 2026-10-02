@@ -284,7 +284,7 @@ impl Timeline {
     pub fn new(plan: &Plan) -> Timeline {
         let rules = plan.book.rules.timed.iter().zip(plan.timed.iter());
         let first =
-            rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.period_start));
+            rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.schedule_start));
         let mut timeline = Timeline {
             done: [0; 6],
             heads: [None; 7],

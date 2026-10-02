@@ -569,7 +569,9 @@ impl Ledger<'_, '_, '_> {
                         self.world.tallies.add(ctx.owner, day.year(), name, part);
                         // What a member's own laws count is a line of the household's year too: the joint return
                         // reads it, and a limit that is the member's own reads only the member's.
-                        if let (Subject::Place(_), Some(house)) = (ctx.subject, book.entities[ctx.owner].member) {
+                        if let (Subject::Place(_), Some(house)) =
+                            (ctx.subject, self.plan.traits.entity(ctx.owner).member)
+                        {
                             self.world.tallies.add(house, day.year(), name, part);
                         }
                         self.sample_temporal(ctx.day);

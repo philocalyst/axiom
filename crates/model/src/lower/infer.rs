@@ -4,10 +4,12 @@
 //! classifies the flows it is the source of by its own purpose, or its kind's `pays`; the flows it is the
 //! destination of by its kind's `purpose`; an account kind can take a purpose it receives as another.
 
-use axiom_core::{Diagnostic, Id, Loc};
+use axiom_core::{Diagnostic, Id, Key, Loc};
 
-use crate::book::{Commodity, Place, Role};
+use crate::book::{Book, Commodity, Place, Purpose, Role};
+use crate::builtin;
 use crate::declare::World;
+use crate::holders::Holder;
 use crate::journal::{Provenance, Purposed};
 use crate::resolve::End;
 use crate::split::FlowSide;
@@ -47,63 +49,59 @@ pub(super) fn infer_for_flow(
     Ok(written.map(|(purpose, _)| purpose).or(inferred.map(|source| source.purposed)))
 }
 
+/// A purpose that a thing or its kinds say, the line that says it, and who says it.
+fn said_purpose(book: &Book, key: Key<Id<Purpose>>, thing: Holder) -> Option<(Id<Purpose>, Loc, Holder)> {
+    let (purpose, by) = book.saying(key, thing)?;
+    Some((purpose, book.site(by, key.slot(), 0).unwrap_or_default(), by))
+}
+
 /// What one end of a flow says the flow is for: the party at it classifies flows through its own purpose or the
 /// applicable purpose of its kind. A commodity issuer contributes `pays`; an account recipient can transform that
 /// source through `takes`.
 fn endpoint_purpose(world: &World<'_>, end: End, side: FlowSide) -> Option<PurposeEvidence> {
-    if let Role::Issuer(unit) = world.book.places[end.place].role {
-        return if side == FlowSide::Out { issuer_purpose(world, unit) } else { None };
+    let book = &world.book;
+    if let Role::Issuer(unit) = book.places[end.place].role {
+        return if side == FlowSide::Out { issuer_purpose(book, unit) } else { None };
     }
-    let role_entity = match world.book.places[end.place].role {
+    let role_entity = match book.places[end.place].role {
         Role::Outside(Some(entity)) | Role::Tab(entity) => Some(entity),
         _ => None,
     };
     let entity = end.entity.or(role_entity)?;
-    let party = &world.book.entities[entity];
-    let kind = &world.book.kinds[party.kind];
-    if let Some(purpose) = party.purpose {
-        // The declaration builder may carry an inherited kind value on an
-        // entity. Preserve its true provenance so explanations name the kind.
-        if kind.purpose != Some(purpose) && kind.pays != Some(purpose) {
-            return Some(PurposeEvidence {
-                purposed: Purposed { purpose: purpose.value, of: None, source: Provenance::Entity(entity) },
-                loc: purpose.loc,
-            });
-        }
+    let kind = book.entities[entity].kind;
+    let by = |key| said_purpose(book, key, Holder::Kind(kind));
+    // A purpose the entity says itself comes before its kind's.
+    if let Some((purpose, loc, Holder::Entity(_))) = said_purpose(book, builtin::PURPOSE, Holder::Entity(entity)) {
+        return Some(PurposeEvidence {
+            purposed: Purposed { purpose, of: None, source: Provenance::Entity(entity) },
+            loc,
+        });
     }
-    let purpose = if side == FlowSide::Out { kind.pays.or(kind.purpose) } else { kind.purpose }?;
-    Some(PurposeEvidence {
-        purposed: Purposed { purpose: purpose.value, of: None, source: Provenance::Party(party.kind) },
-        loc: purpose.loc,
-    })
+    let (purpose, loc, _) =
+        if side == FlowSide::Out { by(builtin::PAYS).or_else(|| by(builtin::PURPOSE)) } else { by(builtin::PURPOSE) }?;
+    Some(PurposeEvidence { purposed: Purposed { purpose, of: None, source: Provenance::Party(kind) }, loc })
 }
 
 /// What a commodity's issuer says what it pays is: its kind's `pays`, said by the outermost kind that says it.
-fn issuer_purpose(world: &World<'_>, unit: Id<Commodity>) -> Option<PurposeEvidence> {
-    let mut kind = world.book.commodities[unit].kind;
-    let pays = world.book.kinds[kind].pays?;
-    while let Some(parent) = world.book.kinds.parent(kind) {
-        if world.book.kinds[parent].pays != Some(pays) {
-            break;
-        }
-        kind = parent;
-    }
-    Some(PurposeEvidence {
-        purposed: Purposed { purpose: pays.value, of: None, source: Provenance::Commodity(kind) },
-        loc: pays.loc,
-    })
+fn issuer_purpose(book: &Book, unit: Id<Commodity>) -> Option<PurposeEvidence> {
+    let (purpose, loc, by) = said_purpose(book, builtin::PAYS, Holder::Kind(book.commodities[unit].kind))?;
+    let Holder::Kind(kind) = by else { unreachable!("a kind says it") };
+    Some(PurposeEvidence { purposed: Purposed { purpose, of: None, source: Provenance::Commodity(kind) }, loc })
 }
 
 /// The purpose an account kind takes `source` as, if it takes it as another.
 fn taken_purpose(world: &World<'_>, destination: Id<Place>, source: PurposeEvidence) -> Option<PurposeEvidence> {
-    if !matches!(world.book.places[destination].role, Role::Account { .. }) {
+    let book = &world.book;
+    if !matches!(book.places[destination].role, Role::Account { .. }) {
         return None;
     }
-    let kind_id = world.book.places[destination].kind;
-    let take = world.book.kinds[kind_id].takes.iter().find(|take| take.value.from == source.purposed.purpose)?;
+    let kind = book.places[destination].kind;
+    let from = source.purposed.purpose;
+    let (to, by) = book.take(kind, from)?;
+    let loc = book.site(by, builtin::TAKES.slot(), from.index() as u32).unwrap_or_default();
     Some(PurposeEvidence {
-        purposed: Purposed { purpose: take.value.to, of: source.purposed.of, source: Provenance::Account(kind_id) },
-        loc: take.loc,
+        purposed: Purposed { purpose: to, of: source.purposed.of, source: Provenance::Account(kind) },
+        loc,
     })
 }
 

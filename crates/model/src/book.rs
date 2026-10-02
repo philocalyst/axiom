@@ -10,15 +10,17 @@ use std::cmp::Ordering;
 
 use axiom_core::calendar::Window;
 use axiom_core::{
-    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
+    Arena, Day, Days, Dim, Facts, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
 };
 
+use crate::holders::HolderIndex;
 use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
     RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, NodeId, Rules, Ty, Value};
+use crate::law::{Fault, Law, NodeId, Rules, Value};
 use crate::names::{Names, Scoped};
+use crate::slots::{Schema, Slot};
 use crate::split::{Expr, Item, Promised, Says, Sign};
 use crate::sync::{Format, Pattern, Source};
 
@@ -43,6 +45,15 @@ pub struct Book<'s> {
     pub issuer_places: Map<Id<Commodity>, Id<Place>>,
     pub entities: Tree<Entity>,
     pub kinds: Tree<Kind>,
+    /// What every kind's things have, and what each takes.
+    pub schema: Schema,
+    /// The things above, numbered for the facts.
+    pub holders: HolderIndex,
+    /// Everything the book says of its things, as steps on days: the values of the slots.
+    pub facts: Facts,
+    /// Where the lines of the language that a diagnostic points back to were written, by the number of the thing, the
+    /// number of the slot and, for a slot of several, the member: see [`Book::site`].
+    pub sites: Map<(u32, u32, u32), Loc>,
     /// What flows are for: `income`, `spending`, `capital` and the tree beneath
     /// them, pre-ordered so "is groceries food" is an interval test.
     pub purposes: Tree<Purpose>,
@@ -228,28 +239,11 @@ pub struct Place {
     pub role: Role,
     pub kind: Id<Kind>,
     pub owner: Id<Entity>,
-    /// The commodities this place may hold; `None` for any.
-    pub holds: Option<Box<[Id<Commodity>]>>,
-    /// Resolved: the place's own policy, else its kind chain's.
-    pub select: Option<Policy>,
-    /// Resolved from the kind chain: gains are not realized inside.
-    pub deferred: bool,
-    /// Resolved from the kind chain: what basis arriving value takes.
-    pub basis: Basis,
-    /// Resolved from the kind chain: this place holds what others owe, and its
-    /// parcels stay apart by the transaction that made them.
-    pub claim: bool,
-    /// Resolved: own, else the kind chain's.
-    pub liquidity: Option<Span>,
-    pub opened: Option<Day>,
-    pub closed: Option<Day>,
     /// `owner me 50%, jordan 50%`: who owns it, in what shares. Empty for one
     /// owner, which is `owner`.
     pub shares: Box<[Share]>,
     /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
     pub known_as: Box<[Id<Pattern>]>,
-    /// Own properties first, then defaults inherited from the kind chain.
-    pub props: Props,
     pub doc: Option<Sym>,
     /// `None` for places opened implicitly by a full path.
     pub loc: Option<Loc>,
@@ -281,17 +275,8 @@ pub enum Role {
 pub struct Entity {
     pub path: Sym,
     pub kind: Id<Kind>,
-    /// The entity's own purpose, before the purpose on its kind.
-    pub purpose: Option<At<Id<Purpose>>>,
     /// Its place as a flow's end: an owner's `Holding`, a party's `Outside`.
     pub place: Option<Id<Place>>,
-    /// Resolved from the kind chain: money from this entity stays tied to it.
-    pub restricted: bool,
-    /// Jurisdictions, sorted by first day. They may overlap.
-    pub lives: Box<[Residence]>,
-    /// `member household`: the household this person belongs to, which is
-    /// governed in their place by the systems it lives in.
-    pub member: Option<Id<Entity>>,
     /// `owner me` on a business: it is one of the owners, owned by that one.
     pub owner: Option<Id<Entity>>,
     /// `of studio` on a client: what it pays is that owner's.
@@ -299,16 +284,8 @@ pub struct Entity {
     /// `owner me 60%, theo 40%` on a business: its tallies reach them in these
     /// shares. Empty for a sole owner (`owner`).
     pub owned_by: Box<[Share]>,
-    /// Its own `currency`, else its residence's system's, else the book's base:
-    /// resolved at build time.
-    pub currency: Id<Commodity>,
-    /// `citizen SYSTEM`: taxed by these wherever it lives.
-    pub citizen: Box<[Id<System>]>,
-    /// When a claim is income or spending.
-    pub books: Books,
     /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
     pub known_as: Box<[Id<Pattern>]>,
-    pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -321,14 +298,6 @@ pub enum Books {
     Cash,
     /// When it is due.
     Accrual,
-}
-
-/// `lives us/ca from 2025-01-01 until 2025-06-30`: inclusive, and open-ended
-/// on either side when unwritten.
-#[derive(Clone, Copy, Debug)]
-pub struct Residence {
-    pub days: Days,
-    pub system: Id<System>,
 }
 
 /// What basis value arriving from outside the owner's asset places takes.
@@ -350,30 +319,8 @@ pub struct Kind {
     pub sort: Sort,
     /// The system that declared it; `None` for built-ins and project kinds.
     pub system: Option<Id<System>>,
-    // Resolved down the kind chain.
-    pub restricted: bool,
-    pub deferred: bool,
-    pub basis: Option<Basis>,
-    pub claim: bool,
-    pub select: Option<Policy>,
-    pub liquidity: Option<Span>,
-    /// On a party kind: what flows with its parties are for (`grocer`:
-    /// groceries).
-    pub purpose: Option<At<Id<Purpose>>>,
-    /// On a commodity kind: what its issuer pays is for (`fund`: dividend).
-    pub pays: Option<At<Id<Purpose>>>,
-    /// On an account kind: what arrives from flows of the second purpose is
-    /// the first (`401k`: pre-tax-deferral from wages).
-    pub takes: Box<[At<Take>]>,
-    /// On a party kind: the tax inside every price paid to its parties.
-    pub sales_tax: Option<Ratio>,
-    /// `business 60% for studio` on a party kind: every flow with its parties
-    /// is shared.
-    pub shares: Box<[Share]>,
-    /// Properties instances may set: own declarations, then inherited ones.
-    pub has: Box<[Has]>,
-    /// Defaults for instances: own, then inherited.
-    pub props: Props,
+    /// The slots this kind declares itself, a run of [`Schema`]'s: its things have these and its ancestors'.
+    pub slots: Run<Slot>,
     /// Only this kind's own laws; ancestors' laws are found through the tree.
     pub laws: Box<[Id<Law>]>,
     pub doc: Option<Sym>,
@@ -390,37 +337,6 @@ pub enum Sort {
     Entity,
 }
 
-/// An account-kind purpose mapping: incoming flows with `from` purpose become
-/// `to` purpose while reaching this kind of account.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Take {
-    pub to: Id<Purpose>,
-    pub from: Id<Purpose>,
-}
-
-/// A declared property: `has beneficiary entity`.
-#[derive(Clone, Copy, Debug)]
-pub struct Has {
-    pub name: Sym,
-    pub ty: Ty,
-    pub loc: Option<Loc>,
-}
-
-pub type Props = Box<[Prop]>;
-
-/// A property's value from a day: a declaration's, or a statement's
-/// (`06-15 me lives us/ny`, `07-01 flat business 20% for studio`). A thing's
-/// props are sorted by name, then `since`; `until` adds a row that restores
-/// the value before.
-#[derive(Clone, Copy, Debug)]
-pub struct Prop {
-    pub name: Sym,
-    pub value: Value,
-    /// `Day::MIN` for a declaration's.
-    pub since: Day,
-    pub loc: Option<Loc>,
-}
-
 /// A declared relationship together with the line that established it.
 /// Keeping the source beside its resolved value lets diagnostics identify the
 /// actual setting even after declarations have been lowered.
@@ -430,27 +346,12 @@ pub struct At<T> {
     pub loc: Loc,
 }
 
-/// The row of `name` in force on `day`: the latest that has begun, the first
-/// written where two begin together.
-pub fn prop(props: &[Prop], name: Sym, day: Day) -> Option<&Prop> {
-    let begun = props.iter().filter(|prop| prop.name == name && prop.since <= day);
-    begun.reduce(|best, prop| if prop.since > best.since { prop } else { best })
-}
-
 /// A unit of account: `USD`, `VTI`, `BTC`, `HOUSE`.
 pub struct Commodity {
     pub symbol: Sym,
     pub kind: Id<Kind>,
     /// Decimal places: declared, or the most seen in any written amount.
     pub scale: u8,
-    pub title: Option<Sym>,
-    pub liquidity: Option<Span>,
-    /// Resolved from the kind chain (`select fifo` on `currency`): how parcels
-    /// of it are relieved where neither the flow nor the place says.
-    pub select: Option<Policy>,
-    /// `grows 5% yearly`: the valuation model forecasts use.
-    pub growth: Option<Ratio>,
-    pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -532,9 +433,8 @@ pub struct Asset {
     /// Its own commodity: one unit, precision 0, named after it.
     pub unit: Id<Commodity>,
     /// `part of building`: a unit of it, a room of it. What is `of` the whole is
-    /// shared among its parts by their measures (`area`), which are props.
+    /// shared among its parts by their measures (`area`), which are slots.
     pub part_of: Option<At<Id<Asset>>>,
-    pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Loc,
 }
@@ -1589,40 +1489,29 @@ impl<'s> Book<'s> {
         Ok(Conversion::Rates { amount, path, rate })
     }
 
+    /// The rate policy of the systems an owner lives under on a day: the policy of a system that no other one's sits
+    /// beneath, or an error if two of them say different things.
     fn owner_rate_policy(&self, owner: Id<Entity>, day: Day) -> Result<Option<RatePolicy>, ConversionError> {
-        let residences = &self.entities[owner].lives;
+        let nearest: Vec<_> = self.residing(owner, day).filter_map(|system| self.nearest_rate_policy(system)).collect();
+        let sits_beneath = |system, other| other != system && self.systems.covers(system, other);
+        let maximal: Vec<_> = nearest
+            .iter()
+            .copied()
+            .filter(|&(system, _)| !nearest.iter().any(|&(other, _)| sits_beneath(system, other)))
+            .collect();
         let mut conflict = None::<(Id<System>, Id<System>)>;
-        for (index, residence) in residences.iter().enumerate().filter(|(_, r)| r.days.contains(day)) {
-            let Some((candidate, policy)) = self.nearest_rate_policy(residence.system) else {
-                continue;
-            };
-            if !self.active_policy_is_maximal(residences, day, candidate) {
-                continue;
-            }
-            for other in residences[index + 1..].iter().filter(|r| r.days.contains(day)) {
-                let Some((other, other_policy)) = self.nearest_rate_policy(other.system) else {
-                    continue;
-                };
-                if other == candidate
-                    || policy == other_policy
-                    || !self.active_policy_is_maximal(residences, day, other)
-                {
-                    continue;
+        for (index, &(first, policy)) in maximal.iter().enumerate() {
+            for &(second, other) in &maximal[index + 1..] {
+                if first != second && policy != other {
+                    let pair = (first.min(second), first.max(second));
+                    conflict = Some(conflict.map_or(pair, |current| current.min(pair)));
                 }
-                let pair = if candidate < other { (candidate, other) } else { (other, candidate) };
-                conflict = Some(conflict.map_or(pair, |current| current.min(pair)));
             }
         }
         if let Some((first, second)) = conflict {
             return Err(ConversionError::PolicyConflict { first, second });
         }
-        Ok(residences
-            .iter()
-            .filter(|residence| residence.days.contains(day))
-            .filter_map(|residence| self.nearest_rate_policy(residence.system))
-            .filter(|(candidate, _)| self.active_policy_is_maximal(residences, day, *candidate))
-            .min_by_key(|(candidate, _)| *candidate)
-            .map(|(_, policy)| policy))
+        Ok(maximal.iter().min_by_key(|(system, _)| *system).map(|&(_, policy)| policy))
     }
 
     fn nearest_rate_policy(&self, mut system: Id<System>) -> Option<(Id<System>, RatePolicy)> {
@@ -1633,14 +1522,6 @@ impl<'s> Book<'s> {
             }
             system = self.systems.parent(system)?;
         }
-    }
-
-    fn active_policy_is_maximal(&self, residences: &[Residence], day: Day, candidate: Id<System>) -> bool {
-        !residences
-            .iter()
-            .filter(|residence| residence.days.contains(day))
-            .filter_map(|residence| self.nearest_rate_policy(residence.system))
-            .any(|(other, _)| other != candidate && self.systems.covers(candidate, other))
     }
 
     fn conversion_path(

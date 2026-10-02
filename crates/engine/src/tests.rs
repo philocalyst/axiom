@@ -5,6 +5,7 @@
 #![allow(clippy::inconsistent_digit_grouping)]
 
 use axiom_core::{Day, Days, Diagnostic, Dim, Disposition, FileId, Groups, Id, Loc, Qty, Ratio, Severity, Tree};
+use axiom_model::builtin::{self, Coded};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
@@ -1096,7 +1097,7 @@ fn deferred_money_has_no_basis_and_a_withdrawal_realizes_all_of_it() {
 fn a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot() {
     let mut f = Fixture::new();
     let (equity, salary, checking, retirement, usd) = (f.equity, f.salary, f.checking, f.retirement, f.usd);
-    f.places[retirement].select = Some(Policy::Prorata);
+    f.say(retirement, builtin::SELECT, Policy::Prorata.code());
     f.flow(1, equity, checking, 6_300_00);
     f.flow(2, checking, retirement, 6_300_00);
     f.flow(3, salary, retirement, 1_000_00);
@@ -1586,7 +1587,6 @@ fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
         place,
         unit,
         part_of: None,
-        props: Box::default(),
         doc: None,
         loc: Loc::default(),
     });
@@ -1650,7 +1650,6 @@ fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
         place,
         unit,
         part_of: None,
-        props: Box::default(),
         doc: None,
         loc: Loc::default(),
     });
@@ -1792,9 +1791,10 @@ fn value_is_conserved_over_random_journals() {
         let (equity, salary, food, usd, vti) = (f.equity, f.salary, f.food, f.usd, f.vti);
         let (checking, savings, cash, brokerage, retirement) =
             (f.checking, f.savings, f.cash, f.brokerage, f.retirement);
-        f.places[brokerage].select =
-            [None, Some(Policy::Fifo), Some(Policy::Hifo), Some(Policy::Prorata)][seed as usize % 4];
-        f.places[retirement].select = Some(Policy::Prorata);
+        if let Some(policy) = [None, Some(Policy::Fifo), Some(Policy::Hifo), Some(Policy::Prorata)][seed as usize % 4] {
+            f.say(brokerage, builtin::SELECT, policy.code());
+        }
+        f.say(retirement, builtin::SELECT, Policy::Prorata.code());
         let pool = [checking, savings, cash, retirement, food];
         f.flow(1, equity, checking, 50_000_00);
         let mut expected = std::collections::BTreeMap::<Id<Commodity>, i64>::new();
@@ -1998,7 +1998,6 @@ fn asset_law_scope_contains_each_parts_place_subtree() {
         place: checking,
         unit: usd,
         part_of: None,
-        props: Box::default(),
         doc: None,
         loc: Loc::new(FileId(0), 1, 2),
     });
@@ -2009,7 +2008,6 @@ fn asset_law_scope_contains_each_parts_place_subtree() {
         place: savings,
         unit: usd,
         part_of: Some(At { value: house, loc: Loc::default() }),
-        props: Box::default(),
         doc: None,
         loc: Loc::new(FileId(0), 3, 4),
     });
@@ -2161,7 +2159,7 @@ fn an_opening_moves_value_but_no_law_sees_it_and_it_starts_no_period() {
 fn a_split_scales_every_holding_of_the_commodity_and_keeps_basis_and_dates() {
     let mut f = Fixture::new();
     let (equity, checking, brokerage, vti, usd) = (f.equity, f.checking, f.brokerage, f.vti, f.usd);
-    f.places[brokerage].select = Some(Policy::Fifo);
+    f.say(brokerage, builtin::SELECT, Policy::Fifo.code());
     f.flow(1, equity, checking, 10_000_00);
     f.buy(2, 1_000_00, 10);
     f.buy(3, 500_00, 5);
@@ -2243,7 +2241,7 @@ fn stated_basis_can_initialize_a_new_asset_holding() {
 fn claims_stay_apart_by_transaction_and_overdue_ones_are_reported_once_each() {
     let mut f = Fixture::new();
     let (salary, savings, checking, grant, usd) = (f.salary, f.savings, f.checking, f.grant, f.usd);
-    f.places[savings].claim = true;
+    f.say(savings, builtin::CLAIM, true);
     let first = f.flow(1, salary, savings, 300_00);
     let second = f.flow(2, salary, savings, 300_00);
     f.claim(first, 30, grant);
@@ -2269,7 +2267,7 @@ fn claims_stay_apart_by_transaction_and_overdue_ones_are_reported_once_each() {
 fn growth_arrives_without_basis_and_a_loss_leaves_its_basis_with_what_remains() {
     let mut f = Fixture::new();
     let (equity, checking, brokerage, market, vti) = (f.equity, f.checking, f.brokerage, f.market, f.vti);
-    f.places[brokerage].select = Some(Policy::Fifo);
+    f.say(brokerage, builtin::SELECT, Policy::Fifo.code());
     f.flow(1, equity, checking, 5_000_00);
     f.buy(2, 600_00, 6);
     f.buy(3, 400_00, 4);

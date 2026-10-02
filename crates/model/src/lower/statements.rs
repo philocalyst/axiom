@@ -15,8 +15,10 @@ use super::tail::{Reach, Tail, written_purpose};
 use crate::book::{
     Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, Role, Terms, TermsState,
 };
+use crate::builtin;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
+use crate::holders::Holder;
 use crate::journal::{
     Action, Assert, ClaimChange, ClaimChangeAction, EndEvent, EndTarget, Event, Filed, Flow, Gap, Infer, Measure, Mode,
     Program, Purposed, Quote, Reading, Split, Txn, Waive,
@@ -208,10 +210,7 @@ pub(super) fn lower_value<'s>(
     };
     match target {
         StatementTarget::Place(place) => {
-            let fallback = match world.book.places[place].holds.as_deref() {
-                Some([unit]) => *unit,
-                _ => world.book.base,
-            };
+            let fallback = world.book.holds_only(place).unwrap_or(world.book.base);
             assert_value(world, at, value, Asserted { place, subject: ModelSubject::Place(place), fallback }, diags);
         }
         StatementTarget::Asset(asset) => {
@@ -691,10 +690,10 @@ fn close(world: &mut World<'_>, target: EndTarget, day: Day, loc: Loc) {
                 contract.ended = Some(loc);
             }
         }
-        EndTarget::Place(place) => world.book.places[place].closed = Some(day),
+        EndTarget::Place(place) => world.say(Holder::Place(place), builtin::CLOSED, day),
         EndTarget::Asset(asset) => {
             let place = world.book.assets[asset].place;
-            world.book.places[place].closed = Some(day);
+            world.say(Holder::Place(place), builtin::CLOSED, day);
         }
     }
 }

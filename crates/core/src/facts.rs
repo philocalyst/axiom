@@ -165,6 +165,13 @@ pub struct Facts {
     members: Column,
 }
 
+/// The store of no holders: what a book that says nothing has.
+impl Default for Facts {
+    fn default() -> Facts {
+        Facts::builder(0).freeze()
+    }
+}
+
 impl Facts {
     /// A builder for a store of `holders` rows, numbered from zero. Statements are painted in the order they are
     /// written: a later one overrides an earlier one over the days it covers, and what held before resumes after it.
@@ -216,6 +223,39 @@ impl Facts {
         let steps = self.steps_of(key.slot, holder)?;
         let begun = begun_by(&self.days[steps.clone()], day);
         read(&self.values, (steps.start + begun - 1) as u32)
+    }
+
+    /// What holds of `holder`'s `slot` on `day`, with its tag, whatever its type: for a reader that learns the type from
+    /// the slot's declaration and not from a [`Key`], as a law that reads `.filing` does. `None` if nothing is said.
+    ///
+    /// ```
+    /// use axiom_core::{Day, Days, Facts, Key, SlotId, Tag};
+    ///
+    /// const FEE: Key<u32> = Key::new(SlotId(4));
+    /// let mut book = Facts::builder(1);
+    /// book.paint_always(0, FEE, 25);
+    /// let facts = book.freeze();
+    ///
+    /// let said = facts.datum_at(SlotId(4), 0, Day(0)).expect("said");
+    /// assert_eq!((said.tag(), said.read::<u32>()), (Tag::Id, Some(25)));
+    /// assert!(facts.datum_at(SlotId(5), 0, Day(0)).is_none());
+    /// ```
+    pub fn datum_at(&self, slot: SlotId, holder: u32, day: Day) -> Option<Datum> {
+        let steps = self.steps_of(slot, holder)?;
+        let at = (steps.start + begun_by(&self.days[steps.clone()], day) - 1) as u32;
+        (self.values.tags()[at as usize] != Tag::Empty).then(|| self.values.datum(at))
+    }
+
+    /// Whether `holder` says anything of `slot` on some day.
+    pub fn says(&self, slot: SlotId, holder: u32) -> bool {
+        let steps = self.steps_of(slot, holder).unwrap_or(0..0);
+        self.values.tags()[steps].iter().any(|&tag| tag != Tag::Empty)
+    }
+
+    /// Every day on which some holder's some slot steps to a new value, or to a gap, other than the beginning of time
+    /// that every timeline starts at. A day is listed once for every step on it.
+    pub fn step_days(&self) -> impl Iterator<Item = Day> + '_ {
+        self.days.iter().copied().filter(|&day| day != Day::MIN)
     }
 
     /// What was painted of `holder`'s `key`, in order: each stretch of days, and the value that holds through it.
@@ -595,7 +635,11 @@ struct Sets {
 impl Sets {
     /// The set of `members`, which are put in order and without repeats, and stored if it was not yet.
     fn intern<V: Field>(&mut self, members: impl IntoIterator<Item = V>) -> Many<V> {
-        let mut sorted: Vec<Datum> = members.into_iter().map(Datum::of).collect();
+        self.intern_data(members.into_iter().map(Datum::of).collect())
+    }
+
+    /// [`Sets::intern`] for members that are data.
+    fn intern_data<V>(&mut self, mut sorted: Vec<Datum>) -> Many<V> {
         sorted.sort_unstable();
         sorted.dedup();
         let start = self.interned.get(sorted.as_slice()).copied().unwrap_or_else(|| self.store(&sorted));
@@ -634,6 +678,20 @@ impl Builder {
     ) {
         let set = self.sets.intern(members);
         self.paint(holder, key, days, set);
+    }
+
+    /// `value` holds of `holder`'s `slot` over `days`, for a writer that learns the type from the slot's declaration: a
+    /// [`Datum`] is a value and its tag. The slot must always be given values of one type, as for [`Builder::paint`].
+    pub fn paint_datum(&mut self, holder: u32, slot: SlotId, days: Days, value: Datum) {
+        assert!(holder < self.holders, "holder {holder} of a store of {}", self.holders);
+        self.statements.push(Statement { holder, slot, days, value });
+    }
+
+    /// The set of `members` holds of `holder`'s `slot` over `days`, as [`Builder::paint_many`] does, for members that
+    /// are data and not a type. The slot must be read as a [`Many`] of whatever the members are.
+    pub fn paint_set_datum(&mut self, holder: u32, slot: SlotId, days: Days, members: impl IntoIterator<Item = Datum>) {
+        let set: Many<u32> = self.sets.intern_data(members.into_iter().collect());
+        self.paint_datum(holder, slot, days, Datum::of(set));
     }
 
     /// `value` holds of `holder`'s `key` from the beginning of time: a declaration.
@@ -892,6 +950,46 @@ mod tests {
         assert_eq!(letters(2, LETTER), [(5, 6, 2), (7, 8, 4), (9, MAX, 2)]);
         assert_eq!(letters(2, OTHER), [(0, 4, 20), (5, 20, 21)]);
         assert_eq!(facts.at(OPENED, 0, Day(-5)), Some(Day(100)));
+    }
+
+    #[test]
+    fn data_are_painted_and_read_without_a_key_and_agree_with_the_typed_ones() {
+        let mut builder = Facts::builder(2);
+        builder.paint(0, LETTER, days(0, 9), 7);
+        builder.paint_datum(0, SlotId(0), days(5, 20), Datum::of(8_u32));
+        builder.paint_datum(1, SlotId(2), Days::ALWAYS, Datum::of(Day(100)));
+        builder.paint_set_datum(1, SlotId(3), Days::ALWAYS, [Datum::of(2_u32), Datum::of(1_u32), Datum::of(2_u32)]);
+        let facts = builder.freeze();
+        let at = |slot: u32, holder, day| facts.datum_at(SlotId(slot), holder, Day(day));
+        assert_eq!(at(0, 0, 3).and_then(Datum::read::<u32>), Some(7));
+        assert_eq!(at(0, 0, 7).and_then(Datum::read::<u32>), Some(8), "painted over by a datum");
+        assert_eq!(facts.at(LETTER, 0, Day(12)), Some(8), "and read through a key");
+        assert_eq!(at(0, 0, 30), None, "nothing is said after");
+        assert_eq!(at(2, 1, -5).and_then(Datum::read::<Day>), Some(Day(100)));
+        assert_eq!(at(2, 0, 0), None, "a holder that said nothing of the slot");
+        let set = facts.at(LIVES, 1, Day(0)).expect("a set");
+        assert_eq!(facts.members(set).collect::<Vec<_>>(), [1, 2], "in order and without repeats");
+        let twice = Facts::builder(1);
+        assert!(twice.freeze().datum_at(SlotId(0), 0, Day(0)).is_none());
+    }
+
+    #[test]
+    fn what_is_said_is_asked_without_a_day_and_the_days_it_changes_are_listed() {
+        let mut builder = Facts::builder(2);
+        builder.paint_always(0, OPENED, Day(100));
+        builder.paint(0, LETTER, days(10, 19), 7);
+        builder.paint(1, LETTER, days(15, 30), 8);
+        let facts = builder.freeze();
+        assert!(facts.says(SlotId(2), 0) && facts.says(SlotId(0), 0), "said on some day");
+        assert!(!facts.says(SlotId(2), 1), "a holder that says nothing of the slot");
+        assert!(!facts.says(SlotId(1), 0), "a slot nobody has");
+        let mut changes: Vec<Day> = facts.step_days().collect();
+        changes.sort_unstable();
+        assert_eq!(
+            changes,
+            [Day(10), Day(15), Day(20), Day(31)],
+            "where something begins or ends, not the beginning of time"
+        );
     }
 
     #[test]

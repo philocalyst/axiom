@@ -46,15 +46,15 @@ impl<'s> Parser<'s> {
             _ => None,
         };
         let header = self.keep_header(line);
-        let (props, laws, alsos, patterns) =
-            (self.mark::<Prop>(), self.mark::<Law>(), self.mark::<Also>(), self.mark::<Pattern>());
+        let (props, slots, laws, alsos, patterns) =
+            (self.mark::<Prop>(), self.mark::<Has>(), self.mark::<Law>(), self.mark::<Also>(), self.mark::<Pattern>());
         let mut found = Found::default();
         let _ = self.children(line, |parser, child| parser.decl_line(child, what, &mut found));
-        let (props, laws, alsos, known_as) =
-            (self.since(props), self.since(laws), self.since(alsos), self.since(patterns));
+        let (props, slots, laws, alsos, known_as) =
+            (self.since(props), self.since(slots), self.since(laws), self.since(alsos), self.since(patterns));
         let budget = found.budget.map(|(allowance, _)| allowance);
         for name in names {
-            let decl = Decl { what, name, kind, at, purpose, budget, known_as, alsos, props, laws };
+            let decl = Decl { what, name, kind, at, purpose, budget, known_as, alsos, props, slots, laws };
             self.emit(&header, decl, ItemKind::Decl);
         }
         Ok(())
@@ -69,6 +69,7 @@ impl<'s> Parser<'s> {
             }
             Tok::Name("also") => self.also(line).map(drop),
             Tok::Name("known-as") => self.known_as(),
+            Tok::Name("has") => self.has(),
             Tok::Name("budget") if what == DeclKind::Purpose => {
                 self.bump();
                 let allowance = self.allowance(Scope::Undated)?;
@@ -81,6 +82,64 @@ impl<'s> Parser<'s> {
             }
             _ => self.property(line, Scope::Undated),
         }
+    }
+
+    /// `has NAME RANGE [MULT] [by WEIGHT]`: a slot.
+    fn has(&mut self) -> Parse<()> {
+        let start = self.peek().loc.start as usize;
+        self.bump();
+        let name = self.name("has-name", "the slot's name, such as `beneficiary`")?;
+        let takes = self.takes()?;
+        let mult = self.choose_mult();
+        let weight = self.eat_word("by").map(|_| self.weight()).transpose()?;
+        self.expect_eol()?;
+        let loc = self.loc_from(start);
+        self.push(Has { name, takes, mult, weight, loc });
+        Ok(())
+    }
+
+    /// What a slot takes: `one of a | b`, a unit or a rate of two, or the names of kinds or one value type.
+    fn takes(&mut self) -> Parse<Takes<'s>> {
+        let words = self.at_word("one") && matches!(self.lexer.peek_second().tok, Tok::Name("of"));
+        if let Tok::Unit(unit) = self.tok() {
+            return Ok(Takes::Unit(self.bump_as(Name(unit))));
+        }
+        let mark = self.mark::<Name>();
+        if words {
+            self.bump();
+            self.bump();
+        }
+        loop {
+            let name = self
+                .name_like("has-type", "what the slot takes: a kind, `one of` some words, or a type such as `date`")?;
+            self.push(name);
+            if self.eat(Punct::Pipe).is_none() {
+                break;
+            }
+        }
+        let names = self.since(mark);
+        Ok(if words { Takes::Words(names) } else { Takes::Names(names) })
+    }
+
+    /// `optional`, `some` or `many`, if one is written.
+    fn choose_mult(&mut self) -> Mult {
+        let mult = match self.tok() {
+            Tok::Name("optional") => Mult::Optional,
+            Tok::Name("some") => Mult::Some,
+            Tok::Name("many") => Mult::Many,
+            _ => return Mult::One,
+        };
+        self.bump_as(mult)
+    }
+
+    /// What follows `by`: the weight's name and, if it counts an amount, its commodity.
+    fn weight(&mut self) -> Parse<Weight<'s>> {
+        let name = self.name("has-weight", "what the values are weighed by, such as `share`")?;
+        let unit = match self.tok() {
+            Tok::Unit(unit) => Some(self.bump_as(Name(unit))),
+            _ => None,
+        };
+        Ok(Weight { name, unit })
     }
 
     /// `budget PURPOSE LIMIT monthly|yearly [carries] [funded from H into H]`

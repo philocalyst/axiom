@@ -25,7 +25,7 @@ kind 401k : tax-deferred
   basis zero
   liquidity 5d
   takes pre-tax-deferral from wages
-  has employer entity
+  has employer employer optional
 
   /// Elective deferrals are capped for each person and calendar year, across
   /// every plan they hold (IRC §402(g)), with a catch-up from age 50 and a

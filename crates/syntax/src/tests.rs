@@ -1240,6 +1240,71 @@ fn declarations_take_lists_institutions_and_several_globs() {
     assert_eq!(format!("{:?}", rules[0].on), format!("{:?}", rules[1].on));
 }
 
+/// A slot as written: its name, what it takes, how many, and what weighs the values.
+fn slot_line(file: &File, has: &Has) -> String {
+    let names = |names: Many<Name>| file[names].iter().map(|name| name.0).collect::<Vec<_>>().join(" | ");
+    let takes = match has.takes {
+        Takes::Names(kinds) => names(kinds),
+        Takes::Words(words) => format!("one of {}", names(words)),
+        Takes::Unit(unit) => unit.0.to_string(),
+    };
+    let weight = has
+        .weight
+        .map(|weight| format!(" by {}{}", weight.name.0, weight.unit.map_or(String::new(), |u| format!(" {}", u.0))));
+    format!("{} {takes} {:?}{}", has.name.0, has.mult, weight.unwrap_or_default())
+}
+
+#[test]
+fn a_slot_says_what_it_takes_how_many_and_what_weighs_it() {
+    let file = parse_clean(
+        "kind plan : entity\n  has owner person | household\n  has coverage one of self-only | family optional\n  \
+         has rate USD/MI many\n  has born date\n  has owners person some by share\n  has tenants person some by rent USD\n  \
+         has 529-plan 529-plan\n  restricted\n",
+    );
+    let decl: &Decl = file.iter().next().unwrap();
+    let slots: Vec<String> = file[decl.slots].iter().map(|has| slot_line(&file, has)).collect();
+    assert_eq!(
+        slots,
+        [
+            "owner person | household One",
+            "coverage one of self-only | family Optional",
+            "rate USD/MI Many",
+            "born date One",
+            "owners person Some by share",
+            "tenants person Some by rent USD",
+            "529-plan 529-plan One",
+        ]
+    );
+    assert_eq!(
+        file[decl.props].iter().map(|prop| prop.name.0).collect::<Vec<_>>(),
+        ["restricted"],
+        "a slot is no property"
+    );
+    let owner = &file[decl.slots][0];
+    assert_eq!(file.src[owner.loc.range()].trim(), "has owner person | household");
+}
+
+#[test]
+fn a_slot_line_that_is_wrong_is_said_where_it_goes_wrong_and_the_others_stay() {
+    let line = |text: &str| format!("kind k : entity\n  has {text}\n  has fine date\n");
+    for (text, code) in [
+        ("", "has-name"),
+        ("x", "has-type"),
+        ("x person |", "has-type"),
+        ("x one of", "has-type"),
+        ("x person by", "has-weight"),
+        ("x person many extra", "expected-end-of-line"),
+        ("x date optional many", "expected-end-of-line"),
+    ] {
+        let source = line(text);
+        only_error(&source, code);
+        let (file, _) = parse(FileId(0), &source);
+        let decl: &Decl = file.iter().next().unwrap();
+        let kept: Vec<String> = file[decl.slots].iter().map(|has| slot_line(&file, has)).collect();
+        assert_eq!(kept, ["fine date One"], "`has {text}` is dropped and the line after it is not");
+    }
+}
+
 #[test]
 fn assets_purposes_and_budgets_are_declared() {
     let file = parse_clean(EXAMPLE);
@@ -2996,6 +3061,19 @@ fn dump_prop(file: &File, prop: &Prop) -> String {
     format!("{:?} {args:?} {lines:?} {:?}", prop.name, prop.loc)
 }
 
+fn dump_has(file: &File, has: &Has) -> String {
+    let (takes, weight) = (
+        match has.takes {
+            Takes::Names(names) | Takes::Words(names) => {
+                format!("{:?} {:?}", &file[names], matches!(has.takes, Takes::Words(_)))
+            }
+            Takes::Unit(unit) => format!("{unit:?}"),
+        },
+        has.weight,
+    );
+    format!("{:?} {takes} {:?} {weight:?} {:?}", has.name, has.mult, has.loc)
+}
+
 fn dump_terms(file: &File, terms: &Terms) -> String {
     let payment = match terms.payment {
         Some(Payment::Fixed(amount)) => format!("Fixed({})", dump_amount(file, &amount)),
@@ -3063,6 +3141,7 @@ fn dump(file: &File) -> String {
     let patterns = |patterns: Many<Pattern>| -> Vec<String> {
         file[patterns].iter().map(|pattern| spell(file, pattern)).collect()
     };
+    let slots = |slots: Many<Has>| -> Vec<String> { file[slots].iter().map(|has| dump_has(file, has)).collect() };
     let alsos = |alsos: Many<Also>| -> Vec<String> { file[alsos].iter().map(|also| dump_also(file, also)).collect() };
     let laws = |laws: Many<Law>| -> Vec<String> { file[laws].iter().map(|law| dump_law(file, law)).collect() };
     for item in &file.items {
@@ -3130,7 +3209,7 @@ fn dump(file: &File) -> String {
                 let decl = &file[id];
                 let budget = decl.budget.map(|budget| dump_allowance(file, &file[budget]));
                 format!(
-                    "{:?} {:?} {:?} {:?} {budget:?} {:?} {:?} {:?} {:?}",
+                    "{:?} {:?} {:?} {:?} {budget:?} {:?} {:?} {:?} {:?} {:?}",
                     decl.name,
                     decl.at,
                     decl.purpose,
@@ -3138,6 +3217,7 @@ fn dump(file: &File) -> String {
                     patterns(decl.known_as),
                     alsos(decl.alsos),
                     props(decl.props),
+                    slots(decl.slots),
                     laws(decl.laws)
                 )
             }

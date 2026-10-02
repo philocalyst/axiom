@@ -457,7 +457,7 @@ impl<'a, 'b, 's> Planner<'a, 'b, 's> {
         if !matches!(place.role, Role::Account { .. }) {
             return problem("sync-feed-account", format!("`{name}` does not target an account"));
         }
-        let commodity = &book.commodities[book.entities[place.owner].currency];
+        let commodity = &book.commodities[book.currency(place.owner)];
         let unit = Unit { name: book.name(commodity.symbol), scale: commodity.scale };
         self.world.plan_feed_at(&Feed { account: book.name(place.path), unit, format }, text, file)
     }
@@ -510,7 +510,7 @@ fn command_units<'s>(book: &Book<'s>, run: &EngineRun) -> Vec<&'s str> {
 
 fn monitor_gaps(book: &Book<'_>, run: &EngineRun) -> Vec<Diagnostic> {
     let has_contracts = !book.contracts.is_empty();
-    let has_claim_places = book.places.iter().any(|(_, place)| place.claim);
+    let has_claim_places = book.places.ids().any(|place| book.is_claim(place));
     if (has_contracts || has_claim_places) && !run.monitor_complete {
         vec![Diagnostic::warning(
             "sync-monitor-incomplete",

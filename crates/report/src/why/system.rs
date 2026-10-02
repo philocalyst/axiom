@@ -47,12 +47,9 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, system: Id<System>) -> 
             laws.push(Row::padded([Cell::text(doc)], 4).depth(1).style(crate::Style::Muted));
         }
     }
-    let residents: Vec<&str> = book
-        .entities
-        .values()
-        .filter(|entity| entity.lives.iter().any(|home| book.systems.covers(system, home.system)))
-        .map(|entity| book.name(entity.path))
-        .collect();
+    let lives_here = |entity| book.residences(entity).any(|(_, home)| book.systems.covers(system, home));
+    let residents: Vec<&str> =
+        book.entities.iter().filter(|&(id, _)| lives_here(id)).map(|(_, entity)| book.name(entity.path)).collect();
     let mut who = Section::new([]);
     who.note(if residents.is_empty() {
         "Nobody in this book lives here.".to_string()

@@ -25,6 +25,7 @@ use crate::state::World;
 use crate::temporal::Query;
 use crate::timeline::{self, Schedule};
 use crate::totals::Watch;
+use crate::traits::Traits;
 use crate::{Options, OwnerShare, Run, infer};
 
 /// The names the fold and the views look for by spelling, resolved once: what
@@ -65,6 +66,8 @@ pub struct Plan<'b, 's> {
     pub(crate) known: Known,
     /// The sign each place's balance is shown in.
     pub(crate) sides: Sides,
+    /// What the fold asks of each place and commodity.
+    pub(crate) traits: Traits,
     /// By law id: what is true of the law whatever runs it.
     pub(crate) laws: Box<[LawFacts]>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
@@ -91,6 +94,9 @@ pub struct Plan<'b, 's> {
     pub(crate) occurrence_txns: Box<[Id<Txn>]>,
     /// The day of the first fact that starts a period; before it there is nothing to close.
     pub(crate) period_start: Option<Day>,
+    /// The day the laws that close periods begin: the first fact of the journal, or the first step of anything the
+    /// book says of its things, a residence beginning being one.
+    pub(crate) schedule_start: Option<Day>,
     last_fact: Option<Day>,
     /// By index in `Rules::timed`: when each falls due.
     pub(crate) timed: Box<[Schedule]>,
@@ -120,6 +126,7 @@ impl<'b, 's> Plan<'b, 's> {
             problems,
             known: Known::of(book),
             sides,
+            traits: Traits::of(book),
             repeats: repeats(book),
             readers: facts::readers(book, &laws),
             purpose_readers: facts::purpose_readers(book),
@@ -130,6 +137,7 @@ impl<'b, 's> Plan<'b, 's> {
             kind_places: kind_places(book),
             occurrence_txns: occurrence_txns(book),
             period_start: timeline::start(book, &events),
+            schedule_start: schedule_start(book, &events),
             last_fact: timeline::last_fact(book, &events),
             events,
             laws,
@@ -327,6 +335,10 @@ fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, bool) {
                 continue;
             };
             let Some(&root) = args.first() else { continue };
+            // The days an entity lives somewhere are counted in the facts.
+            if *func == Func::Days && matches!(law.nodes[root].op, Op::Resides(..)) {
+                continue;
+            }
             let call = axiom_model::NodeId(id.index() as u32);
             for share in owners {
                 queries.push(Query {
@@ -373,28 +385,7 @@ fn subject_owners<'o>(book: &Book, ownership: &'o Owners, subject: Subject) -> &
 
 /// The days a dated value starts or ends, which must be sampled even when the journal has no fact that day.
 fn change_dates(book: &Book) -> Box<[Day]> {
-    let mut dates = Vec::new();
-    for (_, place) in book.places.iter() {
-        add_prop_dates(&mut dates, &place.props);
-    }
-    for (_, entity) in book.entities.iter() {
-        add_prop_dates(&mut dates, &entity.props);
-        for residence in entity.lives.iter() {
-            dates.push(residence.days.first());
-            if residence.days.last() != Day::MAX {
-                dates.push(residence.days.last().add_days(1));
-            }
-        }
-    }
-    for (_, asset) in book.assets.iter() {
-        add_prop_dates(&mut dates, &asset.props);
-    }
-    for (_, commodity) in book.commodities.iter() {
-        add_prop_dates(&mut dates, &commodity.props);
-    }
-    for (_, kind) in book.kinds.iter() {
-        add_prop_dates(&mut dates, &kind.props);
-    }
+    let mut dates: Vec<Day> = book.facts.step_days().collect();
     for (_, param) in book.params.iter() {
         dates.extend(param.rows.iter().filter_map(|row| row.since));
     }
@@ -404,8 +395,9 @@ fn change_dates(book: &Book) -> Box<[Day]> {
     dates.into_boxed_slice()
 }
 
-fn add_prop_dates(dates: &mut Vec<Day>, props: &[axiom_model::Prop]) {
-    dates.extend(props.iter().map(|prop| prop.since).filter(|&day| day != Day::MIN));
+/// The first day on which the book says anything of its things: a dated residence or property, whatever the journal.
+fn schedule_start(book: &Book, events: &Events) -> Option<Day> {
+    timeline::start(book, events).into_iter().chain(book.facts.step_days().min()).min()
 }
 
 /// Whether some list of rules brings one law to one subject twice, as two
