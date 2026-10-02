@@ -232,7 +232,10 @@ gain is less by them, a purchase's basis more.
 4. its commodity's kind in party position (`kind fund … pays dividend`);
 5. its accounts' kinds (a `401k`'s `takes pre-tax-deferral from wages`).
 
-Two sources that disagree are an error naming both. An event none of them
+Parent and child purposes are compatible classifications at different levels
+of detail; the first match still selects the event's purpose. Two sources naming
+unrelated purposes, or different explicit objects, are an error naming both.
+An event none of them
 classifies is *unclassified*; with a description it is *unclassified, described*.
 `check --strict` asks for a purpose on each. `#NAME of THING` gives a purpose its
 object where the purpose takes one; a purpose that requires an object reports its
