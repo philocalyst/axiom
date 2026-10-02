@@ -879,7 +879,7 @@ commodity VTI : fund
 account checking : bank
 account brokerage : bank
 2026-02-10 VTI = 300 USD
-2026-02-10 checking 2_100 USD -> brokerage 7 VTI
+2026-02-10 checking 1_999.90 USD -> brokerage 7 VTI
 ";
     let (book, diagnostics) = build_project(project);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
