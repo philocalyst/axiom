@@ -10,7 +10,8 @@ use std::cmp::Ordering;
 
 use axiom_core::day::days_in_month;
 use axiom_core::{
-    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
+    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline,
+    Tree, calendar,
 };
 
 use crate::journal::{
@@ -436,7 +437,9 @@ pub struct At<T> {
 /// The row of `name` in force on `day`: the latest that has begun, the first
 /// written where two begin together.
 pub fn prop(props: &[Prop], name: Sym, day: Day) -> Option<&Prop> {
-    let begun = props.iter().filter(|prop| prop.name == name && prop.since <= day);
+    let begun = props
+        .iter()
+        .filter(|prop| prop.name == name && prop.since <= day);
     begun.reduce(|best, prop| if prop.since > best.since { prop } else { best })
 }
 
@@ -829,7 +832,10 @@ pub enum ForecastError {
     UnsupportedProration(Day),
     MissingTemplate(Day),
     UnsupportedLoan(Day),
-    UnsupportedFeature { feature: ForecastFeature, day: Day },
+    UnsupportedFeature {
+        feature: ForecastFeature,
+        day: Day,
+    },
     Overflow,
 }
 
@@ -876,8 +882,12 @@ impl Contract {
                 coverage_in_timeline(terms, self.days, template, day)
             });
         match (regular, standing) {
-            (ContractCoverage::Active, _) | (_, ContractCoverage::Active) => ContractCoverage::Active,
-            (ContractCoverage::Waived, _) | (_, ContractCoverage::Waived) => ContractCoverage::Waived,
+            (ContractCoverage::Active, _) | (_, ContractCoverage::Active) => {
+                ContractCoverage::Active
+            }
+            (ContractCoverage::Waived, _) | (_, ContractCoverage::Waived) => {
+                ContractCoverage::Waived
+            }
             _ => ContractCoverage::None,
         }
     }
@@ -899,7 +909,10 @@ impl Contract {
             window.is_some(),
             ScheduleKind::Standing,
         );
-        ContractOccurrences { regular: regular.peekable(), standing: standing.peekable() }
+        ContractOccurrences {
+            regular: regular.peekable(),
+            standing: standing.peekable(),
+        }
     }
 
     /// The days occurrences fall due in `within`, in order. Kept as a
@@ -926,7 +939,9 @@ impl Contract {
         if !self.days.contains(day) {
             return Err(ForecastError::OutsideContract(day));
         }
-        let terms = self.terms_on_schedule(schedule, day).ok_or(ForecastError::OutsideContract(day))?;
+        let terms = self
+            .terms_on_schedule(schedule, day)
+            .ok_or(ForecastError::OutsideContract(day))?;
         if terms.is_waived() {
             return Err(ForecastError::Waived(day));
         }
@@ -1000,7 +1015,9 @@ impl Contract {
         schedule: ScheduleKind,
         day: Day,
     ) -> Result<Option<Days>, ForecastError> {
-        let terms = self.terms_on_schedule(schedule, day).ok_or(ForecastError::OutsideContract(day))?;
+        let terms = self
+            .terms_on_schedule(schedule, day)
+            .ok_or(ForecastError::OutsideContract(day))?;
         if terms.period.is_some() && terms.covers.is_some() {
             return Err(ForecastError::ConflictingRecognition(day));
         }
@@ -1040,9 +1057,16 @@ fn occurrences_for<'a>(
             .within(within)
             .filter(move |(_, terms)| enabled && !terms.is_waived())
             .flat_map(move |(stretch, terms)| {
-                let days = stretch.intersect(within).expect("timeline stretch intersects its window");
-                calendar::due(terms.every, &terms.on, terms.anchor, days)
-                    .map(move |day| ContractOccurrence { day, schedule, terms })
+                let days = stretch
+                    .intersect(within)
+                    .expect("timeline stretch intersects its window");
+                calendar::due(terms.every, &terms.on, terms.anchor, days).map(move |day| {
+                    ContractOccurrence {
+                        day,
+                        schedule,
+                        terms,
+                    }
+                })
             })
     })
 }
@@ -1050,7 +1074,10 @@ fn occurrences_for<'a>(
 fn template_covers_flow(terms: &Terms, template: &Flow) -> bool {
     terms.template.iter().any(|candidate| {
         same_flow_kind(template, &candidate.flow)
-            || candidate.legs.iter().any(|leg| same_flow_kind(template, &leg.flow))
+            || candidate
+                .legs
+                .iter()
+                .any(|leg| same_flow_kind(template, &leg.flow))
     })
 }
 
@@ -1063,7 +1090,11 @@ fn coverage_in_timeline(
     let contains = |terms: &Terms| template_covers_flow(terms, template);
     let current = timeline.at(day);
     if !current.is_waived() {
-        return if contains(current) { ContractCoverage::Active } else { ContractCoverage::None };
+        return if contains(current) {
+            ContractCoverage::Active
+        } else {
+            ContractCoverage::None
+        };
     }
     if contains(current) {
         return ContractCoverage::Waived;
@@ -1072,7 +1103,9 @@ fn coverage_in_timeline(
         .within(within)
         .filter(|(_, candidate)| !candidate.is_waived())
         .map(|(stretch, terms)| {
-            let stretch = stretch.intersect(within).expect("timeline stretch intersects the contract");
+            let stretch = stretch
+                .intersect(within)
+                .expect("timeline stretch intersects the contract");
             let distance = if stretch.last() < day {
                 i64::from(day.0) - i64::from(stretch.last().0)
             } else if stretch.first() > day {
@@ -1117,8 +1150,8 @@ fn same_flow_kind(a: &Flow, b: &Flow) -> bool {
         (None, None) => true,
         _ => false,
     };
-    (a.from, a.to, a.out.unit, a.arrive.unit, a.owner, a.payee) ==
-        (b.from, b.to, b.out.unit, b.arrive.unit, b.owner, b.payee)
+    (a.from, a.to, a.out.unit, a.arrive.unit, a.owner, a.payee)
+        == (b.from, b.to, b.out.unit, b.arrive.unit, b.owner, b.payee)
         && same_purpose
 }
 
@@ -1205,7 +1238,10 @@ fn calendar_window(period: Period, day: Day) -> Result<Days, ForecastError> {
 
 fn previous_window(period: Period, day: Day) -> Result<Days, ForecastError> {
     let first = calendar_window(period, day)?.first();
-    let months = period.months().checked_neg().ok_or(ForecastError::Overflow)?;
+    let months = period
+        .months()
+        .checked_neg()
+        .ok_or(ForecastError::Overflow)?;
     calendar_window(period, add_months(first, months)?)
 }
 
@@ -1358,7 +1394,11 @@ pub enum Implied {
     Item { sign: Sign, amount: TemplateAmount },
     /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
     /// `None` ends mean the implying flow's own ends (`issuer -> self`).
-    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: TemplateAmount },
+    Flow {
+        from: Option<Id<Place>>,
+        to: Option<Id<Place>>,
+        amount: TemplateAmount,
+    },
 }
 
 /// How a line item bears on the flow it is under (LANGUAGE §3).
@@ -1449,18 +1489,54 @@ pub enum RatePolicy {
 }
 
 /// A conversion together with the exact evidence used to obtain its rate.
+/// The variants make it impossible to attach quote evidence to a zero amount
+/// or to mistake that amount for a cross-commodity identity rate.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Conversion {
-    pub amount: Amount,
-    pub rate: Ratio,
-    pub path: ConversionPath,
+pub enum Conversion {
+    Identity {
+        amount: Amount,
+    },
+    /// A zero amount converted across commodities without requiring a quote.
+    Zero {
+        amount: Amount,
+    },
+    Rates {
+        amount: Amount,
+        rate: Ratio,
+        path: RatePath,
+    },
+}
+
+impl Conversion {
+    pub const fn amount(self) -> Amount {
+        match self {
+            Self::Identity { amount } | Self::Zero { amount } | Self::Rates { amount, .. } => {
+                amount
+            }
+        }
+    }
+
+    pub const fn rate(self) -> Option<Ratio> {
+        match self {
+            Self::Identity { .. } => Some(Ratio::ONE),
+            Self::Zero { .. } => None,
+            Self::Rates { rate, .. } => Some(rate),
+        }
+    }
+
+    pub const fn path(self) -> Option<RatePath> {
+        match self {
+            Self::Rates { path, .. } => Some(path),
+            Self::Identity { .. } | Self::Zero { .. } => None,
+        }
+    }
 }
 
 /// One direct or inverse rate, or the two rates used through the base unit.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ConversionPath {
-    Identity,
-    Rates { first: RateUse, second: Option<RateUse> },
+pub struct RatePath {
+    pub first: RateUse,
+    pub second: Option<RateUse>,
 }
 
 /// A rate applied from one commodity to another.
@@ -1487,6 +1563,7 @@ pub enum RateSource {
         param: Id<Param>,
         row: u32,
         since: Option<Day>,
+        inverted: bool,
         loc: Loc,
     },
 }
@@ -1499,6 +1576,12 @@ pub enum ConversionError {
         to: Id<Commodity>,
         day: Day,
         policy: RatePolicy,
+    },
+    /// Two simultaneously active, unrelated residences select different
+    /// policies. Their stable ids let diagnostics point at both declarations.
+    PolicyConflict {
+        first: Id<System>,
+        second: Id<System>,
     },
     Overflow,
 }
@@ -1545,11 +1628,15 @@ impl Param {
         day: Day,
         mut compare_keys: impl FnMut(&[Sym]) -> Ordering,
     ) -> Option<(u32, &ParamRow)> {
-        let first = self.rows.partition_point(|row| compare_keys(&row.names) == Ordering::Less);
+        let first = self
+            .rows
+            .partition_point(|row| compare_keys(&row.names) == Ordering::Less);
         if first == self.rows.len() || compare_keys(&self.rows[first].names) != Ordering::Equal {
             return None;
         }
-        let after = first + self.rows[first..].partition_point(|row| compare_keys(&row.names) != Ordering::Greater);
+        let after = first
+            + self.rows[first..]
+                .partition_point(|row| compare_keys(&row.names) != Ordering::Greater);
         let matching = &self.rows[first..after];
         let upto = matching.partition_point(|row| row.since.is_none_or(|since| since <= day));
         let local_index = upto.checked_sub(1)?;
@@ -1597,14 +1684,21 @@ mod param_lookup_tests {
         assert_eq!(index, 1);
         assert_eq!(row.value, Value::Num(Ratio::int(200)));
         assert_eq!(
-            param.row_index_by(day, |row_keys| row_keys.cmp(&family_key)).unwrap().0,
+            param
+                .row_index_by(day, |row_keys| row_keys.cmp(&family_key))
+                .unwrap()
+                .0,
             index,
             "the borrowed comparator selects the same full tuple without a key vector"
         );
         assert_eq!(param.row_index(day, &[self_only]).unwrap().0, 2);
         assert!(param.row_index(day, &[missing_middle]).is_none());
         assert!(param.row_index(day, &[missing_end]).is_none());
-        assert!(param.row_index(Day::from_ymd(2024, 12, 31).unwrap(), &[self_only]).is_none());
+        assert!(
+            param
+                .row_index(Day::from_ymd(2024, 12, 31).unwrap(), &[self_only])
+                .is_none()
+        );
     }
 }
 
@@ -1649,7 +1743,10 @@ impl Amount {
     }
 
     pub fn zero(unit: Id<Commodity>) -> Amount {
-        Amount { qty: Qty::ZERO, unit }
+        Amount {
+            qty: Qty::ZERO,
+            unit,
+        }
     }
 }
 
@@ -1665,7 +1762,10 @@ pub enum Miss<T> {
 impl<T> std::fmt::Debug for Miss<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Miss::Unknown { suggestion } => f.debug_struct("Unknown").field("suggestion", suggestion).finish(),
+            Miss::Unknown { suggestion } => f
+                .debug_struct("Unknown")
+                .field("suggestion", suggestion)
+                .finish(),
             Miss::Ambiguous(ids) => f.debug_tuple("Ambiguous").field(ids).finish(),
         }
     }
@@ -1691,7 +1791,11 @@ impl<'s> Book<'s> {
         if let Some(sym) = self.names.get(&decoded) {
             return Text::Borrowed(sym);
         }
-        if let Some((id, _)) = self.text_values.iter().find(|(_, text)| text.0.as_ref() == decoded) {
+        if let Some((id, _)) = self
+            .text_values
+            .iter()
+            .find(|(_, text)| text.0.as_ref() == decoded)
+        {
             return Text::Owned(id);
         }
         Text::Owned(self.text_values.push(TextString(decoded.into_boxed_str())))
@@ -1719,11 +1823,16 @@ impl<'s> Book<'s> {
     }
 
     pub fn entity(&self, text: &str) -> Result<Id<Entity>, Miss<Entity>> {
-        self.lookup.entities.names.resolve(&self.names, text, |_| true)
+        self.lookup
+            .entities
+            .names
+            .resolve(&self.names, text, |_| true)
     }
 
     pub fn commodity(&self, symbol: &str) -> Option<Id<Commodity>> {
-        self.names.get(symbol).and_then(|sym| self.lookup.commodities.get(&sym).copied())
+        self.names
+            .get(symbol)
+            .and_then(|sym| self.lookup.commodities.get(&sym).copied())
     }
 
     /// The outside endpoint for this commodity when its kind chain declares
@@ -1735,20 +1844,29 @@ impl<'s> Book<'s> {
     /// A kind by name (`401k`), qualified by its system (`us/401k/401k`), or by
     /// a system named after it (`us/401k`).
     pub fn kind(&self, text: &str) -> Result<Id<Kind>, Miss<Kind>> {
-        crate::kinds::find(&self.lookup.kinds, &self.names, &self.systems, text, |_| true)
+        crate::kinds::find(&self.lookup.kinds, &self.names, &self.systems, text, |_| {
+            true
+        })
     }
 
     /// A purpose by name (`groceries`).
     pub fn purpose(&self, text: &str) -> Result<Id<Purpose>, Miss<Purpose>> {
-        self.lookup.purposes.names.resolve(&self.names, text, |_| true)
+        self.lookup
+            .purposes
+            .names
+            .resolve(&self.names, text, |_| true)
     }
 
     pub fn asset(&self, name: &str) -> Option<Id<Asset>> {
-        self.names.get(name).and_then(|sym| self.lookup.assets.get(&sym).copied())
+        self.names
+            .get(name)
+            .and_then(|sym| self.lookup.assets.get(&sym).copied())
     }
 
     pub fn contract(&self, name: &str) -> Option<Id<Contract>> {
-        self.names.get(name).and_then(|sym| self.lookup.contracts.get(&sym).copied())
+        self.names
+            .get(name)
+            .and_then(|sym| self.lookup.contracts.get(&sym).copied())
     }
 
     pub fn law(&self, name: &str) -> Result<Id<Law>, Miss<Law>> {
@@ -1774,12 +1892,280 @@ impl<'s> Book<'s> {
     /// precision and the same rounding as [`Book::convert`]. Callers that
     /// cache a typed [`RateUse`] can reuse its rate for later amounts without
     /// repeating quote or parameter lookup.
-    pub fn convert_at_rate(&self, amount: Amount, unit: Id<Commodity>, rate: Ratio) -> Option<Amount> {
+    pub fn convert_at_rate(
+        &self,
+        amount: Amount,
+        unit: Id<Commodity>,
+        rate: Ratio,
+    ) -> Option<Amount> {
         if amount.unit == unit {
             return Some(amount);
         }
-        let (from, to) = (self.commodities[amount.unit].scale, self.commodities[unit].scale);
-        Some(Amount::new(crate::prices::rescale(amount.qty, from, to, rate)?, unit))
+        let (from, to) = (
+            self.commodities[amount.unit].scale,
+            self.commodities[unit].scale,
+        );
+        Some(Amount::new(
+            crate::prices::rescale(amount.qty, from, to, rate)?,
+            unit,
+        ))
+    }
+
+    /// Converts an amount under an explicit policy or the effective owner's
+    /// active residence policy, retaining the exact quote or parameter rows
+    /// used. A system without a `rates` setting uses spot quotes.
+    ///
+    /// For overlapping residences, each residence inherits the nearest
+    /// ancestor with a policy. Equal policies agree; different policies are
+    /// an error rather than depending on declaration or tree iteration order.
+    pub fn convert_for(
+        &self,
+        amount: Amount,
+        unit: Id<Commodity>,
+        owner: Id<Entity>,
+        day: Day,
+        explicit: Option<RatePolicy>,
+    ) -> Result<Conversion, ConversionError> {
+        if amount.unit == unit {
+            return Ok(Conversion::Identity { amount });
+        }
+        if amount.qty.0 == 0 {
+            return Ok(Conversion::Zero {
+                amount: Amount::new(amount.qty, unit),
+            });
+        }
+        let policy = match explicit {
+            Some(policy) => policy,
+            None => self
+                .owner_rate_policy(owner, day)?
+                .unwrap_or(RatePolicy::Spot),
+        };
+        let (rate, path) = self.conversion_path(amount.unit, unit, day, policy).ok_or(
+            ConversionError::Missing {
+                from: amount.unit,
+                to: unit,
+                day,
+                policy,
+            },
+        )?;
+        let amount = self
+            .convert_at_rate(amount, unit, rate)
+            .ok_or(ConversionError::Overflow)?;
+        Ok(Conversion::Rates { amount, path, rate })
+    }
+
+    fn owner_rate_policy(
+        &self,
+        owner: Id<Entity>,
+        day: Day,
+    ) -> Result<Option<RatePolicy>, ConversionError> {
+        let residences = &self.entities[owner].lives;
+        let mut conflict = None::<(Id<System>, Id<System>)>;
+        for (index, residence) in residences
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.days.contains(day))
+        {
+            let Some((candidate, policy)) = self.nearest_rate_policy(residence.system) else {
+                continue;
+            };
+            if !self.active_policy_is_maximal(residences, day, candidate) {
+                continue;
+            }
+            for other in residences[index + 1..]
+                .iter()
+                .filter(|r| r.days.contains(day))
+            {
+                let Some((other, other_policy)) = self.nearest_rate_policy(other.system) else {
+                    continue;
+                };
+                if other == candidate
+                    || policy == other_policy
+                    || !self.active_policy_is_maximal(residences, day, other)
+                {
+                    continue;
+                }
+                let pair = if candidate < other {
+                    (candidate, other)
+                } else {
+                    (other, candidate)
+                };
+                conflict = Some(conflict.map_or(pair, |current| current.min(pair)));
+            }
+        }
+        if let Some((first, second)) = conflict {
+            return Err(ConversionError::PolicyConflict { first, second });
+        }
+        Ok(residences
+            .iter()
+            .filter(|residence| residence.days.contains(day))
+            .filter_map(|residence| self.nearest_rate_policy(residence.system))
+            .filter(|(candidate, _)| self.active_policy_is_maximal(residences, day, *candidate))
+            .min_by_key(|(candidate, _)| *candidate)
+            .map(|(_, policy)| policy))
+    }
+
+    fn nearest_rate_policy(&self, mut system: Id<System>) -> Option<(Id<System>, RatePolicy)> {
+        loop {
+            let node = &self.systems[system];
+            if let Some(policy) = node.rates {
+                return Some((system, policy));
+            }
+            system = self.systems.parent(system)?;
+        }
+    }
+
+    fn active_policy_is_maximal(
+        &self,
+        residences: &[Residence],
+        day: Day,
+        candidate: Id<System>,
+    ) -> bool {
+        !residences
+            .iter()
+            .filter(|residence| residence.days.contains(day))
+            .filter_map(|residence| self.nearest_rate_policy(residence.system))
+            .any(|(other, _)| other != candidate && self.systems.covers(candidate, other))
+    }
+
+    fn conversion_path(
+        &self,
+        from: Id<Commodity>,
+        to: Id<Commodity>,
+        day: Day,
+        policy: RatePolicy,
+    ) -> Option<(Ratio, RatePath)> {
+        if let Some(first) = self.rate_use(from, to, day, policy) {
+            return Some((
+                first.rate,
+                RatePath {
+                    first,
+                    second: None,
+                },
+            ));
+        }
+        let first = self.rate_use(from, self.base, day, policy)?;
+        let second = self.rate_use(self.base, to, day, policy)?;
+        let rate = first.rate.checked_mul(second.rate)?;
+        Some((
+            rate,
+            RatePath {
+                first,
+                second: Some(second),
+            },
+        ))
+    }
+
+    fn rate_use(
+        &self,
+        from: Id<Commodity>,
+        to: Id<Commodity>,
+        day: Day,
+        policy: RatePolicy,
+    ) -> Option<RateUse> {
+        match policy {
+            RatePolicy::Spot => self.spot_rate_use(from, to, day),
+            RatePolicy::Param(param) => self.param_rate_use(param, from, to, day),
+        }
+    }
+
+    fn spot_rate_use(&self, from: Id<Commodity>, to: Id<Commodity>, day: Day) -> Option<RateUse> {
+        let forward = self.latest_quote(from, to, day);
+        let reverse = self
+            .latest_quote(to, from, day)
+            .and_then(|quote| Some((quote, quote.rate.recip()?)));
+        let (quote, rate, inverted) = match (forward, reverse) {
+            (Some(forward), Some((reverse, inverted))) if reverse.day > forward.day => {
+                (reverse, inverted, true)
+            }
+            (Some(forward), _) => (forward, forward.rate, false),
+            (None, Some((reverse, inverted))) => (reverse, inverted, true),
+            (None, None) => return None,
+        };
+        (rate.num() > 0).then_some(RateUse {
+            from,
+            to,
+            rate,
+            source: RateSource::Spot {
+                quoted: quote.unit,
+                quote: quote.quote,
+                as_of: quote.day,
+                inverted,
+                implied: quote.implied,
+                loc: quote.loc,
+            },
+        })
+    }
+
+    fn latest_quote(
+        &self,
+        from: Id<Commodity>,
+        to: Id<Commodity>,
+        day: Day,
+    ) -> Option<&crate::journal::Quote> {
+        let upto = self
+            .prices
+            .quotes
+            .partition_point(|quote| (quote.unit, quote.quote, quote.day) <= (from, to, day));
+        self.prices.quotes[..upto]
+            .last()
+            .filter(|quote| quote.unit == from && quote.quote == to)
+    }
+
+    fn param_rate_use(
+        &self,
+        id: Id<Param>,
+        from: Id<Commodity>,
+        to: Id<Commodity>,
+        day: Day,
+    ) -> Option<RateUse> {
+        let param = &self.params[id];
+        let from_name = self.commodities[from].symbol;
+        let to_name = self.commodities[to].symbol;
+        let direct_unit = Some(Dim::Per(to, from));
+        let inverse_unit = Some(Dim::Per(from, to));
+        if param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == direct_unit {
+            if let Some((row, value)) = param.row_index(day, &[from_name, to_name]) {
+                if let Value::Num(rate) = value.value {
+                    if rate.num() > 0 {
+                        return Some(RateUse {
+                            from,
+                            to,
+                            rate,
+                            source: RateSource::Param {
+                                param: id,
+                                row,
+                                since: value.since,
+                                inverted: false,
+                                loc: value.loc,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        if param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == inverse_unit {
+            if let Some((row, value)) = param.row_index(day, &[to_name, from_name]) {
+                if let Value::Num(rate) = value.value {
+                    let rate = rate.recip()?;
+                    if rate.num() > 0 {
+                        return Some(RateUse {
+                            from,
+                            to,
+                            rate,
+                            source: RateSource::Param {
+                                param: id,
+                                row,
+                                since: value.since,
+                                inverted: true,
+                                loc: value.loc,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Borrows a flow with the metadata its compact ranges name.
@@ -1832,13 +2218,18 @@ impl<'s> Book<'s> {
     /// The flow of `txn` that paid into `place`: what made a parcel there. A
     /// claim's counterparty is its payee and its due day is its `due`.
     pub fn paid_into(&self, txn: Id<Txn>, place: Id<Place>) -> Option<&Flow> {
-        self.flows[self.txns.get(txn)?.flows].iter().find(|flow| flow.to == place)
+        self.flows[self.txns.get(txn)?.flows]
+            .iter()
+            .find(|flow| flow.to == place)
     }
 
     /// `1,234.56 USD`
     pub fn show(&self, amount: Amount) -> impl std::fmt::Display + '_ {
         let unit = &self.commodities[amount.unit];
-        Shown { qty: amount.qty.brief(unit.scale), unit: self.name(unit.symbol) }
+        Shown {
+            qty: amount.qty.brief(unit.scale),
+            unit: self.name(unit.symbol),
+        }
     }
 }
 
@@ -1850,7 +2241,10 @@ fn decode_quoted(raw: &str) -> String {
             decoded.push(ch);
             continue;
         }
-        match chars.next().expect("the lexer rejects a trailing backslash") {
+        match chars
+            .next()
+            .expect("the lexer rejects a trailing backslash")
+        {
             'n' => decoded.push('\n'),
             't' => decoded.push('\t'),
             '"' => decoded.push('"'),
@@ -1867,7 +2261,10 @@ mod text_tests {
 
     #[test]
     fn decodes_only_the_escapes_accepted_by_the_lexer() {
-        assert_eq!(decode_quoted("line\\ncolumn\\tquote\\\"slash\\\\"), "line\ncolumn\tquote\"slash\\");
+        assert_eq!(
+            decode_quoted("line\\ncolumn\\tquote\\\"slash\\\\"),
+            "line\ncolumn\tquote\"slash\\"
+        );
     }
 }
 

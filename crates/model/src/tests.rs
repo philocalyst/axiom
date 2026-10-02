@@ -4,10 +4,13 @@
 //! lowerers and by the engine. These tests focus on the model boundary: typed
 //! names, stable trees, ownership and once-stored property defaults.
 
-use axiom_core::{Day, Diagnostic, FileId, Ratio};
+use axiom_core::{Day, Days, Diagnostic, FileId, Ratio};
 use axiom_syntax::{Folder, parse};
 
-use crate::{Book, PurposeRoot, Role, Sort, Source, Value, build, prop};
+use crate::{
+    Amount, Book, Conversion, ConversionError, PurposeRoot, RatePolicy, RateSource, Residence,
+    Role, Sort, Source, Value, build, prop,
+};
 
 const STD: &str = "\
 system std
@@ -436,7 +439,10 @@ kind checking : bankk
         .iter()
         .find_map(|help| help.edit.as_ref())
         .expect("near miss should have an exact source edit");
-    assert_eq!(&project[edit.0.start as usize..edit.0.end as usize], "bankk");
+    assert_eq!(
+        &project[edit.0.start as usize..edit.0.end as usize],
+        "bankk"
+    );
     assert_eq!(edit.1, "bank");
 }
 
@@ -450,7 +456,11 @@ entity opening : person
 ";
     let (_, diagnostics) = build_project(project);
 
-    assert_eq!(codes(&diagnostics), ["reserved-entity-name"], "{diagnostics:?}");
+    assert_eq!(
+        codes(&diagnostics),
+        ["reserved-entity-name"],
+        "{diagnostics:?}"
+    );
     let loc = diagnostics[0].anchor().unwrap();
     assert_eq!(&project[loc.start as usize..loc.end as usize], "opening");
 }
@@ -555,4 +565,353 @@ entity jo : person
         Day::from_ymd(2025, 7, 1).unwrap()
     );
     assert_eq!(residences[1].days.last(), Day::MAX);
+}
+
+fn build_rate_book<'s>(project: &'s str) -> (Book<'s>, Vec<Diagnostic>) {
+    const US: &str = "system us\nuse std\ncurrency USD\nrates spot\n";
+    const US_CA: &str = "system us/ca\nuse std\n";
+    const DE: &str =
+        "system de\nuse std\ncurrency EUR\nrates param fx\nparam fx\n  2026 EUR USD 1.1\n";
+    let sources = [
+        parsed_source(0, "std.ax", STD, true),
+        parsed_source(1, "us.ax", US, true),
+        parsed_source(2, "de.ax", DE, true),
+        parsed_source(3, "us/ca.ax", US_CA, true),
+        parsed_source(4, "axiom.ax", project, false),
+    ];
+    build(&sources)
+}
+
+#[test]
+fn owner_rate_policy_converts_with_parameter_evidence_and_explicit_spot_override() {
+    let project = "\
+use std
+use us
+use de
+base USD
+commodity USD : currency
+  precision 2
+commodity EUR : currency
+  precision 2
+commodity GBP : currency
+  precision 2
+commodity CAD : currency
+  precision 2
+entity me : person
+  lives de from 2026-01-01
+";
+    let (mut book, diagnostics) = build_rate_book(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let owner = book.roots.me;
+    let day = Day::from_ymd(2026, 6, 30).unwrap();
+    let usd = book.commodity("USD").unwrap();
+    let eur = book.commodity("EUR").unwrap();
+    let amount = Amount::new(axiom_core::Qty(1_000), eur);
+    let converted = book.convert_for(amount, usd, owner, day, None).unwrap();
+    assert_eq!(converted.amount(), Amount::new(axiom_core::Qty(1_100), usd));
+    assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()));
+    let Some(path) = converted.path() else {
+        panic!("a table conversion has rate evidence")
+    };
+    let (first, second) = (path.first, path.second);
+    assert_eq!(second, None);
+    assert_eq!((first.from, first.to), (eur, usd));
+    let (param_id, param) = book.params.iter().next().unwrap();
+    let row_loc = param.rows[0].loc;
+    assert_eq!(
+        first.source,
+        RateSource::Param {
+            param: param_id,
+            row: 0,
+            since: Some(Day::from_ymd(2026, 1, 1).unwrap()),
+            inverted: false,
+            loc: row_loc,
+        }
+    );
+
+    let inverse = book
+        .convert_for(
+            Amount::new(axiom_core::Qty(1_000), usd),
+            eur,
+            owner,
+            day,
+            None,
+        )
+        .unwrap();
+    assert_eq!(inverse.amount(), Amount::new(axiom_core::Qty(909), eur));
+    assert_eq!(inverse.rate(), Some(Ratio::new(10, 11).unwrap()));
+    assert!(matches!(
+        inverse.path().unwrap().first.source,
+        RateSource::Param { inverted: true, .. }
+    ));
+
+    // Dimensionless tables still carry an explicit unit declaration.
+    book.params[param_id].unit = Some(axiom_core::Dim::Number);
+    let dimensionless = book.convert_for(amount, usd, owner, day, None).unwrap();
+    assert_eq!(dimensionless.rate(), Some(Ratio::new(11, 10).unwrap()));
+
+    let gbp = book.commodity("GBP").unwrap();
+    book.prices = crate::Prices::new(vec![
+        crate::Quote {
+            unit: eur,
+            quote: usd,
+            day,
+            rate: Ratio::new(6, 5).unwrap(),
+            implied: false,
+            loc: axiom_core::Loc::default(),
+        },
+        crate::Quote {
+            unit: usd,
+            quote: gbp,
+            day,
+            rate: Ratio::new(4, 5).unwrap(),
+            implied: false,
+            loc: axiom_core::Loc::default(),
+        },
+    ]);
+    let cross = book
+        .convert_for(amount, gbp, owner, day, Some(RatePolicy::Spot))
+        .unwrap();
+    assert_eq!(cross.amount(), Amount::new(axiom_core::Qty(960), gbp));
+    let cross_path = cross.path().unwrap();
+    assert_eq!(cross_path.first.to, usd);
+    assert_eq!(cross_path.second.unwrap().from, usd);
+
+    assert_eq!(
+        book.convert_for(
+            Amount::new(axiom_core::Qty(1), book.commodity("CAD").unwrap()),
+            gbp,
+            owner,
+            day,
+            Some(RatePolicy::Spot),
+        ),
+        Err(ConversionError::Missing {
+            from: book.commodity("CAD").unwrap(),
+            to: gbp,
+            day,
+            policy: RatePolicy::Spot,
+        })
+    );
+
+    let zero = book
+        .convert_for(Amount::new(axiom_core::Qty(0), eur), usd, owner, day, None)
+        .unwrap();
+    assert_eq!(zero.amount(), Amount::new(axiom_core::Qty(0), usd));
+    assert_eq!(zero.rate(), None);
+    assert!(matches!(zero, Conversion::Zero { .. }));
+
+    let quote_day = Day::from_ymd(2026, 6, 29).unwrap();
+    book.prices = crate::Prices::new(vec![crate::Quote {
+        unit: eur,
+        quote: usd,
+        day: quote_day,
+        rate: Ratio::new(6, 5).unwrap(),
+        implied: false,
+        loc: axiom_core::Loc::default(),
+    }]);
+    let explicit = book
+        .convert_for(amount, usd, owner, day, Some(RatePolicy::Spot))
+        .unwrap();
+    assert_eq!(explicit.amount(), Amount::new(axiom_core::Qty(1_200), usd));
+    assert!(matches!(
+        explicit.path().unwrap().first.source,
+        RateSource::Spot {
+            as_of,
+            inverted: false,
+            implied: false,
+            ..
+        } if as_of == quote_day
+    ));
+}
+
+#[test]
+fn descendant_residence_policy_supersedes_ancestor_independent_of_order() {
+    let project = "\
+use std
+use us
+use de
+base USD
+commodity USD : currency
+  precision 2
+commodity EUR : currency
+  precision 2
+entity me : person
+";
+    let (mut book, diagnostics) = build_rate_book(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let owner = book.roots.me;
+    let system = |book: &Book<'_>, path| {
+        book.systems
+            .iter()
+            .find_map(|(id, node)| (book.name(node.path) == path).then_some(id))
+            .unwrap()
+    };
+    let (us, de) = (system(&book, "us"), system(&book, "de"));
+    let child = system(&book, "us/ca");
+    let param = book.params.iter().next().unwrap().0;
+    book.systems[child].rates = Some(RatePolicy::Param(param));
+    let residences = [
+        Residence {
+            days: Days::ALWAYS,
+            system: de,
+        },
+        Residence {
+            days: Days::ALWAYS,
+            system: us,
+        },
+        Residence {
+            days: Days::ALWAYS,
+            system: child,
+        },
+    ];
+    let day = Day::from_ymd(2026, 6, 30).unwrap();
+    let amount = Amount::new(axiom_core::Qty(1_000), book.commodity("EUR").unwrap());
+    for lives in [residences, [residences[2], residences[0], residences[1]]] {
+        book.entities[owner].lives = lives.into();
+        let converted = book
+            .convert_for(amount, book.base, owner, day, None)
+            .unwrap();
+        assert_eq!(converted.rate(), Some(Ratio::new(11, 10).unwrap()));
+    }
+}
+
+#[test]
+fn conflicting_overlapping_residence_rate_policies_are_reported_deterministically() {
+    let project = "\
+use std
+use us
+use de
+base USD
+commodity USD : currency
+  precision 2
+commodity EUR : currency
+  precision 2
+entity me : person
+";
+    let (mut book, diagnostics) = build_rate_book(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let owner = book.roots.me;
+    let system = |path| {
+        book.systems
+            .iter()
+            .find_map(|(id, node)| (book.name(node.path) == path).then_some(id))
+            .unwrap()
+    };
+    let (us, de) = (system("us"), system("de"));
+    book.entities[owner].lives = vec![
+        Residence {
+            days: Days::ALWAYS,
+            system: us,
+        },
+        Residence {
+            days: Days::ALWAYS,
+            system: de,
+        },
+    ]
+    .into();
+    let amount = Amount::new(axiom_core::Qty(100), book.commodity("EUR").unwrap());
+    let day = Day::from_ymd(2026, 6, 30).unwrap();
+    let expected = Err(ConversionError::PolicyConflict {
+        first: us.min(de),
+        second: us.max(de),
+    });
+    assert_eq!(
+        book.convert_for(amount, book.base, owner, day, None),
+        expected
+    );
+    book.entities[owner].lives.reverse();
+    assert_eq!(
+        book.convert_for(amount, book.base, owner, day, None),
+        expected
+    );
+}
+
+#[test]
+fn known_exchange_adds_a_spot_quote_used_by_owner_conversion() {
+    let project = "\
+use std
+base USD
+commodity USD : currency
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account checking : bank
+account brokerage : bank
+2026-02-10 checking 1_999.90 USD -> brokerage 7 VTI
+";
+    let (book, diagnostics) = build_project(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let vti = book.commodity("VTI").unwrap();
+    let usd = book.commodity("USD").unwrap();
+    let day = Day::from_ymd(2026, 2, 10).unwrap();
+    let quote = book
+        .prices
+        .quotes()
+        .iter()
+        .find(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
+        .expect("a known actual exchange records an implied quote");
+    assert!(quote.implied);
+    assert_eq!(quote.rate, Ratio::new(2857, 10).unwrap());
+    let conversion = book
+        .convert_for(
+            Amount::new(axiom_core::Qty(7), vti),
+            usd,
+            book.roots.me,
+            day,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        conversion.amount(),
+        Amount::new(axiom_core::Qty(199_990), usd)
+    );
+}
+
+#[test]
+fn written_same_day_price_beats_an_implied_exchange_quote() {
+    let project = "\
+use std
+base USD
+commodity USD : currency
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account checking : bank
+account brokerage : bank
+2026-02-10 VTI = 300 USD
+2026-02-10 checking 2_100 USD -> brokerage 7 VTI
+";
+    let (book, diagnostics) = build_project(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let vti = book.commodity("VTI").unwrap();
+    let usd = book.commodity("USD").unwrap();
+    let day = Day::from_ymd(2026, 2, 10).unwrap();
+    let pair: Vec<_> = book
+        .prices
+        .quotes()
+        .iter()
+        .filter(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
+        .collect();
+    assert_eq!(
+        pair.len(),
+        2,
+        "the written quote and implied evidence are both retained"
+    );
+    assert!(pair[0].implied);
+    let quote = pair[1];
+    assert!(!quote.implied);
+    assert_eq!(quote.rate, Ratio::new(300, 1).unwrap());
+    let conversion = book
+        .convert_for(
+            Amount::new(axiom_core::Qty(7), vti),
+            usd,
+            book.roots.me,
+            day,
+            Some(RatePolicy::Spot),
+        )
+        .unwrap();
+    assert_eq!(
+        conversion.amount(),
+        Amount::new(axiom_core::Qty(210_000), usd)
+    );
 }

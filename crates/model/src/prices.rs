@@ -2,7 +2,7 @@
 
 use axiom_core::num::POW10;
 use axiom_core::num::mul_div;
-use axiom_core::{Arena, Day, Id, Map, Qty, Ratio};
+use axiom_core::{Arena, Day, Id, Qty, Ratio};
 
 use crate::book::{Amount, Book, Commodity};
 use crate::journal::{Flow, Infer, Mode, Prices, Quote};
@@ -19,6 +19,9 @@ pub(crate) fn rescale(qty: Qty, from: u8, to: u8, rate: Ratio) -> Option<Qty> {
 /// `price × qty ÷ stated`: what a stated exchange implies, as whole quote
 /// units per whole priced unit.
 pub(crate) fn implied_rate(commodities: &Arena<Commodity>, priced: Amount, quoted: Amount) -> Option<Ratio> {
+    if priced.qty.0 <= 0 || quoted.qty.0 <= 0 {
+        return None;
+    }
     let (ps, qs) = (commodities[priced.unit].scale, commodities[quoted.unit].scale);
     let numerator = i128::from(quoted.qty.0).checked_mul(*POW10.get(ps as usize)?)?;
     let denominator = i128::from(priced.qty.0).checked_mul(*POW10.get(qs as usize)?)?;
@@ -29,20 +32,11 @@ impl Prices {
     /// Sorts `quotes`. On the same pair and day, written prices beat implied
     /// ones and later declarations beat earlier ones.
     pub fn new(quotes: Vec<Quote>) -> Prices {
-        // Stable, with the winner last: lookups take the last quote of a day.
-        // Quotes come in the order written, which is by day within a pair, so
-        // grouping them by pair leaves each group nearly sorted already.
-        let mut pairs: Map<(Id<Commodity>, Id<Commodity>), Vec<Quote>> = Map::default();
-        for quote in quotes {
-            pairs.entry((quote.unit, quote.quote)).or_default().push(quote);
-        }
-        let mut groups: Vec<_> = pairs.into_iter().collect();
-        groups.sort_unstable_by_key(|&(pair, _)| pair);
-        let sorted = groups.into_iter().flat_map(|(_, mut group)| {
-            group.sort_by_key(|quote| (quote.day, !quote.implied));
-            group
-        });
-        Prices { quotes: sorted.collect() }
+        // One stable sort avoids a map and a Vec per pair. Implied rows sort
+        // before written rows for the same day, so the last quote is canonical.
+        let mut quotes = quotes;
+        quotes.sort_by_key(|quote| (quote.unit, quote.quote, quote.day, !quote.implied));
+        Prices { quotes }
     }
 
     /// Whole `quote` units per whole `unit` on `day`: the latest quote at or
@@ -77,7 +71,7 @@ impl Prices {
 /// The price an exchange implies: what one unit of the commodity that is not
 /// the base cost in the one that is; else, what the arriving commodity cost.
 pub(crate) fn implied_quote(book: &Book, flow: &Flow) -> Option<Quote> {
-    if !flow.is_exchange() || flow.infer != Infer::Known || flow.mode == Mode::Planned {
+    if !flow.is_exchange() || flow.infer != Infer::Known || flow.mode != Mode::Actual {
         return None;
     }
     let (priced, quoted) = if flow.out.unit == book.base {

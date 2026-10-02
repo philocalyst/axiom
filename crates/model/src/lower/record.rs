@@ -293,6 +293,20 @@ pub(crate) fn record<'a, 's>(
         }
     }
 
+    // Actual, known exchanges provide dated price evidence for their
+    // commodity pair. Derive these after successful transaction lowering so
+    // rollback cannot leave a quote from a rejected record. Written quotes
+    // are already in the pool and retain priority on the same pair and day.
+    for index in 0..world.book.flows.len() {
+        let flow_id = Id::new(index as u32);
+        let quote = crate::prices::implied_quote(&world.book, &world.book.flows[flow_id]);
+        if let Some(quote) = quote {
+            world.book.prices.quotes.push(quote);
+        }
+    }
+    let quotes = std::mem::take(&mut world.book.prices.quotes);
+    world.book.prices = crate::journal::Prices::new(quotes);
+
     let places = world.book.places.len();
     world.book.touching = Groups::build(
         places,
