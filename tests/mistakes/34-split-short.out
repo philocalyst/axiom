@@ -1,11 +1,33 @@
-error[split-short]: the legs add up to 4,800.00 USD, but the total is 5,000.00 USD
-   ╭─[34-split-short.ax:14:20]
-   │
-14 │ 2026-01-15 acme -> 5_000 USD
-   │                    ────┬────
-   │                        ╰── a total of 5,000.00 USD
-   │
-   = help: add a `...` leg to take the remaining 200.00 USD
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[34-split-short.ax:8:9]
+  │
+8 │ account income/salary   : wages
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[34-split-short.ax:9:9]
+  │
+9 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[34-split-short.ax:12:7]
+   │
+11 │ entity acme : employer
+12 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+✗ 3 errors
 [exit status 1]

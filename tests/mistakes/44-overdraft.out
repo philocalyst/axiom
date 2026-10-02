@@ -1,21 +1,48 @@
-warning[overdraft]: balance below zero: -1,000.00 USD against a minimum of 0.00 USD, short by 1,000.00 USD
+error[chart-account]: `expenses/rent` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[44-overdraft.ax:7:9]
+  │
+7 │ account expenses/rent
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[44-overdraft.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/rent`
+   ╭─[44-overdraft.ax:11:7]
+   │
+10 │ entity landlord : org
+11 │   via expenses/rent
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/rent`
+
+warning[overdraft]: bank balance below zero: -1,000.00 USD against a minimum of 0.00 USD, short by 1,000.00 USD
    ╭─[44-overdraft.ax:15:1]
    │
 15 │ 2026-01-01 checking -> landlord 1_800 USD
    │ ────────────────────┬────────────────────
-   │                     ╰── this flow: 1,800.00 USD from assets/checking to expenses/rent
+   │                     ╰── this flow: 1,800.00 USD from assets/checking to landlord
    │
-   ├─[std.ax:28:10] (built in)
+   ├─[std.ax:14:10] (built in)
    │
-28 │     warn balance >= empty "balance below zero"
-   │          ───┬───
-   │             ╰── -1,000.00 USD
+14 │     warn self.balance >= empty "bank balance below zero"
+   │          ──────┬─────
+   │                ╰── -1,000.00 USD
    │
-   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
-           usually for a fee.
-   = help: move money in before the payment clears, or look for a pending payment or a missing
-           deposit that explains it.
+   = note: A bank balance below zero is an overdraft.
 
-1 warning
-✓ 3 flows · 4 places · 1 law enforced · net worth 8,000.00 USD
-[exit status 0]
+✗ 3 errors · 1 warning
+[exit status 1]

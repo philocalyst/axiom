@@ -8,8 +8,42 @@ error[duplicate-declaration]: account `assets/checking` is declared twice
 7 │ account assets/checking : cash
   │         ───────┬───────
   │                ╰── declared again here
-  │
-  = help: keep the declaration you mean and delete the other
 
-✗ 1 error
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[26-duplicate-account.ax:8:9]
+  │
+8 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[26-duplicate-account.ax:9:9]
+  │
+9 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[26-duplicate-account.ax:12:1]
+   │
+12 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[26-duplicate-account.ax:12:24]
+   │
+12 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+✗ 5 errors
 [exit status 1]

@@ -1,3 +1,24 @@
+error[unknown-kind]: there is no kind `broker`
+  ╭─[43-exchange-no-price.ax:8:28]
+  │
+8 │ account assets/brokerage : broker
+  │                            ───┬──
+  │                               ╰── not a known kind
+  │
+  = help: did you mean `grocer`?
+8 - account assets/brokerage : broker
+8 + account assets/brokerage : grocer
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[43-exchange-no-price.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
 error[insufficient-holding]: assets/checking does not hold 7 VTI
    ╭─[43-exchange-no-price.ax:13:1]
    │
@@ -16,13 +37,13 @@ error[no-price]: cannot check `overdraft`: no price for VTI in USD on 2026-01-22
    │ ───────────────────┬──────────────────
    │                    ╰── this flow: 7 VTI from assets/checking to assets/brokerage
    │
-   ├─[std.ax:28:10] (built in)
+   ├─[std.ax:14:10] (built in)
    │
-28 │     warn balance >= empty "balance below zero"
-   │          ───┬───
-   │             ╰── no price for VTI in USD on 2026-01-22
+14 │     warn self.balance >= empty "bank balance below zero"
+   │          ──────┬─────
+   │                ╰── no price for VTI in USD on 2026-01-22
    │
    = help: add a price line such as `2026-01-22 VTI <price> USD`
 
-✗ 2 errors
+✗ 4 errors
 [exit status 1]

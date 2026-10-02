@@ -1,15 +1,19 @@
-error[kind-sort]: kind `fund` is a commodity kind, so it cannot describe the asset account `assets/brokerage`
-    ╭─[31-kind-in-wrong-slot.ax:8:28]
-    │
-  8 │ account assets/brokerage : fund
-    │                            ──┬─
-    │                              ╰── commodity kind
-    │
-    ├─[std.ax:125:6] (built in)
-    │
-125 │ kind fund : security
-    │      ──┬─
-    │        ╰── declared here
+error[kind-sort]: kind `fund` cannot classify this declaration
+  ╭─[31-kind-in-wrong-slot.ax:8:28]
+  │
+8 │ account assets/brokerage : fund
+  │                            ──┬─
+  │                              ╰── expected Place(Asset), found Commodity
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[31-kind-in-wrong-slot.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+✗ 2 errors
 [exit status 1]

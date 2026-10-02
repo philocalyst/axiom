@@ -1,16 +1,12 @@
-error[place-not-open]: `assets/savings` opened on 2026-03-01; this flow is 15 days earlier
-   ╭─[41-before-opened.ax:11:24]
-   │
- 6 │ account assets/savings : bank
- 7 │   opened 2026-03-01
-   │   ────────┬────────
-   │           ╰── opened here
-   ⋮
-11 │ 2026-02-14 checking -> savings 500 USD
-   │                        ───┬───
-   │                           ╰── 15 days before it opened
-   │
-   = help: move the flow to 2026-03-01 or later, or change `opened`
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[41-before-opened.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
 ✗ 1 error
 [exit status 1]

@@ -11,5 +11,12 @@ error[kind-cycle]: kind `a` inherits from itself
   = note: the chain is a -> b -> a
   = help: give one of them a parent outside the loop, such as a root kind like `asset`
 
-✗ 1 error
+error[kind-sort]: kind `a` cannot classify this declaration
+  ╭─[r12-kind-cycle.ax:4:20]
+  │
+4 │ account assets/x : a
+  │                    ┬
+  │                    ╰── expected Place(Asset), found Thing
+
+✗ 2 errors
 [exit status 1]

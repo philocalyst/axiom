@@ -1,17 +1,51 @@
-error[duplicate-declaration]: `USD` is already declared by system `std`
+error[duplicate-declaration]: commodity `USD` is declared twice
     ╭─[60-redeclare-std-commodity.ax:6:11]
     │
   6 │ commodity USD : currency
     │           ─┬─
     │            ╰── declared again here
     │
-    ├─[std.ax:211:11] (built in)
+    ├─[std.ax:163:11] (built in)
     │
-211 │ commodity USD : currency
+163 │ commodity USD : currency
     │           ─┬─
-    │            ╰── first declared here (built in)
-    │
-    = help: delete this declaration: the commodity already exists
+    │            ╰── first declared here
 
-✗ 1 error
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[60-redeclare-std-commodity.ax:10:9]
+   │
+10 │ account expenses/food
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[60-redeclare-std-commodity.ax:11:9]
+   │
+11 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[60-redeclare-std-commodity.ax:14:1]
+   │
+14 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[60-redeclare-std-commodity.ax:14:24]
+   │
+14 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+✗ 5 errors
 [exit status 1]

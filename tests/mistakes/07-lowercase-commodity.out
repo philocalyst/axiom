@@ -1,3 +1,44 @@
+error[chart-account]: `expenses/food/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[07-lowercase-commodity.ax:6:9]
+  │
+6 │ account expenses/food/groceries
+  │         ───────────┬───────────
+  │                    ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/food/dining` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[07-lowercase-commodity.ax:7:9]
+  │
+7 │ account expenses/food/dining
+  │         ──────────┬─────────
+  │                   ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[07-lowercase-commodity.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/food/groceries`
+   ╭─[07-lowercase-commodity.ax:11:7]
+   │
+10 │ entity trader-joes : org
+11 │   via expenses/food/groceries
+   │       ───────────┬───────────
+   │                  ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/food/groceries`
+
 error[lowercase-commodity]: commodities are written in capitals, not `usd`
    ╭─[07-lowercase-commodity.ax:15:40]
    │
@@ -9,5 +50,5 @@ error[lowercase-commodity]: commodities are written in capitals, not `usd`
 15 - 2026-01-18 checking -> groceries 84.20 usd
 15 + 2026-01-18 checking -> groceries 84.20 USD
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

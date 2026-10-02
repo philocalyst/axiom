@@ -1,15 +1,22 @@
-error[unknown-place]: there is no place `expenses/grocries`
-   ╭─[45-typo-full-path.ax:12:24]
-   │
-12 │ 2026-01-15 checking -> expenses/grocries 97.10 USD
-   │                        ────────┬────────
-   │                                ╰── not a known place
-   │
-   = note: it is close to `expenses/groceries`, so it is not opened as a new account
-   = help: did you mean `expenses/groceries`?
-12 - 2026-01-15 checking -> expenses/grocries 97.10 USD
-12 + 2026-01-15 checking -> expenses/groceries 97.10 USD
-   = help: if it is a new account, declare it: `account expenses/grocries`
+error[chart-account]: `expenses/groceries` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[45-typo-full-path.ax:7:9]
+  │
+7 │ account expenses/groceries
+  │         ─────────┬────────
+  │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[45-typo-full-path.ax:8:9]
+  │
+8 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+✗ 2 errors
 [exit status 1]

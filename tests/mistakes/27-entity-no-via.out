@@ -1,15 +1,22 @@
-error[entity-without-via]: `landlord` is not tied to a place, so a flow cannot end there
-   ╭─[27-entity-no-via.ax:12:24]
-   │
- 9 │ entity landlord : org
-   │        ────┬───
-   │            ╰── declared without `via`
-   ⋮
-12 │ 2026-01-01 checking -> landlord 1_800 USD
-   │                        ────┬───
-   │                            ╰── an entity written where a place is expected stands for its `via` place
-   │
-   = help: name the place its payments belong to: add `via expenses/landlord` to `entity landlord`
+error[chart-account]: `expenses/rent` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[27-entity-no-via.ax:6:9]
+  │
+6 │ account expenses/rent
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[27-entity-no-via.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+✗ 2 errors
 [exit status 1]

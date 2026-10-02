@@ -1,12 +1,31 @@
-error[amount-range]: this amount is too large to count exactly
-  ╭─[r13-sum-overflow.ax:9:39]
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r13-sum-overflow.ax:5:9]
+  │
+5 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r13-sum-overflow.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-amount]: a flow needs an amount or an inference marker
+  ╭─[r13-sum-overflow.ax:9:1]
   │
 9 │ 2026-01-08 equity/opening -> checking 90_000_000_000_000_000 USD
-  │                                       ─────────────┬────────────
-  │                                                    ╰── beyond 100,000,000,000,000,000 quanta
+  │ ────────────────────────────────┬───────────────────────────────
+  │                                 ╰── no quantity is stated
   │
   = note: also at r13-sum-overflow.ax:10
-  = help: a single amount stays below that; use a coarser unit
 
-✗ 2 errors
+✗ 4 errors
 [exit status 1]

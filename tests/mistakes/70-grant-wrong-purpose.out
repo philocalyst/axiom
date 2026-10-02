@@ -1,3 +1,65 @@
+error[chart-account]: `income/grants` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[70-grant-wrong-purpose.ax:6:9]
+  │
+6 │ account income/grants
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/rent` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[70-grant-wrong-purpose.ax:7:9]
+  │
+7 │ account expenses/rent
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `expenses/tuition` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[70-grant-wrong-purpose.ax:8:9]
+  │
+8 │ account expenses/tuition : education
+  │         ────────┬───────
+  │                 ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/grants`
+   ╭─[70-grant-wrong-purpose.ax:11:7]
+   │
+10 │ entity scholarship : grant
+11 │   via income/grants
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/grants`
+
+error[unknown-purpose]: there is no purpose `education`
+   ╭─[70-grant-wrong-purpose.ax:12:11]
+   │
+12 │   purpose education
+   │           ────┬────
+   │               ╰── not a known purpose
+   │
+   = note: the purpose `education` is declared by system `us`, which is not used here
+   = help: add `use us` to bring it into scope
+
+error[unknown-place]: there is no place `expenses/rent`
+   ╭─[70-grant-wrong-purpose.ax:15:7]
+   │
+14 │ entity landlord : org
+15 │   via expenses/rent
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/rent`
+
 error[purpose]: grant money spent outside its purpose
     ╭─[70-grant-wrong-purpose.ax:18:1]
     │
@@ -5,16 +67,12 @@ error[purpose]: grant money spent outside its purpose
     │ ────────────────────┬────────────────────
     │                     ╰── this flow: 1,200.00 USD of restricted money leaving assets/checking
     │
-    ├─[std.ax:198:13] (built in)
+    ├─[std.ax:156:13] (built in)
     │
-198 │     require to is self.purpose "grant money spent outside its purpose"
-    │             ─┬    ──────┬─────
-    │              │          ╰── education
-    │              ╰── expenses/rent
-    │
-    = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
-    = help: pay it from another account, or, if the funder agreed to the change, update `purpose` on
-            the grant.
+156 │     require purpose is self.grant-purpose "grant money spent outside its purpose"
+    │             ───┬───    ─────────┬────────
+    │                │                ╰── no value (`grant-purpose` is not set)
+    │                ╰── empty
 
-✗ 1 error
+✗ 7 errors
 [exit status 1]

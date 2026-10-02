@@ -1,11 +1,44 @@
-error[unknown-cadence]: unknown cadence `fortnight`
-   ╭─[87-unknown-cadence.ax:14:7]
+error[chart-account]: `expenses/rent` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[87-unknown-cadence.ax:6:9]
+  │
+6 │ account expenses/rent
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[87-unknown-cadence.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `expenses/rent`
+   ╭─[87-unknown-cadence.ax:10:7]
+   │
+ 9 │ entity landlord : org
+10 │   via expenses/rent
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account expenses/rent`
+
+error[plan-is-a-contract]: `every` is gone: what repeats is a contract
+   ╭─[87-unknown-cadence.ax:14:1]
    │
 14 │ every fortnight checking -> landlord 900 USD
-   │       ────┬────
-   │           ╰── not a known cadence
+   │ ──┬──
+   │   ╰── a promise of flows, with a name and a party
    │
-   = note: the cadences are `day`, `week`, `month`, `quarter` and `year`
+   = note: a contract states its schedule once, and the journal records each time it is kept
+   = help: write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08
+           NAME` says it
 
-✗ 1 error
+✗ 4 errors
 [exit status 1]

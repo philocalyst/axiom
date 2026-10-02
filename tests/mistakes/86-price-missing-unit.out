@@ -1,15 +1,33 @@
-error[expected-commodity]: `285.70` has no commodity
+error[unknown-kind]: there is no kind `broker`
+  ╭─[86-price-missing-unit.ax:8:28]
+  │
+8 │ account assets/brokerage : broker
+  │                            ───┬──
+  │                               ╰── not a known kind
+  │
+  = help: did you mean `grocer`?
+8 - account assets/brokerage : broker
+8 + account assets/brokerage : grocer
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[86-price-missing-unit.ax:10:9]
+   │
+10 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[price-needs-equals]: a price is a value: `VTI = 280.14 USD`
    ╭─[86-price-missing-unit.ax:14:16]
    │
 14 │ 2026-01-31 VTI 285.70
    │                ───┬──
-   │                   ╰── which commodity?
+   │                   ╰── a commodity's price is written after `=`
    │
-   = note: the amounts in this file are written in USD, VTI
-   = help: write `285.70 USD`
-14 + 2026-01-31 VTI 285.70 USD
-   = help: write `285.70 VTI`
-14 + 2026-01-31 VTI 285.70 VTI
+   = help: insert `=`
+14 + 2026-01-31 VTI = 285.70
 
-✗ 1 error
+✗ 3 errors
 [exit status 1]

@@ -1,30 +1,71 @@
+error[chart-account]: `income/salary` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[69-401k-two-employers.ax:17:9]
+   │
+17 │ account income/salary : wages
+   │         ──────┬──────
+   │               ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `income/salary-newco` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[69-401k-two-employers.ax:18:9]
+   │
+18 │ account income/salary-newco : wages
+   │         ─────────┬─────────
+   │                  ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `income/salary`
+   ╭─[69-401k-two-employers.ax:21:7]
+   │
+20 │ entity acme : employer
+21 │   via income/salary
+   │       ──────┬──────
+   │             ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary`
+
+error[unknown-place]: there is no place `income/salary-newco`
+   ╭─[69-401k-two-employers.ax:23:7]
+   │
+22 │ entity newco : employer
+23 │   via income/salary-newco
+   │       ─────────┬─────────
+   │                ╰── not a known place
+   │
+   = note: assets, liabilities, income, expenses and equity are not special account roots
+   = help: declare a full account path and its kind: `account income/salary-newco`
+
 error[deferral-limit]: 401(k) deferrals over the yearly limit: 27,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 2,500.00 USD
    ╭─[69-401k-two-employers.ax:32:3]
    │
 26 │ 2026-05-29 acme -> 20_000 USD
 27 │   retirement  15_000 USD
    │   ───────────┬──────────
-   │              ╰── 2026-05-29: 15,000.00 USD from income/salary to assets/retirement
+   │              ╰── 2026-05-29: 15,000.00 USD from acme to assets/retirement
    ⋮
 31 │ 2026-06-26 newco -> 16_000 USD
 32 │   retirement-newco  12_000 USD
    │   ──────────────┬─────────────
    │                 ╰── this flow: 12,000.00 USD into assets/retirement-newco
    │
-   ├─[us/401k.ax:42:13] (built in)
+   ├─[us/401k.ax:44:13] (built in)
    │
-42 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearl…
-   │             ────────────┬────────────    ─────────┬─────────
-   │                         │                         ╰── 24,500.00 USD
-   │                         ╰── 27,000.00 USD
+44 │     require value(tally(elective-deferrals), USD) <= limit[year] + extra "401(k) deferrals ov…
+   │             ──────────────────┬──────────────────    ─────────┬─────────
+   │                               │                               ╰── 24,500.00 USD
+   │                               ╰── 27,000.00 USD
    │
    = note: Elective deferrals are capped for each person and calendar year, across every plan they
            hold (IRC §402(g)), with a catch-up from age 50 and a larger one from 60 through 63 (IRC
            §414(v)). Employer contributions do not count. This payment took the year's deferrals
            over the cap. Any excess must also be returned by the plan before April 15 of the next
            year, or it is taxed twice (IRC §402(g)(2)).
-   = help: at most 9,500.00 USD more can count toward `elective-deferrals` this year
    = help: ask payroll to lower the deferral, and have the plan return the excess.
 
-✗ 1 error
+✗ 5 errors
 [exit status 1]

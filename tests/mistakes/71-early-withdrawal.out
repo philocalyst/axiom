@@ -1,3 +1,25 @@
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+   ╭─[71-early-withdrawal.ax:14:9]
+   │
+14 │ account equity/opening
+   │         ───────┬──────
+   │                ╰── what a flow is for is its purpose, and whom it is with is its party
+   │
+   = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+           for; declare institution positions as `account checking : bank at chase`
+
+error[unknown-place]: there is no place `equity/opening`
+   ╭─[71-early-withdrawal.ax:17:7]
+   │
+16 │ entity acme : employer
+17 │   via equity/opening
+   │       ───────┬──────
+   │              ╰── not a known place
+   │
+   = note: it is close to `equity/opening`, so it is not opened as a new account
+   = help: if this path is a new account, declare it: `account equity/opening`
+   = help: did you mean `equity/opening`?
+
 note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2027-04-15
    ╭─[71-early-withdrawal.ax:20:1]
    │
@@ -5,9 +27,9 @@ note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, du
    │ ──────────────────────┬─────────────────────
    │                       ╰── this flow: a gain of 10,000.00 USD on 10,000.00 USD
    │
-   ├─[us/401k.ax:54:13] (built in)
+   ├─[us/401k.ax:56:13] (built in)
    │
-54 │     require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-w…
+56 │     require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-w…
    │             ────┬────
    │                 ╰── 37y9m21d
    │
@@ -17,6 +39,5 @@ note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, du
            substantially equal payments, and others in §72(t)(2)), keep the withdrawal and mark it
            `!` with the reason.
 
-1 priced
-✓ 2 flows · 3 places · 9 laws enforced · net worth 40,000.00 USD
-[exit status 0]
+✗ 2 errors · 1 priced
+[exit status 1]

@@ -1,12 +1,38 @@
-error[unknown-trigger]: unknown trigger `deposit`
-  ╭─[73-unknown-trigger.ax:9:8]
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[73-unknown-trigger.ax:6:9]
   │
-8 │   law monthly-cap
-9 │     on deposit
-  │        ───┬───
-  │           ╰── not a known trigger
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
   │
-  = note: the triggers are `in`, `out`, `gain` and `spend`
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
 
-✗ 1 error
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[73-unknown-trigger.ax:7:9]
+  │
+7 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[flow-shape]: a flow needs a named end and at least one leg
+   ╭─[73-unknown-trigger.ax:13:1]
+   │
+13 │ 2026-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── no complete flow can be formed here
+   │
+   = help: write both ends in the header, or write one end and indent the other legs
+
+error[unknown-entity]: there is no entity `food`
+   ╭─[73-unknown-trigger.ax:13:24]
+   │
+13 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known entity
+
+✗ 4 errors
 [exit status 1]

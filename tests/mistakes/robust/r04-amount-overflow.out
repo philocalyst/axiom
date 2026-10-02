@@ -1,3 +1,23 @@
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r04-amount-overflow.ax:5:9]
+  │
+5 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r04-amount-overflow.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
 error[bad-number]: `99999999999999999999` is not a valid number
   ╭─[r04-amount-overflow.ax:9:29]
   │
@@ -7,5 +27,5 @@ error[bad-number]: `99999999999999999999` is not a valid number
   │
   = note: this number has more digits than an amount can hold
 
-✗ 1 error
+✗ 3 errors
 [exit status 1]

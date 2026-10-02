@@ -1,3 +1,13 @@
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[55-infer-no-assertion.ax:7:9]
+  │
+7 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
 error[cannot-infer]: cannot infer the amount of this flow
    ╭─[55-infer-no-assertion.ax:10:1]
    │
@@ -10,5 +20,5 @@ error[cannot-infer]: cannot infer the amount of this flow
    = help: assert assets/checking's balance after 2026-02-08 so the amount can be solved: `DATE
            assets/checking = AMOUNT`
 
-✗ 1 error
+✗ 2 errors
 [exit status 1]

@@ -1,3 +1,23 @@
+error[chart-account]: `expenses/food` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r17-many-nested-indent.ax:5:9]
+  │
+5 │ account expenses/food
+  │         ──────┬──────
+  │               ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
+error[chart-account]: `equity/opening` is a v3 chart account: v4 has no income, expense or equity accounts
+  ╭─[r17-many-nested-indent.ax:6:9]
+  │
+6 │ account equity/opening
+  │         ───────┬──────
+  │                ╰── what a flow is for is its purpose, and whom it is with is its party
+  │
+  = help: declare the party (`entity lumen : employer`) and use `#purpose` for what each flow is
+          for; declare institution positions as `account checking : bank at chase`
+
 error[expected-amount]: expected an amount such as `50 USD`, found the end of the line
    ╭─[r17-many-nested-indent.ax:10:4]
    │
@@ -21,5 +41,5 @@ error[unexpected-indent]: this line is indented further than the lines above it
 11 -     x
 11 +   x
 
-✗ 2 errors
+✗ 4 errors
 [exit status 1]
