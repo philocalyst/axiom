@@ -27,59 +27,25 @@ use crate::{Pad, explain};
 impl Ledger<'_, '_, '_> {
     pub(crate) fn reconcile(&mut self, index: usize) {
         let book = self.plan.book;
-        let source = &book.asserts[index];
         let Some(amount) = self.assertion_amount(index) else {
             return;
         };
-        let assert = Assert {
-            day: source.day,
-            place: source.place,
-            subject: source.subject,
-            amount,
-            computed: source.computed,
-            gap: source.gap,
-            loc: source.loc,
-        };
+        let assert = with_amount(&book.asserts[index], amount);
         let (place, unit) = (assert.place, assert.amount.unit);
         let shown = self.plan.sides.display(place, self.world.holdings.qty(place, unit));
         let gap = assert.amount.qty - shown;
         let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
         let now = LastCheck { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
-        let blame =
-            self.plan.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
         let now = match (assert.gap, gap.is_zero()) {
             (_, true) => now,
-            (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
-                Some(unknown) => {
-                    self.record.report(explain::unchecked(book, &assert, book.flows[unknown].loc));
-                    LastCheck { unsolved_said: true, ..now }
-                }
-                None if gap == last.gap => now,
-                None => {
-                    let others: Vec<_> = self
-                        .world
-                        .holdings
-                        .of(place)
-                        .map(|slot| (slot.unit, self.plan.sides.display(place, slot.qty)))
-                        .collect();
-                    let report = explain::mismatch(
-                        book,
-                        &self.plan.events,
-                        (&assert, self.plan.sides.sign(place)),
-                        (shown, gap - last.gap),
-                        last.day,
-                        &others,
-                    );
-                    self.record.report(report);
-                    now
-                }
-            },
+            (Gap::Refused, false) => self.refuse(&assert, shown, last, now),
             (Gap::Unexplained(waive), false) => {
+                let unknown = book.entities[book.roots.unknown].place;
                 self.pad(
                     index,
                     &assert,
                     gap,
-                    book.entities[book.roots.unknown].place.expect("the unknown entity owns its balancing place"),
+                    unknown.expect("the unknown entity owns its balancing place"),
                     Some(waive),
                 );
                 LastCheck { gap: Qty::ZERO, ..now }
@@ -90,6 +56,41 @@ impl Ledger<'_, '_, '_> {
             }
         };
         self.record.checkpoints.insert((place, unit), now);
+    }
+
+    /// A gap nobody accepted. It is reported once: not when an amount that could not be solved may be to blame
+    /// and has been said to be, and not when it is the gap that was reported before. Returns what is now known
+    /// of the place's checks.
+    fn refuse(&mut self, assert: &Assert, shown: Qty, last: LastCheck, now: LastCheck) -> LastCheck {
+        let book = self.plan.book;
+        let (place, unit) = (assert.place, assert.amount.unit);
+        let blame =
+            self.plan.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
+        match blame.filter(|_| !last.unsolved_said) {
+            Some(unknown) => {
+                self.record.report(explain::unchecked(book, assert, book.flows[unknown].loc));
+                LastCheck { unsolved_said: true, ..now }
+            }
+            None if now.gap == last.gap => now,
+            None => {
+                let others: Vec<_> = self
+                    .world
+                    .holdings
+                    .of(place)
+                    .map(|slot| (slot.unit, self.plan.sides.display(place, slot.qty)))
+                    .collect();
+                let report = explain::mismatch(
+                    book,
+                    &self.plan.events,
+                    (assert, self.plan.sides.sign(place)),
+                    (shown, now.gap - last.gap),
+                    last.day,
+                    &others,
+                );
+                self.record.report(report);
+                now
+            }
+        }
     }
 
     /// Computes a statement amount at the statement's day. Literal assertions
@@ -136,5 +137,18 @@ impl Ledger<'_, '_, '_> {
             let note = explain::padded(book, assert, waive, amount);
             self.record.report(note);
         }
+    }
+}
+
+/// The assertion as written, with the amount it says: a computed one is evaluated first.
+fn with_amount(source: &Assert, amount: Amount) -> Assert {
+    Assert {
+        day: source.day,
+        place: source.place,
+        subject: source.subject,
+        amount,
+        computed: source.computed,
+        gap: source.gap,
+        loc: source.loc,
     }
 }
