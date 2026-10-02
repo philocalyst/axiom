@@ -3,7 +3,7 @@
 //! A thing is a holder, and a slot is something that can be said of it: its owner, when it opened, the systems a
 //! person lives in. What is said of a slot is a timeline: a value from some day, until a statement from a later day
 //! says another. Holders and slots are dense numbers (the model numbers them), and a value is whatever a
-//! [`Field`](crate::tagless::Field) can hold.
+//! [`Field`] can hold.
 //!
 //! # Why compressed rows
 //!
@@ -11,23 +11,21 @@
 //! store is a table of three levels, laid end to end in flat arrays and found by offsets, with nothing to chase:
 //!
 //! ```text
-//! rows[holder] ‥ rows[holder + 1]      the entries of a holder, sorted by slot
-//! entries[e].first ‥ entries[e+1].first    the steps of an entry: a slot's timeline
-//! days[step], values[step]             a step: the day it begins, and what holds from then
+//! rows[holder]  ‥ rows[holder + 1]         the entries of a holder, sorted by slot      4 bytes a holder
+//! entries[e].first ‥ entries[e + 1].first  the steps of an entry: one slot's timeline    8 bytes an entry
+//! days[step], values[step]                 a step: the day it begins, and what holds    4 + 17 bytes a step
 //! ```
 //!
-//! A read is a short scan of the holder's entries and a binary search of one entry's days, and touches four bytes of
-//! day and seventeen of value. Reading a whole slot is a slice. Building is one counting sort of the statements by
-//! holder, then each (holder, slot) group painted in arrival order into a small reused vector, and written out. The
-//! holders do not depend on each other, so they are painted and written in chunks on every core, and the chunks laid
-//! end to end.
+//! A read finds the slot among a holder's entries (a scan for the handful there usually are, a binary search for a
+//! long row), binary-searches that entry's days, and reads the value: it touches four bytes of day and seventeen of
+//! value, and allocates nothing. Reading a whole slot is a slice, and a stepper over it is [`Steps`].
 //!
 //! # Steps and gaps
 //!
 //! Every entry is a timeline over all time: its first step begins at [`Day::MIN`], so a read always finds the step
 //! it is in, with no case for "before the first". Where nothing is said (before the first statement, and after a
 //! window that ends with nothing to resume) the step holds an empty value, a gap. A read of a gap is `None`, and
-//! [`Steps`] leaves gaps out.
+//! [`Steps`] leaves gaps out. A slot a holder says nothing of has no entry at all.
 //!
 //! # Keys are claims
 //!
@@ -41,6 +39,33 @@
 //!
 //! Painting merges adjacent steps that hold the same value, and "the same" is [`Datum`] equality: the same tag and the
 //! same sixteen bytes. That is `==` for every type a column holds; [`Datum`] says what would break it.
+//!
+//! # Sets
+//!
+//! A slot that holds many things at once (the systems a person lives in, the owners of a position) is a slot of
+//! [`Many<V>`]: a [`Field`] that wears a run, a handle into a second column of the store, where each set that any step
+//! holds is stored once, sorted and without repeats. So equal sets are one handle, equal values, and merge like any
+//! other; `at`, `steps` and `days_where` need no case for them, and [`Facts::members`] opens a handle. The alternative
+//! was an `at_many` beside `at`, which would have left `steps` and `days_where` to grow a second form each, or to stop
+//! at sets; this way [`Steps`] stays a borrowed day slice and value column, with no store behind it.
+//!
+//! # Inheritance
+//!
+//! A kind's facts are the defaults of its things, and a lookup falls back up the kind's ancestors. The tree of kinds is
+//! the model's; [`Facts::at_first`] takes the ancestors as holder numbers, nearest first, and answers with the first
+//! that says anything on the day. A gap in a thing's own timeline lets the kind's value through.
+//!
+//! # Building, and editing
+//!
+//! A [`Builder`] takes statements as they are written, in any order of holders and slots, and [`Builder::freeze`] makes
+//! the store from them and from nothing else, leaving the builder as it was. A live edit makes more statements and
+//! freezes again: that costs the counting sort and the painting again, and is the same store a build of all the
+//! statements would give. A patch that redid only what an edit touched would go here too, in `freeze`: it freezes in
+//! chunks of holders that are each a store of their own, laid end to end, and so an edit need only freeze the chunk of
+//! its holder again. Not built.
+//!
+//! The counting sort is `groups::bucket`, by holder; the painting of each (holder, slot) is `timeline`'s, in the
+//! order the statements were made; and the chunks are frozen on every core, with `par`.
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -110,105 +135,6 @@ impl<V> fmt::Debug for Key<V> {
     }
 }
 
-/// A set of `V`s as the value of a step: a slot that holds many things at once, such as the systems a person lives
-/// in or the owners of a position.
-///
-/// It is a handle: where the members are in the store's second column. They are sorted and without repeats, and each
-/// set is stored once, so within a store two equal sets are the same handle, are equal as values and merge as steps
-/// do. Open it with [`Facts::members`] of the store it came from; a handle of another store is a wrong claim like a
-/// wrong key, and gives other members, or panics.
-pub struct Many<V> {
-    run: Run<V>,
-}
-
-const _: () = assert!(size_of::<Many<u32>>() == 8);
-
-impl<V> Many<V> {
-    fn at(start: u32, len: u32) -> Many<V> {
-        Many { run: Run::new(Id::new(start), len) }
-    }
-}
-
-impl<V> Clone for Many<V> {
-    fn clone(&self) -> Many<V> {
-        *self
-    }
-}
-
-impl<V> Copy for Many<V> {}
-
-impl<V> PartialEq for Many<V> {
-    fn eq(&self, other: &Many<V>) -> bool {
-        self.run == other.run
-    }
-}
-
-impl<V> Eq for Many<V> {}
-
-impl<V> fmt::Debug for Many<V> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Many<{}>{:?}", std::any::type_name::<V>(), self.run)
-    }
-}
-
-impl<V> sealed::Sealed for Many<V> {}
-
-/// A run in the payload, as it is for [`Run`]: one more way to say it, in the type of the key.
-impl<V> Field for Many<V> {
-    const TAG: Tag = Tag::Run;
-
-    fn put(self) -> Payload {
-        self.run.put()
-    }
-
-    fn pull(payload: Payload) -> Many<V> {
-        Many { run: Run::pull(payload) }
-    }
-}
-
-/// The members of a set, in order, borrowed from the store's second column: what [`Facts::members`] gives.
-pub struct Members<'a, V> {
-    column: &'a Column,
-    range: Range<u32>,
-    of: PhantomData<fn() -> V>,
-}
-
-const _: () = assert!(size_of::<Members<'_, u32>>() == 16);
-
-impl<V: Field> Members<'_, V> {
-    /// Whether `member` is in the set, by the equality of values that merging uses. A scan: a set is a handful.
-    pub fn contains(&self, member: V) -> bool {
-        let member = Datum::of(member);
-        self.range.clone().any(|at| self.column.datum(at) == member)
-    }
-}
-
-impl<V: Field> Iterator for Members<'_, V> {
-    type Item = V;
-
-    fn next(&mut self) -> Option<V> {
-        self.range.next().map(|at| self.column.get(at))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.range.size_hint()
-    }
-}
-
-impl<V: Field> DoubleEndedIterator for Members<'_, V> {
-    fn next_back(&mut self) -> Option<V> {
-        self.range.next_back().map(|at| self.column.get(at))
-    }
-}
-
-impl<V: Field> ExactSizeIterator for Members<'_, V> {}
-
-impl<V> Clone for Members<'_, V> {
-    fn clone(&self) -> Self {
-        Members { column: self.column, range: self.range.clone(), of: PhantomData }
-    }
-}
-
 /// One slot of one holder: which slot, and where its steps begin. They end where the next entry's begin, and the
 /// last entry of the store is followed by one that says only where the steps end.
 #[derive(Clone, Copy)]
@@ -218,6 +144,11 @@ struct Entry {
 }
 
 const _: () = assert!(size_of::<Entry>() == 8);
+// The fold borrows the store from every thread that reads it.
+const _: fn() = || {
+    fn is_send_and_sync<T: Send + Sync>() {}
+    is_send_and_sync::<Facts>();
+};
 
 /// Every slot of every holder, frozen: steps on days in compressed rows. Built by a [`Builder`], then only read.
 pub struct Facts {
@@ -234,7 +165,25 @@ pub struct Facts {
 }
 
 impl Facts {
-    /// A builder for a store of `holders` rows, numbered from zero.
+    /// A builder for a store of `holders` rows, numbered from zero. Statements are painted in the order they are
+    /// written: a later one overrides an earlier one over the days it covers, and what held before resumes after it.
+    ///
+    /// ```
+    /// use axiom_core::{Day, Days, Facts, Key, SlotId};
+    ///
+    /// const RENT: Key<u32> = Key::new(SlotId(0));
+    /// let day = |month, date| Day::from_ymd(2026, month, date).unwrap();
+    ///
+    /// let mut book = Facts::builder(1); // one thing: a lease
+    /// book.paint_always(0, RENT, 1_200); // the declaration holds from the beginning of time
+    /// book.paint(0, RENT, Days::new(day(3, 1), Day::MAX).unwrap(), 1_300); // from March on
+    /// book.paint(0, RENT, Days::new(day(6, 1), day(6, 30)).unwrap(), 900); // from June until the end of June
+    /// let facts = book.freeze();
+    ///
+    /// assert_eq!(facts.at(RENT, 0, day(2, 1)), Some(1_200));
+    /// assert_eq!(facts.at(RENT, 0, day(6, 15)), Some(900));
+    /// assert_eq!(facts.at(RENT, 0, day(7, 1)), Some(1_300), "what held before June resumes after it");
+    /// ```
     pub fn builder(holders: usize) -> Builder {
         Builder {
             holders: u32::try_from(holders).expect("fewer than 2^32 holders"),
@@ -249,6 +198,19 @@ impl Facts {
     }
 
     /// What holds of `holder`'s `key` on `day`, or `None` if nothing is said then. Two searches and no allocation.
+    ///
+    /// ```
+    /// use axiom_core::{Day, Days, Facts, Key, SlotId};
+    ///
+    /// const CLOSED: Key<Day> = Key::new(SlotId(0));
+    /// let mut book = Facts::builder(2);
+    /// book.paint(1, CLOSED, Days::new(Day(100), Day::MAX).unwrap(), Day(250));
+    /// let facts = book.freeze();
+    ///
+    /// assert_eq!(facts.at(CLOSED, 1, Day(100)), Some(Day(250)));
+    /// assert_eq!(facts.at(CLOSED, 1, Day(99)), None, "nothing is said before it is said");
+    /// assert_eq!(facts.at(CLOSED, 0, Day(100)), None, "and nothing of a holder that said nothing");
+    /// ```
     pub fn at<V: Field>(&self, key: Key<V>, holder: u32, day: Day) -> Option<V> {
         let steps = self.steps_of(key.slot, holder)?;
         let begun = self.days[steps.clone()].partition_point(|&from| from <= day);
@@ -265,6 +227,30 @@ impl Facts {
     ///
     /// An integral, not a sample: it walks the steps that meet the window once, and what it returns is exact. Each
     /// satisfying step is clipped to the window, and steps that touch make one interval.
+    ///
+    /// The days a person lived in a system:
+    ///
+    /// ```
+    /// use axiom_core::{Day, Days, Facts, Key, Many, SlotId};
+    ///
+    /// const LIVES: Key<Many<u32>> = Key::new(SlotId(0));
+    /// const US: u32 = 1;
+    /// const PORTUGAL: u32 = 2;
+    /// let day = |month, date| Day::from_ymd(2026, month, date).unwrap();
+    /// let span = |from, to| Days::new(from, to).unwrap();
+    ///
+    /// let mut book = Facts::builder(1);
+    /// book.paint_many(0, LIVES, Days::ALWAYS, [US]);
+    /// book.paint_many(0, LIVES, span(day(3, 1), day(8, 31)), [PORTUGAL, US]); // both, from March until August
+    /// book.paint_many(0, LIVES, span(day(9, 1), day(12, 31)), [PORTUGAL]);
+    /// let facts = book.freeze();
+    ///
+    /// let in_portugal = facts.days_where(LIVES, 0, span(day(1, 1), day(12, 31)), |set| {
+    ///     facts.members(set).contains(PORTUGAL)
+    /// });
+    /// assert_eq!(in_portugal.intervals(), [span(day(3, 1), day(12, 31))], "the two steps that satisfy it touch");
+    /// assert_eq!(in_portugal.len(), 306);
+    /// ```
     pub fn days_where<V: Field>(
         &self,
         key: Key<V>,
@@ -291,18 +277,29 @@ impl Facts {
         Members { column: &self.members, range, of: PhantomData }
     }
 
+    /// The slots `holder` says anything of, in the order of their numbers: what a thing has to show.
+    pub fn slots(&self, holder: u32) -> impl ExactSizeIterator<Item = SlotId> + '_ {
+        self.entries[self.row(holder)].iter().map(|entry| entry.slot)
+    }
+
+    /// The entries of `holder`.
+    fn row(&self, holder: u32) -> Range<usize> {
+        self.rows[holder as usize] as usize..self.rows[holder as usize + 1] as usize
+    }
+
     /// Where the steps of `slot` are among the store's, if `holder` said anything of it.
     fn steps_of(&self, slot: SlotId, holder: u32) -> Option<Range<usize>> {
-        let (start, end) = (self.rows[holder as usize] as usize, self.rows[holder as usize + 1] as usize);
-        let found = start + find_slot(&self.entries[start..end], slot)?;
+        let row = self.row(holder);
+        let found = row.start + find_slot(&self.entries[row], slot)?;
         // The entry after a row's last is the next row's first, or the last of all: it says where the steps end.
         Some(self.entries[found].first as usize..self.entries[found + 1].first as usize)
     }
 }
 
 /// The longest row that is scanned for a slot; a longer one is searched. Where the two cross in the benchmark in the
-/// tests, which has the scan faster by half up to 6 entries, even at 12, and the search faster by a third at 40 and by
-/// 2.5 times at 200: a thing says a handful of its slots, but a kind of thing may say many.
+/// tests, in whole reads: the scan is faster by half at 3 entries and by a fifth at 12, they meet at about 24, and the
+/// search is faster by a fifth at 40 and by nearly half at 200. A thing says a handful of its slots, but a kind of
+/// thing may say many.
 const SCAN_UP_TO: usize = 16;
 
 /// Where `slot` is in a row, whose entries are sorted by slot.
@@ -434,6 +431,105 @@ impl<V: Field> DoubleEndedIterator for Stretches<'_, V> {
 impl<V> Clone for Stretches<'_, V> {
     fn clone(&self) -> Self {
         Stretches { days: self.days, end: self.end, values: self.values, first: self.first, of: PhantomData }
+    }
+}
+
+/// A set of `V`s as the value of a step: a slot that holds many things at once, such as the systems a person lives
+/// in or the owners of a position.
+///
+/// It is a handle: where the members are in the store's second column. They are sorted and without repeats, and each
+/// set is stored once, so within a store two equal sets are the same handle, are equal as values and merge as steps
+/// do. Open it with [`Facts::members`] of the store it came from; a handle of another store is a wrong claim like a
+/// wrong key, and gives other members, or panics.
+pub struct Many<V> {
+    run: Run<V>,
+}
+
+const _: () = assert!(size_of::<Many<u32>>() == 8);
+
+impl<V> Many<V> {
+    fn at(start: u32, len: u32) -> Many<V> {
+        Many { run: Run::new(Id::new(start), len) }
+    }
+}
+
+impl<V> Clone for Many<V> {
+    fn clone(&self) -> Many<V> {
+        *self
+    }
+}
+
+impl<V> Copy for Many<V> {}
+
+impl<V> PartialEq for Many<V> {
+    fn eq(&self, other: &Many<V>) -> bool {
+        self.run == other.run
+    }
+}
+
+impl<V> Eq for Many<V> {}
+
+impl<V> fmt::Debug for Many<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Many<{}>{:?}", std::any::type_name::<V>(), self.run)
+    }
+}
+
+impl<V> sealed::Sealed for Many<V> {}
+
+/// A run in the payload, as it is for [`Run`]: one more way to say it, in the type of the key.
+impl<V> Field for Many<V> {
+    const TAG: Tag = Tag::Run;
+
+    fn put(self) -> Payload {
+        self.run.put()
+    }
+
+    fn pull(payload: Payload) -> Many<V> {
+        Many { run: Run::pull(payload) }
+    }
+}
+
+/// The members of a set, in order, borrowed from the store's second column: what [`Facts::members`] gives.
+pub struct Members<'a, V> {
+    column: &'a Column,
+    range: Range<u32>,
+    of: PhantomData<fn() -> V>,
+}
+
+const _: () = assert!(size_of::<Members<'_, u32>>() == 16);
+
+impl<V: Field> Members<'_, V> {
+    /// Whether `member` is in the set, by the equality of values that merging uses. A scan: a set is a handful.
+    pub fn contains(&self, member: V) -> bool {
+        let member = Datum::of(member);
+        self.range.clone().any(|at| self.column.datum(at) == member)
+    }
+}
+
+impl<V: Field> Iterator for Members<'_, V> {
+    type Item = V;
+
+    fn next(&mut self) -> Option<V> {
+        self.range.next().map(|at| self.column.get(at))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.range.size_hint()
+    }
+}
+
+impl<V: Field> DoubleEndedIterator for Members<'_, V> {
+    fn next_back(&mut self) -> Option<V> {
+        self.range.next_back().map(|at| self.column.get(at))
+    }
+}
+
+impl<V: Field> ExactSizeIterator for Members<'_, V> {}
+
+impl<V> Clone for Members<'_, V> {
+    fn clone(&self) -> Self {
+        Members { column: self.column, range: self.range.clone(), of: PhantomData }
     }
 }
 
@@ -783,6 +879,20 @@ mod tests {
         assert!(keys.iter().enumerate().all(|(i, &key)| facts.at(key, 1, Day(0)) == Some(i as u32 * 10)));
         assert!(keys.iter().all(|&key| facts.at(key, 0, Day(0)).is_none()));
         assert_eq!(facts.at(Key::<u32>::new(SlotId(50)), 1, Day(0)), None);
+    }
+
+    #[test]
+    fn a_holder_shows_the_slots_it_said_in_order_and_no_others() {
+        let mut builder = Facts::builder(3);
+        builder.paint_always(1, OPENED, Day(5));
+        builder.paint(1, LETTER, days(0, 9), 1);
+        builder.paint(1, LETTER, days(3, 4), 2);
+        builder.paint_many(1, LIVES, Days::ALWAYS, [1]);
+        builder.paint_always(2, OTHER, 3);
+        let facts = builder.freeze();
+        assert_eq!(facts.slots(1).collect::<Vec<_>>(), [SlotId(0), SlotId(2), SlotId(3)]);
+        assert_eq!(facts.slots(2).collect::<Vec<_>>(), [SlotId(1)]);
+        assert_eq!(facts.slots(0).len(), 0, "a holder that said nothing has no slots");
     }
 
     #[test]
@@ -1389,6 +1499,13 @@ mod tests {
             // The same statements frozen in other chunks make the same store, found timeline by timeline.
             let chunked = builder.freeze_in_chunks(1 + rng.below(holders + 1));
             for holder in 0..holders {
+                // A slot said of has an entry, and one not said of has none.
+                let said = |slot: usize| case.timeline(holder, slot).iter().any(Option::is_some);
+                let expected: Vec<SlotId> =
+                    (0..SLOTS).filter(|&slot| said(slot)).map(|slot| SlotId(slot as u32)).collect();
+                for store in [&facts, &chunked] {
+                    assert_eq!(store.slots(holder as u32).collect::<Vec<_>>(), expected, "case {}", case.number);
+                }
                 for slot in 0..SLOTS {
                     case.check_reads(&facts, holder, slot);
                     case.check_steps(&facts, holder, slot);
@@ -1509,6 +1626,10 @@ mod tests {
         }
     }
 
+    fn per(time: std::time::Duration, count: usize) -> f64 {
+        time.as_nanos() as f64 / count as f64
+    }
+
     /// `cargo test -p axiom-core --release facts::tests::bench -- --ignored --nocapture`
     #[test]
     #[ignore = "a benchmark"]
@@ -1518,23 +1639,21 @@ mod tests {
         let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
         let book = generated_book(HOLDERS, &mut rng);
         let keys: Vec<Key<u32>> = (0..8).map(|slot| Key::new(SlotId(slot))).collect();
-        let per = |time: std::time::Duration, count: usize| time.as_nanos() as f64 / count as f64;
-
-        let painting = best_of(3, || {
+        let fill = || {
             let mut builder = Facts::builder(HOLDERS as usize);
             for &(holder, slot, days, letter) in &book {
                 builder.paint(holder, keys[slot as usize], days, letter);
             }
             builder
-        });
-        let mut builder = Facts::builder(HOLDERS as usize);
-        for &(holder, slot, days, letter) in &book {
-            builder.paint(holder, keys[slot as usize], days, letter);
-        }
+        };
+        let painting = best_of(3, fill);
+        let builder = fill();
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         let freezing = best_of(3, || builder.freeze());
+        // One chunk of every holder is one piece of work, which `par` runs on the calling thread.
+        let freezing_on_one_core = best_of(3, || builder.freeze_in_chunks(HOLDERS as usize));
         let nested_build = best_of(3, || Nested::build(HOLDERS, &book));
-        let facts = builder.freeze();
-        let nested = Nested::build(HOLDERS, &book);
+        let (facts, nested) = (builder.freeze(), Nested::build(HOLDERS, &book));
 
         let (entries, steps) = (facts.entries.len() - 1, facts.days.len());
         let facts_bytes = facts.rows.len() * 4 + facts.entries.len() * 8 + steps * 21;
@@ -1546,22 +1665,22 @@ mod tests {
             steps as f64 / entries as f64
         );
         eprintln!(
-            "  build: paint {:.0} ms, freeze {:.0} ms ({:.0} ns a statement); nested vectors {:.0} ms",
+            "  build: statements made {:.0} ms; freeze {:.0} ms on {cores} cores and {:.0} ms on one ({:.0} ns a statement); nested vectors {:.0} ms",
             painting.as_secs_f64() * 1e3,
             freezing.as_secs_f64() * 1e3,
-            per(freezing, book.len()),
+            freezing_on_one_core.as_secs_f64() * 1e3,
+            per(freezing_on_one_core, book.len()),
             nested_build.as_secs_f64() * 1e3
         );
         eprintln!(
-            "  size: facts {:.1} MB = {:.1} bytes a step ({:.1} with the statements' slack), nested {:.1} MB = {:.1} bytes a step in {nested_allocations} allocations",
+            "  size: facts {:.1} MB = {:.1} bytes a step; nested {:.1} MB = {:.1} bytes a step, in {nested_allocations} allocations",
             facts_bytes as f64 / 1e6,
             facts_bytes as f64 / steps as f64,
-            (facts.rows.capacity() * 4 + facts.entries.capacity() * 8 + facts.days.capacity() * 21) as f64
-                / steps as f64,
             nested_bytes as f64 / 1e6,
             nested_bytes as f64 / steps as f64
         );
 
+        // Slots that the holder did not say are most of what is asked, 5 in 8, as they are when a thing falls back on its kind.
         let queries: Vec<(u32, u32, Day)> = (0..READS)
             .map(|_| (rng.below(HOLDERS as usize) as u32, rng.below(8) as u32, Day(rng.below(4000) as i32)))
             .collect();
@@ -1581,5 +1700,85 @@ mod tests {
             per(best_of(5, || sum_facts(&sorted)), READS),
             per(best_of(5, || sum_nested(&sorted)), READS)
         );
+    }
+
+    #[test]
+    #[ignore = "a benchmark"]
+    fn bench_the_days_a_condition_holds_by_integral_and_by_daily_sample() {
+        const STEPS: i32 = 10_000;
+        let mut builder = Facts::builder(1);
+        for step in 0..STEPS {
+            builder.paint(0, LETTER, days(step * 3, step * 3 + 2), step as u32 % 3);
+        }
+        let facts = builder.freeze();
+        let window = days(0, STEPS * 3 - 1);
+        let holds = |letter: u32| letter == 1;
+        let integral = || facts.days_where(LETTER, 0, window, holds);
+        let sampled = || {
+            let mut runs: Vec<Days> = Vec::new();
+            for day in (window.first().0..=window.last().0).map(Day) {
+                if !facts.at(LETTER, 0, day).is_some_and(holds) {
+                    continue;
+                }
+                match runs.last_mut() {
+                    Some(run) if run.last().add_days(1) == day => *run = Days::new(run.first(), day).unwrap(),
+                    _ => runs.push(Days::on(day)),
+                }
+            }
+            runs.into_iter().collect::<DaySet>()
+        };
+        assert_eq!(integral(), sampled(), "the sample finds the same days, a day at a time");
+        let (by_integral, by_sample) = (best_of(9, integral), best_of(9, sampled));
+        eprintln!(
+            "days_where over {} steps and {} days: integral {:.1} us, daily sample {:.1} us, {:.0} times as long",
+            facts.steps(LETTER, 0).len(),
+            window.len(),
+            by_integral.as_secs_f64() * 1e6,
+            by_sample.as_secs_f64() * 1e6,
+            by_sample.as_secs_f64() / by_integral.as_secs_f64()
+        );
+    }
+
+    /// Where a row's slot is found by scanning and by searching cross: what `SCAN_UP_TO` is set from. Whole reads, with
+    /// the finding of the slot done each way, because the scan's cost is in what it lets the next step start on.
+    #[test]
+    #[ignore = "a benchmark"]
+    fn bench_finding_a_slot_in_a_row_by_scan_and_by_search() {
+        type Find = fn(&[Entry], SlotId) -> Option<usize>;
+        let scan: Find = |row, slot| row.iter().position(|entry| entry.slot == slot);
+        let search: Find = |row, slot| {
+            let at = row.partition_point(|entry| entry.slot < slot);
+            row.get(at).is_some_and(|entry| entry.slot == slot).then_some(at)
+        };
+        let read_with = |facts: &Facts, find: Find, (holder, slot, day): (usize, SlotId, Day)| -> u64 {
+            let (start, end) = (facts.rows[holder] as usize, facts.rows[holder + 1] as usize);
+            let Some(found) = find(&facts.entries[start..end], slot) else { return 0 };
+            let steps = facts.entries[start + found].first as usize..facts.entries[start + found + 1].first as usize;
+            let begun = facts.days[steps.clone()].partition_point(|&from| from <= day);
+            read::<u32>(&facts.values, (steps.start + begun - 1) as u32).map_or(0, u64::from)
+        };
+        let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
+        for per_row in [3usize, 6, 12, 24, 40, 200] {
+            let holders = 3_000_000 / per_row;
+            let mut builder = Facts::builder(holders);
+            for holder in 0..holders {
+                for slot in 0..per_row {
+                    builder.paint_always(holder as u32, Key::<u32>::new(SlotId(2 * slot as u32)), slot as u32);
+                }
+            }
+            let facts = builder.freeze();
+            // Half of the slots asked for are the even ones that a row has.
+            let queries: Vec<(usize, SlotId, Day)> = (0..2_000_000)
+                .map(|_| (rng.below(holders), SlotId(rng.below(2 * per_row) as u32), Day(rng.below(100) as i32)))
+                .collect();
+            let (facts, queries) = (&facts, &queries);
+            let sum = |find: Find| move || queries.iter().map(|&q| read_with(facts, find, q)).sum::<u64>();
+            assert_eq!(sum(scan)(), sum(search)());
+            eprintln!(
+                "{per_row:>4} slots a row: scan {:.1} ns, search {:.1} ns",
+                per(best_of(5, sum(scan)), queries.len()),
+                per(best_of(5, sum(search)), queries.len())
+            );
+        }
     }
 }

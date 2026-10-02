@@ -4,8 +4,8 @@
 //! pre-ordered trees, grouped tables, source locations, diagnostics, and scoped
 //! parallelism; and the primitives the kernels are made of: columns of mixed
 //! values, sets of days, range extremes in constant time, intersection of
-//! sorted lists, forced placement of words into slots, and dense state with an
-//! undo log.
+//! sorted lists, forced placement of words into slots, dense state with an
+//! undo log, and one store of everything said about a thing, as steps on days.
 
 pub mod calendar;
 pub mod day;
@@ -36,7 +36,7 @@ pub use calendar::{Cadence, DateLayout, Days, On, Period, due, spread};
 pub use day::{Day, Span};
 pub use dayset::{DaySet, DaySlice};
 pub use diag::{Diagnostic, Disposition, FileId, Loc, Severity};
-pub use facts::{Facts, Key, SlotId};
+pub use facts::{Facts, Key, Many, SlotId};
 pub use groups::Groups;
 pub use hash::{Map, Set};
 pub use id::{Arena, Id, Run};
