@@ -17,7 +17,7 @@ pub(super) struct Commodities<'s> {
 }
 
 /// A commodity of no kind of its own: scale, title and the rest are for the property pass to fill.
-pub(super) fn commodity<'s>(
+pub(super) fn commodity(
     symbol: axiom_core::Sym,
     kind: Id<crate::book::Kind>,
     scale: u8,

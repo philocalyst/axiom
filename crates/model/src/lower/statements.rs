@@ -308,6 +308,9 @@ fn lower_quote<'s>(
     world.book.prices.quotes.push(quote);
 }
 
+/// What an assertion's amount is: written, or computed by a node of a program of its own.
+type Computed = Option<(Id<TemplateProgram>, NodeId)>;
+
 fn assertion_amount<'s>(
     world: &mut World<'s>,
     at: Stated<'_, '_, 's>,
@@ -315,7 +318,7 @@ fn assertion_amount<'s>(
     fallback: Id<Commodity>,
     subject: Ty,
     diags: &mut Vec<Diagnostic>,
-) -> Option<(Amount, Option<(Id<TemplateProgram>, NodeId)>)> {
+) -> Option<(Amount, Computed)> {
     let (home, file) = (at.home(), at.file());
     match value {
         ast::Amount::Literal(literal) => {

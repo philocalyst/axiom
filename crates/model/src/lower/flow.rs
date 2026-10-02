@@ -360,7 +360,7 @@ pub(super) fn make_resolved_flow(
     let mut detail = tail.detail;
     detail.spender = from.entity;
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
-    if to.select.len() != 0 {
+    if !to.select.is_empty() {
         diags.push(
             Diagnostic::error("selector-target", "selectors narrow the source endpoint of a flow")
                 .label(loc, "this endpoint only receives"),
@@ -411,9 +411,7 @@ pub(super) fn resolve_end<'s>(
 ) -> Option<ResolvedEnd> {
     let (home, file) = (cx.home, cx.file);
     let word = Word::of(file, written.name.0);
-    let Some(end) = world.end(home, word).or_report(diags) else {
-        return None;
-    };
+    let end = world.end(home, word).or_report(diags)?;
     let start = world.book.selectors.len();
     for selector in &file[written.select] {
         let resolved = match *selector {
@@ -421,11 +419,9 @@ pub(super) fn resolve_end<'s>(
             ast::Select::Code(code) => Some(Select::Code(world.book.names.intern(code.name()))),
             ast::Select::Policy(policy, _) => Some(Select::Policy(policy)),
             ast::Select::Purpose(name) => {
-                world.purpose(home, Word::of(file, name.0)).or_report(diags).map(|id| Select::Purpose(id))
+                world.purpose(home, Word::of(file, name.0)).or_report(diags).map(Select::Purpose)
             }
-            ast::Select::Unit(name) => {
-                world.commodity_of(Word::of(file, name.0)).or_report(diags).map(|id| Select::Unit(id))
-            }
+            ast::Select::Unit(name) => world.commodity_of(Word::of(file, name.0)).or_report(diags).map(Select::Unit),
             ast::Select::End(name) => {
                 world.end(home, Word::of(file, name.0)).or_report(diags).map(|id| Select::End(id.place))
             }

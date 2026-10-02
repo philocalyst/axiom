@@ -1804,45 +1804,22 @@ impl<'s> Book<'s> {
         let to_name = self.commodities[to].symbol;
         let direct_unit = Some(Dim::Per(to, from));
         let inverse_unit = Some(Dim::Per(from, to));
-        if param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == direct_unit {
-            if let Some((row, value)) = param.row_index(day, &[from_name, to_name]) {
-                if let Value::Num(rate) = value.value {
-                    if rate.num() > 0 {
-                        return Some(RateUse {
-                            from,
-                            to,
-                            rate,
-                            source: RateSource::Param {
-                                param: id,
-                                row,
-                                since: value.since,
-                                inverted: false,
-                                loc: value.loc,
-                            },
-                        });
-                    }
-                }
-            }
+        if (param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == direct_unit)
+            && let Some((row, value)) = param.row_index(day, &[from_name, to_name])
+            && let Value::Num(rate) = value.value
+            && rate.num() > 0
+        {
+            let source = RateSource::Param { param: id, row, since: value.since, inverted: false, loc: value.loc };
+            return Some(RateUse { from, to, rate, source });
         }
-        if param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == inverse_unit {
-            if let Some((row, value)) = param.row_index(day, &[to_name, from_name]) {
-                if let Value::Num(rate) = value.value {
-                    let rate = rate.recip()?;
-                    if rate.num() > 0 {
-                        return Some(RateUse {
-                            from,
-                            to,
-                            rate,
-                            source: RateSource::Param {
-                                param: id,
-                                row,
-                                since: value.since,
-                                inverted: true,
-                                loc: value.loc,
-                            },
-                        });
-                    }
-                }
+        if (param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == inverse_unit)
+            && let Some((row, value)) = param.row_index(day, &[to_name, from_name])
+            && let Value::Num(rate) = value.value
+        {
+            let rate = rate.recip()?;
+            if rate.num() > 0 {
+                let source = RateSource::Param { param: id, row, since: value.since, inverted: true, loc: value.loc };
+                return Some(RateUse { from, to, rate, source });
             }
         }
         None

@@ -213,19 +213,18 @@ fn row_value<'s>(
     unit: Option<Dim<axiom_core::Id<crate::book::Commodity>>>,
 ) -> Result<Value, Diagnostic> {
     let expr = &file.exprs[row.value];
-    if let (Some(Dim::Per(want_top, want_bottom)), ExprKind::Amount(amount)) = (unit, &expr.kind) {
-        if let Some(written_unit) = amount.unit() {
-            if written_unit.0.contains('/') {
-                let found = parse_unit(world, written_unit.0, file.loc(written_unit.0))?;
-                if found != Dim::Per(want_top, want_bottom) {
-                    return Err(unit_mismatch(world, unit.unwrap(), found, expr.loc));
-                }
-                let ratio = amount.num().to_ratio().ok_or_else(|| {
-                    Diagnostic::error("number-range", "this param value is too large").label(expr.loc, "out of range")
-                })?;
-                return Ok(Value::Num(ratio));
-            }
+    if let (Some(Dim::Per(want_top, want_bottom)), ExprKind::Amount(amount)) = (unit, &expr.kind)
+        && let Some(written_unit) = amount.unit()
+        && written_unit.0.contains('/')
+    {
+        let found = parse_unit(world, written_unit.0, file.loc(written_unit.0))?;
+        if found != Dim::Per(want_top, want_bottom) {
+            return Err(unit_mismatch(world, unit.unwrap(), found, expr.loc));
         }
+        let ratio = amount.num().to_ratio().ok_or_else(|| {
+            Diagnostic::error("number-range", "this param value is too large").label(expr.loc, "out of range")
+        })?;
+        return Ok(Value::Num(ratio));
     }
     let (value, _) = world.constant(home, file, row.value, None)?;
     Ok(value)

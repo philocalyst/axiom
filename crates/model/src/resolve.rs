@@ -11,7 +11,7 @@ use axiom_core::num::DecError;
 use axiom_core::{Dec, Diagnostic, Id, Loc};
 use axiom_syntax::{File, Literal};
 
-use crate::book::{Amount, Commodity, Contract, Entity, Kind, Miss, Param, Place, Purpose, Role, System};
+use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, Place, Purpose, Role, System};
 use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word};
 use crate::kinds;
@@ -219,7 +219,7 @@ impl<'s> World<'s> {
     }
 
     /// The names that are none of an account or a party: the unknown party, a contract and an asset. None for
-    /// any other.
+    /// any other. A contract's name stands for its debt tab when it is a loan, and for its party otherwise.
     fn special_end(&self, home: Home, word: Word) -> Option<Result<End, Diagnostic>> {
         if word.text == "?" {
             let place = self.book.entities[self.book.roots.unknown].place.expect("unknown has an endpoint");
@@ -231,23 +231,25 @@ impl<'s> World<'s> {
             return Some(Ok(end));
         }
         if let Some(contract) = self.book.contract(word.text) {
-            return Some(self.contract_end(contract, home, word));
+            let contract = &self.book.contracts[contract];
+            if let Some(loan) = contract.loan {
+                return Some(Ok(End { place: loan.debt, entity: Some(contract.party) }));
+            }
+            return Some(match self.seek_entity(home, word) {
+                Ok(Some(entity)) => self.entity_end(entity, word),
+                Ok(None) => Err(Diagnostic::error(
+                    "contract-endpoint",
+                    format!("contract `{}` is not a flow endpoint", word.text),
+                )
+                .label(word.loc, "name its party or holding account instead")
+                .help("loan contracts name their debt tab; other contracts are not places")),
+                Err(problem) => Err(problem),
+            });
         }
-        self.book.asset(word.text).map(|_| Err(asset_endpoint(word.text, word.loc)))
-    }
-
-    /// A contract's name stands for its debt tab when it is a loan, and for its party otherwise.
-    fn contract_end(&self, contract: Id<Contract>, home: Home, word: Word) -> Result<End, Diagnostic> {
-        let contract = &self.book.contracts[contract];
-        if let Some(loan) = contract.loan {
-            return Ok(End { place: loan.debt, entity: Some(contract.party) });
+        if self.book.asset(word.text).is_some() {
+            return Some(Err(asset_endpoint(word.text, word.loc)));
         }
-        if let Some(entity) = self.seek_entity(home, word)? {
-            return self.entity_end(entity, word);
-        }
-        Err(Diagnostic::error("contract-endpoint", format!("contract `{}` is not a flow endpoint", word.text))
-            .label(word.loc, "name its party or holding account instead")
-            .help("loan contracts name their debt tab; other contracts are not places"))
+        None
     }
 
     /// What the places and parties a name answers to say it is, if it answers to any.

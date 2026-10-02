@@ -761,12 +761,8 @@ fn declare_has<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, dia
         };
         let sort = world.book.kinds[kind].sort;
         world.declare_props(sort, &own, diags);
-        let inherited: Vec<Has> = world
-            .book
-            .kinds
-            .parent(kind)
-            .map(|parent| world.book.kinds[parent].has.iter().copied().collect())
-            .unwrap_or_default();
+        let inherited: Vec<Has> =
+            world.book.kinds.parent(kind).map(|parent| world.book.kinds[parent].has.to_vec()).unwrap_or_default();
         let inherited = inherited.iter().filter(|above| !own.iter().any(|child| child.name == above.name));
         world.book.kinds[kind].has = own.iter().chain(inherited).copied().collect();
     }
@@ -1121,10 +1117,7 @@ fn read_builtin_lines<'s>(
         if !BUILTINS.iter().any(|(name, _, _)| *name == line.name.0) {
             continue;
         }
-        if targets.contains(&Target::Kind)
-            && targets.iter().any(|target| *target == Target::Asset)
-            && line.name.0 == "part"
-        {
+        if targets.contains(&Target::Kind) && targets.contains(&Target::Asset) && line.name.0 == "part" {
             diags.push(
                 Diagnostic::error("kind-property-target", "`part` is specific to an asset")
                     .label(line.loc, "write this under an `asset`, not its `kind`"),
@@ -1591,7 +1584,7 @@ fn stage_unique(
         diags.push(diagnostic.context(first, "first assigned here"));
         return;
     }
-    seen.insert(key, prop.loc.unwrap_or(Loc::default()));
+    seen.insert(key, prop.loc.unwrap_or_default());
     world.set_prop(target, prop);
 }
 

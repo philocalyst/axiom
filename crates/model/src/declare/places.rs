@@ -9,7 +9,7 @@ use axiom_syntax::DeclKind;
 use super::commodities::Commodities;
 use super::holdings::{AccountDraft, Assets, TabDraft};
 use super::parties::Entities;
-use super::{Resolving, is_path_child, path_key};
+use super::{Resolving, Tabs, is_path_child, path_key};
 use crate::book::{Asset, Basis, Class, Commodity, Entity, Place, Role, Sort};
 use crate::collect::Collected;
 use crate::names::Names;
@@ -36,7 +36,7 @@ pub(super) struct Places {
     /// The place each commodity that pays is issued from.
     pub issuers: Map<Id<Commodity>, Id<Place>>,
     /// The place of each claim, by (party, owner, class).
-    pub tabs: Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
+    pub tabs: Tabs,
     pub names: Names<Place>,
 }
 

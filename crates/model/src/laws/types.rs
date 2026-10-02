@@ -4,9 +4,10 @@
 //! These are functions of types only; they know nothing of names or nodes.
 //! The engine implements exactly the combinations accepted here.
 
-use axiom_core::{Diagnostic, Dim, Loc};
+use axiom_core::{Diagnostic, Dim, Id, Loc};
 use axiom_syntax::BinOp;
 
+use crate::book::Commodity;
 use crate::errors::article;
 use crate::law::Ty;
 
@@ -57,16 +58,12 @@ pub(crate) fn binary(op: BinOp, left: Ty, right: Ty) -> Option<Ty> {
     }
 }
 
+/// How two units combine, if they can.
+type UnitOp = fn(Dim<Id<Commodity>>, Dim<Id<Commodity>>) -> Option<Dim<Id<Commodity>>>;
+
 /// Combine numeric and dimensional amount types with the same unit algebra as
 /// literals and params. A pure number remains the dedicated `Ty::Num` type.
-fn combine(
-    left: Ty,
-    right: Ty,
-    op: fn(
-        Dim<axiom_core::Id<crate::book::Commodity>>,
-        Dim<axiom_core::Id<crate::book::Commodity>>,
-    ) -> Option<Dim<axiom_core::Id<crate::book::Commodity>>>,
-) -> Option<Ty> {
+fn combine(left: Ty, right: Ty, op: UnitOp) -> Option<Ty> {
     let dimension = |ty| match ty {
         Ty::Num => Some(Dim::Number),
         Ty::Amount(dim) => Some(dim),

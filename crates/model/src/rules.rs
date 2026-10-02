@@ -170,7 +170,7 @@ impl WrittenIn {
             project: book
                 .laws
                 .iter()
-                .filter(|(id, law)| law.owner == Owner::Book && !auxiliary.contains(&id))
+                .filter(|(id, law)| law.owner == Owner::Book && !auxiliary.contains(id))
                 .map(|(id, _)| id)
                 .collect(),
         }

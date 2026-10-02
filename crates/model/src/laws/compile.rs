@@ -189,15 +189,15 @@ impl Call<'_, '_> {
 
 /// Why a node has no type.
 enum Bad {
-    /// A diagnostic for it.
-    Report(Diagnostic),
+    /// A diagnostic for it, boxed because every step of the compiler returns a `Check` and a diagnostic is large.
+    Report(Box<Diagnostic>),
     /// A child was already reported.
     Cascade,
 }
 
 impl From<Diagnostic> for Bad {
     fn from(diagnostic: Diagnostic) -> Bad {
-        Bad::Report(diagnostic)
+        Bad::Report(Box::new(diagnostic))
     }
 }
 
@@ -510,9 +510,7 @@ impl<'s> Compiler<'_, '_, 's> {
     fn expression(&mut self, root: ExprId, want: Ty) -> Option<NodeId> {
         let node = self.value(root)?;
         let found = &self.nodes[node];
-        let Some(found_ty) = found.typed_ty() else {
-            return None;
-        };
+        let found_ty = found.typed_ty()?;
         if fits(want, found_ty) {
             return Some(node);
         }
@@ -524,9 +522,7 @@ impl<'s> Compiler<'_, '_, 's> {
     fn condition(&mut self, root: ExprId) -> Option<NodeId> {
         let node = self.value(root)?;
         let found = &self.nodes[node];
-        let Some(found_ty) = found.typed_ty() else {
-            return None;
-        };
+        let found_ty = found.typed_ty()?;
         if found_ty == Ty::Bool {
             return Some(node);
         }
@@ -546,7 +542,7 @@ impl<'s> Compiler<'_, '_, 's> {
         let (op, ty) = match self.check(at, expr) {
             Ok((op, ty)) => (op, Some(ty)),
             Err(Bad::Report(diagnostic)) => {
-                self.report(diagnostic);
+                self.report(*diagnostic);
                 (Op::Const(Value::Empty), None)
             }
             Err(Bad::Cascade) => (Op::Const(Value::Empty), None),

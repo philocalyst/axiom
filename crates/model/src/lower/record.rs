@@ -272,7 +272,7 @@ fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut 
     let (cx, flow) = (txn.cx, txn.flow);
     let from = flow.from.end.map(|end| resolve_end(staged, &cx, end, diags));
     let to = flow.to.end.map(|end| resolve_end(staged, &cx, end, diags));
-    built.successful &= !from.is_some_and(|end| end.is_none()) && !to.is_some_and(|end| end.is_none());
+    built.successful &= from.is_none_or(|end| end.is_some()) && to.is_none_or(|end| end.is_some());
     let has_legs = !cx.file[flow.body.legs].is_empty();
     match (from, to) {
         (Some(Some(from)), Some(Some(to))) => {
@@ -557,7 +557,7 @@ fn lower_opening_leg<'s>(
         return None;
     }
     let tail = cx.lower_tail(staged, leg.tail, diags).1;
-    if end.select.len() != 0 {
+    if !end.select.is_empty() {
         diags.push(
             Diagnostic::error("opening-selector", "an opening line sets a whole place")
                 .label(leg.loc, "selectors do not apply to an opening balance"),

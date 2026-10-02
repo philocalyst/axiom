@@ -34,7 +34,7 @@ pub(crate) struct World<'s> {
     pub tallies: Set<&'s str>,
     /// Claim tabs allocated from the bounded syntax survey before place IDs
     /// freeze. A later lookup that was not surveyed is an error.
-    tabs: Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
+    tabs: Tabs,
     /// Loan contract names resolve to their actual debt tab, before and after
     /// contract terms have been compiled.
     pub(crate) contract_endpoints: Map<Sym, End>,
@@ -268,10 +268,10 @@ fn add_lives(
     prop: &axiom_syntax::Prop<'_>,
 ) {
     for &arg in &file[prop.args] {
-        if let ExprKind::Name(path) = file.exprs[arg].kind {
-            if let Some(system) = systems.find(path.0) {
-                used.push((home, system));
-            }
+        if let ExprKind::Name(path) = file.exprs[arg].kind
+            && let Some(system) = systems.find(path.0)
+        {
+            used.push((home, system));
         }
     }
 }
@@ -451,6 +451,9 @@ fn contract_party_name_exception(a: &NameClaim<'_>, b: &NameClaim<'_>, spelling:
     contract.declared == spelling && contract.contract_party == Some(spelling) && entity.declared == spelling
 }
 
+/// The place that keeps what one party owes another, by the party, the owner and the class of the claim.
+pub(crate) type Tabs = Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>;
+
 /// What the sources say, three ways: in the order they are written, by kind of item, and as the mentions the
 /// journal makes of parties and ends.
 #[derive(Clone, Copy)]
@@ -532,13 +535,15 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
         kinds: kinds.roots,
         purposes: purposes.roots,
     };
-    let mut lookup = Lookup::default();
-    lookup.places = places.names;
-    lookup.entities = entities.index;
-    lookup.kinds = kinds.index;
-    lookup.purposes = purposes.index;
-    lookup.assets = assets.by_name.into_iter().map(|(name, id)| (names.intern(name), id)).collect();
-    lookup.commodities = commodities.by_name.into_iter().map(|(name, id)| (names.intern(name), id)).collect();
+    let lookup = Lookup {
+        places: places.names,
+        entities: entities.index,
+        kinds: kinds.index,
+        purposes: purposes.index,
+        assets: assets.by_name.into_iter().map(|(name, id)| (names.intern(name), id)).collect(),
+        commodities: commodities.by_name.into_iter().map(|(name, id)| (names.intern(name), id)).collect(),
+        ..Lookup::default()
+    };
     Book {
         names,
         text_values: Arena::new(),
@@ -593,7 +598,7 @@ fn contract_endpoints<'s>(
     survey: &crate::lower::JournalSurvey<'s>,
     entities: &Entities<'s>,
     account_owners: &Map<&'s str, Id<Entity>>,
-    tabs: &Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
+    tabs: &Tabs,
     names: &mut Interner<'s>,
 ) -> Map<Sym, End> {
     let mut endpoints = Map::default();
@@ -756,7 +761,7 @@ impl Resolving<'_> {
     }
 }
 
-fn first_name_prop<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>, name: &str) -> Option<&'s str> {
+fn first_name_prop<'s>(file: &axiom_syntax::File<'s>, decl: &Decl<'s>, name: &str) -> Option<&'s str> {
     file[decl.props].iter().find(|prop| prop.name.0 == name).and_then(|prop| file[prop.args].first()).and_then(|&arg| {
         match file.exprs[arg].kind {
             ExprKind::Name(name) => Some(name.0),
@@ -765,7 +770,7 @@ fn first_name_prop<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>, na
     })
 }
 
-fn owner_names_in<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>) -> Vec<&'s str> {
+fn owner_names_in<'s>(file: &axiom_syntax::File<'s>, decl: &Decl<'s>) -> Vec<&'s str> {
     file[decl.props]
         .iter()
         .filter(|prop| prop.name.0 == "owner")

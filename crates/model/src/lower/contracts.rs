@@ -703,7 +703,8 @@ fn template_header<'a, 's>(
         Direction::Into => (party_place, holding, FlowSide::Out),
     };
     let owner = world.book.places[holding].owner;
-    let ((out, arrive), amount, buys) = schedule_amount(world, file, schedule, roots, diags)?;
+    let ScheduleAmount { quantity, amount, buys } = schedule_amount(world, file, schedule, roots, diags)?;
+    let (out, arrive) = (quantity, quantity);
     let mut flow = cx.flow(from, to, amount, owner, schedule.at);
     let (from_party, to_party) = match hold.direction {
         Direction::From => (None, Some(party)),
@@ -746,13 +747,20 @@ fn template_legs<'a, 's>(
     Some(lowered)
 }
 
+/// What a schedule pays: how the header says it, in what amount, and, for a standing buy, the commodity bought.
+struct ScheduleAmount {
+    quantity: TemplateQuantity,
+    amount: Amount,
+    buys: Option<Id<Commodity>>,
+}
+
 fn schedule_amount<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<((TemplateQuantity, TemplateQuantity), Amount, Option<Id<Commodity>>)> {
+) -> Option<ScheduleAmount> {
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
             let (quantity, amount) = template_amount(world, file, amount, roots, world.book.base, diags)?;
@@ -765,7 +773,7 @@ fn schedule_amount<'s>(
         }
         None => (TemplateQuantity::Derived, Amount::zero(world.book.base), None),
     };
-    Some(((quantity, quantity), amount, buys))
+    Some(ScheduleAmount { quantity, amount, buys })
 }
 
 impl TermsCx<'_, '_> {

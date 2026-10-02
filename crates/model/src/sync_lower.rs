@@ -721,10 +721,9 @@ fn require_format_fields(
     if !seen[Field::Date as usize] {
         diags.push(Diagnostic::error("bad-format", "a record format needs a date field").label(here, "this format"));
     }
-    if !seen[Field::Amount as usize]
-        && !(seen[Field::Debit as usize] && seen[Field::Credit as usize])
-        && !seen[Field::Gross as usize]
-    {
+    let amount = seen[Field::Amount as usize];
+    let split = seen[Field::Debit as usize] && seen[Field::Credit as usize];
+    if !(amount || split || seen[Field::Gross as usize]) {
         diags.push(
             Diagnostic::error("bad-format", "a record format needs `amount`, both `debit` and `credit`, or `gross`")
                 .label(here, "this format"),
@@ -746,9 +745,7 @@ fn format_purposes<'s>(
                 return None;
             }
             let args = format_args(file, line);
-            let Some(value) = args.get(2) else {
-                return None;
-            };
+            let value = args.get(2)?;
             let loc = file.loc(value.text);
             let decoded = match value.quoted {
                 true => match decode_quoted(value.text) {
@@ -763,9 +760,7 @@ fn format_purposes<'s>(
                 },
                 false => std::borrow::Cow::Borrowed(value.text),
             };
-            let Some(text) = decoded.strip_prefix('#') else {
-                return None;
-            };
+            let text = decoded.strip_prefix('#')?;
             match world.purpose(home, Word { text, loc }) {
                 Ok(purpose) => Some(purpose),
                 Err(problem) => {
