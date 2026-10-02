@@ -212,6 +212,15 @@ fn lower_contract<'a, 's>(
         Some(schedule) => schedule_owner(world, written.site.home, file, Some(schedule), party, diags)?,
         None => world.book.roots.me,
     };
+    let deposit = contract_deposit(
+        world,
+        file,
+        node.props,
+        written.site.home,
+        owner,
+        diags,
+    )
+    .ok()?;
     let also = crate::laws::lower_alsos(
         world,
         diags,
@@ -243,6 +252,10 @@ fn lower_contract<'a, 's>(
     contract.purpose = purpose;
     contract.description = description;
     contract.area = area;
+    if let Some((amount, holding)) = deposit {
+        contract.deposit = Some(amount);
+        contract.deposit_holding = holding;
+    }
     contract.loan = loan.map(|(loan, _)| loan);
     contract.doc = node_doc(world, written.site, written.loc);
     contract.loc = written.loc;
@@ -1543,6 +1556,113 @@ fn contract_area<'s>(
         area = Some(amount);
     }
     Ok(area)
+}
+
+fn contract_deposit<'s>(
+    world: &mut World<'s>,
+    file: &ast::File<'s>,
+    props: axiom_syntax::Many<ast::Prop<'s>>,
+    home: Home,
+    owner: Id<crate::book::Entity>,
+    diags: &mut Vec<Diagnostic>,
+) -> Result<Option<(Amount, Option<Id<crate::book::Place>>)>, ()> {
+    let mut deposit = None;
+    let mut first_loc = None;
+    for prop in &file[props] {
+        if prop.name.0 != "deposit" {
+            continue;
+        }
+        if let Some(first) = first_loc {
+            diags.push(
+                Diagnostic::error("contract-deposit-duplicate", "a contract has one deposit")
+                    .label(prop.loc, "remove this repeated deposit")
+                    .context(first, "the first deposit is here"),
+            );
+            return Err(());
+        }
+        first_loc = Some(prop.loc);
+        let args = &file[prop.args];
+        if !file[prop.lines].is_empty() || !(args.len() == 1 || args.len() == 3) {
+            diags.push(
+                Diagnostic::error("contract-deposit", "a deposit needs one amount and an optional holding")
+                    .label(prop.loc, "write `deposit AMOUNT [into HOLDING]`"),
+            );
+            return Err(());
+        }
+        let ExprKind::Amount(literal) = file.exprs[args[0]].kind else {
+            diags.push(
+                Diagnostic::error("contract-deposit-amount", "a deposit must be a literal amount")
+                    .label(file.exprs[args[0]].loc, "write the amount the contract will hold"),
+            );
+            return Err(());
+        };
+        let amount = match resolve_amount(
+            world,
+            file,
+            literal,
+            world.book.entities[owner].currency,
+            diags,
+        ) {
+            Some(amount) if amount.qty.0 > 0 => amount,
+            Some(_) => {
+                diags.push(
+                    Diagnostic::error("contract-deposit-positive", "a contract deposit must be positive")
+                        .label(file.exprs[args[0]].loc, "write an amount greater than zero"),
+                );
+                return Err(());
+            }
+            None => return Err(()),
+        };
+        let holding = if args.len() == 3 {
+            let into = matches!(file.exprs[args[1]].kind, ExprKind::Name(name) if name.0 == "into");
+            let ExprKind::Name(name) = file.exprs[args[2]].kind else {
+                diags.push(
+                    Diagnostic::error("contract-deposit-holding", "a deposit holding needs a place name")
+                        .label(file.exprs[args[2]].loc, "name the account or holding that keeps the deposit"),
+                );
+                return Err(());
+            };
+            if !into {
+                diags.push(
+                    Diagnostic::error("contract-deposit-holding", "name a deposit holding after `into`")
+                        .label(file.exprs[args[1]].loc, "write `into` here"),
+                );
+                return Err(());
+            }
+            let place = resolve_endpoint(world, home, file, name, prop.loc, diags).ok_or(())?;
+            if !matches!(world.book.places[place].role, crate::book::Role::Account { .. } | crate::book::Role::Holding(_)) {
+                diags.push(
+                    Diagnostic::error("contract-deposit-holding", "a deposit is held in an account")
+                        .label(file.exprs[args[2]].loc, "choose an account or holding, not an asset or party"),
+                );
+                return Err(());
+            }
+            if world.book.places[place].owner != owner {
+                diags.push(
+                    Diagnostic::error("contract-deposit-owner", "the deposit holding belongs to another owner")
+                        .label(file.exprs[args[2]].loc, "choose a holding owned by the contract owner")
+                        .context(world.book.places[place].loc.unwrap_or(prop.loc), "this place is declared here"),
+                );
+                return Err(());
+            }
+            if world.book.places[place]
+                .holds
+                .as_ref()
+                .is_some_and(|units| !units.contains(&amount.unit))
+            {
+                diags.push(
+                    Diagnostic::error("contract-deposit-unit", "the deposit holding does not accept this unit")
+                        .label(file.exprs[args[0]].loc, "choose a unit the named holding can keep"),
+                );
+                return Err(());
+            }
+            Some(place)
+        } else {
+            None
+        };
+        deposit = Some((amount, holding));
+    }
+    Ok(deposit)
 }
 
 fn shares<'s>(

@@ -643,6 +643,68 @@ contract flat with greystar
 }
 
 #[test]
+fn contract_deposit_keeps_its_amount_and_named_holding() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity me : person
+entity dana : person
+account checking
+  owner me
+account escrow
+  owner me
+contract lease with dana
+  1_200 USD monthly on 1 into checking
+  from 2025-07-01
+  deposit 2_350 USD into escrow
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    assert_eq!(contract.deposit, Some(axiom_model::Amount::new(axiom_core::Qty(2_350), book.base)));
+    assert_eq!(contract.deposit_holding, Some(book.place("escrow").unwrap()));
+}
+
+#[test]
+fn invalid_contract_deposits_do_not_leave_active_terms() {
+    let path = "contracts.ax";
+    let cases = [
+        ("deposit 0 USD", "contract-deposit-positive"),
+        ("deposit 5 USD into dana", "contract-deposit-holding"),
+        ("deposit 5 USD\n  deposit 7 USD", "contract-deposit-duplicate"),
+    ];
+    for (deposit, expected) in cases {
+        let text = format!(
+            "base USD\ncommodity USD\nkind person : entity\nentity me : person\nentity dana : person\naccount checking\ncontract lease with dana\n  1 USD monthly from checking\n  from 2025-07-01\n  {deposit}\n"
+        );
+        let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
+        assert!(syntax.is_empty(), "{syntax:?}");
+        let (book, diagnostics) = build(&[Source {
+            path,
+            file,
+            embedded: false,
+        }]);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
+            "expected {expected}, got {diagnostics:?}"
+        );
+        let contract = &book.contracts[Id::new(0)];
+        assert!(contract.terms.is_none(), "invalid deposit must not retain a schedule");
+        assert!(contract.deposit.is_none());
+        assert!(contract.deposit_holding.is_none());
+    }
+}
+
+#[test]
 fn measured_shares_reject_missing_and_mismatched_denominators() {
     for (extra_unit, area, share) in [
         ("", "", "share 120 SQFT for studio"),
