@@ -67,6 +67,8 @@ mod fixture;
 #[cfg(test)]
 mod source_tests;
 #[cfg(test)]
+mod split_tests;
+#[cfg(test)]
 mod tests;
 
 use std::hash::{Hash, Hasher};
