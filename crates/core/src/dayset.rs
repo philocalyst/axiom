@@ -310,30 +310,69 @@ mod tests {
         assert_eq!(loaded.union(&DaySlice::load(&arena, in_arena_a)), a.union(&b));
     }
 
-    /// The days from `origin`, one flag each: the model every operation is checked against.
     const REACH: usize = 3 * 366;
 
-    fn paint(origin: Day, intervals: &[Days]) -> Vec<bool> {
-        let mut bitmap = vec![false; REACH];
-        for days in intervals {
-            let (from, to) =
-                ((days.first().0 as i64 - origin.0 as i64) as usize, (days.last().0 as i64 - origin.0 as i64) as usize);
-            bitmap[from..=to].fill(true);
-        }
-        bitmap
+    /// The model every operation is checked against: a flag for each of the `REACH` days from `origin`, and the
+    /// operations done the slow way, a day at a time.
+    struct Bitmap {
+        origin: Day,
+        flags: Vec<bool>,
     }
 
-    /// The maximal runs of a bitmap, found the slow way.
-    fn runs(origin: Day, bitmap: &[bool]) -> Vec<Days> {
-        let mut runs: Vec<Days> = Vec::new();
-        for at in (0..bitmap.len()).filter(|&at| bitmap[at]) {
-            let day = origin.add_days(at as i32);
-            match runs.last_mut() {
-                Some(run) if run.last().add_days(1) == day => *run = Days::new(run.first(), day).unwrap(),
-                _ => runs.push(Days::on(day)),
+    impl Bitmap {
+        fn painted(origin: Day, intervals: &[Days]) -> Bitmap {
+            let mut bitmap = Bitmap { origin, flags: vec![false; REACH] };
+            for days in intervals {
+                let offset = |day: Day| (i64::from(day.0) - i64::from(origin.0)) as usize;
+                bitmap.flags[offset(days.first())..=offset(days.last())].fill(true);
             }
+            bitmap
         }
-        runs
+
+        fn day(&self, at: usize) -> Day {
+            self.origin.add_days(at as i32)
+        }
+
+        /// Whether `day` is held; no day outside the `REACH` is.
+        fn holds(&self, day: Day) -> bool {
+            let at = i64::from(day.0) - i64::from(self.origin.0);
+            usize::try_from(at).ok().and_then(|at| self.flags.get(at)).copied().unwrap_or(false)
+        }
+
+        fn combine(&self, other: &Bitmap, keep: fn(bool, bool) -> bool) -> Bitmap {
+            let flags = self.flags.iter().zip(&other.flags).map(|(&ours, &theirs)| keep(ours, theirs)).collect();
+            Bitmap { origin: self.origin, flags }
+        }
+
+        fn within(&self, window: Days) -> Bitmap {
+            let flags = (0..REACH).map(|at| self.flags[at] && window.contains(self.day(at))).collect();
+            Bitmap { origin: self.origin, flags }
+        }
+
+        fn count(&self) -> u64 {
+            self.flags.iter().filter(|&&held| held).count() as u64
+        }
+
+        /// The maximal runs of held days.
+        fn runs(&self) -> Vec<Days> {
+            let mut runs: Vec<Days> = Vec::new();
+            for day in (0..REACH).filter(|&at| self.flags[at]).map(|at| self.day(at)) {
+                match runs.last_mut() {
+                    Some(run) if run.last().add_days(1) == day => *run = Days::new(run.first(), day).unwrap(),
+                    _ => runs.push(Days::on(day)),
+                }
+            }
+            runs
+        }
+
+        /// The first day with `n` held days among it and the `window_len - 1` before it.
+        fn earliest_reaching(&self, n: usize, window_len: usize) -> Option<Day> {
+            if n == 0 {
+                return Some(Day::MIN);
+            }
+            let held = |at: usize| self.flags[(at + 1).saturating_sub(window_len)..=at].iter().filter(|&&f| f).count();
+            (0..REACH).find(|&at| held(at) >= n).map(|at| self.day(at))
+        }
     }
 
     fn random_intervals(rng: &mut Rng, origin: Day) -> Vec<Days> {
@@ -347,53 +386,37 @@ mod tests {
             .collect()
     }
 
-    /// The window's days counted by hand: `at` and the `window_len - 1` before it.
-    fn earliest_reaching_by_counting(bitmap: &[bool], origin: Day, n: usize, window_len: usize) -> Option<Day> {
-        if n == 0 {
-            return Some(Day::MIN);
+    /// `set` is the model's set: the same maximal runs, days, and answer to `contains` for every day near it.
+    fn agrees(set: &DaySet, model: &Bitmap, case: usize) {
+        assert_eq!(set.intervals(), model.runs(), "case {case}: the maximal runs");
+        assert_eq!(set.len(), model.count(), "case {case}");
+        for at in -3..REACH as i64 + 3 {
+            let Ok(day) = i32::try_from(i64::from(model.origin.0) + at) else { continue };
+            assert_eq!(set.contains(Day(day)), model.holds(Day(day)), "case {case}: day {at}");
         }
-        let held = |at: usize| bitmap[(at + 1).saturating_sub(window_len)..=at].iter().filter(|&&set| set).count();
-        (0..REACH).find(|&at| held(at) >= n).map(|at| origin.add_days(at as i32))
     }
 
-    fn check_against_bitmaps(origin: Day, rng: &mut Rng, case: usize) {
+    fn random_window(rng: &mut Rng, origin: Day) -> Days {
+        let first = rng.below(REACH);
+        let last = (first + rng.below(400)).min(REACH - 1);
+        Days::new(origin.add_days(first as i32), origin.add_days(last as i32)).unwrap()
+    }
+
+    fn check_against_the_model(origin: Day, rng: &mut Rng, case: usize) {
         let (raw_a, raw_b) = (random_intervals(rng, origin), random_intervals(rng, origin));
         let (a, b): (DaySet, DaySet) = (raw_a.iter().copied().collect(), raw_b.iter().copied().collect());
-        let (bits_a, bits_b) = (paint(origin, &raw_a), paint(origin, &raw_b));
-        let both = |keep: fn(bool, bool) -> bool| -> Vec<bool> {
-            bits_a.iter().zip(&bits_b).map(|(&x, &y)| keep(x, y)).collect()
-        };
+        let (model_a, model_b) = (Bitmap::painted(origin, &raw_a), Bitmap::painted(origin, &raw_b));
+        agrees(&a, &model_a, case);
+        agrees(&a.union(&b), &model_a.combine(&model_b, |ours, theirs| ours || theirs), case);
+        agrees(&a.intersection(&b), &model_a.combine(&model_b, |ours, theirs| ours && theirs), case);
+        agrees(&a.difference(&b), &model_a.combine(&model_b, |ours, theirs| ours && !theirs), case);
 
-        let expected = [
-            (a.union(&b), both(|x, y| x || y)),
-            (a.intersection(&b), both(|x, y| x && y)),
-            (a.difference(&b), both(|x, y| x && !y)),
-            (a.clone(), bits_a.clone()),
-        ];
-        for (got, bits) in &expected {
-            assert_eq!(got.intervals(), runs(origin, bits), "case {case}: the intervals are the maximal runs");
-            assert_eq!(got.len(), bits.iter().filter(|&&set| set).count() as u64, "case {case}");
-        }
-        for at in -3..REACH as i64 + 3 {
-            let Ok(day) = i32::try_from(i64::from(origin.0) + at) else { continue };
-            let held = usize::try_from(at).ok().and_then(|at| bits_a.get(at)).copied().unwrap_or(false);
-            assert_eq!(a.contains(Day(day)), held, "case {case}: day {at}");
-        }
-
-        let window_first = rng.below(REACH);
-        let window = Days::new(
-            origin.add_days(window_first as i32),
-            origin.add_days((window_first + rng.below(400)).min(REACH - 1) as i32),
-        )
-        .unwrap();
-        let clipped: Vec<bool> =
-            (0..REACH).map(|at| bits_a[at] && window.contains(origin.add_days(at as i32))).collect();
-        assert_eq!(a.within(window).intervals(), runs(origin, &clipped), "case {case}");
-
+        let window = random_window(rng, origin);
+        agrees(&a.within(window), &model_a.within(window), case);
         let (n, window_len) = (rng.below(400), rng.below(400));
         assert_eq!(
             a.earliest_reaching(n as u32, window_len as u32),
-            earliest_reaching_by_counting(&bits_a, origin, n, window_len),
+            model_a.earliest_reaching(n, window_len),
             "case {case}: {n} days in {window_len}"
         );
     }
@@ -404,7 +427,7 @@ mod tests {
         // In the middle of the calendar, and with the sets pressed against each end of the days there are.
         for origin in [Day::from_ymd(2026, 1, 1).unwrap(), Day(i32::MIN), Day(i32::MAX - REACH as i32 + 1)] {
             for case in 0..300 {
-                check_against_bitmaps(origin, &mut rng, case);
+                check_against_the_model(origin, &mut rng, case);
             }
         }
     }
