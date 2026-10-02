@@ -24,9 +24,8 @@ pub fn intersect(a: &[u32], b: &[u32], out: &mut Vec<u32>) {
     }
 }
 
-/// The ids in every list, in `out`, whose old contents are dropped. Starts from the shortest, so every step after
-/// the first works on a list no longer than it, and stops as soon as nothing is left. No lists intersect to nothing.
-/// Reorders `lists`.
+/// The ids in every list, in `out`, whose old contents are dropped; no lists have none. Starts from the shortest,
+/// which no result can outgrow, and stops as soon as nothing is left. Reorders `lists`.
 pub fn intersect_all(lists: &mut [&[u32]], out: &mut Vec<u32>) {
     lists.sort_unstable_by_key(|list| list.len());
     out.clear();
