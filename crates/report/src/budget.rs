@@ -28,6 +28,7 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
             .into_iter()
             .chain(["Spent", "Limit", "Left", "Used"].map(Column::right)),
     );
+    let mut unpriced = 0;
 
     let mut budgets: Vec<_> = book.budgets.iter().map(|(_, budget)| budget).collect();
     budgets.sort_by_key(|budget| book.name(book.purposes[budget.purpose].name));
@@ -40,7 +41,9 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
         let owners = budget_owners(lens, run, budget);
 
         if terms.period == Period::Year {
-            let window = Periods::covering(Period::Year, at.max(budget.starts), end).window(0).days();
+            let window = Periods::covering(Period::Year, at.max(budget.starts), end)
+                .window(0)
+                .days();
             for owner in owners.iter().copied() {
                 let reading = matching_reading(run, budget, owner, window);
                 let Some((spent, limit)) = values(&terms.limit, reading) else {
@@ -50,7 +53,7 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
                     book,
                     &mut table,
                     name,
-                    "budget",
+                    owner_name(book, owner),
                     window_label(window),
                     spent,
                     limit,
@@ -82,17 +85,20 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
             }
 
             if by == Period::Year {
-                let (spent, limit) = sum_periods(book, lens.day, &month_rows);
-                push_row(
-                    book,
-                    &mut table,
-                    name,
-                    "budget",
-                    window_label(query),
-                    spent,
-                    limit,
-                    0,
-                );
+                if let Some((spent, limit)) = sum_periods(lens, &month_rows) {
+                    push_row(
+                        book,
+                        &mut table,
+                        name,
+                        owner_name(book, owner),
+                        window_label(query),
+                        spent,
+                        limit,
+                        0,
+                    );
+                } else {
+                    unpriced += 1;
+                }
                 for (window, spent, limit, _) in month_rows {
                     push_row(
                         book,
@@ -129,18 +135,31 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
             "No budget headroom was recorded for this window."
         });
     }
-    Report::new(format!("Budgets for {}", Periods::covering(by, at, at).title(0))).with(table)
+    table.unpriced(unpriced, "budget total");
+    Report::new(format!(
+        "Budgets for {}",
+        Periods::covering(by, at, at).title(0)
+    ))
+    .with(table)
 }
 
 /// Preserve owners recorded by the engine, but still show a wholly unused
 /// typed budget when it has not needed an owner-specific comparison yet.
-fn budget_owners(lens: Lens<'_, '_, '_, '_>, run: &Run, budget: &Budget) -> Vec<Option<Id<axiom_model::Entity>>> {
+fn budget_owners(
+    lens: Lens<'_, '_, '_, '_>,
+    run: &Run,
+    budget: &Budget,
+) -> Vec<Option<Id<axiom_model::Entity>>> {
     let mut owners: Vec<_> = run
         .headroom
         .iter()
         .filter(|reading| reading.law == budget.law && lens.owns_entity(reading.owner))
         .map(|reading| Some(reading.owner))
         .collect();
+    owners.sort_unstable();
+    if let Some(selected) = lens.whose.owners() {
+        owners.extend(selected.iter().copied().map(Some));
+    }
     owners.sort_unstable();
     owners.dedup();
     if owners.is_empty() {
@@ -175,23 +194,22 @@ fn values(limit: &Limit, reading: Option<&Headroom>) -> Option<(Amount, Amount)>
     Some((Amount::zero(limit.unit), limit))
 }
 
-fn sum_periods(book: &Book<'_>, day: Day, rows: &[(Days, Amount, Amount, bool)]) -> (Amount, Amount) {
+fn sum_periods(
+    lens: Lens<'_, '_, '_, '_>,
+    rows: &[(Days, Amount, Amount, bool)],
+) -> Option<(Amount, Amount)> {
     if rows.iter().any(|row| row.3) {
         let last = rows.last().copied().expect("a nonempty month series");
-        return (last.1, last.2);
+        return Some((last.1, last.2));
     }
-    let unit = book.base;
-    let spent = rows.iter().map(|row| to_base(book, day, row.1)).sum();
-    let limit = rows.iter().map(|row| to_base(book, day, row.2)).sum();
-    (Amount::new(spent, unit), Amount::new(limit, unit))
-}
-
-fn to_base(book: &Book<'_>, day: Day, amount: Amount) -> Qty {
-    if amount.unit == book.base {
-        amount.qty
-    } else {
-        book.convert(amount, book.base, day).map_or(Qty::ZERO, |base| base.qty)
-    }
+    let spent = rows
+        .iter()
+        .try_fold(Qty::ZERO, |sum, row| Some(sum + lens.value(row.1)?))?;
+    let limit = rows
+        .iter()
+        .try_fold(Qty::ZERO, |sum, row| Some(sum + lens.value(row.2)?))?;
+    let unit = lens.book().base;
+    Some((Amount::new(spent, unit), Amount::new(limit, unit)))
 }
 
 fn owner_name<'s>(book: &'s Book<'_>, owner: Option<Id<axiom_model::Entity>>) -> &'s str {
@@ -217,8 +235,13 @@ fn push_row<'s>(
 ) {
     let left = Amount::new(room_amount(limit, spent), limit.unit);
     let ratio = used_amount(spent, limit);
+    let purpose = if purpose.is_empty() {
+        Cell::Blank
+    } else {
+        Cell::Purpose(purpose)
+    };
     let row = Row::new([
-        Cell::Name(purpose),
+        purpose,
         Cell::Name(owner),
         Cell::text(window),
         Cell::amount(book, spent),
@@ -230,7 +253,11 @@ fn push_row<'s>(
     .style(if left.qty.is_negative() {
         Style::Alert
     } else {
-        if depth == 0 { Style::Normal } else { Style::Muted }
+        if depth == 0 {
+            Style::Normal
+        } else {
+            Style::Muted
+        }
     });
     table.push(row);
 }
@@ -240,5 +267,7 @@ fn room_amount(limit: Amount, spent: Amount) -> Qty {
 }
 
 fn used_amount(spent: Amount, limit: Amount) -> Option<Ratio> {
-    (spent.unit == limit.unit).then(|| Ratio::new(spent.qty.0.into(), limit.qty.0.into())).flatten()
+    (spent.unit == limit.unit)
+        .then(|| Ratio::new(spent.qty.0.into(), limit.qty.0.into()))
+        .flatten()
 }

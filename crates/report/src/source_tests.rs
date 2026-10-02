@@ -1589,10 +1589,10 @@ fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
         assert_eq!(
             rows(book, run, budget),
             [
-                "clothing | budget | 2026 | 0.00 USD | 160.00 USD | 160.00 USD | 0%",
+                "#clothing | budget | 2026 | 0.00 USD | 160.00 USD | 160.00 USD | 0%",
                 "~   |  | 2026-01 | 0.00 USD | 80.00 USD | 80.00 USD | 0%",
                 "~   |  | 2026-02 | 0.00 USD | 80.00 USD | 80.00 USD | 0%",
-                "dining | budget | 2026 | 120.00 USD | 300.00 USD | 180.00 USD | 40%",
+                "#dining | me | 2026 | 120.00 USD | 300.00 USD | 180.00 USD | 40%",
                 "~   |  | 2026-01 | 120.00 USD | 150.00 USD | 30.00 USD | 80%",
                 "~   |  | 2026-02 | 0.00 USD | 150.00 USD | 150.00 USD | 0%",
             ]
@@ -1630,8 +1630,8 @@ opening 2026-01-01
                 },
             ),
             [
-                "!coverage | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
-                "meals | me | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
+                "!#coverage | me | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
+                "#meals | me | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
             ]
         );
         assert_eq!(
@@ -1644,12 +1644,83 @@ opening 2026-01-01
                 },
             ),
             [
-                "!coverage | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
-                "meals | budget | 2026 | 204.20 USD | 1,500.00 USD | 1,295.80 USD | 1021/75%",
+                "!#coverage | me | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
+                "#meals | me | 2026 | 204.20 USD | 1,500.00 USD | 1,295.80 USD | 1021/75%",
                 "~   |  | 2026-01 | 84.20 USD | 500.00 USD | 415.80 USD | 16.84%",
                 "~   |  | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
                 "~   |  | 2026-03 | 0.00 USD | 500.00 USD | 500.00 USD | 0%",
             ]
+        );
+    });
+}
+
+#[test]
+fn an_unused_budget_stays_in_the_selected_owner_scope() {
+    let source = "\
+base USD
+entity jordan
+purpose meals : spending
+budget meals 500 USD monthly
+";
+    with_run(source, day(2026, 2, 14), |book, run| {
+        let query = Query::Budget {
+            at: Some(day(2026, 2, 10)),
+            by: axiom_model::Period::Month,
+        };
+        let jordan = crate::report(book, run, &query, Some("jordan")).unwrap();
+        let everyone = crate::report(book, run, &query, None).unwrap();
+        assert!(matches!(
+            jordan.sections[0].rows[0].cells[0],
+            crate::Cell::Purpose("meals")
+        ));
+        assert_eq!(
+            lines(&everyone.sections[0]),
+            ["#meals | budget | 2026-02 | 0.00 USD | 500.00 USD | 500.00 USD | 0%"]
+        );
+        assert_eq!(
+            lines(&jordan.sections[0]),
+            ["#meals | jordan | 2026-02 | 0.00 USD | 500.00 USD | 500.00 USD | 0%"]
+        );
+    });
+}
+
+#[test]
+fn an_unpriced_year_budget_keeps_month_rows_and_marks_the_missing_total() {
+    let source = "\
+base USD
+use std
+entity jordan
+purpose meals : spending
+budget meals 50 EUR monthly
+";
+    with_std(source, day(2026, 2, 14), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Budget {
+                at: Some(day(2026, 2, 10)),
+                by: axiom_model::Period::Year,
+            },
+            Some("jordan"),
+        )
+        .unwrap();
+        let section = &report.sections[0];
+        assert_eq!(
+            lines(section),
+            [
+                "~   |  | 2026-01 | 0.00 EUR | 50.00 EUR | 50.00 EUR | 0%",
+                "~   |  | 2026-02 | 0.00 EUR | 50.00 EUR | 50.00 EUR | 0%",
+            ],
+            "the unavailable EUR/USD rate must not make the annual amount look like zero"
+        );
+        assert!(matches!(section.rows[0].cells[0], crate::Cell::Blank));
+        assert_eq!(
+            section
+                .notes
+                .iter()
+                .map(crate::tests::cell)
+                .collect::<Vec<_>>(),
+            ["1 budget total left out for lack of a price."]
         );
     });
 }

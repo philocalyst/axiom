@@ -59,6 +59,11 @@ impl Whose {
         self.owners.is_none()
     }
 
+    /// The selected owners, or `None` for an unfiltered household view.
+    pub fn owners(&self) -> Option<&[Id<Entity>]> {
+        self.owners.as_deref()
+    }
+
     /// The entity under which machine-readable facts are reported.
     pub fn label<'b>(&self, book: &'b Book<'_>) -> &'b str {
         self.label
@@ -101,11 +106,7 @@ pub struct Lens<'b, 's, 'w, 'p> {
 impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     /// Uses the plan's exact book, ownership graph and display signs so a
     /// lens cannot pair unrelated arenas or fall back to raw entity owners.
-    pub fn new(
-        plan: &'p Plan<'b, 's>,
-        whose: &'w Whose,
-        day: Day,
-    ) -> Lens<'b, 's, 'w, 'p> {
+    pub fn new(plan: &'p Plan<'b, 's>, whose: &'w Whose, day: Day) -> Lens<'b, 's, 'w, 'p> {
         Lens { whose, day, plan }
     }
 
