@@ -4,12 +4,12 @@
 //! posting list. A path of words denotes the things in every one of its lists, so resolving it is intersecting them.
 //! Sorted lists intersect by merging, in time linear in both, or, when one is far shorter, by galloping through the
 //! longer one: for each id of the short list, double a step until it overshoots, then bisect the last stretch. That is
-//! `k log(n/k)` for lists of `k` and `n`, which beats a merge once `n` is several times `k`.
+//! `k log(n/k)` for lists of `k` and `n`, which beats a merge once `n` is some thirty times `k`.
 //!
-//! Lists of similar length merge a block of eight ids at a time. Each id of one list's block is compared with every id
+//! Lists of similar length, of sixteen ids or more, merge a block of eight ids at a time. Each id of one list's block is compared with every id
 //! of the other's, which is eight vector comparisons for 64 pairs and leaves a mask of the ids that were in both. The
 //! block that ends on the smaller id is spent, since everything after the other block's last id is larger than all of
-//! it. The ends of the lists, too short to fill a block, merge an id at a time.
+//! it. The ends of the lists, too short to fill a block, merge an id at a time, and so do lists too short for blocks to pay.
 //!
 //! Lists are `&[u32]`, not a set type: the index stores them contiguously (a `Groups`), and a list that was just
 //! intersected is another slice to intersect. Ids in a list strictly increase.
@@ -73,13 +73,18 @@ const BLOCK: usize = 8;
 type Mask = u8;
 const _: () = assert!(Mask::BITS as usize == BLOCK);
 
+type LanesSet = [[u8; BLOCK]; 1 << BLOCK];
+
+// Every block reads it at random, so it should stay in the L1 cache with the ids.
+const _: () = assert!(size_of::<LanesSet>() == 2048);
+
 /// For each mask, the lanes it has set, in order and packed to the front, then zeros that [`pack`] writes and the
 /// caller does not keep. A table, because both alternatives lose: a loop over the set bits runs as many times as the
 /// data says, a branch mispredicted half the time on lists that share half their ids, and storing every lane and
 /// stepping on by its bit is 1.4 times slower with 256-bit registers and 1.1 times with 128-bit ones.
-static LANES_SET: [[u8; BLOCK]; 1 << BLOCK] = lanes_set();
+static LANES_SET: LanesSet = lanes_set();
 
-const fn lanes_set() -> [[u8; BLOCK]; 1 << BLOCK] {
+const fn lanes_set() -> LanesSet {
     let mut table = [[0; BLOCK]; 1 << BLOCK];
     let mut mask = 0;
     while mask < table.len() {
