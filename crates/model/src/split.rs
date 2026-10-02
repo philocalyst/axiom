@@ -123,6 +123,14 @@ pub enum FlowSide {
 }
 
 impl FlowSide {
+    /// Where it is in a pair that holds one of each, `Out` first.
+    pub fn index(self) -> usize {
+        match self {
+            FlowSide::Out => 0,
+            FlowSide::Arrive => 1,
+        }
+    }
+
     /// The other side.
     pub fn other(self) -> FlowSide {
         match self {
