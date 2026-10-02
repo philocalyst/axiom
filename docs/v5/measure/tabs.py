@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """A generator of small projects full of claims, loans and parties, and a differential run of two builds of the CLI.
 
-    tabs.py gen DIR N [SEED]                  write N projects into DIR (p0000/axiom.ax, journal/..), DIR/forms.json
-    tabs.py run BASELINE NEW DIR [JOBS]       run the commands below over every project through both binaries
-    tabs.py all BASELINE NEW DIR N [SEED]     gen, then run
+    tabs.py gen DIR N [SEED] [--no-foreign-loans]   write N projects into DIR (p0000/axiom.ax, journal/..), DIR/forms.json
+    tabs.py run BASELINE NEW DIR [JOBS]             run the commands below over every project through both binaries
+    tabs.py all BASELINE NEW DIR N [SEED]           gen, then run
+    tabs.py names NEW DIR [JOBS]                    the same projects with every account written by its whole path
 
 What it is for. Lane K3a makes a claim tab, which a claim, a loan or a `for` clause needs as a place, exist when
 the lowering asks for it and not when a survey of the journal predicts it. The tab is a place; where it stands in
@@ -29,8 +30,15 @@ status, in two classes:
 
     places    the only difference is the number of places the `check` summary counts: a predicted tab nobody
               asked for is a place the summary counted (a tab has a source line, and so counts as declared)
+    order     `balance`, `lots`, `claims` or `available` (or their `--json`) say the same things in another order: claim tabs are
+              listed by whom they are with, and no longer in the order the survey met them
+    why       `why LINE` no longer says `declares place X` for a place no claim at that line asked for (and says nothing
+              is written there, if that was all it said)
     missed    the BASELINE said `unregistered-tab`: its survey predicted a tab with the wrong owner (a loan paid from
               `joint`, which is `assets/joint`, was a loan of `me`) and the lowering asked for the right one
+    owner     another difference in a project with such a loan: a flow to the loan's name used to land in a tab of the
+              survey's guessed owner and lands in the loan's own, which a claim of the party may share. Generate
+              with `--no-foreign-loans` for books without them: there nothing may be in `other`
     other     anything else
 
 and, from what the BASELINE printed, how many projects were clean (no error), moved money, and held each form, so
@@ -70,6 +78,8 @@ IMPLIED = ["zed", "quill", "vera", "shops/mill"]
 OWNERS = ["me", "pat"]
 PARTIES = DECLARED + IMPLIED
 HOLDINGS = ["checking", "savings", "joint", "pat-save"]
+# `gen --no-foreign-loans`: loans are paid from accounts of `me` only.
+LOAN_HOLDINGS = HOLDINGS
 
 
 class Book:
@@ -163,7 +173,7 @@ def loan(book):
     rng, forms = book.rng, ["loan"]
     name = f"mortgage{len(book.loans)}"
     party = rng.choice(DECLARED + ["zed"])
-    hold = rng.choice(HOLDINGS)
+    hold = rng.choice(LOAN_HOLDINGS)
     forms.append("loan:from-" + ("pat" if hold in ("joint", "pat-save") else "me"))
     lines = [f"contract {name} with {party}",
              f"  loan {rng.choice([20_000, 90_000])} USD on 2026-01-01 at {rng.choice(['4', '5.5'])}% over 10y",
@@ -296,11 +306,47 @@ def without_places(said):
     return tuple(re.sub(r"\b\d+ places\b", "N places", part) if isinstance(part, str) else part for part in said)
 
 
-def classify(before, after):
-    """Which kind of difference this is: the baseline's own survey failing, only the places counted, or something else."""
+def canonical(value):
+    """A JSON value with every list put in order: the same things, whatever order they were listed in."""
+    if isinstance(value, list):
+        return sorted((canonical(item) for item in value), key=lambda item: json.dumps(item, sort_keys=True))
+    if isinstance(value, dict):
+        return {key: canonical(item) for key, item in value.items()}
+    return value
+
+
+def same_things(args, before, after):
+    """Whether two outputs of a report say the same things in another order: the same lines, or the same JSON."""
+    if "--json" in args:
+        try:
+            return canonical(json.loads(before)) == canonical(json.loads(after))
+        except ValueError:
+            return False
+    return sorted(before.split("\n")) == sorted(after.split("\n"))
+
+
+def only_declares(before, after):
+    """Whether the lines that differ are all `declares place X` lines, which `why` says of a place made at a line."""
+    # A column is as wide as its longest cell, so a row that goes changes the rule under the heading.
+    squeeze = lambda text: Counter(re.sub(r"[\s─]+", " ", line).strip() for line in text.split("\n"))
+    old, new = squeeze(before), squeeze(after)
+    changed = list((old - new).elements()) + list((new - old).elements())
+    nothing = "Nothing that the book records is written on that line."
+    return bool(changed) and all("declares place" in line or nothing in line for line in changed)
+
+
+def classify(args, before, after):
+    """Which kind of difference this is, from the most to the least expected."""
     if any("unregistered-tab" in part for part in before[1:]):
         return "missed"
-    return "places" if without_places(before) == without_places(after) else "other"
+    if without_places(before) == without_places(after):
+        return "places"
+    if args[0] in ("balance", "lots", "claims", "available") and before[0] == after[0] and before[2] == after[2] and same_things(
+            args, without_places(before)[1], without_places(after)[1]):
+        return "order"
+    if args[0] == "why" and before[0] == after[0] and only_declares(before[1], after[1]):
+        return "why"
+    return "other"
 
 
 def run_project(baseline, new, path):
@@ -311,7 +357,7 @@ def run_project(baseline, new, path):
     for index, (args, before) in enumerate(zip(work, said)):
         after = sh(new, args, path)
         if before != after:
-            differences.append((args, before, after, classify(before, after)))
+            differences.append((args, before, after, classify(args, before, after)))
         if index == 0:
             summary["clean"] = before[0] == 0 and "error[" not in before[1] + before[2]
         if args[0] == "claims" and "--json" not in args:
@@ -325,9 +371,15 @@ def run(baseline, new, directory, jobs=3):
     with ThreadPoolExecutor(jobs) as pool:
         results = list(pool.map(lambda path: run_project(baseline, new, path), paths))
     kinds = {path: {d[3] for d in diff} for path, diff, _ in results}
+    # The survey guessed the owner of a loan's tab as `me` when the account is not written by its whole path. A loan
+    # paid from `joint` (`assets/joint`, `pat`'s) has its debt tab owned by `pat` now, and a flow to the loan's name
+    # lands in it: the books differ wherever that tab was met, and cannot be sorted into the other kinds.
+    owned = {path for path, found in kinds.items() if "other" in found and forms[os.path.basename(path)].get("loan:from-pat")}
+    for path in owned:
+        kinds[path] = (kinds[path] - {"other"}) | {"owner"}
     other = [(path, diff) for path, diff, _ in results if "other" in kinds[path]]
     missed = [path for path, found in kinds.items() if "missed" in found and "other" not in found]
-    places = [path for path, found in kinds.items() if found == {"places"}]
+    seen = Counter(kind for found in kinds.values() for kind in found)
     for path, diff in other[:5]:
         args, before, after, _ = next(d for d in diff if d[3] == "other")
         print(f"DIFFERENT {path}: {' '.join(args)}\n--- baseline (exit {before[0]})\n{before[1]}{before[2]}\n"
@@ -342,8 +394,9 @@ def run(baseline, new, directory, jobs=3):
             covered[form, "all"] += 1
             covered[form, "clean"] += summary["clean"]
     print(f"{states['projects']} projects, {sum(len(commands(p)) for p in paths)} commands: "
-          f"{len(other)} differ in something else, {len(missed)} had a survey miss in the baseline, "
-          f"{len(places)} differ only in the number of places")
+          f"{len(other)} differ in something else, {len(missed)} had a survey miss in the baseline")
+    print("projects with a difference of each expected kind: " + ", ".join(
+        f"{kind} {seen[kind]}" for kind in ("places", "order", "why", "missed", "owner")))
     print(f"clean (no error) {states['clean']}, with an open claim {states['claims open']}")
     width = max((len(form) for form, _ in covered), default=0)
     print(f"{'form':<{width}}  {'all':>5} {'clean':>6}")
@@ -352,7 +405,61 @@ def run(baseline, new, directory, jobs=3):
     return len(other)
 
 
+def plain(args, said):
+    """What a command said, without what only the length of the text changes: the byte offsets of a source, and the quoted
+    lines of a diagnostic, of which `check` is reduced to what it concludes."""
+    code, out, err = said
+    if args[0] == "check":
+        return code, "\n".join(re.findall(r"^[✓✗].*$", out, re.M)), ""
+    offsets = re.compile(r'"(start|end)_byte":\d+')
+    return code, offsets.sub("", out), offsets.sub("", err)
+
+
+def names(new, directory, jobs=3):
+    """The same projects with every account written by its whole path (`assets/joint`, not `joint`): the build must not
+    know the difference. It did, through its survey, which guessed the owner of a loan's tab from the path written."""
+    import shutil
+    import tempfile
+    work = tempfile.mkdtemp()
+    written = re.compile(r"(?<![/\w-])(joint|pat-save)(?![\w-])")
+    paths = sorted(os.path.join(directory, name) for name in os.listdir(directory) if name.startswith("p"))
+
+    def one(path):
+        whole = os.path.join(work, os.path.basename(path))
+        shutil.copytree(path, whole, ignore=shutil.ignore_patterns("*.json"))
+        for root, _, files in os.walk(whole):
+            for name in files:
+                if name.endswith(".ax"):
+                    file = os.path.join(root, name)
+                    text = open(file).read().split("\n")
+                    text = [line if line.startswith("account") else written.sub(r"assets/\1", line) for line in text]
+                    open(file, "w").write("\n".join(text))
+        differing = []
+        for args in commands(path):
+            if args[0] == "why":
+                continue
+            before, after = (plain(args, sh(new, args, where)) for where in (path, whole))
+            if before != after:
+                differing.append((args, before, after))
+        shutil.rmtree(whole)
+        return path, differing
+
+    with ThreadPoolExecutor(jobs) as pool:
+        results = list(pool.map(one, paths))
+    different = [(path, found) for path, found in results if found]
+    for path, found in different[:3]:
+        args, before, after = found[0]
+        print(f"DIFFERENT {path}: {' '.join(args)}\n--- as written\n{before[1]}{before[2]}\n--- by whole path\n{after[1]}{after[2]}")
+    shutil.rmtree(work)
+    print(f"{len(results)} projects written both ways, {len(different)} differ")
+    return len(different)
+
+
 def main(argv):
+    global LOAN_HOLDINGS
+    if "--no-foreign-loans" in argv:
+        argv.remove("--no-foreign-loans")
+        LOAN_HOLDINGS = ["checking", "savings"]
     if len(argv) >= 4 and argv[1] == "gen":
         forms = gen(argv[2], int(argv[3]), int(argv[4]) if len(argv) > 4 else 1)
         total = Counter()
@@ -362,6 +469,8 @@ def main(argv):
         for form, count in sorted(total.items()):
             print(f"  {form:<24} {count}")
         return 0
+    if len(argv) >= 4 and argv[1] == "names":
+        return 1 if names(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 3) else 0
     if len(argv) >= 5 and argv[1] == "run":
         return 1 if run(argv[2], argv[3], argv[4], int(argv[5]) if len(argv) > 5 else 3) else 0
     if len(argv) >= 6 and argv[1] == "all":
