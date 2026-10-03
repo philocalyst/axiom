@@ -79,7 +79,8 @@ fn watched(reference: &Reference<'_>, kind: ScheduleKind, slow: bool) -> bool {
 }
 
 /// The days of the stream the reference says were missed: its payments (all of its owed days, or a loan's) from the day
-/// the book began that no line kept, and that are past their reach at `horizon` or before a day that was kept.
+/// the book began that no line kept, and that are past their reach, and their deadline if the terms say one (`due 5d`),
+/// at `horizon` or before a day that was kept.
 fn expected_missed(
     reference: &Reference<'_>,
     kind: ScheduleKind,
@@ -96,11 +97,17 @@ fn expected_missed(
     let owed = reference.owed(kind, all);
     let payments = payments(contract, kind, &owed);
     let latest_kept = kept.iter().next_back().copied();
+    let deadline = contract.terms_of(kind).and_then(|terms| terms.due.as_ref()).map(|due| due.after);
+    // The last day a line may keep it, or the party may pay it in time, whichever is later.
+    let last_day = |due: Day| {
+        let in_time = deadline.and_then(|after| due.checked_add(after)).map_or(i64::MIN, |day| i64::from(day.0));
+        (i64::from(due.0) + reach).max(in_time)
+    };
     payments
         .iter()
         .copied()
         .filter(|due| *due >= start && !kept.contains(due))
-        .filter(|due| i64::from(due.0) + reach + 1 <= i64::from(horizon.0) || latest_kept.is_some_and(|kept| kept > *due))
+        .filter(|due| last_day(*due) < i64::from(horizon.0) || latest_kept.is_some_and(|kept| kept > *due))
         .collect()
 }
 
