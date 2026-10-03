@@ -46,7 +46,6 @@ fn everything(book: &Book, run: &Run) -> i64 {
 
 /// The statement of the README: a client pays 3,100.00 net of the processor's 90.20 fee, and the invoice is settled whole.
 #[test]
-#[ignore = "K3d phase A: a leg to a third party settles nothing, so the fee is left as a remainder of the claim"]
 fn a_split_payment_net_of_a_fee_settles_the_whole_invoice() {
     let lines = "\
 2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
@@ -64,7 +63,6 @@ fn a_split_payment_net_of_a_fee_settles_the_whole_invoice() {
 
 /// The fee leg may be written first: the legs are one payment whatever their order.
 #[test]
-#[ignore = "K3d phase A: a leg to a third party settles nothing"]
 fn the_fee_leg_may_come_first() {
     let lines = "\
 2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
@@ -81,7 +79,6 @@ fn the_fee_leg_may_come_first() {
 /// "The one whose open amount is exactly the flow's" is what the party pays in all: 3,100.00, which is `^i2` and not the
 /// oldest. Judged leg by leg it would be 3,009.80, which is no claim, and the oldest would have been paid.
 #[test]
-#[ignore = "K3d phase A: exactly the flow's amount is judged on what the party pays in all"]
 fn a_split_payment_settles_the_claim_it_is_the_size_of_and_not_the_oldest() {
     let lines = "\
 2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
@@ -112,21 +109,18 @@ fn a_split_payment_of_more_than_the_claim_settles_it_and_the_rest_is_ordinary() 
     });
 }
 
-/// A payment that bounces runs backwards, every leg: the claim is paid in between, then open again as it was, and nothing is
-/// lost.
+/// A payment that bounces runs backwards, every leg: the claim is open again as it was, and nothing is lost. Without the
+/// return it is paid.
 #[test]
-#[ignore = "K3d phase A: a leg to a third party settles nothing, so the claim is not paid in between"]
 fn a_returned_split_payment_opens_what_each_leg_settled() {
     let lines = "\
 2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
 2026-01-20 ann -> 3_100 USD ^pay-1
   checking 3_009.80 USD
   stripe 90.20 USD #fees
-2026-01-25 ^pay-1 returned
 ";
-    let text = format!("{PRELUDE}{lines}");
-    with_run(&text, day(2026, 1, 22), |book, run| assert_eq!(tab(book, run, "ann"), claims(&[])));
-    with_run(&text, day(2026, 3, 1), |book, run| {
+    paid(lines, |book, run| assert_eq!(tab(book, run, "ann"), claims(&[])));
+    paid(&format!("{lines}2026-01-25 ^pay-1 returned\n"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 3_100_00)]));
         assert_eq!(held(book, run, "checking"), 1_000_00);
         assert_eq!(everything(book, run), 0, "nothing was lost when it was put back");

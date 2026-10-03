@@ -75,6 +75,13 @@ impl Traits {
         }
     }
 
+    /// Whether the party whose place this is owes any owner anything on record: a flow out of a place that does not has
+    /// no claim to settle, and nothing about its statement is looked up.
+    pub fn owes(&self, party: Id<Place>) -> bool {
+        let at = self.claims.partition_point(|&(found, ..)| found < party);
+        self.claims.get(at).is_some_and(|&(found, ..)| found == party)
+    }
+
     /// The tab that holds what the party whose place this is owes `owner`, if the party owes it anything on record.
     pub fn tab_of(&self, party: Id<Place>, owner: Id<Entity>) -> Option<Id<Place>> {
         let at = self.claims.partition_point(|&(found, by, _)| (found, by) < (party, owner));

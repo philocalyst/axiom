@@ -212,6 +212,8 @@ pub(crate) struct Candidate {
 /// What relief is asked for.
 pub(crate) struct Request<'a> {
     pub need: Qty,
+    /// The size of the claim `exact` looks for: `need`, unless the flow is one of several that make one payment.
+    pub exact: Qty,
     /// Base currency outside claim places: plain money has basis at its face,
     /// and acquisition dates do not tell parcels apart.
     pub money: bool,
@@ -229,6 +231,25 @@ pub(crate) struct Request<'a> {
     /// Whether to list the candidates if the choice turns out to be ambiguous:
     /// asked only then, since it is a lookup.
     pub explain: &'a dyn Fn() -> bool,
+}
+
+impl<'a> Request<'a> {
+    /// The relief of `need` as the policy says, from a place that is not money and holds nothing tied: what a flow
+    /// asks beyond that (a selector, a spender, ties) is written over it.
+    pub fn of(need: Qty, policy: Option<Policy>, codes: &'a Arena<Sym>, now: (Day, RuntimeTxn)) -> Request<'a> {
+        Request {
+            need,
+            exact: need,
+            money: false,
+            selectors: &[],
+            policy,
+            codes,
+            permits: &[],
+            spender: None,
+            now,
+            explain: &|| false,
+        }
+    }
 }
 
 /// What a parcel's tie says about when relief takes it. The variants are in
@@ -557,7 +578,7 @@ impl Slot {
             let lots = &self.holding.lots[at..];
             let end = at + lots.iter().take_while(|lot| lot.txn == lots[0].txn).count();
             let held: Qty = self.holding.lots[at..end].iter().filter(|&lot| keep(lot)).map(|lot| lot.qty).sum();
-            if held == req.need {
+            if held == req.exact {
                 for line in at..end {
                     let lot = &self.holding.lots[line];
                     let qty = lot.qty.min(*left);
@@ -639,7 +660,7 @@ impl Slot {
         if policy == Some(Policy::Exact) {
             whole_claims(&mut candidates, colour);
         }
-        candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, req.need, a, b)));
+        candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, req.exact, a, b)));
 
         let mut plan = std::mem::take(&mut out.plan);
         plan.clear();
@@ -873,12 +894,12 @@ fn whole_claims(candidates: &mut [Candidate], colour: impl Fn(&Candidate) -> Col
 /// Candidates in the order the policy consumes them. Storage order is oldest
 /// first, so FIFO is the identity, and it also orders "no policy", pro-rata
 /// (whose order does not matter) and ties in the others. `Exact` puts the
-/// candidates of a claim that holds exactly `need` first, oldest of them first.
-fn by_policy(policy: Option<Policy>, need: Qty, a: &Candidate, b: &Candidate) -> Ordering {
+/// candidates of a claim that holds exactly `exact` first, oldest of them first.
+fn by_policy(policy: Option<Policy>, exact: Qty, a: &Candidate, b: &Candidate) -> Ordering {
     match policy {
         Some(Policy::Lifo) => b.source.cmp(&a.source),
         Some(Policy::Hifo) => basis_per_unit(b, a).then(a.source.cmp(&b.source)),
-        Some(Policy::Exact) => (b.claim == need).cmp(&(a.claim == need)).then(a.source.cmp(&b.source)),
+        Some(Policy::Exact) => (b.claim == exact).cmp(&(a.claim == exact)).then(a.source.cmp(&b.source)),
         _ => a.source.cmp(&b.source),
     }
 }
@@ -1399,15 +1420,12 @@ mod tests {
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
         let (spender, now) = (ask.spender, (Day(1_000), journal(0)));
         let request = Request {
-            need: Qty(need),
             money,
             selectors,
-            policy,
-            codes: &codes,
             permits,
             spender,
-            now,
             explain: &|| true,
+            ..Request::of(Qty(need), policy, &codes, now)
         };
         slot.relieve(&request, &mut relief);
         relief
@@ -1747,17 +1765,7 @@ mod tests {
         source.land_with_codes(parcel, false, &pool);
 
         let mut relief = Relief::default();
-        let request = Request {
-            need: Qty(3),
-            money: false,
-            selectors: &[],
-            policy: Some(Policy::Fifo),
-            codes: &pool,
-            permits: &[],
-            spender: None,
-            now: (Day(20), journal(20)),
-            explain: &|| false,
-        };
+        let request = Request::of(Qty(3), Some(Policy::Fifo), &pool, (Day(20), journal(20)));
         source.relieve(&request, &mut relief);
         let slice = relief.slices[0];
         let moved = Parcel {
@@ -1818,17 +1826,7 @@ mod tests {
         assert_eq!(slot.holding.lots.len(), 2, "distinct cost-basis parts remain addressable");
         let mut relief = Relief::default();
         let codes = Arena::new();
-        let request = Request {
-            need: Qty(2),
-            money: false,
-            selectors: &[],
-            policy: Some(Policy::Fifo),
-            codes: &codes,
-            permits: &[],
-            spender: None,
-            now: (Day(20), journal(20)),
-            explain: &|| false,
-        };
+        let request = Request::of(Qty(2), Some(Policy::Fifo), &codes, (Day(20), journal(20)));
         slot.relieve(&request, &mut relief);
         assert_eq!(relief.slices[0].part, Some(first));
 

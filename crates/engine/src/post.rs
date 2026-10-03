@@ -71,6 +71,9 @@ impl Ledger<'_, '_, '_> {
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
+        // A payment run backwards opens the claims it settled; one run forwards settles them.
+        self.reopen_claims(m);
+        let settled = self.settle_claims(m);
         // A `!` on an assertion accepts its gap: it is never unused.
         if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), true, Some(waive)) =
             (m.cause, watched, m.waive)
@@ -83,13 +86,13 @@ impl Ledger<'_, '_, '_> {
             self.fire(&book.rules.on_out[m.from], &Occasion { amount: Some(m.out), skip_internal: true, ..on });
         }
         if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
-            self.relieve(m);
+            self.relieve(m, settled);
             let keeps = self.price(m);
             self.arrive(m, keeps);
         } else {
             // Places that hold only a plain balance have no parcels to move, and nothing was relieved.
             self.scratch.relief.slices.clear();
-            self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);
+            self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
             self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
             self.sample_temporal(m.day);
         }
@@ -183,27 +186,25 @@ impl Ledger<'_, '_, '_> {
     }
 
     /// Takes `m.out` from the source, leaving the value in flight in
-    /// `scratch.relief.slices`.
-    fn relieve(&mut self, m: &Motion) {
+    /// `scratch.relief.slices`. `settled` of it paid claims, which the tab it came out of already counted.
+    fn relieve(&mut self, m: &Motion, settled: Qty) {
         let book = self.plan.book;
         let (unit, now) = (m.out.unit, (m.day, m.txn));
         self.scratch.relief.slices.clear();
         if m.source.class != Class::Asset {
-            return self.relieve_balance(m);
+            return self.relieve_balance(m, settled);
         }
         self.ask_ties(m);
         let named = self.name_claims(m, m.from);
+        // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
+        let policy = self.plan.traits.place(m.from).select.or(self.plan.traits.unit_select(unit));
         let request = Request {
-            need: m.out.qty,
             money: is_money(self.plan, m.from, unit),
             selectors: if named { &self.scratch.selectors } else { m.select() },
-            // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
-            policy: self.plan.traits.place(m.from).select.or(self.plan.traits.unit_select(unit)),
-            codes: &book.codes,
             permits: &self.scratch.permits,
             spender: m.detail().spender,
-            now,
             explain: &|| !self.record.ambiguous.contains(&m.from),
+            ..Request::of(m.out.qty, policy, &book.codes, now)
         };
         self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
         self.account_for_relief(m);
@@ -211,8 +212,7 @@ impl Ledger<'_, '_, '_> {
 
     /// A source that holds no parcels, a debt or the outside, only a balance: the balance falls by what leaves, less
     /// what settled a claim, and the value in flight is one fresh slice.
-    fn relieve_balance(&mut self, m: &Motion) {
-        let settled = self.settle_claims(m);
+    fn relieve_balance(&mut self, m: &Motion, settled: Qty) {
         self.scratch.relief.slices.clear();
         self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
         let fresh = fresh_slice(m, m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn));
@@ -425,11 +425,9 @@ impl Ledger<'_, '_, '_> {
         purpose
     }
 
-    /// A target that holds no parcels, a debt or the outside, only a balance: it rises by what arrives, and a payment that
-    /// bounces opens the claims it had settled.
+    /// A target that holds no parcels, a debt or the outside, only a balance: it rises by what arrives.
     fn arrive_balance(&mut self, m: &Motion) {
         self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
-        self.reopen_claims(m);
         if m.moves == Moves::Loss {
             self.keep_basis(m);
         }
@@ -787,17 +785,9 @@ impl Ledger<'_, '_, '_> {
             self.report_asset_state_error(m, crate::AssetError::NegativeAmount);
             return;
         }
-        let request = Request {
-            need: quantity,
-            money: false,
-            selectors: &[],
-            policy: self.plan.traits.place(declaration.place).select.or(self.plan.traits.unit_select(declaration.unit)),
-            codes: &book.codes,
-            permits: &[],
-            spender: None,
-            now: (m.day, m.txn),
-            explain: &|| false,
-        };
+        let policy =
+            self.plan.traits.place(declaration.place).select.or(self.plan.traits.unit_select(declaration.unit));
+        let request = Request::of(quantity, policy, &book.codes, (m.day, m.txn));
         self.world.holdings.relieve(declaration.place, declaration.unit, &request, &mut self.scratch.relief);
         self.sample_temporal(m.day);
         if self.scratch.relief.shortfall > Qty::ZERO {

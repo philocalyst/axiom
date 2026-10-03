@@ -573,7 +573,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// the plan's; `=` and `all` depend on the balance and are resolved now,
     /// once, and remembered (a reversal must undo exactly what was done).
     pub(crate) fn amounts(&mut self, flow: &Flow, id: Option<Id<Flow>>) -> Amounts {
-        if let Some(done) = id.and_then(|id| settled(self.plan, &self.record, id, flow)) {
+        if let Some(done) = id.and_then(|id| solved(self.plan, &self.record, id, flow)) {
             return done;
         }
         let written = Amounts::written(flow);
@@ -638,7 +638,7 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
     let mut all = Vec::with_capacity(book.flows.len());
     let post = |id: Id<Flow>| {
         let flow = &book.flows[id];
-        let amounts = settled(plan, record, id, flow).unwrap_or_else(|| Amounts::written(flow));
+        let amounts = solved(plan, record, id, flow).unwrap_or_else(|| Amounts::written(flow));
         Posted { out: amounts.out, arrive: amounts.arrive, state: plan.events.state(id, flow) }
     };
     let stretch = |&first: &usize| {
@@ -649,10 +649,10 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
     all.into()
 }
 
-/// A flow's quantities where they are already settled: as written, as the
+/// A flow's quantities where they are already solved: as written, as the
 /// plan solved a `?`, or as the fold resolved an `=` or `all`. Only the last
 /// depends on the fold, and only it is looked up in the record.
-fn settled(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
+pub(crate) fn solved(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
     match flow.infer {
         Infer::Known => Some(record.resolved.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),
         Infer::Unknown => Some(plan.amounts.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),

@@ -70,17 +70,8 @@ impl Ledger<'_, '_, '_> {
         if open.is_zero() {
             return 0;
         }
-        let request = Request {
-            need: open,
-            money: false,
-            selectors: &made,
-            policy: Some(Policy::Fifo),
-            codes: &book.codes,
-            permits: &[],
-            spender: None,
-            now: (change.day, RuntimeTxn::journal(change.target).expect("a written transaction")),
-            explain: &|| false,
-        };
+        let now = (change.day, RuntimeTxn::journal(change.target).expect("a written transaction"));
+        let request = Request { selectors: &made, ..Request::of(open, Some(Policy::Fifo), &book.codes, now) };
         self.world.holdings.relieve(place, unit, &request, &mut self.scratch.relief);
         self.world.holdings.credit(flow.from, unit, open);
         let slices = &self.scratch.relief.slices;
