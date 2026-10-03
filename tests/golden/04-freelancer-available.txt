@@ -1064,9 +1064,9 @@ Coming in
 What it would take to reach the rest
   Holding                         Liquid in          Value          Cost            Net  Because
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  sep                             3d         29,586.06 USD  3,166.80 USD  26,419.26 USD  driven by federal-income-tax 3,166.80 USD
+  sep                             3d         29,586.06 USD  3,008.46 USD  26,577.60 USD  driven by federal-income-tax 3,008.46 USD
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today             29,586.06 USD  3,166.80 USD  26,419.26 USD
+  If everything were drawn today             29,586.06 USD  3,008.46 USD  26,577.60 USD
   · Each line withdraws that owner's share of a holding into personal-checking on 2026-04-16 and
     runs the books the books on to 2027-04-15, when the year's return closes, through the laws. Cost
     is what they would then owe beyond what they already will: penalties, and the tax on any income

@@ -1041,34 +1041,34 @@ error[assertion]: personal-checking holds 40,485.76 USD, not 4,406.81 USD
 Taxes 2025 for me
 
 Counted
-  Tally                        Amount  From
-  ───────────────────────────────────────────────
+  Tally                       Amount  From
+  ──────────────────────────────────────────────
   project
-    gross-receipts     158,672.40 USD  42 sources
-    business-expenses    6,847.91 USD  26 sources
-    sep-contributions    8,000.00 USD  4 sources
-    net-profit         151,824.49 USD  period end
-    se-tax              21,452.12 USD  period end
-    other-taxes         21,452.12 USD  period end
-    se-deduction        10,726.06 USD  period end
-  ───────────────────────────────────────────────
+    gross-receipts     84,400.00 USD  22 sources
+    business-expenses   6,847.91 USD  26 sources
+    sep-contributions   8,000.00 USD  4 sources
+    net-profit         77,552.09 USD  period end
+    se-tax             10,957.76 USD  period end
+    other-taxes        10,957.76 USD  period end
+    se-deduction        5,478.88 USD  period end
+  ──────────────────────────────────────────────
   us
-    interest               290.12 USD  12 sources
-    total-income       152,114.61 USD  13 sources
-    investment-income      290.12 USD  12 sources
-    payments            11,100.00 USD  5 sources
-    adjustments         18,726.06 USD  5 sources
-    deductions          39,277.71 USD  2 sources
-    agi                133,388.55 USD  period end
-    taxable-income      94,110.84 USD  period end
-    income-tax          15,618.38 USD  period end
-    total-tax           37,070.50 USD  period end
+    interest              290.12 USD  12 sources
+    total-income       77,842.21 USD  13 sources
+    investment-income     290.12 USD  12 sources
+    payments           11,100.00 USD  5 sources
+    adjustments        13,478.88 USD  5 sources
+    deductions         25,472.67 USD  2 sources
+    agi                64,363.33 USD  period end
+    taxable-income     38,890.66 USD  period end
+    income-tax          4,428.38 USD  period end
+    total-tax          15,386.14 USD  period end
 
 Owed
-  Owed                  To   Due                Amount  From
-  ────────────────────────────────────────────────────────────────
+  Owed                  To   Due               Amount  From
+  ───────────────────────────────────────────────────────────────
   us
-    federal-income-tax  irs  2026-04-15  25,970.50 USD  period end
-  ────────────────────────────────────────────────────────────────
-  Total owed                             25,970.50 USD
+    federal-income-tax  irs  2026-04-15  4,286.14 USD  period end
+  ───────────────────────────────────────────────────────────────
+  Total owed                             4,286.14 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
