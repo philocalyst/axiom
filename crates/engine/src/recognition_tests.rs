@@ -37,6 +37,9 @@ purpose retail : income
   law retail
     on flow
     count amount as retail-receipts
+  law retail-running
+    on flow
+    count total(ever) as retail-running
 purpose fees : spending
   law fees
     on flow
@@ -180,6 +183,23 @@ fn a_write_off_reverses_in_accrual_books_what_the_claim_recognized() {
     // Nothing was recognized of the forgiven part in cash books, so there is nothing to take back.
     with("cash", &lines, |book, run| {
         assert_eq!(counted(book, run, "running"), [on("2026-01-20", 100_00), on("2026-03-01", 150_00)]);
+    });
+}
+
+/// A claim of several lines is forgiven line by line: each takes back its own purpose and not the first line's.
+#[test]
+fn a_write_off_takes_back_each_line_of_an_itemized_claim_for_its_own_purpose() {
+    let lines = "\
+2026-01-02 ann owes me due 2026-02-01 ^i1
+  300 USD #design
+  100 USD #retail
+2026-02-15 ^i1 waived \"not collected\"
+2026-03-01 ann -> checking 50 USD #design
+2026-03-02 ann -> checking 20 USD #retail
+";
+    with("accrual", lines, |book, run| {
+        assert_eq!(counted(book, run, "running"), [on("2026-01-02", 300_00), on("2026-03-01", 50_00)]);
+        assert_eq!(counted(book, run, "retail-running"), [on("2026-01-02", 100_00), on("2026-03-02", 20_00)]);
     });
 }
 

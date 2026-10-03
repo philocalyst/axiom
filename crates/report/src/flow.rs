@@ -633,9 +633,9 @@ fn forgiven_by(run: &Run, book: &Book<'_>, cutoff: Day) -> Vec<Forgiven> {
         if day > cutoff {
             continue;
         }
-        match lines.last_mut() {
-            Some(last) if (last.day, last.claim) == (day, off.claim) => last.qty += off.qty,
-            _ => lines.push(Forgiven { day, claim: off.claim, tab: off.place, unit: off.unit, qty: off.qty }),
+        match lines.iter_mut().find(|line| (line.day, line.claim) == (day, off.claim)) {
+            Some(line) => line.qty += off.qty,
+            None => lines.push(Forgiven { day, claim: off.claim, tab: off.place, unit: off.unit, qty: off.qty }),
         }
     }
     lines

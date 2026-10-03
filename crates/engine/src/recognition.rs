@@ -196,7 +196,7 @@ impl Counting<'_> {
 /// What the claim a parcel is was made for: the purpose of the line that made it, if it was a line of the journal.
 pub fn claim_purpose(book: &Book, parcel: &Parcel) -> Option<Purposed> {
     let part = parcel.part?;
-    book.txn_flow(part.origin, part.ordinal)?.purpose
+    book.flows[book.txn_flow(part.origin, part.ordinal)?].purpose
 }
 
 /// Whether two purposes are the same to the totals: the same node, of the same thing.

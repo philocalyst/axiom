@@ -18,7 +18,7 @@ use axiom_model::{Amount, ClaimChange, Flow, Policy, RuntimeTxn, Select};
 
 use crate::explain;
 use crate::ledger::Ledger;
-use crate::lots::Request;
+use crate::lots::{Request, Slice};
 use crate::motion::{Amounts, Motion};
 use crate::recognition::{Counting, Counts, Piece, Share};
 use crate::{Cause, Promise, WriteOff};
@@ -60,7 +60,8 @@ impl Ledger<'_, '_, '_> {
     }
 
     /// Takes the parcels the write-off `at` makes of one line of the claim out of the place that line paid into, gives
-    /// their value back to the place it came from, and says how many parcels that was.
+    /// their value back to the place it came from, and says how many parcels that was. Each parcel is forgiven under the
+    /// line that made it, which is what says what it was for.
     fn forgive(&mut self, at: u32, claim: Id<Flow>) -> usize {
         let book = self.plan.book;
         let (change, flow) = (book.claim_changes[at as usize], &book.flows[claim]);
@@ -74,21 +75,30 @@ impl Ledger<'_, '_, '_> {
         let now = (change.day, RuntimeTxn::journal(change.target).expect("a written transaction"));
         let request = Request { selectors: &made, ..Request::of(open, Some(Policy::Fifo), &book.codes, now) };
         self.world.holdings.relieve(place, unit, &request, &mut self.scratch.relief);
-        self.world.holdings.credit(flow.from, unit, open);
-        let slices = &self.scratch.relief.slices;
-        let rows = slices.iter().map(|s| WriteOff {
-            change: at,
-            claim,
-            place,
-            unit,
-            qty: s.qty,
-            basis: s.basis,
-            acquired: s.acquired,
-        });
-        self.record.written_off.extend(rows);
-        let parcels = slices.len();
-        self.take_back(change, flow, open);
-        parcels
+        for (line, qty) in self.record_write_off(at, claim) {
+            let line = &book.flows[line];
+            self.world.holdings.credit(line.from, unit, qty);
+            self.take_back(change, line, qty);
+        }
+        self.scratch.relief.slices.len()
+    }
+
+    /// Records the parcels just relieved as forgiven by the write-off `at`, each under the line of the claim that made it
+    /// (`claim`, for one that came from nowhere written), and says how much of each line that was.
+    fn record_write_off(&mut self, at: u32, claim: Id<Flow>) -> Vec<(Id<Flow>, Qty)> {
+        let book = self.plan.book;
+        let (place, unit) = (book.flows[claim].to, book.flows[claim].arrive.unit);
+        let mut lines: Vec<(Id<Flow>, Qty)> = Vec::new();
+        for slice in &self.scratch.relief.slices {
+            let line = slice.part.and_then(|part| book.txn_flow(part.origin, part.ordinal)).unwrap_or(claim);
+            let Slice { qty, basis, acquired, .. } = *slice;
+            self.record.written_off.push(WriteOff { change: at, claim: line, place, unit, qty, basis, acquired });
+            match lines.iter_mut().find(|(seen, _)| *seen == line) {
+                Some((_, total)) => *total += qty,
+                None => lines.push((line, qty)),
+            }
+        }
+        lines
     }
 
     /// What the claim recognized when it was made, in accrual books, is taken back by forgiving it: its purpose, the amount

@@ -1462,9 +1462,9 @@ impl<'s> Book<'s> {
     }
 
     /// The flow a written transaction made as its `ordinal`th: for a claim, the line that says what it is for.
-    pub fn txn_flow(&self, txn: RuntimeTxn, ordinal: u32) -> Option<&Flow> {
+    pub fn txn_flow(&self, txn: RuntimeTxn, ordinal: u32) -> Option<Id<Flow>> {
         let flows = self.txns.get(txn.source_txn()?)?.flows;
-        (ordinal < flows.len()).then(|| &self.flows[Id::new(flows.start().index() as u32 + ordinal)])
+        (ordinal < flows.len()).then(|| Id::new(flows.start().index() as u32 + ordinal))
     }
 
     /// `1,234.56 USD`

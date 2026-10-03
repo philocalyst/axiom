@@ -68,13 +68,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CRATES = ["core", "syntax", "model", "engine", "systems"]
 PROFILE = "opt-level = 1\ncodegen-units = 16\nincremental = true"
 TODAY = "2026-06-30"
-REPORTS = ["check", "balance", "lots", "claims", "gains", "available"]
+REPORTS = ["check", "balance", "lots", "claims", "gains", "available", "flow"]
 
 # What a book that does not say means by `books`: the build under test says (K3d's first commit, accrual; its flip, cash).
 DEFAULT_BOOKS = os.environ.get("CLAIMS_DEFAULT_BOOKS", "accrual")
 
 # What each purpose's law counts, by tally.
 TALLIES = {"design": "receipts", "retail": "retail-receipts"}
+NAMED = {tally: purpose for purpose, tally in TALLIES.items()}
 
 PRELUDE = """use std
 base USD
@@ -190,6 +191,8 @@ class Sim:
         self.paid = {}
         self.fired = {}
         self.counted = []
+        self.net = Counter()
+        self.replaced = Counter()
 
     def make(self, place, code, lines, when, order, unit="USD"):
         self.places.setdefault(place, []).append(Parcel(code, lines, when, order))
@@ -280,7 +283,9 @@ class Sim:
             self.empty += 1
         for p in found:
             self.forgiven[code] += p.qty
-            p.take(p.qty)
+            for _, purpose, part in p.take(p.qty):
+                if self.rules == "new" and self.books == "accrual" and purpose in TALLIES:
+                    self.net[purpose] -= part
 
     def open(self):
         left = Counter()
@@ -295,6 +300,7 @@ class Sim:
     def count(self, day, purpose, qty):
         if purpose in TALLIES and qty > 0:
             self.counted.append((TALLIES[purpose], str(day), qty))
+            self.net[purpose] += qty
 
     def recognizes(self, day, claims):
         """The claims a flow settled, counted as their purposes in cash books: one piece for each purpose."""
@@ -308,7 +314,7 @@ class Sim:
             for qty, purpose in lines:
                 self.count(day, purpose, qty)
 
-    def paid_by(self, day, legs):
+    def paid_by(self, day, legs, label):
         """What a payment counted, leg by leg: its own purpose for what it moved, less what the claims it settled were when
         it reached the owner, and the claims' purposes in cash books. Says the pieces, for its return."""
         pieces = []
@@ -316,6 +322,7 @@ class Sim:
             before = len(self.counted)
             replaced = kind == "owner" and self.rules == "new"
             replaced = sum(part for found, part in claims if found in TALLIES) if replaced else 0
+            self.replaced[label] += replaced
             self.count(day, purpose, qty - replaced)
             self.recognizes(day, claims)
             pieces += self.counted[before:]
@@ -323,8 +330,12 @@ class Sim:
 
     def returned(self, label):
         """A payment that is returned runs backwards, and what its laws count is counted again: on the days the payment
-        was recognized, which a return does not change."""
-        self.counted += self.fired.pop(label, [])
+        was recognized, which a return does not change. `flow` does not show a flow that was returned at all."""
+        pieces = self.fired.pop(label, [])
+        self.replaced.pop(label, None)
+        self.counted += pieces
+        for tally, _, qty in pieces:
+            self.net[NAMED[tally]] -= qty
 
 
 def run_events(events, rules, books="accrual"):
@@ -348,7 +359,7 @@ def run_events(events, rules, books="accrual"):
                 select = tuple(e["select"]) if e.get("select") else None
                 legs = [(kind, qty * 100, purpose) for kind, qty, purpose in e["legs"]]
                 settled = sim.pay(e["party"], legs, select, e.get("tail", ()), e["label"])
-                sim.fired[e["label"]] = sim.paid_by(d, settled)
+                sim.fired[e["label"]] = sim.paid_by(d, settled, e["label"])
             elif e["kind"] == "settle":
                 select = tuple(e["select"]) if e.get("select") else None
                 sim.recognizes(d, sim.settle(e["place"], e["qty"] * scale, select, e.get("tail", ())))
@@ -773,6 +784,21 @@ def effects_of(dump):
     return found
 
 
+def flow_view(output):
+    """What `flow` says each purpose came to over all its months: the amount under the `Total` heading, which is blank
+    when the months add up to nothing."""
+    said, found = section(output, "flow"), Counter()
+    heading = re.search(r"^.*\bTotal$", said, re.M)
+    end = len(heading.group(0)) if heading else 0
+    for purpose in TALLIES:
+        row = re.search(rf"^\s+{purpose}\s+(.*)$", said, re.M)
+        if row:
+            line = row.group(0)
+            under = [m for m in re.finditer(r"(-?[\d,]+\.\d\d) USD", line) if m.end() == end]
+            found[purpose] = round(float(under[0].group(1).replace(",", "")) * 100) if under else 0
+    return found
+
+
 def claims_view(output):
     """What `claims` lists as owed to you: the open quantity by code, as a reader of the report sees it."""
     said = section(output, "claims")
@@ -837,6 +863,9 @@ def check_one(path, output, rules, reports=True):
             failures.append(f"forgiven basis {forgiven['basis']} wanted {forgiven['total']}")
         if diagnostics.get("ambiguous-lots", 0) and spec["family"] != "mixed":
             failures.append("a claim place is ambiguous")
+        shown, wanted = ({k: v for k, v in c.items() if v} for c in (flow_view(output), sim.net))
+        if reports and shown != wanted:
+            failures.append(f"flow says {shown} wanted {wanted} ({spec.get('books')})")
         if effects_of(dump) != Counter(sim.counted):
             counted, wanted = effects_of(dump), Counter(sim.counted)
             failures.append(f"counted {sorted((counted - wanted).items())} too much, "
@@ -904,7 +933,8 @@ def predicted_to_differ(spec):
     differ = +old[1] != +new[1] or {p: v for p, v in old[2].items() if v} != {p: v for p, v in new[2].items() if v}
     forgave = sum(old[0].forgiven.values()) != sum(new[0].forgiven.values())
     counted = Counter(old[0].counted) != Counter(new[0].counted)
-    return differ or forgave or counted or old[0].empty != new[0].empty
+    netted = Counter(old[0].net) != Counter(new[0].net) or sum(old[0].replaced.values()) != sum(new[0].replaced.values())
+    return differ or forgave or counted or netted or old[0].empty != new[0].empty
 
 
 def may_differ(spec):
