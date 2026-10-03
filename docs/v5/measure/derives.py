@@ -320,7 +320,7 @@ CALC = "crates/engine/src/calc.rs"
 # two spellings of a contract two books) or by a test that names what it checks.
 MUTANTS = [
     (ENGINE, "Occasion { amount: Some(given.out), ..Occasion::flow(&motion) }",
-     "Occasion { amount: Some(header.flow.out), ..Occasion::flow(&motion) }",
+     "Occasion { amount: Some(group[0].flow.out), ..Occasion::flow(&motion) }",
      "`amount` is the header after the legs and items took from it, not as the template gave it"),
     (ENGINE, "header_motion(book, &group[0], details, cx.making.source_day)",
      "header_motion(book, &group[group.len() - 1], details, cx.making.source_day)", "the law fires for the group's last flow"),
@@ -351,7 +351,6 @@ MUTANTS = [
     (ENGINE, "owner: derived.owner.unwrap_or(header.owner),", "owner: header.owner,", "a share's flow is borne by the header's owner"),
     (ENGINE, "description: derived.description.or(header.description),", "description: derived.description,",
      "a derived flow does not keep the header's description"),
-    (ENGINE, "waive: derived.waive.or(header.waive),", "waive: derived.waive,", "a derived flow does not keep the header's waiver"),
     (ENGINE, "origin: Origin::Derived(Derivation::Law(made.law)),", "origin: header.origin,",
      "a derived flow does not say which law made it"),
     (ENGINE, "out: made.amount,\n            arrive: made.amount,", "out: made.amount,\n            arrive: header.arrive,",
@@ -374,7 +373,8 @@ MUTANTS = [
      "a law that derives must not fire on a flow"),
     (COMPILE, "StepKind::When(_) | StepKind::Unless(_) | StepKind::Let(_))", "StepKind::When(_) | StepKind::Unless(_))",
      "a `let` in a law that derives is a step that judges"),
-    (COMPILE, "let Some(first) = steps.iter().find(|step| derives(step)) else { return };", "return;",
+    (COMPILE, "let Some(first) = steps.iter().find(|step| derives(step)) else { return };",
+     "let Some(first) = steps.iter().find(|step| derives(step)) else { return };\n        if first.loc == first.loc {\n            return;\n        }",
      "a law that derives is checked for nothing"),
 ]
 

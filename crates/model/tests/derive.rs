@@ -81,3 +81,16 @@ fn a_derive_that_cannot_be_made_is_said_where_it_is_written() {
         contract_with("both\n    on flow\n    warn value(amount, USD) <= 5 USD\n    derive -> escrow 5 USD #match\n");
     assert_eq!(lowered(&both).1, ["derive-and-judge"]);
 }
+
+#[test]
+fn a_let_before_a_derive_is_a_step_of_the_law_that_derives() {
+    let text = contract_with("fees\n    on flow\n    let fee = amount * 2 / 100\n    derive + fee #fee\n");
+    let (book, codes) = lowered(&text);
+    assert!(codes.is_empty(), "{codes:?}");
+    let contract = book.contract("rent").unwrap();
+    let law = &book.laws[book.rules.at(Watch::Occurrence(contract))[0].law];
+    assert!(
+        matches!(law.steps[0].kind, StepKind::Let(_))
+            && matches!(law.steps[1].kind, StepKind::Effect(Effect::Derive { .. }))
+    );
+}

@@ -804,6 +804,8 @@ kind person : entity
 entity greystar : person
 entity studio : person
 account assets/checking
+account assets/studio-bank
+  owner studio
 contract flat with greystar
   2_900 USD monthly from checking
   area 1_000 SQFT
@@ -826,6 +828,29 @@ contract flat with greystar
     let Op::Bin(BinOp::Mul, rate, of) = law.nodes[amount].op else { panic!("a rate of the amount") };
     assert_eq!(law.nodes[rate].op, Op::Const(Value::Num(axiom_core::Ratio::new(3, 25).unwrap())), "120 of 1,000");
     assert_eq!(law.nodes[of].op, Op::Var(Var::Amount));
+}
+
+#[test]
+fn a_share_for_a_party_is_made_as_a_flow_it_bears_and_the_book_is_told_it_owes_nothing_yet() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity greystar : person
+entity ben : person
+account assets/checking
+contract flat with greystar
+  2_900 USD monthly from checking
+  share 1/3 for ben
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    let codes: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect();
+    assert_eq!(codes, ["contract-share-party"], "{diagnostics:?}");
+    assert!(diagnostics[0].help.iter().any(|help| help.text.contains("ben owes me")), "{diagnostics:?}");
+    assert_eq!(laws_named(&book, Id::new(0), "share").len(), 1, "and the share is made all the same");
 }
 
 #[test]

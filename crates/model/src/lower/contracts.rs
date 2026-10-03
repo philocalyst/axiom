@@ -12,8 +12,8 @@ use super::infer::classify;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
-    Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation, Input, Loan, Param,
-    Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
+    Amount, Asset, At, Book, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation, Input, Loan,
+    Param, Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
@@ -243,6 +243,9 @@ fn lower_contract<'a, 's>(
         contract.standing = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
     for share in shares(world, &cx, diags) {
+        if !bears(&world.book, share.entity) {
+            diags.push(share_for_a_party(&world.book, &share));
+        }
         crate::laws::push_share(world, Owner::Contract(written.id), home, &share);
     }
     owed_by_party(world, &contract);
@@ -1490,6 +1493,23 @@ fn deposit_holding<'s>(
         return Err(());
     }
     Ok(place)
+}
+
+/// Whether an entity is an owner in this book, which has an account of its own: what it bears is its own.
+fn bears(book: &Book, entity: Id<Entity>) -> bool {
+    book.entities[entity].place.is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)))
+}
+
+/// A share for a party is what it owes, and a contract makes the flow it bears and not the claim on it.
+fn share_for_a_party(book: &Book, share: &Share) -> Diagnostic {
+    let party = book.name(book.entities[share.entity].path);
+    Diagnostic::warning(
+        "contract-share-party",
+        format!("`{party}` is a party, and a share for a party is what it owes"),
+    )
+    .label(share.loc, format!("this share is made as a flow `{party}` bears, and no claim on it"))
+    .note("an owner of the book (one with an account of its own) bears its share, and nothing more is needed")
+    .help(format!("for what `{party}` owes, write the claim: `{party} owes me AMOUNT`"))
 }
 
 /// The shares a contract divides what it brings in by: each `share RATE for ENTITY`, as a percentage, a fraction or

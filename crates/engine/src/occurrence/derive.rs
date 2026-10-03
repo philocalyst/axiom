@@ -143,7 +143,8 @@ impl Ledger<'_, '_, '_> {
 
     /// The flow a `derive` makes: along the header's ends (reversed for a `-` item) or the ends it names, the amount
     /// the law came to, and what the line says of it. What it does not say is the header's, as for a leg or an item the
-    /// template writes (the contract's party is its payee, whatever end it is paid to).
+    /// template writes (the contract's party is its payee, whatever end it is paid to). A header carries no waiver, so
+    /// there is none to keep.
     fn derived_flow(&self, header: &Flow, derived: &Derived, made: Made) -> Flow {
         let (from, to) = match derived.shape {
             Shape::Flow { from, to } => (from.unwrap_or(header.from), to.unwrap_or(header.to)),
@@ -162,7 +163,7 @@ impl Ledger<'_, '_, '_> {
             codes: derived.codes,
             select: derived.select,
             detail: derived.detail,
-            waive: derived.waive.or(header.waive),
+            waive: derived.waive,
             loc: derived.loc,
             origin: Origin::Derived(Derivation::Law(made.law)),
             ..header.clone()
@@ -372,6 +373,44 @@ opening 2026-01-01
         let low = text.replace("10% of amount", "5% of amount");
         with_run(&low, day(2026, 1, 31), |book, run| {
             assert_eq!(held(book, run, "k401"), Qty(500_00 + 100_00), "40% of the cap of 250.00");
+        });
+    }
+
+    #[test]
+    fn a_law_fires_for_the_header_and_reads_its_ends_whatever_legs_the_group_has() {
+        let text = format!(
+            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  checking ...\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
+        );
+        with_run(&text, day(2026, 1, 31), |book, run| {
+            assert_eq!(
+                held(book, run, "escrow"),
+                Qty(10_00),
+                "the header goes to checking; the leg, which goes to k401, is not what fired it"
+            );
+        });
+    }
+
+    #[test]
+    fn an_item_derived_for_a_standing_buy_is_in_what_is_spent_not_in_what_is_bought() {
+        let text = format!(
+            "{PRELUDE}commodity VTI\ncontract invest with lender\n  buy VTI for 500.00 USD monthly on 15 from checking\n  from 2026-01-01\n  law derived\n    on flow\n    derive + 2.00 USD #fee\n2026-01-02 VTI = 100.00 USD\n2026-01-15 invest 5 VTI\n"
+        );
+        with_run(&text, day(2026, 1, 31), |book, run| {
+            let said: Vec<_> = run
+                .diagnostics
+                .iter()
+                .map(|diagnostic| (diagnostic.code.to_string(), diagnostic.message.clone()))
+                .collect();
+            assert_eq!(
+                held(book, run, "checking"),
+                Qty(10_000_00 - 500_00 - 2_00),
+                "the 5 VTI cost 500.00, and the fee is 2.00 more: {said:?}"
+            );
+            assert!(
+                run.diagnostics.iter().all(|diagnostic| diagnostic.severity != axiom_core::Severity::Error),
+                "{:?}",
+                run.diagnostics
+            );
         });
     }
 
