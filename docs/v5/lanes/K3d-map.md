@@ -208,6 +208,34 @@ payments, and the 7 fee-leg parts of the payments written as splits. `business-e
 The prototype also runs the existing tests: with the accrual default, `cargo test --workspace --release`: only the two failures
 of the integration branch (the prorata one and the year-end forecast one).
 
+### 5.1 Measured again, with the readers and the cash default built
+
+Every example project through `check balance available limits claims flow budget lots contracts tax` on 2026-04-16 and 2026-12-31
+and `flow --by party`, then `forecast` and `why #design|#consulting|#retainer`, the start commit's binary against the last
+commit's. What differs, and why (the books of an example decide: `01-agency` says `books accrual`, the others say nothing and are
+cash):
+
+| example | what differs | why |
+|---|---|---|
+| `04-freelancer` | `check balance available claims lots tax flow flow --by party`, `why #design`, the forecast's net worth | the table above; `flow` counts each invoice once, when it is paid (cash) |
+| `11-sam` | `flow`, `flow --by party`, `why #design` | one 3,800.00 USD invoice counted when made and again when paid; now once, when paid |
+| `v4-sketch` | `flow`, `flow --by party`, `why #design` | a 3,800.00 USD invoice that is not paid by 2026-12-31 counts nothing in cash books |
+| `explore-v5/01-agency` (accrual) | `flow`, `flow --by party`, `why #design` | the payments of invoices no longer count as `Unclassified` (120,660.65 to 33,689.54 USD), and the two write-offs take back what the claims counted: `design` -589.50 (the credit note `CN-0002`) and -3,750.00 (`inv-2026-0009`), and `sales-tax-collected` takes back its 403.65 and 388.12 |
+| `explore-v5/03-triplex` | `flow`, `flow --by party` | the late fee of 92.50 USD counts when it is paid, as `late-fees`, and not as `Unclassified` |
+| `explore-v5/04-nomad` | `flow`, `flow --by party`, `why #consulting` | the payments of `#consulting` invoices no longer count as `Unclassified`; the same month counts `consulting` as before |
+
+Nothing else of any example differs: not `check`, `balance`, `available`, `limits`, `claims`, `lots`, `contracts`, `budget` or
+`tax` of any but 04, and not the forecast of any but 04's net worth (113,287.25 to 112,620.15 USD, the fees). The 304 of 2,000
+mutants of the examples on which `fuzz.py ... diff` finds a different `check` are all of 04.
+
+The probe books of `docs/v5/measure/diff/cases2/` through both binaries: `split-payment` (`check balance available claims lots
+flow`: the invoice is settled, 90.20 USD of fee no longer stands as an asset, and `flow` counts 3,100.00 of `design` and not
+6,109.80), `claim-recognition` (`check`: one `recognized` warning, on the payment, and not two; `flow` 300.00 and not 600.00),
+`claim-flow-code.flow` (300.00 and not 800.00), `recognition-cash.flow` and `recognition-accrual.flow`: all expected by the rule.
+`recognition-writeoff-lines.ax` (added with the fixes: an itemized claim of 3,000.00 `#design` and 300.00 `#tax-collected`, paid 1,000.00 and the
+rest forgiven, in accrual books) says what the write-off takes back of each line: `design` 3,000.00 then -2,000.00, `tax-collected`
+300.00 then -300.00, where the start commit takes back nothing.
+
 ## 6. Debts as parcels (phase C): the design, not built yet
 
 What `Class::holds_parcels` gates: `post.rs:95` (a flow whose ends hold no parcels credits and debits balances and relieves
@@ -255,3 +283,122 @@ through the start commit's binary and the final one.
 - 04-freelancer's README and `outputs/tax-2025.txt` for the 74,800.00 USD and 27 sources.
 - The two failing tests of the integration branch and the baseline's counts are K3c's and K5c's: the prorata one and the
   year-end forecast one.
+
+## 9. What was built
+
+The commits on `claude/great-wozniak-pnqn7x-v5-k3d`, from `368e5e8`, in the order the plan of section 7 says (the numbers
+are non-test lines by `briefs/loc.py`, excluding `#[cfg(test)]` and `*_tests.rs`):
+
+| commit | what | engine | report | model | total |
+|---|---|---|---|---|---|
+| `368e5e8` | the start | 11,448 | 7,000 | 18,542 | 53,190 |
+| `44b64ba` | this map | | | | |
+| `3582ef1` | acceptance tests of a split payment, ignored | | | | |
+| `490cbfc` | **A** a payment settles by what the party pays in all (`settle.rs`, `Request::exact`) | 11,495 | | | 53,237 |
+| `9718f7a` | goldens: `04-freelancer-{check,balance,available,claims}` | | | | |
+| `dd2f5ce` | acceptance tests of recognition, ignored; the probe books; LANGUAGE §7 says what a payment of several legs is | | | | |
+| `7ed085c` | **B** the rule (`recognition.rs`), the fold counts pieces, `Run.settlements`; accrual default | 11,741 | | 18,549 | 53,490 |
+| `e9ccc34` | goldens: `04-freelancer-{available,tax}` | | | | |
+| `d8f2fd1` | the claims oracle: split payments and recognition, with references written from §7 | | | | |
+| `1dce5f5` | the readers (`flow`, `flow --by party`, `why #purpose`, the forecast's habits) ask the rule; the write-off's reversal | 11,784 | 7,024 | | 53,557 |
+| `5da3aee` | **the default of `books` is `cash`**: one attribute | | | | |
+| `e8b2de9` | goldens: `04-freelancer-{available,tax}` again | | | | |
+| `2f522b4` | a write-off takes back each line of an itemized claim for its own purpose (found by the oracle) | 11,790 | | | 53,563 |
+| `d4f6db2` | a claim taken back is not more of a purpose that passes through (found in `01-agency`) | | 7,027 | | |
+| `bac034f` | a flow that settles and makes no claim costs the rule almost nothing | 11,810 | | | 53,586 |
+| `42c1d77` | the mutants of the rule | | | | |
+| `66ace96` | `post` is steps of its own | 11,828 | 7,027 | 18,549 | 53,604 |
+
+**Net: +414 non-test lines (engine +380, report +27, model +7), and 610 lines of tests** (`payment_tests.rs`, `recognition_tests.rs`
+in `engine` and in `report`), plus the oracle (`claims.py`) and six probe books. The honest accounting of section 3.3's promise,
+"the readers delete their copies": it did, and it did not make `report` smaller. Four walks over the postings (`PurposeTotals::add`,
+`PartyTotals::of`, `why/purpose.rs::totals`, `forecast/variable.rs::purpose_history`) and the dead `purpose_direction` of `Lens` went (-32
+lines in `lens.rs`, `why/purpose.rs` and `variable.rs`), and the one walk that replaced them, `flow::for_each_counted` with the
+write-off's `forgiven_by` and the priced signed amount, is +55 in `flow.rs`: the reports now do three things they did not (settled
+claims, claims taken back, a payment's fee leg), and the net of `report` is +27. The rule itself is `recognition.rs`, 137 lines.
+Where the lines are: `settle.rs` +81 (A: the legs of a payment are one; B: returns and claim places), `recognition.rs` +137, `post.rs`
++31, `fire.rs` +21 and `explain.rs` +20 (the limit's explanation names what the rule counted), `claims.rs` +19 (the write-off per
+line).
+
+Function lengths (`hist.py`, all of `crates/`, tests excluded): 42,777 lines in functions at the start, 43,073 now. 1-10 lines: 2,023
+fns to 2,039; 11-20: 691 to 698; 21-40: 504 to 513; 41-80: 131 to 128; 81-160: 8 to 8; over 160: 1 to 1. The lane added no function
+over 40 lines, made `finish` of `ledger.rs` two lines longer (46 to 48, the sorted settlements), and shortened `post` from 42 to 32 (it had
+grown to 54 on the way and was split: `accept_waiver`, `deal_with_claims`,
+`count_leaving`, `fire_arrival`); no new `bool` parameter (`Relief::{Pending, Done}` says whether the claim place was relieved
+before the flow was counted).
+
+## 10. What was measured
+
+- **Timings.** `axiom check -C bench/{100k,1m}` (the seeded generator, no claims in it, so this is the cost of the rule on a
+  book that does not use it), the start commit's binary against the last commit's, four runs each, interleaved, the fastest of the
+  four, on a shared machine with a load average of 5 to 6 (K6 builds beside this lane): 100k flows 0.478 s before and 0.494 s after (+3%), 1m flows 4.426 s before and 4.487 s after (+1.4%), the medians of
+  the four equal within the noise, peak RSS unchanged (80.6 MB and 680 MB). Instructions are steadier than the clock on a
+  loaded machine (`valgrind --tool=callgrind`, `check` of 100k flows): **1,870.8 million before, 1,895.9 million after (+1.3%)**. The first build of the readers cost +2.7%; the explanation of a limit (`purpose_contributors`) builds pieces for
+  every flow of the book, and now passes over the flows of other days and other purposes before it does.
+- **The claims oracle** (`docs/v5/measure/claims.py`, 600 projects of seed 7, references written from §7): the build at the last
+  commit, held to the references of the new rules in cash books: **0 failures of 600**; against the start commit's build: 276
+  identical, 324 different as the references say, 0 different where they say nothing, 0 identical where they say a difference. The
+  `flow` report was added to what the oracle checks after the reader commit; it found the bug of `2f522b4` (26 failures, 13 of
+  them a column the oracle read wrongly and 13 the bug) and the oracle itself was wrong twice (the `Total` column of `flow` is blank
+  when it adds up to nothing; its prediction of when two builds must differ left out the payments that no longer count as
+  `Unclassified`).
+- **Mutants** (`claims.py mutate`, each built and held to the oracle, then to the tests): at the last commit, 46 mutants of the
+  code of lanes K3c and K3d: 43 killed (30 by the oracle and 13 by the tests) and 3 survived. A's 18 that were not rewritten since
+  (the exact policy, the codes of a payment, a leg to a third party, what a party still pays, the lines of an invoice) are all
+  killed, among them the two that survived the first run (a leg that is not real yet is paid, and the legs of two parties are
+  a payment), which are now `payment_tests.rs`'s two last tests. The 28 that are new or rewritten for B and the fixes (when a
+  claim counts and in which books, what a payment replaces, what a write-off takes back and for which line, what the readers are
+  told, what a transfer purpose's reversal is): 25 killed, 3 survived, and the survivors are equivalent as far as anything
+  counts: a returned payment's entry left in `Record::settled` (it is read once), a flow out of a claim place that `reaches` the
+  owner (an internal transfer counts nothing either way), and a flow from an owned place into a claim place that is called a claim
+  (the same). The reversal of a write-off is a window total that no table of the oracle shows, so the tests, not the oracle, kill
+  the mutants of it; that is a gap of the oracle and not of the tests.
+- **`fuzz.py ... diff`**, 2,000 mutants of the examples (seed 11): no panics; 304 differ in `check`, all of `04-freelancer` (the
+  fee legs: the overdue warnings and the net worth); the 1,696 others are identical.
+- **`splits.py`** (K4b's differential over 300 projects, seed 5): the 272 with no claim in them are identical in every command;
+  of the 28 with claims, 10 are identical and 18 differ in `flow` or the forecast: a claim with a purpose that is not paid counts
+  nothing in cash books (and no habit of spending for the forecast), and one that is paid counts when it is.
+- **The probe books** (`diff/compare.sh` over 156 mistakes and 32 valid projects): 11 files of 5 books differ, all of them the
+  books of this lane (section 5.1); the mistakes (`cases/`) are identical.
+- **The tests**: `cargo test --workspace --release`: all pass but the two that fail at `368e5e8` as well (the prorata one and the
+  year-end forecast one). `cargo clippy --workspace --all-targets`: 93 warnings before and after, none in a line of this lane.
+  Goldens: five files of `04-freelancer`, in three commits of their own.
+
+## 11. What is not finished
+
+- **Phase C, debts as parcels, is not built.** A and B took the budget, and C touches `Sides`, `owed_by_you`, the `payable` gate and
+  `makes_debt`, which K6 (norms and relators) is beside. Section 6 is the design; `claim-debt-tab.ax` is the probe (`available`
+  857.50 to 665.00 USD once a bill is settled by its payment).
+- **A limit that broke does not name a payment out of a *claim place* that settled the claim** in cash books (`explain.rs` reads
+  `Record::settled`, which holds the payments from a party's tab; a flow out of a claim place is in `Record::settlements` only,
+  because a return of it must not reopen anything). Its own purpose, if it has one, is named.
+- **K5c's claim has no purpose** (`claims.rs`, `claim_missed`: `header.flow.purpose = None`). Giving it the occurrence's is one line
+  (drop that assignment) and one K5c test (`claim_tests.rs`'s "a claim the monitor made has no purpose for a law to count" says the
+  opposite then). What accrual books would then count: the occurrence, whole, over the occurrence's own recognition days, as of
+  the day the miss is found (the day the claim is made, never before its due day), and a write-off takes it back that day; cash
+  books count it when the party pays it, on the payment's days. That is the contract reading of §7 line 627 (the due day) only
+  as far as the miss is found on it.
+- **`AccrualAt::Due` is a variant nothing exercises**: it is `Days::on(due)` for the claim made, in one function
+  (`Counting::made`), with no test and no oracle; it will need both the day someone takes the contract reading of §7.
+- **A transfer purpose's reversal** counts as `-volume` in `flow`, though `flow` shows a transfer as the volume of what passed in
+  either direction; a payment returned that counted a transfer claim is the same. Neither is in the oracle (it checks `design` and
+  `retail`, both income).
+- **No law fires on a write-off's reversal** (a law cannot subtract what it counted); the totals and the reports follow it, the
+  tallies of a law do not. Said in LANGUAGE §7.
+- The two failing tests of the integration branch are still failing; they fail at `368e5e8`.
+
+## 12. The three places I am least proud of
+
+1. **Three records of what a flow settled**: `Record::settled` (a map, so a return can open the claims), `Record::settlements` (a
+   log, sorted into `Run.settlements` for the readers) and `Frame::settled` (explain's view of the first). They disagree about
+   exactly one kind of flow (out of a claim place), which is the gap of section 11, and a fourth reader would have to choose.
+   The right shape is a settlement recorded on the flow once (`Posted` could carry it), and a return that reads it back.
+2. **The write-off's reversal is written twice**: the fold (`claims.rs::take_back`, which only moves a window total) and the
+   reader (`flow.rs::forgiven_by`, which rebuilds the same pieces from `Run.written_off`). Both go through `Counting::forgiving`,
+   but nothing makes them agree except the oracle, and it found a bug in exactly that seam (`2f522b4`). `Run` should carry what
+   was taken back, as it carries what was settled.
+3. **The rule does not make the readers smaller, and costs a flow +1.3%**: section 3.3 promised deletion and delivered one walk
+   that is +55 lines where the four it replaced were not, and `report` is +27 net. The rule is asked of every flow with a purpose,
+   in a book that makes no claim too, and what it answers, one piece that says "all of it", is built each time (`Counting::pieces`,
+   `makes_claim`, and `record_purpose` is no longer inlined). A flow with no purpose and no claim skips it; one with a purpose
+   and no claim could, if the fold knew that the book has no claim place at all.
