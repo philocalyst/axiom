@@ -893,6 +893,8 @@ def equivalent(rng):
     """
     forms = Counter()
     day = "2026-03-%02d" % rng.randint(2, 27)
+    if rng.random() < 0.15:
+        return exchanged(rng, day, forms)
     named = rng.random() < 0.3
     from_side = rng.random() < 0.5
     source = "checking"
@@ -997,6 +999,39 @@ def equivalent(rng):
         if kind.endswith("less"):
             a, b = b, a
         plain.append(f"{day} {a} -> {b} {value} USD #{purpose}")
+    return "\n".join(split) + "\n", "\n".join(plain) + "\n", forms
+
+
+def exchanged(rng, day, forms):
+    """A split with a leg in another commodity: the exchange of what the other legs leave (README of example 08).
+
+    `checking 900 USD ->` with a fee leg (`shop 5 USD`) and `savings 800 EURX` is a fee of 5 USD and an exchange of
+    the 895 USD that is left for the 800 EURX; written the other way (`-> savings 900 USD`) the euros are what leaves
+    `checking` and the dollars the remainder that arrives.
+    """
+    from_side = rng.random() < 0.6
+    total = rng.choice(range(800, 1201, 20))
+    fees = [rng.randint(1, 30) for _ in range(rng.choice([1, 1, 2]))]
+    left = total - sum(fees)
+    euros = left * rng.choice([85, 90, 92]) // 100
+    ends = rng.sample(["shop", "acme", "buyer"], len(fees))
+    forms["exchange:" + ("from" if from_side else "to")] += 1
+    forms["exchange:fees:%d" % len(fees)] += 1
+    legs = [f"  {end} {fee} USD" for end, fee in zip(ends, fees)]
+    leg = f"  savings {euros} EURX"
+    place = rng.choice(["last", "first"])
+    forms["exchange:leg-" + place] += 1
+    legs = legs + [leg] if place == "last" else [leg] + legs
+    if from_side:
+        split = [f"{day} checking {total} USD ->"] + legs
+        plain = [f"{day} checking -> {end} {fee} USD" for end, fee in zip(ends, fees)]
+        plain.append(f"{day} checking {left} USD -> savings {euros} EURX")
+    else:
+        # the euros are `checking`'s, the only account that holds any
+        legs = [leg.replace("savings", "checking") for leg in legs]
+        split = [f"{day} -> savings {total} USD"] + legs
+        plain = [f"{day} {end} -> savings {fee} USD" for end, fee in zip(ends, fees)]
+        plain.append(f"{day} checking {euros} EURX -> savings {left} USD")
     return "\n".join(split) + "\n", "\n".join(plain) + "\n", forms
 
 
