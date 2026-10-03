@@ -12,7 +12,8 @@
                                               the dump's own verdict over every project
     contracts.py reproduce DIR A B            whether dump A (the frozen old one) is what dump B rebuilds of the old walkers
     contracts.py cover DIR [TAG]              what the projects hold, and what the dumps asked of them
-    contracts.py mutate TREE WORK DIR [N,M..] the mutants of the code under test: each is built and must make the verdict fail
+    contracts.py mutate TREE WORK DIR [N,M..] the mutants of the code under test: each is built and must be caught (by the
+                                              verdict, by the pinned factors, recognition windows and payments, or by tests)
 
 What it is for. Lane K5a built a structure that says by arithmetic when a promise is due (a schedule whose due days and
 ordinals are computed, not searched) and held it to the old walkers. Lane K5b moved the fold, the lowering and the reports to
@@ -56,7 +57,7 @@ same books), each a spec drawn from the forms a promise can take:
 from a contract's days and never from an answer, so every build is asked the same: the due days in thirty windows,
 the occurrence that each of several hundred days keeps, the ordinal of the first dozen due days and a spread of
 later ones, the factor and the recognition window of each of 2,200 days, a loan's payment, and the fold's own promises.
-`mutate` shows that this is enough: each mutant of the code under test is built and the verdict must fail on it.
+`mutate` shows that this is enough: each mutant of the code under test is built and must be caught.
 """
 import calendar
 import datetime
@@ -670,7 +671,7 @@ MUTANTS = [
     (PROMISE, "Cadence::TwiceMonthly => 31,", "Cadence::TwiceMonthly => 15,", "the cadence of twice monthly is 15 days"),
     (PROMISE, "terms.grace.map_or(cadence / 2, days)", "terms.grace.map_or(cadence, days)", "the reach is a whole cadence"),
     (PROMISE, "terms.grace.map_or(cadence / 2, days)", "terms.grace.map_or((cadence + 1) / 2, days)", "half a cadence is rounded up"),
-    (PROMISE, "terms.grace.map_or(cadence / 2, days)", "Some(cadence / 2).map_or(0, days)", "a grace is not read"),
+    (PROMISE, "terms.grace.map_or(cadence / 2, days)", "terms.grace.map_or(cadence / 2, |_| cadence / 2)", "a grace is not read"),
     (SCHED, "schedule.nearest(day, schedule.reach())", "schedule.nearest(day, 1 << 20)", "a line any distance away keeps a due day"),
     (RECKON, "Ratio::ONE.checked_add(rate)", "Ratio::ONE.checked_sub(rate)", "a rise of 3% is a fall"),
     (RECKON, "power(yearly, u32::try_from(years)", "power(yearly, u32::try_from(years + 1)", "a rise a year early"),
@@ -737,10 +738,37 @@ def own_tests_fail(source, work):
     return False
 
 
+PINNED = ("factor", "recog", "payment")
+
+
+def pinned_differs(binary, directory, jobs=4, limit=120, enough=1):
+    """Whether BINARY says of any project a factor, a recognition window or a payment that the fold under test
+    (`dump.new.txt`) did not. Nothing in this repository is a second implementation of those (the old code that was is
+    gone); what judges them is the frozen dump of that code, which `compare` holds `dump.new.txt` to, so a mutant that
+    moves one is caught by being different from it."""
+    different = []
+
+    def pinned(text):
+        return [line for line in text.split("\n") if line.split(" ", 1)[0] in PINNED]
+
+    def one(path):
+        if len(different) >= enough:
+            return
+        code, out, _ = run_dump(binary, path, (), limit)
+        wanted = pinned(open(os.path.join(path, "dump.new.txt")).read())
+        if code or pinned(out) != wanted:
+            different.append(path)
+
+    with ThreadPoolExecutor(jobs) as pool:
+        list(pool.map(one, projects(directory)))
+    return bool(different)
+
+
 def mutate(tree, work, directory, only=None):
-    """Builds each mutant into the dump. The verdict must fail on it, or the tests of the crate that holds it (which say
-    what the corpus cannot). Mutants that are not caught are listed: each is either equivalent, and the report says why,
-    or the corpus is too weak."""
+    """Builds each mutant into the dump. The verdict must fail on it, or the factors, recognition windows and payments it
+    says must not be the fold's (`pinned_differs`), or the tests of the crate that holds it (which say what the corpus
+    cannot). Mutants that are not caught are listed: each is either equivalent, and the report says why, or the corpus is
+    too weak."""
     work = os.path.abspath(work)
     source = os.path.join(work, "tree")
     if not os.path.isdir(source):
@@ -753,6 +781,7 @@ def mutate(tree, work, directory, only=None):
     binary = build(source, out, source=snapshot)
     baseline = verdict(binary, directory, 4)[1]
     assert not baseline, f"the baseline fails its own verdict: {baseline[:2]}"
+    assert not pinned_differs(binary, directory, 4), "the baseline says what dump.new.txt does not: dump it again as `new`"
     assert not own_tests_fail(source, work), "the baseline fails its own tests"
     limit = 20
     results = []
@@ -767,8 +796,9 @@ def mutate(tree, work, directory, only=None):
         try:
             binary = build(source, out, source=snapshot)
             caught = bool(verdict(binary, directory, 4, limit=limit, enough=3)[1])
-            by_tests = not caught and own_tests_fail(source, work)
-            outcome = "killed" if caught else "killed by the tests" if by_tests else "SURVIVED"
+            pinned = not caught and pinned_differs(binary, directory, 4, limit=limit)
+            by_tests = not caught and not pinned and own_tests_fail(source, work)
+            outcome = "killed" if caught else "killed by the dump" if pinned else "killed by the tests" if by_tests else "SURVIVED"
         except SystemExit:
             outcome = "does not build"
         finally:
@@ -776,8 +806,9 @@ def mutate(tree, work, directory, only=None):
         results.append((number, outcome, what))
         print(f"mutant {number:02d} {outcome:<8} {what}", flush=True)
     summary = Counter(outcome for _, outcome, _ in results)
-    print(f"{len(results)} mutants: {summary['killed']} killed, {summary['killed by the tests']} killed by the tests, "
-          f"{summary['SURVIVED']} survived, {summary['does not build']} did not build")
+    print(f"{len(results)} mutants: {summary['killed']} killed by the verdict, {summary['killed by the dump']} by the dump, "
+          f"{summary['killed by the tests']} by the tests, {summary['SURVIVED']} survived, "
+          f"{summary['does not build']} did not build")
     with open(os.path.join(work, "mutants.txt"), "w") as handle:
         for number, outcome, what in results:
             handle.write(f"{number:02d} {outcome} {what}\n")

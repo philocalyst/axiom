@@ -231,3 +231,109 @@ a test and the oracle). K5d owns the loan's and the deposit's; the grammar stays
 - Section 0.5: `finish()`, `Run` and `OpenClaim` read; `grep` of `open_claims`, `monitor_complete`, `overdue`.
 - Baseline behaviour on books (`target/release/axiom` of `456b2dd`, kept as the baseline binary): `diff/cases2/promise-grace-ignored.ax`
   (`contracts`: "1 occurrences, 9 days" late, a line nine days late keeps its due day under `grace 3d`), `promise-no-from.ax`.
+
+## 11. What was built, where it departs from sections 0 to 10, and every output that changed
+
+Written after the code, from the code at the tip of the lane and the runs listed in section 12. Sections 0 to 10 stay as they
+were written; this section is what is different from them.
+
+### 11.1 What was built
+
+| step | commit subject | what it did |
+|---|---|---|
+| 0 | `docs/v5/lanes: K5b-map ...` | sections 0 to 10 |
+| 2, 3, 4 | `model, engine, report, sync: a contract holds its terms once, and the fold, the lowering and the reports read the compiled promise` | `Contract.terms`/`.standing` are one `Terms` each, `waived` a `Timeline<Option<Change>>`; `Promises` reads them; the ordinal, the factor, the recognition window, the payment, the matching and the reports ask `Promises`; `Contract::occurrences` and its helpers, `ContractOccurrences`, `loan_payment`, the ordinal count, `nearest_occurrence`, `ForecastFeature` and four `ForecastError` variants are deleted; `grace` is read; sync's `promise.rs` and `World.dues` are deleted |
+| 5 | `engine: the monitor walks a residual per stream beside the journal, and a due day nothing kept is missed` | `engine/src/monitor.rs`; `World.monitor`; `Run.open_claims` and `monitor_complete: true`; the `missed-occurrence` warning; `sync-monitor-incomplete` deleted |
+| 1 | `core, docs/v5/measure: a walked schedule with no first day begins in 1970 ...` | `Dues` for a walked schedule with no first day; the oracle against the reference, the rebuilt old rule and the frozen dump |
+| | `tests: goldens after K5b` | the seven goldens of section 11.3 |
+| | the commits after it | `Contract::covers` inlined (the forecast's per-flow loop: 132M instructions out of line at 100k flows); `kept_by` (one function says what a line keeps and the terms it is made from, so the `expect` in `lower_occurrence` is gone and the function is 23 lines shorter); the monitor's two `expect`s in non-test code gone; a test for the order in which misses are recorded; the verdict's causes (section 12) |
+
+The order of the plan changed once: the oracle (step 1) was finished after the code it judges (steps 2 to 5), because the first
+reference had to be rewritten to the spec (grace, per-schedule reach) before it could say anything about the second.
+
+### 11.2 Where it departs from the map
+
+1. **`blame` did not leave the term.** `Term::Due` carries `blame: Blame` (`Party` or `Owner`, one byte, a function of the
+   template's side, `Blame::of(&contract)` says who). Section 3 had it leave; K5a's test asserts it and K5c's claim reads it, and a
+   byte beside a `Span` keeps the term at 16 bytes. The template, the program and the inputs are held once, as section 3 says.
+2. **`Promises::alone(&Contract)`** compiles one contract by itself, for the match the lowering does while the book is still
+   being written (section 0.3 said "a one-contract compile"; this is its name). The fold checks the match against the final
+   schedule (`Sched::ordinal` is `None` for a day that is not owed), so the lowering's answer is provisional and the fold's is not.
+   `Promises::expected(contract, kind, window)` and `Promises::loan(contract)` are the two calls the forecast and
+   `instantiate_occurrence` make, so that neither knows what an `Annuity` or a `Sched` is.
+3. **A walked schedule with no first day counts from 1970-01-01** (`Dues::new`). Section 0.7 solved the monitor's walk from
+   `Day::MIN` (start at the book's first day); it did not solve `Dues::walked`, which collects its days from the anchor, and
+   a `weekly on 15` or `every 45d` with no `from` has no first day: the counting of its ordinals, its residual and the
+   monitor's first day collected four billion of them (the oracle's out-of-memory, then `promise-no-from.ax` at 8.9 s).
+   The phase of such a schedule used to be that of `Day::MIN`, which means nothing; it is now that of day zero, which also means
+   nothing, and is at least a day. It changes the due days of six of the oracle's 1,500 projects (`first` differs, section 12),
+   of no example and of no golden. `Dues::days` also clips a window that begins before the anchor.
+4. **The reach of a month is 31 days and half is rounded down** (section 5 said so); the reach is a field of the compiled
+   `Schedule`, and a `twice monthly` schedule has 15.
+5. **The monitor does not read `Term::Due`'s `after`.** Section 6.3 said so; it is repeated here because nothing reads that
+   field but the oracle and one test, and K5c will have to read it or delete it.
+6. **The matching is still provisional in one way section 0.3 hoped to remove**: a line is matched against the schedule as the
+   statements before it left it, not the final one. A later waiver can make a line that was matched to a due day that is no
+   longer owed; the fold then says `contract-occurrence-source` (11.3). The brief's "the fold reads the promise" holds for
+   everything the fold computes; what the lowering *chooses* is still decided one statement at a time.
+
+### 11.3 Every output that changed, and why
+
+**Goldens** (`git diff 456b2dd -- tests/`, seven files, all of them `05-family` and `07-landlord`; no mistakes golden, no other
+example):
+
+* `05-family-check.txt`: two `warning[missed-occurrence]` (`mortgage-payment`, due 2026-01-01, 02-01, 03-01; `car-payment`, due
+  2026-01-05, 02-05, 03-05) and the footer's `2 warnings`. The journal of the example ends on 2025-12-31 and its contracts run on, so,
+  on `--today 2026-04-16`, three due days of each have passed their reach with nothing written. **Not the grace.**
+* `07-landlord-{check,balance,available,limits,claims,tax}.txt`: two of the changes are the monitor: `home-loan` (the house was
+  sold on 2025-12-29 and the loan paid off, and the contract has no `until`: due 2026-01-01, 02-01, 03-01) and `manager-fee`
+  (nothing on 2025-10-05: the book has no October line). The rest is **the grace**: `2025-12-29 manager-fee 200.00 USD` is a second
+  fee line 24 days after the due day 2025-12-05 (the contract ends on 2025-12-31, so it has no due day on 2026-01-05); the old reach was
+  the contract's longest cadence, a month, 31 days, so it kept 12-05 a second time; LANGUAGE §7's reach is half of the cadence of the schedule's
+  own, 15 days, so it keeps nothing: `contract-occurrence-date` (the "(7 more)" of the paycheck error is "(8 more)"), the line
+  is not posted, the 12-31 assertion on `rental-bank` fails by 200.00 USD (a new `error[assertion]`: 46 errors where there were 44), and
+  the reports move with the 200.00 USD that did not leave `rental-bank`: `balance` (`rental-bank` 154.60 to 354.60 USD), `available`
+  (money in hand 95,045.20 to 95,245.20 USD) and `tax` (`rental-net` 13,184.52 to 13,384.52 USD, `agi` 50,915.10 to 51,115.10 USD);
+  `limits` and `claims` gain only the diagnostics.
+  **The book was not edited.** To keep the example as it was, the contract would say `grace 30d`, or the line would be dated 2025-12-05 or
+  moved to a different contract. That is the orchestrator's decision.
+
+**Tests whose assertion changed** (none deleted without its replacement):
+
+* `model/tests/native_records.rs`: the book of the input-binding test wrote `2026-02-05 flat` under `grace 3d`, four days from the due day
+  `02-01`, which nothing read; it is `2026-02-04 flat` now (inside the grace) and its assertion on the day the occurrence lands follows.
+  The rest of that file is ported to one `Terms` and `waiver_on`, with the same assertions.
+* `model/tests/promises.rs`: `a_grace_is_carried_though_nothing_reads_it` is `the_reach_of_a_schedule_is_its_grace_or_half_its_own_cadence`;
+  the assertion that "the old walk loses it" is gone with the old walk; three new tests
+  (`a_line_beyond_the_reach_of_its_due_day_keeps_nothing`, `a_loan_expects_its_payments_and_no_more`,
+  `a_contract_alone_is_asked_as_it_stands`).
+* `engine` and `report`: `monitor_complete` is `true` (the brief says so); `forecast_materializes_contracts_even_when_the_run_monitor_is_incomplete`
+  is `forecast_materializes_contracts_beside_a_run_whose_monitor_is_complete`.
+* `sync`: the three tests of `keep` (`a_record_within_half_a_cadence_keeps_the_nearest_occurrence`, `each_occurrence_is_kept_once_and_only_by_money_going_the_right_way`,
+  `a_different_amount_still_keeps_it_and_a_stranger_does_not`) go with `sync/promise.rs` (the brief allows it); `e2e.rs` no longer asserts
+  the `sync-monitor-incomplete` field that cannot be set.
+* `native_loan_forecast_stops_after_the_typed_principal_is_repaid` (K5c's name for it in the known failures) **now passes**: a loan expects
+  its payments and no more.
+* Failing as before and not mine: `a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot` (K3c),
+  `a_context_forecast_keeps_historical_and_same_day_obligations_once` (K5c).
+
+**The K0a harness** (`docs/v5/measure/diff/compare.sh`, 384 outputs): 68 differ and 316 do not. 28 differ only by the new
+`missed-occurrence` warning (and its line in the footer) in books that declare a contract and write nothing; 17 are the `contracts` view
+(a `Late` cell: "6 occurrences, 629 days", and, for `promise-last-after-waiver`, the next due day 2026-06-30 where the old walk, which lost
+that day, said 2026-07-31); 11 are `promise-grace-ignored` (a line 9 days from its due day under `grace 3d` is now an error: the
+`grace` is read), 11 are `promise-lowering-order` (a line matched to a due day that a later waiver took out: `contract-occurrence-source`,
+"this occurrence is not part of its contract schedule", where it was `Forecast(Waived(Day(20513)))`: K5a 7e's one visible change) and
+`stmts-ok.check` (three warnings). Nothing else.
+
+**The oracle's old-rule differences** (section 12): the reach (35,287 probe days of 339,756), a day the old walk lost (880 probe
+days, 404 due windows, 183 ordinals), a day it found twice or out of order (904 due windows, 1,398 ordinals), and a walk with no first
+day (not compared). Recognition: 359 answers of `Err(Overflow)` for a contract with no first day are now `Ok`. Factors and payments: **no
+difference in 1,500 projects**. `diagnostics`: `contract-occurrence-date` +199, `ambiguous-contract-occurrence` -6 (the reach).
+
+**The fuzz** (`fuzz.py OLD NEW examples 2 1000 diff missed-occurrence`): no panic in either build; 153 mutants differ, 151 from `07-landlord`
+(the grace line above, mutated around) and 2 from `04-freelancer` (one more `missed-occurrence`, hidden behind the display limit and
+so not removed by the filter, in the count of "N more diagnostics not shown").
+
+### 11.4 Written and read by nothing after the lane
+
+Section 8's list, plus: `Term::Due`'s `after` and `blame` and `Residual::deadline` (K5c); `Promise.waived` (always `false`, section 0.8).
