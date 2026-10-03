@@ -44,8 +44,8 @@ pub(super) fn declare_accounts<'a, 's>(
         }
         declared.insert(path, file.loc(path));
         let scope = resolving.seeing.scopes.of(written.home());
-        let spelled = leading(&entities.index, &entities.tree, names, scope, path).is_some();
-        let kind = resolving.account_kind(names, written, spelled, diags);
+        let fillers = leading(&entities.index, &entities.tree, names, scope, path);
+        let kind = resolving.account_kind(names, written, fillers.as_deref(), diags);
         let class = match resolving.kinds.tree[kind].sort {
             Sort::Place(class) => class,
             found => {
@@ -84,7 +84,7 @@ pub(super) fn declare_accounts<'a, 's>(
             owner,
             shares: shares.into_boxed_slice(),
             institution,
-            spelled,
+            spelled: fillers.is_some(),
             loc: file.loc(path),
         });
     }

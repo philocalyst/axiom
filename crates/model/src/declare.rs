@@ -21,6 +21,7 @@ use crate::problem::{self, Among, Noun};
 use crate::resolve::End;
 use crate::scope::{Home, Scopes, Seeing};
 use crate::sources::{Site, SystemIndex};
+use crate::spelled::Leading;
 use crate::taxonomy::{self, Taxonomy};
 use crate::{kinds, purposes};
 
@@ -660,11 +661,12 @@ impl Resolving<'_> {
     }
 
     /// The kind an account is written as; of a spelled path with none written, the kind its name is (`alex/401k`).
+    /// `fillers` are the entities written before the name: none, for a path in a tree.
     fn account_kind(
         &self,
         names: &Interner,
         written: &Written<Decl>,
-        spelled: bool,
+        fillers: Option<&[Leading]>,
         diags: &mut Vec<Diagnostic>,
     ) -> Id<Kind> {
         let by_name = || {
@@ -673,7 +675,7 @@ impl Resolving<'_> {
             matches!(self.kinds.tree[kind].sort, Sort::Place(_)).then_some(kind)
         };
         match written.node.kind {
-            None if spelled => by_name().unwrap_or(self.kind_roots.asset),
+            None if fillers.is_some() => by_name().unwrap_or(self.kind_roots.asset),
             _ => self.kind(names, written, Sort::Place(Class::Asset), self.kind_roots.asset, diags),
         }
     }
