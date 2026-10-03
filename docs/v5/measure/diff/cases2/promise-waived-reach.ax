@@ -1,0 +1,14 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+// A line inside a waived stretch keeps no due day of the stretch, and the nearest of the others is 47 days off,
+// past the 31 days the matching looks: no occurrence is close enough.
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  from 2026-01-01
+2026-02-01 flat waived until 2026-04-30
+2026-03-15 flat

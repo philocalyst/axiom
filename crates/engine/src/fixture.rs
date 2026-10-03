@@ -532,6 +532,7 @@ impl Fixture {
             commodities: self.commodities,
             assets: Arena::new(),
             contracts: Arena::new(),
+            promises: Default::default(),
             also: Arena::new(),
             laws: self.laws,
             rules,

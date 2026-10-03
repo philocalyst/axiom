@@ -63,6 +63,8 @@ pub struct Book<'s> {
     pub assets: Arena<Asset>,
     /// Promises of flows: `phone with mint`, `mortgage with rocket`.
     pub contracts: Arena<Contract>,
+    /// What each contract promises, compiled once when the book is built: its terms and the schedules they fall due on.
+    pub promises: crate::promise::Promises,
     /// `also ITEM | FLOW`: what every matching flow implies, declared once.
     pub also: Arena<Also>,
 

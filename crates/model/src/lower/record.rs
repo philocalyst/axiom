@@ -1183,7 +1183,9 @@ fn lower_loan_origin<'a, 's>(
     staged.commit();
 }
 
-fn nearest_occurrence<'a>(
+/// The occurrence a line dated `day` keeps: the nearest due day within a cadence of it, the earlier of two equally near.
+/// Public so that the oracle of `docs/v5/measure/promises` can ask it of a finished book; lane K5 replaces it.
+pub fn nearest_occurrence<'a>(
     contract: &'a crate::book::Contract,
     day: Day,
 ) -> Result<Option<(ScheduleKind, Day, &'a crate::book::Terms)>, (Day, Day)> {

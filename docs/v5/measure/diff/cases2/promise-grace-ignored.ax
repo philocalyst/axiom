@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+// `grace 3d` is lowered and read by nothing: the line is nine days after the due day and keeps it.
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  from 2026-01-01
+  grace 3d
+2026-02-10 flat
