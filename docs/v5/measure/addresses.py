@@ -215,8 +215,11 @@ def draw_account(rng, index, style, taken, pool):
         custodian = rng.choice(BANKS) if rng.random() < 0.6 else None
         opened = day_at(rng.randrange(0, 200)) if rng.random() < 0.35 else None
         closed = day_at(rng.randrange(150, 336)) if rng.random() < 0.25 else None
-        if opened and closed and closed < opened and rng.random() < 0.8:
-            continue  # now and then an account that is never open: it closes before it opens
+        if rng.random() < 0.08:  # now and then an account that is never open: it closes before it opens
+            first = rng.randrange(20, 300)
+            opened, closed = day_at(first), day_at(rng.randrange(0, first))
+        elif opened and closed and closed < opened:
+            continue
         account = Account(index, kind, name, owner, sponsor, beneficiary, custodian, opened, closed, co_owner)
         key = (account.owner, account.co_owner, account.sponsor, account.beneficiary, account.custodian, name)
         if key not in taken:
