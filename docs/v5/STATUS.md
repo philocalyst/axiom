@@ -23,7 +23,8 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | K3b addresses | `Addresses`, declaration words fill slots by forced placement | brief written |
 | K5c forecast | the forecast is the fold past today; a missed `Due` is a claim | brief written |
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | brief written |
-| K7 facts out, `Session` | steppers, pivots, provenance `why`, the surface an MCP server and a GUI use | brief to write |
+| K7a the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | brief written |
+| K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | after K5c |
 | K5d loans and the dead features | amortization, `deposit`, `resets`, `prepay`, `match` | after K5c |
 | L language | the junction, paths, debts as promises, `fmt --upgrade` | last |
 
