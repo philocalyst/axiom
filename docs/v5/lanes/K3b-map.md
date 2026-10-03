@@ -230,8 +230,10 @@ For a flow end (`World::end_on(home, word, day)`) and a setting (`World::end(hom
 
 1. `special_end`, then `found_end` as today. If it finds exactly one place or a party, that is the answer: **a name that
    resolved before resolves to the same thing**, and nothing declared later changes it.
-2. If `found_end` says several places, and any of them is address-spelled, or finds nothing and the path has two words or
-   more and its first word is a filler (an entity some account has in a slot): the **address resolution**: resolve the
+2. If `found_end` says several places, and any of them is address-spelled, or, **in a book that writes some account as an
+   address** (section 8.7), finds nothing and the path has two words or
+   more and it begins with a filler (an entity some account has in a slot) or ends in the name of an account (a
+   misspelt first word of `jordan/bluefin/401k` is still an attempt at it): the **address resolution**: resolve the
    words as entities in the line's home, intersect their posting lists with the name's, filter by order and by open on the
    day. One account: the answer. Several: **`ambiguous-address`** with each candidate's full address and its
    **shortest unique address** as the edit. None: **`unknown-address`**, with the closest address of what the leading words
@@ -244,33 +246,47 @@ declarations say, which is the line's day deciding, as a relator's `from` and `u
 
 ### 8.5 The implied-party pass must know what an address is
 
+(Only in a book that writes some account as an address, section 8.7.)
+
 `implied_parties` runs before entities exist and makes a party of every undeclared name a journal mentions. A mention such
 as `jordan/chekcing` would become a party. So the pass is given one more set of names it does not make parties of: a
 mention of two words or more whose first word is a **filler word**, a word that some account declaration writes as a leading
-path word, an `at` name or an argument of a non-built-in line. It over-approximates (a word that turns out to fill no
-slot only means the mention is read as an address attempt and is `unknown-address` instead of a party). The corpora have no
-mention of that shape that is not already declared, so it changes no book we have; it is measured, not argued
-(section 10).
+path word, an `at` name or an argument of a non-built-in line, **or whose last word is the name of an account**. It
+over-approximates (a word that turns out to fill no slot only means the mention is read as an address attempt and is
+`unknown-address` instead of a party). The corpora have no mention of that shape that is not already declared, so it
+changes no book we have; it is measured, not argued (section 10).
 
 ### 8.6 `Addresses`
 
 ```rust
 pub(crate) struct Addresses {
-    ids: Groups<Word, u32>,        // the accounts whose address holds the word, by place number
-    at: Groups<Word, u16>,         // beside each id: one bit per position of the word in that address
-    words: Groups<Place, Sym>,     // each account's address in order, the name last: for a diagnostic and a shortest unique
-    open: Vec<Option<Days>>,       // by place number: the days it is open; none if it closes before it opens
-    once: Map<Sym, Id<Place>>,     // the references a journal writes that no day or home can change, worked out once
+    fills: Groups<Entity, u32>,   // for each entity, the accounts it fills a slot of, by place number
+    stands: Groups<Entity, u16>,  // beside each: one bit for each position the entity has in that address
+    called: Groups<Called, u32>,  // for each name, the accounts called it
+    address: Groups<Place, Part>, // each account's address in order, the name last: for a diagnostic and a shortest unique
+    open: Vec<Option<Days>>,      // by place number: the days it is open; none if it closes before it opens
+    once: Map<Sym, Id<Place>>,    // the references a journal writes that no day or home can change, worked out once
 }
 ```
 
-A word is keyed by the symbol of its text (an interner index: no hash on a hit), an entity by its own path and a name by its
-own text; the posting of a name has the bit of the last position, so a reference's last word must hold it. Order is
-checked greedily on the bits (the lowest unused position past the last). An account that holds a word in two slots has
-one entry with two bits. At most 16 words an address.
+A filler is the entity its word is in the line's home (so a scoped or nested entity is the one the line sees), and the
+posting list of an entity is the accounts it fills, with the bit of each position it holds; the name's list is the accounts
+called it. Order is checked greedily on the bits (the lowest unused position past the last). An account that holds an
+entity in two slots has one entry with two bits. At most 16 words an address. The words that can be written are the
+entities whose paths have no `/` (DESIGN §2.4: "entities and assets keep flat names"); a nested entity can fill a slot by a
+role line and does not appear in an address.
 
-The words that can be written are only the entities whose paths have no `/`, since `/` separates words ("entities and assets
-keep flat names", DESIGN §2.4); a nested entity can fill a slot by a role line and does not appear in an address.
+### 8.7 The book's gate: no spelled account, no address
+
+A book in which no account is written with the entities that fill its slots before its name reads every reference as it
+always did, byte for byte. The index is not asked, `settle_addresses` does nothing, the CLI and the settings take no
+address, and the implied-party pass keeps no mention from being a party. This is what "additive" means for the two rules
+of 8.4 and 8.5 that are not about a spelled account: without it, a party written as a path that ends in an account's name
+(`clients/escrow`, with `account bank/escrow`) or begins with an entity that fills a slot (`jordan/landlord`, with `owner
+jordan` on some account) would be `unknown-address`, where it was an implied party. The gate is one flag of `Addresses`
+(`is_used`, any place `is_spelled`) and one of the implied-party pass (`Addressed.used`, any account whose leading
+words are all written entities, by text). In a book that does write one, an account written the old way has an address
+too (`bluefin/jordan-401k`), and a mention of that shape is an address and no party.
 
 ## 9. What this lets L delete
 
@@ -290,3 +306,94 @@ The `owner` line of every account whose owner is a path word (12 of the 16 relat
   written in each directory, every `account` path of two words or more): 0 accounts whose leading words are all entities,
   and `crates/*/src` has three tests with a `/` in an account name (`personal/checking`, `business/checking`,
   `bank/checking`), none of whose leading words is an entity.
+
+## 11. What the lane built, where it departs from section 8, and what it measured
+
+### 11.1 Built
+
+- `model/src/addresses.rs`: `Addresses`, the index of section 8.6, resolved by intersection in order and by day.
+- `model/src/spelled.rs`: the gate (`leading`, `Book::is_spelled`) and the placement pass (`place_words`) over
+  `core::placement`.
+- `model/src/reference.rs`: a written reference read as an address, `settle_addresses`, and the two diagnostics
+  `unknown-address` and `ambiguous-address` (each candidate with the shortest address that means only it).
+- `model/src/problem.rs`: `ambiguous-placement`, and `wrong-kind` and `too-many` for a word before a name, built from the
+  words the role-line versions of them use.
+- Small edits: `resolve.rs` (the line's day reaches `found_end`; `seek_place` and `Book::place` take an address),
+  `declare/*` (a spelled account is a root; an account's kind from its last word; the party pass keeps mentions that are
+  addresses from being parties), `lower/flow.rs` and `lower/statements.rs` (the day is passed), `slots.rs`
+  (`entity_slots`, root-first), and one line of `report/places.rs` (a spelled account's row is its whole path).
+- `tests/mistakes/100` to `104`: a case for each diagnostic, with the output the tool gives.
+- `docs/v5/measure/addresses.py`: the generator and the brute-force oracle, with the mutants; `family_addresses.py`: the
+  acceptance copy; `examples/explore-v5/06-family-addresses`: that copy, which checks to the balances, tallies, claims
+  and limits of `examples/05-family` (which is not edited). `diff/cases2/old-party-path.ax`: the old shape the gate keeps.
+
+### 11.2 Where it departs from section 8
+
+1. **The index is keyed by entity, not by the symbol of a word.** A filler is the entity its word is in the line's home
+   (a scoped or nested entity is the one the line sees), and a word that is no entity cannot be a filler, so a posting
+   list for a word that is not an entity would only hold nothing. The name's list is its own (`called`).
+2. **The gate of 8.7 is new.** Section 8.4 and 8.5 as first written changed the meaning of a party written as a path in a
+   book that has no spelled account. The corpora do not hold the shape, so no golden said so; a case written for it
+   (`old-party-path.ax`) does, and the gate keeps it.
+3. **"Ends in an account's name" is a second reason to read a reference as an address** (8.4, 8.5), beside "begins with
+   a filler": a misspelt first word of `jordan/bluefin/401k` is a mistake in an address and no party.
+4. **`settle_addresses`** works out once, before the journal is lowered, what each reference of two words or more means
+   when no day or home can change it (one account, open on every day). A hit is one hash of the text. It is the cost
+   of the new spelling at 100k flows brought from +12.6% to +1.75% (1m: +1.90%).
+5. **The shortest address is taken by the whole reading**: the fewest fillers, the leftmost among equals, the name always,
+   and never a word of digits alone (a number is no name), judged by what the names every account has and the index
+   say together, not by the index alone.
+6. **A setting or a report has no line and so no day**: a reference of an account that is open on no day is unknown, and
+   one that two accounts share but only one is ever open means that one (`Book::place`, `seek_place`).
+7. **`opened` and `closed` are read from the facts when the index is built.** An `end` statement says `closed` after
+   lowering, and a line before it does not see it, as a relator's `from` and `until` are read.
+
+### 11.3 Not built, and not right yet
+
+- Nesting (`entity fidelity` with `alex/401k` under it) and the `as with` marker (section 7): the custodian is still `at`.
+- A kind-narrowed `owner`: until `owner` has a range, `acme/529` places `acme` as the owner and says nothing. Section 7.
+- The CLI's own message for a target two accounts share is the old one (`ambiguous-place`, by suffix); a setting says
+  `ambiguous-address` only where the names found none.
+- `unknown-address` suggests the closest name only, not the closest address.
+- The party pass decides by the text of the sources, before the entities exist: an over-approximation, said in 8.5.
+- Entities whose path has a `/`, and addresses of more than 15 words, are not in the index.
+- An account whose path begins with an entity's name used to be owned by `me` and grouped under that name; in a book it is
+  now owned by that entity. Section 8.1. No corpus holds one.
+- The owner's own place becomes a holding when it owns a spelled account (`own()` in `spelled.rs`), the one fix-up of a
+  place made earlier. The oracle does not model it; a unit test does.
+
+### 11.4 Measured
+
+Numbers are of the tree after the last commit unless said otherwise.
+
+- **Lines** (`briefs/loc.py`, before to after): core 3461 to 3472, model 17961 to 18819, report 7088 to 7091; the other
+  crates unchanged; total 52079 to 52951 (+872). The design asked for +250 and the oracle's support in the model is not
+  in it: nothing has been deleted yet (section 9 is L's).
+- **Functions** (`hist.py crates`): 41-80 lines 137 to 136 functions, nothing else moved by more than the new functions
+  (1908 to 1954 of 1-10 lines, 666 to 681 of 11-20, 487 to 497 of 21-40). 70 new functions, the longest 32 lines
+  (`Addresses::build`); the three functions the lane grew past 38 lines are 40 (`resolve_end`, `declare`) and 38
+  (`found_end`).
+- **Lookup cost** (callgrind instructions of `check` on `bench/gen.py` projects, baseline `0089678` against this tree):
+  100k flows 1,855,756,956 to 1,857,625,340 (+0.10%); 1m flows 17,148,503,376 to 17,163,680,209 (+0.09%). The same
+  projects written as addresses (`addresses.py bench`): 100k 1,888,223,514 (+1.75%), 1m 17,474,812,742 (+1.90%).
+- **Tests**: `cargo test --workspace --release`: 1046 passed, 4 failed. Three are the known failures. The fourth,
+  `claim_tests::a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles`, fails the same on `0089678`.
+- **Goldens**: `tests/golden.sh` changes four files, `04-freelancer-{available,balance,check,claims}.txt`, and the
+  baseline binary prints the same: they were stale at `0089678` (K3c settles the invoices by their payments). None of
+  them is touched here. `tests/mistakes` and the K0a harness (`diff/compare.sh`, 185 cases and the new one) change
+  nothing; `fuzz.py ... 1000 diff`: 0 panics, 0 differences (every example is rejected by `check` for the v3 syntax it
+  carries, so the fuzz compares what is said of it).
+- **Oracle** (`addresses.py all`, books of both sorts, some with a tight pool of entities that stand in every slot):
+  400 books at seed 77, 0 wrong. It read 7,533 references: 5,463 one account (3,037 by the names every account has, 2,426
+  by the index, 101 of those because the line's day ruled a sibling out), 378 ambiguous (each re-read after the shortest
+  address its diagnostic offers), 1,563 unknown (719 of them an account that is open on another day) and 129 parties; 20
+  of the books write no account as an address. The same at seeds 5, 7 and 8 over 300 books each, 0 wrong. `placement`:
+  words before a name against a brute-force placement of them, 400 of them, 0 wrong (73 placed, 50 ambiguous, 99 wrong
+  kind, 178 too many).
+- **Mutants**: see the end of this section.
+- **Acceptance**: `family_addresses.py prove target/release/axiom` runs the eleven commands of the goldens over
+  `05-family` and over the copy: the same 141 diagnostics (the v3 syntax every example still carries) in the same lines,
+  and the same balances, claims, tallies, limits and tax, with each account called what the copy calls it. The copy
+  says each account once, and drops the 13 relation lines under its accounts (`owner`, `employer`, `beneficiary`) that
+  its words place, and the names that carried a relation (`jordan-401k`, `riley-529`, `joint-checking`); the two
+  `owner` lines under assets stay, an asset not being an address.
