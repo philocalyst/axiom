@@ -7,61 +7,54 @@
 use axiom_core::{Day, Diagnostic, FileId};
 use axiom_engine::Run;
 use axiom_model::Book;
+use axiom_session::Sources;
 use axiom_sync::{PlanOutcome, SourceRegistry};
 
-use crate::project::{Project, SourceFile, Sources};
+use crate::project::Project;
 
 /// Plan the selected native sync sources without writing project files.
 ///
-/// `files` is the immutable Axiom source catalog borrowed by `book`;
-/// `auxiliary` is a disjoint append-only catalog for statement inputs and
-/// generated command output. The returned diagnostic IDs are real IDs in the
-/// combined source catalog.
+/// `sources` holds the Axiom files `book` was built from, and the planning adds
+/// to it what the sources read and the commands print, so the returned
+/// diagnostic IDs are real IDs in it.
 pub fn plan(
     book: &Book<'_>,
     run: &Run,
     project: &Project,
     today: Day,
     wanted: &[&str],
-    files: &[SourceFile],
-    auxiliary: &mut Vec<SourceFile>,
+    sources: &mut Sources<'_>,
 ) -> Result<PlanOutcome, Diagnostic> {
-    let project_paths: Vec<&str> = files.iter().filter(|file| !file.embedded).map(|file| file.path.as_ref()).collect();
-    let file_paths: Vec<&str> = files.iter().map(|file| file.path.as_ref()).collect();
-    let mut registry = Catalog { project, files, auxiliary, first_auxiliary: files.len() };
+    let project_paths: Vec<&str> = sources.project_paths().collect();
+    let file_paths: Vec<&str> = sources.files().map(|file| &*file.path).collect();
+    let mut registry = Catalog { project, sources };
     axiom_sync::plan(book, run, &project.root, today, wanted, &project_paths, &file_paths, &mut registry)
 }
 
-struct Catalog<'a> {
+struct Catalog<'a, 't> {
     project: &'a Project,
-    files: &'a [SourceFile],
-    auxiliary: &'a mut Vec<SourceFile>,
-    first_auxiliary: usize,
+    sources: &'a mut Sources<'t>,
 }
 
-impl SourceRegistry for Catalog<'_> {
+impl SourceRegistry for Catalog<'_, '_> {
     fn read(&mut self, path: &str) -> Result<Option<FileId>, Diagnostic> {
         // A declared reader may name an Axiom source already loaded by the
         // project. Reuse that exact text and identity instead of reading or
         // registering a duplicate.
-        if let Some(source) = self.files.iter().find(|source| !source.embedded && source.path == path) {
+        if let Some(source) = self.sources.files().find(|source| !source.embedded && source.path == path) {
             return Ok(Some(source.id));
         }
         let text = self.project.read_local(path)?;
-        let file = Sources::append_auxiliary_to(self.auxiliary, self.first_auxiliary, path.to_owned(), text)?;
+        let file = self.sources.append_auxiliary(path.to_owned(), text)?;
         Ok(Some(file))
     }
 
     fn text(&self, file: FileId) -> Option<&str> {
-        self.files
-            .iter()
-            .chain(self.auxiliary.iter())
-            .find(|source| source.id == file)
-            .map(|source| source.text.as_ref())
+        self.sources.get(file).map(|source| source.text.as_ref())
     }
 
     fn generated(&mut self, path: &str, text: String) -> Result<FileId, Diagnostic> {
-        Sources::append_auxiliary_to(self.auxiliary, self.first_auxiliary, path.to_owned(), text)
+        self.sources.append_auxiliary(path.to_owned(), text)
     }
 }
 
@@ -69,6 +62,7 @@ impl SourceRegistry for Catalog<'_> {
 mod tests {
     use super::*;
     use crate::testing::TempDir;
+    use axiom_session::Texts;
 
     #[test]
     fn local_reader_and_generated_text_receive_real_append_only_ids() {
@@ -76,10 +70,9 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         dir.write("statement.csv", "date,amount,memo\n");
         let project = Project::find(dir.path()).unwrap();
-        let mut sources = project.load().unwrap();
-        let first_auxiliary = sources.files.len();
-        let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
-        let mut catalog = Catalog { project: &project, files, auxiliary, first_auxiliary };
+        let texts = Texts::default();
+        let mut sources = project.load(&texts).unwrap();
+        let mut catalog = Catalog { project: &project, sources: &mut sources };
 
         let input = catalog.read("statement.csv").unwrap().unwrap();
         assert_eq!(catalog.text(input), Some("date,amount,memo\n"));

@@ -99,6 +99,13 @@ pub fn diagnostics(diagnostics: &[&Diagnostic], sources: &dyn SourceProvider) ->
     out
 }
 
+/// One diagnostic as a JSON object, without a line ending: for a client that puts diagnostics in a document of its own.
+pub fn diagnostic(diagnostic: &Diagnostic, sources: &dyn SourceProvider) -> String {
+    let mut out = String::new();
+    write_diagnostic(&mut out, diagnostic, sources);
+    out
+}
+
 fn write_diagnostic(out: &mut String, diagnostic: &Diagnostic, sources: &dyn SourceProvider) {
     out.push_str("{\"code\":");
     string(out, &diagnostic.code);

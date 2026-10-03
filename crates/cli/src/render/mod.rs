@@ -18,12 +18,12 @@ mod page;
 mod snippet;
 
 use axiom_core::diag::{Diagnostic, Help, Label, Loc, Severity};
+use axiom_session::{SourceFile, Sources};
 
 pub use self::findings::Tally;
 use self::findings::{SHOWN, arrange};
 use self::page::Page;
 use self::snippet::Panel;
-use crate::project::{SourceFile, Sources};
 use crate::style::{Ink, Line, Terminal};
 use crate::text::plural;
 
@@ -41,13 +41,13 @@ pub enum Limit {
 }
 
 pub struct Renderer<'a> {
-    sources: &'a Sources,
+    sources: &'a Sources<'a>,
     terminal: Terminal,
 }
 
 impl<'a> Renderer<'a> {
     /// A renderer for diagnostics that point into `sources`.
-    pub fn new(sources: &'a Sources, terminal: Terminal) -> Renderer<'a> {
+    pub fn new(sources: &'a Sources<'a>, terminal: Terminal) -> Renderer<'a> {
         Renderer { sources, terminal }
     }
 

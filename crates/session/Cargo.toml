@@ -1,13 +1,9 @@
 [package]
-name = "axiom-cli"
-description = "The axiom command"
+name = "axiom-session"
+description = "A loaded project as a value: its texts, its book and its run, and the edits that change them"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "axiom"
-path = "src/main.rs"
 
 [dependencies]
 axiom-core.workspace = true
@@ -15,7 +11,7 @@ axiom-syntax.workspace = true
 axiom-model.workspace = true
 axiom-engine.workspace = true
 axiom-report.workspace = true
-axiom-session.workspace = true
-axiom-sync.workspace = true
-axiom-systems.workspace = true
 memchr.workspace = true
+
+[dev-dependencies]
+axiom-systems.workspace = true

@@ -205,7 +205,7 @@ pub struct Fact<'s> {
     pub value: Money<'s>,
 }
 
-pub use context::Context;
+pub use context::{Context, Folded};
 pub use table::percent;
 
 /// A source position as a client can display it. Lines and columns are
@@ -335,9 +335,13 @@ pub struct Summary {
 }
 
 pub fn summary(book: &Book, run: &Run) -> Summary {
-    let (everyone, today) = (Whose::default(), run.today);
-    let plan = Plan::new(book);
-    let lens = Lens::new(&plan, &everyone, today);
+    summary_of(&Plan::new(book), run)
+}
+
+/// [`summary`], with the plan the run was folded with: a client that has one does not build another.
+pub fn summary_of(plan: &Plan<'_, '_>, run: &Run) -> Summary {
+    let (everyone, today, book) = (Whose::default(), run.today, plan.book());
+    let lens = Lens::new(plan, &everyone, today);
     let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, run, &[today], false), 0);
     // Built-in place rows exist in every book: only declared or used places
     // contribute to the summary.

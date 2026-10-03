@@ -10,6 +10,7 @@ dependencies = [
  "axiom-engine",
  "axiom-model",
  "axiom-report",
+ "axiom-session",
  "axiom-sync",
  "axiom-syntax",
  "axiom-systems",
@@ -49,6 +50,19 @@ dependencies = [
  "axiom-engine",
  "axiom-model",
  "axiom-syntax",
+]
+
+[[package]]
+name = "axiom-session"
+version = "0.3.0"
+dependencies = [
+ "axiom-core",
+ "axiom-engine",
+ "axiom-model",
+ "axiom-report",
+ "axiom-syntax",
+ "axiom-systems",
+ "memchr",
 ]
 
 [[package]]

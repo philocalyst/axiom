@@ -16,9 +16,9 @@ use std::ops::Range;
 
 use axiom_core::Loc;
 use axiom_core::diag::Label;
+use axiom_session::SourceFile;
 
 use super::labels::{LineLabel, annotate};
-use crate::project::SourceFile;
 use crate::style::{Ink, Line, TAB_WIDTH};
 
 /// A label spanning more lines than this is marked only on its first and last.

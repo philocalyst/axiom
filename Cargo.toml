@@ -14,6 +14,7 @@ axiom-syntax = { path = "crates/syntax" }
 axiom-model = { path = "crates/model" }
 axiom-engine = { path = "crates/engine" }
 axiom-report = { path = "crates/report" }
+axiom-session = { path = "crates/session" }
 axiom-systems = { path = "crates/systems" }
 axiom-sync = { path = "crates/sync" }
 memchr = "2.8"

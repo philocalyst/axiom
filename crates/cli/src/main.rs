@@ -27,8 +27,8 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 use axiom_core::Diagnostic;
+use axiom_session::{Sources, Texts};
 
-use crate::project::Sources;
 use crate::render::Renderer;
 use crate::style::{ColorChoice, Terminal};
 
@@ -80,13 +80,16 @@ fn main() -> ExitCode {
 
 /// Shows why nothing could be run and exits with 2; JSON mode writes to stdout.
 fn refuse(problem: &Diagnostic, color: ColorChoice, json: bool) -> ExitCode {
+    // Nothing was loaded, so there is no text for the diagnostic to point into.
+    let texts = Texts::default();
+    let nothing = Sources::empty(&texts);
     if json {
-        let output = axiom_report::json::diagnostics(&[problem], &Sources::default());
+        let output = axiom_report::json::diagnostics(&[problem], &nothing);
         let _ = io::stdout().write_all(output.as_bytes());
         return ExitCode::from(2);
     }
     let terminal = Terminal::detect(color, &io::stderr());
-    let text = Renderer::new(&Sources::default(), terminal).diagnostic(problem);
+    let text = Renderer::new(&nothing, terminal).diagnostic(problem);
     let _ = io::stderr().write_all(text.as_bytes());
     ExitCode::from(2)
 }
