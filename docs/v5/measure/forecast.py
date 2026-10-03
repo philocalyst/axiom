@@ -407,6 +407,8 @@ def own_tests_fail(source, work):
     for package, targets in (("axiom-engine", ["--lib"]), ("axiom-report", ["--lib"])):
         run = subprocess.run(["cargo", "test", "--release", "--offline", "-p", package, *targets], cwd=source, env=env,
                              capture_output=True, text=True)
+        if "could not compile" in run.stderr:
+            raise SystemExit("the tests do not build")
         if run.returncode:
             return True
     return False
