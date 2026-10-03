@@ -133,6 +133,14 @@ pub enum Counts {
     Claim { tab: Id<Place>, dir: Dir },
 }
 
+impl Piece {
+    /// Whether it takes back what a claim counted: a claim forgiven in accrual books, or a payment that settled one and
+    /// was returned.
+    pub fn takes_back(&self) -> bool {
+        matches!(self.counts, Counts::Claim { dir: Dir::Out, .. })
+    }
+}
+
 impl Counting<'_> {
     /// The pieces the flow counts in, in `out`: its own first, then one for each purpose of the claims it settled.
     pub fn pieces(&self, book: &Book, out: &mut Vec<Piece>) {

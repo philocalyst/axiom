@@ -1023,10 +1023,12 @@ MUTANTS = [
     ("crates/engine/src/post.rs", "[m.code_runs.header, m.code_runs.local]", "[m.code_runs.header]", "the flow's own line's codes are not read"),
     ("crates/engine/src/claims.rs", "let made = [Select::Txn(change.target)];", "let made: [Select; 0] = [];",
      "a write-off forgives every claim in the place"),
-    ("crates/engine/src/claims.rs", "        self.world.holdings.credit(flow.from, unit, open);\n", "", "the forgiven value goes nowhere"),
+    ("crates/engine/src/claims.rs", "            self.world.holdings.credit(line.from, unit, qty);\n", "", "the forgiven value goes nowhere"),
     ("crates/engine/src/claims.rs", "if forgiven == 0 {", "if forgiven == 1 {", "an empty write-off is said when one parcel was forgiven"),
-    ("crates/engine/src/claims.rs", "basis: s.basis,", "basis: Qty::ZERO,", "a write-off records no basis"),
-    ("crates/engine/src/claims.rs", "qty: s.qty,", "qty: open,", "a write-off records the whole open amount for each parcel"),
+    ("crates/engine/src/claims.rs", "let Slice { qty, basis, acquired, .. } = *slice;", "let Slice { qty, acquired, .. } = *slice;\n            let basis = Qty::ZERO;",
+     "a write-off records no basis"),
+    ("crates/engine/src/claims.rs", "let Slice { qty, basis, acquired, .. } = *slice;", "let Slice { basis, acquired, .. } = *slice;\n            let qty = slice.qty + slice.qty;",
+     "a write-off records twice the parcel"),
     ("crates/model/src/lower/record.rs", "let claimed = matches!(used, CodeUse::ClaimWaiver) && self.claims.by_code.contains_key(&symbol);",
      "let claimed = false;", "a code on a claim and its payment is ambiguous for a write-off"),
     ("crates/model/src/lower/statements.rs", "if !flows().any(|flow| book.makes_claim(flow)) {", "if !flows().any(|flow| book.is_claim(flow.to)) {",
@@ -1041,15 +1043,16 @@ MUTANTS = [
     ("crates/engine/src/settle.rs", "let need = open.min(m.out.qty);", "let need = open;", "a payment settles more than it paid"),
     ("crates/engine/src/settle.rs", "let named = self.name_claims(m, tab);", "let named = false;",
      "the codes of a payment from a party name no claim"),
-    ("crates/engine/src/settle.rs", "        parcels.iter().for_each(|&parcel| slot.land_with_codes(parcel, false, codes));\n", "",
+    ("crates/engine/src/settle.rs", "        settlement.parcels.iter().for_each(|&parcel| slot.land_with_codes(parcel, false, codes));\n", "",
      "a returned payment does not open its claims"),
-    ("crates/engine/src/settle.rs", "        self.world.holdings.credit(m.to, unit, -reopened);\n", "",
+    ("crates/engine/src/settle.rs", "        self.world.holdings.credit(m.to, settlement.unit, -reopened);\n", "",
      "a returned payment makes value when it opens its claims"),
     ("crates/engine/src/post.rs", "        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);\n        let fresh",
      "        self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n        let fresh", "a payment that settles claims makes value"),
-    ("crates/engine/src/post.rs", "            self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);\n            self.world.holdings.credit(m.to,",
-     "            self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n            self.world.holdings.credit(m.to,", "a leg to a third party that settles claims makes value"),
-    ("crates/engine/src/post.rs", "        self.reopen_claims(m);\n", "", "a payment that is returned opens nothing"),
+    ("crates/engine/src/post.rs", "            self.world.holdings.credit(m.from, m.out.unit, paid - m.out.qty);\n",
+     "            self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n", "a leg to a third party that settles claims makes value"),
+    ("crates/engine/src/settle.rs", "        let settlement = self.record.settled.remove(&flow)?;\n", "        let settlement = self.record.settled.get(&flow)?.clone();\n",
+     "a payment that is returned forgets what it settled, and a return of it settles again"),
     ("crates/engine/src/settle.rs", "exact: open.min(rest),", "exact: need,", "exactly the flow's amount is judged on the leg and not on what the party pays in all"),
     ("crates/engine/src/settle.rs", "            Class::Outside => Some(Leg::Elsewhere),\n", "            Class::Outside => None,\n",
      "a leg to a third party is no payment"),
@@ -1067,7 +1070,53 @@ MUTANTS = [
      "partition_point(|&(found, by, _)| (found, by) <= (party, owner))", "the tab of a party is not found"),
     ("crates/engine/src/lots.rs", "lots.iter().take_while(|lot| lot.txn == lots[0].txn).count()", "1",
      "the lines of an invoice are claims of their own"),
+    ("crates/engine/src/recognition.rs", "            (Dealing::Making, Books::Cash) if self.purpose.is_some() => {}\n", "",
+     "a claim made counts in cash books"),
+    ("crates/engine/src/recognition.rs", "(Dealing::Making, Books::Cash) if self.purpose.is_some() => {}", "(Dealing::Making, Books::Accrual) if self.purpose.is_some() => {}",
+     "a claim made counts in cash books and not in accrual"),
+    ("crates/engine/src/recognition.rs", "            if books == Books::Accrual {\n                continue;\n            }\n", "",
+     "a claim settled counts again in accrual books"),
+    ("crates/engine/src/recognition.rs", "let replaced = if settlement.reaches == Reaches::Owner { settled } else { Qty::ZERO };", "let replaced = settled;",
+     "a leg to a third party is replaced by the claims it paid"),
+    ("crates/engine/src/recognition.rs", "Share::Part(moved - replaced)", "Share::Part(moved)",
+     "a payment counts what it moved as well as the claims it settled"),
+    ("crates/engine/src/recognition.rs", "(Dealing::Forgiving { tab, qty, dir }, Books::Accrual) if self.purpose.is_some() =>",
+     "(Dealing::Forgiving { tab, qty, dir }, Books::Cash) if self.purpose.is_some() =>", "a write-off reverses in cash books and not in accrual"),
+    ("crates/engine/src/recognition.rs", "let dealing = Dealing::Forgiving { tab: claim.to, qty, dir: Dir::Out };", "let dealing = Dealing::Forgiving { tab: claim.to, qty, dir: Dir::In };",
+     "a write-off adds what the claim recognized"),
+    ("crates/engine/src/recognition.rs", "book.txn_flow(part.origin, part.ordinal)?", "book.txn_flow(part.origin, 0)?",
+     "every parcel of a claim is for its first line's purpose"),
+    ("crates/engine/src/recognition.rs", "let Some(purpose) = claim_purpose(book, parcel) else { continue };",
+     "let Some(purpose) = claim_purpose(book, parcel) else {\n                total += parcel.qty;\n                continue;\n            };",
+     "a claim with no purpose replaces what pays it"),
+    ("crates/engine/src/claims.rs", "slice.part.and_then(|part| book.txn_flow(part.origin, part.ordinal)).unwrap_or(claim)", "claim",
+     "a write-off takes back the first line's purpose for every parcel"),
+    ("crates/engine/src/post.rs", "None if self.plan.makes_claim(m.from, m.to) => Dealing::Making,", "None if false => Dealing::Making,",
+     "the fold counts a claim made as an ordinary flow"),
+    ("crates/engine/src/recognition.rs", "None if plan.makes_claim(flow.from, flow.to) => Dealing::Making,", "None if false => Dealing::Making,",
+     "the readers count a claim made as an ordinary flow", "cli"),
+    ("crates/engine/src/settle.rs", "Some(Claiming { settlement, dir: Dir::In })\n    }\n}", "None\n    }\n}",
+     "a flow out of a claim place settles nothing as far as counting goes"),
+    ("crates/engine/src/settle.rs", "let settlement = Settlement { tab: m.from, unit: m.out.unit, parcels, reaches: Reaches::Elsewhere };",
+     "let settlement = Settlement { tab: m.from, unit: m.out.unit, parcels, reaches: Reaches::Owner };", "a flow out of a claim place reaches the owner's money"),
+    ("crates/engine/src/settle.rs", "            self.record.settlements.push((flow, claiming.settlement.clone()));\n", "",
+     "the readers are not told what a payment settled", "cli"),
+    ("crates/engine/src/settle.rs", "Dir::In => self.settlement.parcels.iter().map(|parcel| parcel.qty).sum(),", "Dir::In => Qty::ZERO,",
+     "a payment that settled claims debits the party for them as well"),
+    ("crates/engine/src/post.rs", "Counts::Claim { dir, .. } => dir,", "Counts::Claim { .. } => Dir::Out,", "a claim settled counts the way the payment goes"),
+    ("crates/engine/src/recognition.rs", "Dealing::Settling { settlement, dir: Dir::In, moved: posted.out }", "Dealing::Settling { settlement, dir: Dir::In, moved: Qty::ZERO }",
+     "the readers count a payment that settled claims without what it moved", "cli"),
 ]
+
+
+def build_cli(source, work):
+    """The CLI of the (mutated) tree, for a mutant of what the readers do with a run: the dump does not read it."""
+    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "cli-target"))
+    result = subprocess.run(["cargo", "build", "--release", "--offline", "-p", "axiom-cli"], cwd=source, env=env,
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise SystemExit("the CLI did not build")
+    return os.path.join(work, "cli-target", "release", "axiom")
 
 
 def leave_out(names):
@@ -1127,7 +1176,7 @@ def mutate(tree, work, directory, only=None):
     clean = caught(directory, "base", "clean")
     assert not clean, f"the unmutated tree fails the oracle: {clean[:2]}"
     results = []
-    for number, (path, old, replacement, what) in enumerate(MUTANTS):
+    for number, (path, old, replacement, what, *how) in enumerate(MUTANTS):
         if only is not None and number not in only:
             continue
         target = os.path.join(source, path)
@@ -1138,8 +1187,13 @@ def mutate(tree, work, directory, only=None):
         outcome = "SURVIVED"
         try:
             binary = build(source, out, new=True, source=snapshot)
-            dump_only(binary, directory, tag)
-            if caught(directory, "base", tag):
+            if how == ["cli"]:
+                do_dump(build_cli(source, work), binary, directory, tag)
+                caught_by = [path for path in projects(directory) if check_one(path, read(path, tag), "new")]
+            else:
+                dump_only(binary, directory, tag)
+                caught_by = caught(directory, "base", tag)
+            if caught_by:
                 outcome = "killed"
             elif own_tests_fail(source, work):
                 outcome = "killed by the tests"

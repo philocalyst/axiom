@@ -28,6 +28,7 @@ kind receivable : asset
   claim
 purpose design : income
 purpose fees : spending
+purpose tax-collected : transfer
 account checking
 entity me
   books {books}
@@ -66,6 +67,23 @@ fn flow_counts_a_claim_when_it_is_made_in_accrual_books_and_takes_back_what_was_
         let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));
         assert_eq!(rows[0], "=income | 300.00 USD |  | -200.00 USD | 100.00 USD", "{rows:#?}");
         assert_eq!(rows[1], "  design | 300.00 USD |  | -200.00 USD | 100.00 USD");
+    });
+}
+
+/// A purpose that is money passing through counts as the volume of it, in either direction, but forgiving a claim of it
+/// takes back what was counted and does not add more.
+#[test]
+fn flow_takes_back_what_a_forgiven_claim_counted_of_a_purpose_that_passes_through() {
+    let lines = "\
+2026-01-02 ann owes me due 2026-02-01 ^i1
+  300 USD #design
+  30 USD #tax-collected
+2026-03-15 ^i1 waived \"not collected\"
+";
+    with_run(&book("accrual", lines), day(2026, 3, 31), |book, run| {
+        let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));
+        let transfer: Vec<_> = rows.iter().filter(|row| row.contains("tax-collected")).collect();
+        assert_eq!(transfer, ["  tax-collected | 30.00 USD |  | -30.00 USD |"], "{rows:#?}");
     });
 }
 

@@ -683,7 +683,11 @@ fn priced(
     match piece.purpose.map(|purpose| book.purposes[purpose.purpose].root) {
         Some(PurposeRoot::Income) => Some(value),
         Some(PurposeRoot::Spending | PurposeRoot::Capital) => Some(Qty(value.0.checked_neg()?)),
-        Some(PurposeRoot::Transfer) | None => Some(Qty(value.0.checked_abs()?)),
+        // What passes through counts as the volume it was in either direction, but a claim taken back is not more of it.
+        Some(PurposeRoot::Transfer) | None => {
+            let volume = value.0.checked_abs()?;
+            Some(Qty(if piece.takes_back() { -volume } else { volume }))
+        }
     }
 }
 
