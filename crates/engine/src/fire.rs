@@ -677,8 +677,15 @@ impl Ledger<'_, '_, '_> {
         if !fresh {
             return;
         }
-        let frame =
-            Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame = Frame {
+            plan: self.plan,
+            law,
+            facts,
+            ctx,
+            values: &self.scratch.values,
+            effects: &self.record.effects,
+            settled: &self.record.settled,
+        };
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
         let verdict = match (waiver, warn) {
             (Some(waiver), _) => Verdict::Waived(waiver),
@@ -704,8 +711,15 @@ impl Ledger<'_, '_, '_> {
             self.record.waivers.insert(waive.loc, true);
         }
         let facts = &self.plan.laws[rule.law.index()];
-        let frame =
-            Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame = Frame {
+            plan: self.plan,
+            law,
+            facts,
+            ctx,
+            values: &self.scratch.values,
+            effects: &self.record.effects,
+            settled: &self.record.settled,
+        };
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
         self.violation(rule, ctx, diagnostic, Verdict::Priced { waived: waive.is_some() });
         if waive.is_none() {
@@ -720,8 +734,15 @@ impl Ledger<'_, '_, '_> {
     fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
         let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let facts = &self.plan.laws[rule.law.index()];
-        let frame =
-            Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame = Frame {
+            plan: self.plan,
+            law,
+            facts,
+            ctx,
+            values: &self.scratch.values,
+            effects: &self.record.effects,
+            settled: &self.record.settled,
+        };
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
         let missing = match fault {

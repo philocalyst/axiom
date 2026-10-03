@@ -30,6 +30,9 @@ purpose design : income
   law running
     on flow
     count total(ever) as running
+  law cap
+    on flow
+    warn value(total(ever), USD) <= 250 USD \"over the cap\"
 purpose retail : income
   law retail
     on flow
@@ -215,5 +218,36 @@ fn the_fee_leg_counts_its_own_purpose_and_the_claim_its_own() {
     with("accrual", lines, |book, run| {
         assert_eq!(counted(book, run, "receipts"), [on("2026-01-02", 3_100_00)], "the invoice when it was made");
         assert_eq!(counted(book, run, "fee-expenses"), [on("2026-01-20", 90_20)], "the fee is the owner's cost, whole");
+    });
+}
+
+// ─── What a limit that broke says counted ───────────────────────────────────
+
+/// The flows a warning names as what built the total it read.
+fn named_as_counted(run: &Run) -> String {
+    let warning = run.diagnostics.iter().find(|diagnostic| &*diagnostic.code == "cap").expect("the cap was broken");
+    warning.labels.iter().map(|label| label.text.to_string()).collect::<Vec<_>>().join("\n")
+}
+
+#[test]
+fn a_limit_that_broke_names_the_payments_that_counted_and_not_the_claims_made() {
+    let lines = "\
+2026-01-02 ann owes me 200 USD due 2026-02-01 #design ^i1
+2026-01-03 ann owes me 100 USD due 2026-02-01 #design ^i2
+2026-01-20 ann -> checking 200 USD ^i1
+2026-01-25 ann -> checking 100 USD ^i2
+";
+    with("cash", lines, |_, run| {
+        let counted = named_as_counted(run);
+        assert!(counted.contains("2026-01-20: 200.00 USD"), "the payment that settled the first claim: {counted}");
+        assert!(
+            !counted.contains("2026-01-02") && !counted.contains("2026-01-03"),
+            "a claim made counted nothing: {counted}"
+        );
+    });
+    with("accrual", lines, |_, run| {
+        let counted = named_as_counted(run);
+        assert!(counted.contains("2026-01-02: 200.00 USD"), "the claim counted when it was made: {counted}");
+        assert!(!counted.contains("2026-01-20"), "and its payment counted nothing: {counted}");
     });
 }

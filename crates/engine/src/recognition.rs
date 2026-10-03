@@ -86,6 +86,13 @@ impl<'a> Counting<'a> {
         Counting { books, purpose: m.purpose, day: m.day, recognized: m.recognized, due: m.detail().due, dealing }
     }
 
+    /// A claim forgiven on `day`, `qty` of it: what its purpose took back.
+    pub fn forgiving(plan: &Plan, claim: &Flow, day: Day, qty: Qty) -> Counting<'static> {
+        let dealing = Dealing::Forgiving { tab: claim.to, qty, dir: Dir::Out };
+        let books = plan.traits.entity(claim.owner).books;
+        Counting { books, purpose: claim.purpose, day, recognized: Days::on(day), due: None, dealing }
+    }
+
     /// A journal flow as the run left it, with what it settled of claims, if it did.
     pub fn posted(plan: &Plan, flow: &Flow, posted: &Posted, settlement: Option<&'a Settlement>) -> Counting<'a> {
         let dealing = match settlement {

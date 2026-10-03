@@ -13,14 +13,14 @@
 //! and `claims`, `balance` and `overdue` see it because they read the parcels. In accrual books the claim recognized its
 //! purpose when it was made, and forgiving it takes that back (`take_back`); in cash books it recognized nothing yet.
 
-use axiom_core::{Day, Days, Id, Qty};
-use axiom_model::{Amount, ClaimChange, Dir, Flow, Policy, RuntimeTxn, Select};
+use axiom_core::{Day, Id, Qty};
+use axiom_model::{Amount, ClaimChange, Flow, Policy, RuntimeTxn, Select};
 
 use crate::explain;
 use crate::ledger::Ledger;
 use crate::lots::Request;
 use crate::motion::{Amounts, Motion};
-use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
+use crate::recognition::{Counting, Counts, Piece, Share};
 use crate::{Cause, Promise, WriteOff};
 
 impl Ledger<'_, '_, '_> {
@@ -95,14 +95,11 @@ impl Ledger<'_, '_, '_> {
     /// forgiven, the other way round, on the day of the write-off. In cash books it recognized nothing yet. A law cannot
     /// subtract what it counted (`count amount as receipts` adds), so no law fires on it and only the totals follow.
     fn take_back(&mut self, change: ClaimChange, claim: &Flow, forgiven: Qty) {
-        let dealing = Dealing::Forgiving { tab: claim.to, qty: forgiven, dir: Dir::Out };
-        let books = self.plan.traits.entity(claim.owner).books;
-        let (day, recognized) = (change.day, Days::on(change.day));
-        let counting = Counting { books, purpose: claim.purpose, day, recognized, due: None, dealing };
-        counting.pieces(self.plan.book, &mut self.scratch.pieces);
+        let day = change.day;
+        Counting::forgiving(self.plan, claim, day, forgiven).pieces(self.plan.book, &mut self.scratch.pieces);
         self.scratch.worth.clear();
         for at in 0..self.scratch.pieces.len() {
-            let Piece { purpose, share, counts, .. } = self.scratch.pieces[at];
+            let Piece { purpose, share, counts, recognized } = self.scratch.pieces[at];
             let (Some(purposed), Share::Part(qty), Counts::Claim { dir, .. }) = (purpose, share, counts) else {
                 continue;
             };

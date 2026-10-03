@@ -8,7 +8,7 @@
 use std::ops::{AddAssign, Range};
 
 use axiom_core::{Day, Id, Qty, Ratio, Set};
-use axiom_engine::{DisposalBoundary, Holding, Pad, Posted, Run, State};
+use axiom_engine::{DisposalBoundary, Holding, Pad, Posted, Run, Settlement, State};
 use axiom_model::{Amount, Book, Commodity, End, Flow, Place};
 
 use crate::lens::{Basket, Lens, on_balance_sheet};
@@ -19,11 +19,15 @@ pub struct Posting<'a> {
     pub id: Id<Flow>,
     pub flow: &'a Flow,
     pub posted: &'a Posted,
+    /// The claims the flow settled, if it settled any.
+    pub settlement: Option<&'a Settlement>,
 }
 
 impl<'a> Posting<'a> {
     pub fn at(book: &'a Book, run: &'a Run, id: Id<Flow>) -> Posting<'a> {
-        Posting { id, flow: &book.flows[id], posted: &run.posted[id.index()] }
+        let settled = run.settlements.binary_search_by_key(&id, |&(flow, _)| flow);
+        let settlement = settled.ok().map(|at| &run.settlements[at].1);
+        Posting { id, flow: &book.flows[id], posted: &run.posted[id.index()], settlement }
     }
 
     /// What left `flow.from`, as solved.
@@ -86,16 +90,6 @@ impl<'a> Posting<'a> {
     pub fn changes_at(self, place: Id<Place>) -> impl Iterator<Item = Change> {
         [End::From, End::To].into_iter().filter(move |&end| self.place(end) == place).map(move |end| self.change(end))
     }
-
-    /// The out side priced on the day the flow happened.
-    pub fn out_in_base(&self, lens: Lens) -> Option<Qty> {
-        lens.on(self.flow.day).value(self.out())
-    }
-
-    /// The arrival priced on the day the flow happened.
-    pub fn arrive_in_base(&self, lens: Lens) -> Option<Qty> {
-        lens.on(self.flow.day).value(self.arrive())
-    }
 }
 
 /// What a flow did to the place at one of its ends.
@@ -114,7 +108,12 @@ pub fn pad_ends(pad: &Pad) -> [(Id<Place>, Amount); 2] {
 
 /// Every journal flow with its posting, in journal order.
 pub fn postings<'a>(book: &'a Book, run: &'a Run) -> impl Iterator<Item = Posting<'a>> {
-    book.flows.iter().zip(run.posted.iter()).map(|((id, flow), posted)| Posting { id, flow, posted })
+    // The settlements are by flow, as the flows are: one walk through both.
+    let mut settlements = run.settlements.iter().peekable();
+    book.flows.iter().zip(run.posted.iter()).map(move |((id, flow), posted)| {
+        let settlement = settlements.next_if(|&&(found, _)| found == id).map(|(_, settlement)| settlement);
+        Posting { id, flow, posted, settlement }
+    })
 }
 
 /// Whether the journal holds nothing after `day`, so the run's final state is

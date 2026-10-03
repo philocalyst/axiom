@@ -2,12 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Days, Id, spread};
-use axiom_engine::Run;
-use axiom_model::{Flow, Period, Purpose, PurposeRoot};
+use axiom_core::{Day, Days, Id, spread};
+use axiom_engine::{Piece, Run};
+use axiom_model::{Book, Flow, Period, Purpose, PurposeRoot};
 
 use crate::calendar::Periods;
-use crate::history::postings;
+use crate::flow::for_each_counted;
 use crate::lens::Lens;
 
 /// What each top-level spending purpose cost in each full month of history,
@@ -37,10 +37,15 @@ impl Variable {
 fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
     let book = lens.book();
     let none = Variable { amounts: Vec::new(), categories: Vec::new(), months: 0 };
-    let first = postings(book, run)
-        .filter(|posting| posting.is_real_on(run.today) && !explained(posting.flow))
-        .filter_map(|posting| spending_category(lens, posting.flow).map(|_| posting.flow.recognized.first()))
-        .min();
+    let spent = |flow: &Flow, piece: &Piece| {
+        let category = piece.purpose.and_then(|purpose| spending_category(book, purpose.purpose));
+        category.is_some() && !explained(flow)
+    };
+    let mut first = None::<Day>;
+    for_each_counted(lens, run, run.today, spent, |counted| {
+        let day = counted.recognized.first();
+        first = Some(first.map_or(day, |first| first.min(day)));
+    });
     let Some(first) = first else { return none };
     let last_full_month = run.today.month_start().add_days(-1);
     if first > last_full_month {
@@ -50,22 +55,15 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     let months = Periods::covering(Period::Month, first, last_full_month);
     let mut categories: BTreeMap<Id<Purpose>, usize> = BTreeMap::new();
     let mut amounts = Vec::new();
-    let mut shares = crate::flow::MovementShares::default();
-    for posting in postings(book, run).filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow))
-    {
-        let Some(category) = spending_category(lens, posting.flow) else {
-            continue;
-        };
-        let Some(amount) = crate::flow::movement_in_base_with(lens, posting, Some(PurposeRoot::Spending), &mut shares)
-        else {
-            continue;
-        };
-        for month in months.overlapping(posting.flow.recognized.first(), posting.flow.recognized.last()) {
+    for_each_counted(lens, run, last_full_month, spent, |counted| {
+        let (Some(purpose), Some(amount)) = (counted.purpose, counted.amount) else { return };
+        let Some(category) = spending_category(book, purpose.purpose) else { return };
+        for month in months.overlapping(counted.recognized.first(), counted.recognized.last()) {
             let window = months.window(month).days();
             let Some(happened) = Days::new(window.first(), window.last().min(last_full_month)) else {
                 continue;
             };
-            let part = spread(amount, posting.flow.recognized, happened);
+            let part = spread(amount, counted.recognized, happened);
             let index = *categories.entry(category).or_insert_with(|| {
                 let index = amounts.len() / months.len();
                 amounts.resize((index + 1) * months.len(), 0);
@@ -73,18 +71,12 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
             });
             amounts[index * months.len() + month] += part.0;
         }
-    }
+    });
     Variable { amounts, categories: categories.into_values().collect(), months: months.len() }
 }
 
-/// The first purpose beneath `spending`, if the flow moves through an owned
-/// endpoint and belongs to the selected owner scope.
-fn spending_category(lens: Lens, flow: &Flow) -> Option<Id<Purpose>> {
-    let book = lens.book();
-    if !lens.owns(crate::flow::movement_place(lens, flow)) {
-        return None;
-    }
-    let purpose = flow.purpose?.purpose;
+/// The first purpose beneath `spending` that `purpose` is, if it is a spending one.
+fn spending_category(book: &Book<'_>, purpose: Id<Purpose>) -> Option<Id<Purpose>> {
     let spending = book.roots.purposes.spending;
     if book.purposes[purpose].root != PurposeRoot::Spending {
         return None;
