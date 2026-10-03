@@ -22,10 +22,10 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5b** the fold reads the promise | a contract's terms stored once, the old schedule walkers and sync's dead `dues` deleted, the monitor (`missed-occurrence`), `grace` as LANGUAGE §7 says | **merged** (`c8c1695`) |
 | **K3b** addresses | an account is written with the entities that fill its slots (`jordan/bluefin/401k`); `Addresses` is an inverted index resolved by posting-list intersection on the line's day; forced placement fills the slots; three new diagnostics | **merged** (`8e33a9d`) |
 | **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
-| K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | brief written |
+| K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | running (map first) |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | running (map first) |
-| K7a the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | running (new `crates/session`) |
+| **K7a** the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | **merged** (`368e5e8`) |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | brief written (after K7a, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | brief written (after K5c) |
@@ -53,7 +53,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 52,940 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 53,300 non-test lines: the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -118,6 +118,19 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K7a, in numbers
+
+| | |
+|---|---|
+| what it is | a new crate, `axiom-session`: `Session<'t>` is a loaded project as a value (`open`, `query`, `diagnostics`, `summary`, `run`), `what_if(&self, edit, ask)` hands a closure the session the edit would make, `apply(&mut self, edit) -> Result<Applied, Refused>` builds the next session as a value and assigns it only when it exists; `Edit` and `NewTransaction` are typed values (a line of the language written by `syntax`, not concatenated). The CLI is its first client |
+| the borrow checker | no value can own a text, a book built from it and a plan over that book (`Book<'s>` borrows names, `Plan<'b,'s>` borrows the whole book), so: the text lives in `Texts`, an **append-only arena of `OnceLock` slots in doubling buckets** (no `unsafe`; `#![forbid(unsafe_code)]`), the session owns the book, the fold's results are kept lifetime-free (`Folded`) and the plan is built per answer. `query(&self)` returns a report tied to the session and `apply(&mut self)` needs it alone, so **no report outlives the state it was read from** (a `compile_fail,E0502` doc test with its passing twin); `what_if` takes a closure because a returned hypothesis would dangle (a second `compile_fail`). A `Session` is `Send + Sync` (asserted by a `const _`) and several coexist |
+| lines | +363 non-test total: session +500 (about 150 of it the CLI's text store, moved), cli -169, report +32; against the brief's about +400. "Deletes the CLI's duplicated loading" was smaller than hoped: the duplication was the orchestration (about 60 lines) |
+| speed | 1m `check` +1.6% min / +2.1% median (the retained checkpoint, about 1% of the fold), 100k within noise, RSS 680 MB both. A held session at 100k: `open` 301 ms, first query 172 ms, later 16 to 18 ms; at 1m first 2.05 s, later about 180 ms (a `Plan::new` each). **`apply` is a full rebuild** (398 ms at 100k, 4.85 s at 1m): `build` is 2.2 s of the 4.3 s `check` at 1m and no part of DESIGN §3.8's trail touches it |
+| behaviour | no output changed: 1,592 outputs of every command on every example (text, `--json`, `--at`, `--for`, `--all`, `--relaxed`, `fmt --check`, `sync --dry`) byte-identical after every commit; 468 diff cases; `fuzz.py` 400 mutants and a new `fuzzcmds.py` (250 mutants x 15 commands) 0 differ |
+| proof | 31 tests added, none deleted; 26 mutants of the new code, 24 killed at once and **2 survived and showed two missing assertions** (added, re-killed) |
+| left | an incremental `apply` (needs `build` to be incremental: the model's, not the fold's); `Edit::Insert { day }`; `NewTransaction` for splits, `@ price` and `for`; `Project` stays in the CLI so an MCP server writes its own loader (the example has 15 lines); `check` builds two plans when the book has no errors; **`apply` refuses an edit that adds a syntax error and identifies a diagnostic by (severity, code, message)**: two policies argued, not facts (a stable identity is better and more code); a `Texts` keeps every applied edit's old text |
+| K7b can delete | `report`, `report_with_sources`, `views`, `holdings_at`, `available::view_with_lens`, `Past::Journal` (about 90 lines and 60 test call sites), `with_plan` once views read the run, `ledger_at` and `available`'s forks |
 
 ## K3b, in numbers
 
