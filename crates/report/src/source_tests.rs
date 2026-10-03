@@ -1440,6 +1440,47 @@ budget meals 500 USD monthly
     });
 }
 
+/// A euro spent in a shop with no rate for it has no worth on its day: `balance --value` says how many such flows have
+/// happened by the day it is asked for, and none that have not.
+#[test]
+fn a_value_says_how_many_flows_it_could_not_price_that_have_happened_by_its_day() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+entity me
+entity shop
+purpose food : spending
+account checking
+opening 2026-01-01
+  checking 1_000 EUR
+2026-02-01 checking -> shop 10 EUR #food
+2026-03-01 checking -> shop 20 EUR #food
+";
+    with_run(source, day(2026, 3, 31), |book, run| {
+        let note = |at: Day| {
+            let query = Query::Balance { globs: vec![], at: Some(at), value: true, monthly: false };
+            let report = crate::report(book, run, &query, None).unwrap();
+            report.sections[0]
+                .notes
+                .iter()
+                .map(crate::tests::cell)
+                .filter(|note| note.contains("no price"))
+                .collect::<Vec<_>>()
+        };
+        let said =
+            |count: usize| vec![format!("{count} flows have no price on their day and are not counted in the value.")];
+        // The opening's source and the shop are the places that are not on the balance sheet: a flow end each.
+        assert_eq!(note(day(2026, 1, 15)), said(1));
+        assert_eq!(note(day(2026, 2, 1)), said(2), "a flow stands on its own day");
+        assert_eq!(note(day(2026, 2, 15)), said(2));
+        assert_eq!(note(day(2026, 3, 15)), said(3));
+        assert_eq!(note(day(2025, 12, 1)), Vec::<String>::new(), "nothing had happened");
+    });
+}
+
 #[test]
 fn an_unpriced_year_budget_keeps_month_rows_and_marks_the_missing_total() {
     let source = "\
