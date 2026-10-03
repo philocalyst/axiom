@@ -196,13 +196,19 @@ def flat_name(base, index):
     return f"{base}{index}" if not base.isdigit() else f"n{base}-{index}"
 
 
-def draw_account(rng, index, style, taken):
+# Who may fill each slot in a book of a few entities that stand in every slot, so that two accounts of one name have
+# the same entities in different slots (`acme` owns one and sponsors another): the order of an address is told apart.
+TIGHT = {"owner": ["acme", "ann", "kai"], "sponsor": ["acme"], "beneficiary": ["ann", "kai"], "names": ["plan", "gift"]}
+WIDE = {"owner": SAVERS + KIDS + HOUSEHOLDS + FIRMS[:1], "sponsor": FIRMS, "beneficiary": SAVERS + KIDS, "names": NAMES}
+
+
+def draw_account(rng, index, style, taken, pool):
     for _ in range(50):
         kind = rng.choice(list(SLOTS))
-        name = rng.choice(NAMES) if style == "spelled" else flat_name(rng.choice(NAMES), index)
-        owner = rng.choice(SAVERS + KIDS + HOUSEHOLDS + FIRMS[:1])
-        sponsor = rng.choice(FIRMS) if "sponsor" in SLOTS[kind] and rng.random() < 0.6 else None
-        beneficiary = rng.choice(SAVERS + KIDS) if "beneficiary" in SLOTS[kind] and rng.random() < 0.5 else None
+        name = rng.choice(pool["names"]) if style == "spelled" else flat_name(rng.choice(pool["names"]), index)
+        owner = rng.choice(pool["owner"])
+        sponsor = rng.choice(pool["sponsor"]) if "sponsor" in SLOTS[kind] and rng.random() < 0.6 else None
+        beneficiary = rng.choice(pool["beneficiary"]) if "beneficiary" in SLOTS[kind] and rng.random() < 0.5 else None
         co_owner = rng.choice(SAVERS + KIDS) if style == "flat" and rng.random() < 0.2 else None
         if co_owner == owner or index == 0:
             co_owner = None  # the first account of a flat book is the one written as an address: a path cannot say shares
@@ -373,8 +379,9 @@ def project(seed, index):
     rng = random.Random(seed * 1_000_003 + index)
     style = rng.choice(["spelled", "spelled", "flat"])
     taken, accounts = set(), []
+    pool = TIGHT if rng.random() < 0.35 else WIDE
     for i in range(rng.randrange(3, 9)):
-        account = draw_account(rng, i, style, taken)
+        account = draw_account(rng, i, style, taken, pool)
         if account is not None:
             accounts.append(account)
     # Two accounts written alike would be one declared twice: the written path decides.
