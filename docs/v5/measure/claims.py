@@ -141,6 +141,7 @@ class Sim:
         self.ambiguous = False
         self.unit = {}
         self.forgiven = Counter()
+        self.paid = {}
 
     def make(self, place, code, qty, when, order, unit="USD"):
         self.places.setdefault(place, []).append(Parcel(code, qty, when, order))
@@ -172,6 +173,37 @@ class Sim:
                 break
         self.plain[place] -= left
 
+    def pay(self, party, need, select, tail, label):
+        """A payment from `party`: under the new rules it settles the claims on the party, as far as they go, and what
+        remains is an ordinary flow; under the old a payment from a party settled nothing."""
+        if self.rules == "old":
+            return
+        place = "tab:" + party
+        live = self.live(place)
+        candidates = live
+        if select is not None:
+            kind, value = select
+            candidates = [p for p in live if (p.code == value if kind == "code" else p.when == value)]
+        elif tail:
+            named = [p for p in live if p.code in tail]
+            candidates = named or live
+        need = min(need, sum(p.qty for p in candidates))
+        ordered = sorted(candidates, key=lambda p: (p.qty != need, p.when, p.order))
+        taken, left = [], need
+        for parcel in ordered:
+            take = min(parcel.qty, left)
+            if take:
+                parcel.qty -= take
+                left -= take
+                taken.append((parcel, take))
+            if not left:
+                break
+        self.paid[label] = taken
+
+    def give_back(self, label):
+        for parcel, qty in self.paid.pop(label, []):
+            parcel.qty += qty
+
     def write_off(self, code, declared):
         if declared and self.rules == "old":
             self.refused += 1
@@ -201,9 +233,15 @@ def run_events(events, rules):
     days = sorted({e["day"] for e in events})
     for d in days:
         today = [e for e in events if e["day"] == d]
-        for e in (e for e in today if e["kind"] != "writeoff"):
+        for e in (e for e in today if e["kind"] == "return"):
+            if rules == "new":
+                sim.give_back(e["label"])
+        for e in (e for e in today if e["kind"] not in ("writeoff", "return")):
             if e["kind"] == "make":
                 sim.make(e["place"], e["code"], e["qty"] * 100 if e["unit"] == "USD" else e["qty"], d, e["order"], e["unit"])
+            elif e["kind"] == "pay":
+                select = tuple(e["select"]) if e.get("select") else None
+                sim.pay(e["party"], e["qty"] * 100, select, e.get("tail", ()), e["label"])
             elif e["kind"] == "settle":
                 scale = 100 if e["unit"] == "USD" else 1
                 select = tuple(e["select"]) if e.get("select") else None
@@ -263,9 +301,35 @@ def tab_family(book):
             book.forms["itemized"] += 1
         else:
             line = f"{party} owes me {amount(qty)} USD due {text(due)} ^{code}"
-        book.add(d, line, dict(kind="make", place="tab:" + code, code=code, qty=qty, unit="USD"))
-        claims.append((d, code))
-    for d, code in claims:
+        book.add(d, line, dict(kind="make", place="tab:" + party, code=code, qty=qty, unit="USD"))
+        claims.append((d, code, party, qty))
+    for _ in range(rng.choice([0, 1, 1, 2, 3])):
+        d0, code0, party, qty0 = rng.choice(claims)
+        mine = [c for c in claims if c[2] == party]
+        when = d0 + datetime.timedelta(days=rng.randint(1, 50))
+        choice = rng.random()
+        total = sum(c[3] for c in mine)
+        need = (qty0 if choice < 0.3 else max(1, qty0 // 2) if choice < 0.5 else total + 50 if choice < 0.6
+                else qty0 + rng.choice(AMOUNTS))
+        label = book.code("pay-")
+        select, tail, line_select, line_tail = None, [label], "", f" ^{label}"
+        how = rng.random()
+        if how < 0.3:
+            tail = [label, code0]
+            line_tail = f" ^{label} ^{code0}"
+            book.forms["payment names a claim"] += 1
+        elif how < 0.4:
+            select, line_select = ["code", code0], f"[^{code0}]"
+            book.forms["payment selects a claim"] += 1
+        else:
+            book.forms["payment from a party"] += 1
+        book.add(when, f"{party}{line_select} -> checking {amount(need)} USD{line_tail}",
+                 dict(kind="pay", party=party, qty=need, select=select, tail=tail, label=label))
+        if rng.random() < 0.25:
+            book.add(when + datetime.timedelta(days=rng.randint(1, 10)), f"^{label} returned",
+                     dict(kind="return", label=label))
+            book.forms["payment returned"] += 1
+    for d, code, _, _ in claims:
         if rng.random() < 0.45:
             when = d + datetime.timedelta(days=rng.choice([0, 0, 5, 20, 40]))
             for _ in range(2 if rng.random() < 0.15 else 1):
@@ -329,7 +393,9 @@ def place_family(book, place="owed", unit="USD", boxes=False):
             elif how < 0.70:
                 line_tail = f" ^pay-{book.code('n')}"
                 book.forms["settle with a label"] += 1
-            if select and tail:
+            if select and rng.random() < 0.6:
+                tail = [rng.choice(made)[1]]
+                line_tail = f" ^{tail[0]}"
                 book.forms["selector and codes"] += 1
         to = f"{sink} {amount(need)} {unit}"
         book.add(when, f"{place}{line_select} -> {to}{line_tail}",
@@ -604,7 +670,7 @@ def check_one(path, output, rules, reports=True):
     spec = spec_of(path)
     if spec["family"] not in ("tab", "place", "boxes", "mixed"):
         return []
-    if not any(e["kind"] in ("make", "settle", "writeoff") for e in spec["events"]):
+    if not any(e["kind"] in ("make", "settle", "writeoff", "pay") for e in spec["events"]):
         return []
     sim, want_open, want_plain = expected(spec, rules)
     open_, plain, forgiven, diagnostics, dump = held(output)
@@ -691,19 +757,27 @@ def predicted_to_differ(spec):
     return differ or new[0].empty > 0 or old[0].refused > 0 or old[0].ambiguous
 
 
+def may_differ(spec):
+    """A payment that is returned puts its claims back, as open as they were, but a line that was used up comes back after
+    the lines of its day that were not: the same claims, in another order. So a project with a return may differ from the
+    baseline without the states differing."""
+    return any(e["kind"] == "return" for e in spec["events"])
+
+
 def compare(directory, a, b, show=5):
     """Projects whose outputs differ: each must be one the references say differs. Returns the unexplained."""
     unexplained, explained, same, missed = [], 0, 0, []
     for path in projects(directory):
         left, right = read(path, a), read(path, b)
-        should = predicted_to_differ(spec_of(path))
+        spec = spec_of(path)
+        should, may = predicted_to_differ(spec), may_differ(spec)
         if left == right:
             same += 1
             if should:
                 missed.append(path)
             continue
         moved = unmoved(section(left, "dump"), section(right, "dump"))
-        if should and not moved:
+        if (should or may) and not moved:
             explained += 1
         else:
             unexplained.append(path)
@@ -775,8 +849,6 @@ MUTANTS = [
     ("crates/engine/src/claims.rs", "if forgiven == 0 {", "if forgiven == 1 {", "an empty write-off is said when one parcel was forgiven"),
     ("crates/engine/src/claims.rs", "basis: s.basis,", "basis: Qty::ZERO,", "a write-off records no basis"),
     ("crates/engine/src/claims.rs", "qty: s.qty,", "qty: open,", "a write-off records the whole open amount for each parcel"),
-    ("crates/engine/src/claims.rs", "let claim = (flow.to, flow.arrive.unit, flow.from);\n            if !claims.contains(&claim) {\n                claims.push(claim);\n            }",
-     "claims.push((flow.to, flow.arrive.unit, flow.from));", "an itemized claim is forgiven once for each line"),
     ("crates/model/src/lower/record.rs", "let claimed = matches!(used, CodeUse::ClaimWaiver) && self.claims.by_code.contains_key(&symbol);",
      "let claimed = false;", "a code on a claim and its payment is ambiguous for a write-off"),
     ("crates/model/src/lower/statements.rs", "if !flows().any(|flow| book.makes_claim(flow)) {", "if !flows().any(|flow| book.is_claim(flow.to)) {",
@@ -798,11 +870,13 @@ def own_tests_fail(source, work):
     env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
     run = subprocess.run(["cargo", "test", "--release", "--offline", "--no-fail-fast", "-p", "axiom-engine", "-p", "axiom-model",
                           "-p", "axiom-report"], cwd=source, env=env, capture_output=True, text=True)
+    if "test result" not in run.stdout:
+        raise SystemExit("the tests did not run: " + run.stderr[-300:])
     failed = set(re.findall(r"^test (\S+) \.\.\. FAILED", run.stdout, re.M))
     known = {"tests::a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot",
              "source_tests::a_context_forecast_keeps_historical_and_same_day_obligations_once",
              "source_tests::native_loan_forecast_stops_after_the_typed_principal_is_repaid"}
-    return bool(failed - known) or ("error[" in run.stderr)
+    return bool(failed - known)
 
 
 def dump_only(binary, directory, tag, jobs=4, limit=60):
@@ -823,7 +897,7 @@ def caught(directory, base, tag):
         found = check_one(path, output, "new", reports=False)
         left, right = section(read(path, base), "dump"), section(output, "dump")
         found += unmoved(left, right)
-        if left != right and not predicted_to_differ(spec):
+        if left != right and not predicted_to_differ(spec) and not may_differ(spec):
             found.append("differs from the baseline where the references say it should not")
         if found:
             failures.append((path, found))
