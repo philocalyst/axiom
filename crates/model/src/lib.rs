@@ -8,7 +8,10 @@
 //! | `declare`    | kinds, commodities, entities and places come to exist       |
 //! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
 //! | `slots`      | what the things of a kind have: ranges, counts and weights  |
+//! | `spelled`    | an account's path of the entities that fill its slots        |
 //! | `builtin`    | the language's own slots, as typed keys of the facts        |
+//! | `addresses`  | how the words of a reference find the account they mean      |
+//! | `reference`  | a written reference read as an address, or why it is none    |
 //! | `holders`    | the things a book says things about, numbered for the facts |
 //! | `said`       | what a book says of a thing: a slot's value on a day        |
 //! | `fill`       | what a line gives a slot: range, count and weights, checked |
@@ -30,6 +33,7 @@ pub mod solve;
 pub mod split;
 pub mod sync;
 
+mod addresses;
 pub mod builtin;
 mod collect;
 mod declare;
@@ -48,12 +52,14 @@ mod prices;
 mod problem;
 mod props;
 mod purposes;
+mod reference;
 mod resolve;
 mod rules;
 mod said;
 mod scope;
 mod slots;
 mod sources;
+mod spelled;
 mod sync_lower;
 mod taxonomy;
 #[cfg(test)]
@@ -101,12 +107,14 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     props::declare(&mut world, &collected, &mut diags);
     world.freeze_facts();
     props::place_entities(&mut world);
+    world.book.lookup.addresses = addresses::Addresses::of(&world.book);
     params::declare(&mut world, &collected, &mut diags);
     props::system_rates(&mut world, &collected, &mut diags);
     sync_lower::declare(&mut world, &sites, &collected, &mut diags);
     laws::declare(&mut world, &sites, &mut diags);
     lower::contracts(&mut world, &collected, &mut diags);
     let order = laws::register_native(&mut world, &mut diags);
+    world.settle_addresses();
     lower::record(&mut world, &collected, &mut diags);
     // What watches a place is worked out when the last claim tab has been made: a claim makes its tab while the
     // journal is lowered.

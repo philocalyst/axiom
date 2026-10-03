@@ -1,0 +1,12 @@
+error[wrong-kind]: `riley` fits no slot of `riley/401k` that is still free
+   ╭─[103-word-fits-no-slot.ax:12:9]
+   │
+12 │ account riley/401k at fidelity
+   │         ──┬──
+   │           ╰── not something a 401k can still take
+   │
+   = note: a 401k still has: `employer` takes an employer
+   = help: write the word as a role line if it is meant for a slot, or take it out of the path
+
+✗ 1 error
+[exit status 1]

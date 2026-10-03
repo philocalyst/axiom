@@ -1,0 +1,16 @@
+// MISTAKE: a person in the path of a 401(k) whose owner a line already gives. Riley is no employer, and the owner
+// is taken: the word has nowhere to go.
+base USD
+use std
+use us/401k
+
+entity fidelity : org
+entity bluefin : employer
+entity jordan : person
+entity riley : person
+
+account riley/401k at fidelity
+  owner jordan
+
+opening 2026-01-01
+  riley/401k 5_000 USD

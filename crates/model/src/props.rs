@@ -29,6 +29,7 @@ use crate::holders::Holder;
 use crate::problem;
 use crate::scope::Home;
 use crate::slots::{Range, Slot};
+use crate::spelled;
 use crate::values::describe;
 
 /// What a property line describes.
@@ -601,6 +602,7 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
     let mut seen = Seen::default();
     let mut filled = Filled::default();
     stage_declared_values(world, collected, &mut seen, &mut filled, diags);
+    spelled::place_words(world, collected, &mut filled, diags);
     let changes = property_changes(world, collected, &mut seen, diags);
     paint_changes(world, changes);
     missing_roles(world, collected, &filled, diags);

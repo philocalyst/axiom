@@ -1,0 +1,24 @@
+error[ambiguous-address]: `fidelity/401k` could be either of these addresses
+   ╭─[101-ambiguous-address.ax:20:12]
+   │
+13 │ account jordan/bluefin/401k at fidelity
+   │         ─────────┬─────────
+   │                  ╰── `jordan/bluefin/fidelity/401k` is declared here
+14 │ account me/acme/401k at fidelity
+   │         ──────┬─────
+   │               ╰── `me/acme/fidelity/401k` is declared here
+   ⋮
+20 │ 2026-01-31 fidelity/401k = 5_000 USD
+   │            ──────┬──────
+   │                  ╰── which one is meant?
+   │
+   = note: these are the accounts open on 2026-01-31: a later one may need a longer address
+   = help: write `jordan/401k` for `jordan/bluefin/fidelity/401k`
+20 - 2026-01-31 fidelity/401k = 5_000 USD
+20 + 2026-01-31 jordan/401k = 5_000 USD
+   = help: write `me/401k` for `me/acme/fidelity/401k`
+20 - 2026-01-31 fidelity/401k = 5_000 USD
+20 + 2026-01-31 me/401k = 5_000 USD
+
+✗ 1 error
+[exit status 1]

@@ -1,0 +1,13 @@
+error[too-many]: the words before the name of `jordan/riley/401k` do not fit the slots of a 401k together
+   ╭─[104-words-do-not-fit-together.ax:10:9]
+   │
+10 │ account jordan/riley/401k at fidelity
+   │         ──────┬─────
+   │               ╰── each slot that takes one value takes one word
+   │
+   = note: `jordan` fits `owner`; `riley` fits `owner`
+   = help: write the words that are not meant for the slot they would take as role lines, or take
+           them out of the path
+
+✗ 1 error
+[exit status 1]

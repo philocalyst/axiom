@@ -1,0 +1,13 @@
+// What the house and the car are worth, from the quarterly estimates. In a real
+// project a `sync` script would write this file from a valuation site. Only
+// prices go in this folder.
+
+2024-12-31 HOME = 592_000 USD
+2025-04-01 HOME = 606_500 USD
+2025-07-01 HOME = 611_200 USD
+2025-10-01 HOME = 609_800 USD
+2025-12-31 HOME = 612_400 USD
+
+2024-12-31 CRV = 27_400 USD
+2025-07-01 CRV = 26_100 USD
+2025-12-31 CRV = 25_300 USD

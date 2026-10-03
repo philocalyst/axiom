@@ -196,6 +196,26 @@ impl Schema {
         kinds.lineage(kind).flat_map(move |above| self.own(&kinds[above])).filter(move |slot| seen.insert(slot.name))
     }
 
+    /// The slots things of `kind` have that take entities, in the order they are declared: the outermost kind's first,
+    /// each name once, with the narrowest range among those that repeat it. An address lists what fills them in this
+    /// order, so that it does not change when a kind beneath narrows a slot.
+    pub(crate) fn entity_slots(&self, kinds: &Tree<Kind>, kind: Id<Kind>) -> Vec<(SlotId, Slot)> {
+        let mut lineage: Vec<Id<Kind>> = kinds.lineage(kind).collect();
+        lineage.reverse();
+        let mut seen = Set::default();
+        let names = lineage.iter().flat_map(|&above| self.own(&kinds[above])).map(|slot| slot.name);
+        let names: Vec<Sym> = names.filter(|&name| seen.insert(name)).collect();
+        let takes_entities = |slot: &Slot| match slot.range {
+            Range::Kinds(run) => receiver(kinds[self.kinds_of(run)[0]].sort) == Ty::Entity,
+            Range::Words(_) | Range::Value(_) => false,
+        };
+        let found = names.into_iter().filter_map(|name| self.find(kinds, kind, name));
+        found
+            .filter(|slot| takes_entities(slot))
+            .map(|&slot| (self.number(slot.name).expect("numbered"), slot))
+            .collect()
+    }
+
     /// The number of the slot named `name`, if any kind declares it.
     pub fn number(&self, name: Sym) -> Option<SlotId> {
         self.numbers.get(&name).copied()

@@ -32,13 +32,13 @@ want() {
     return 1
 }
 
-for f in [0-9][0-9]-*.ax; do
+for f in [0-9][0-9]-*.ax [0-9][0-9][0-9]-*.ax; do
     [ -e "$f" ] || continue
     name=${f%.ax}
     want "$@" || continue
     case_out "$name" check "$f"
 done
-for d in [0-9][0-9]-*/; do
+for d in [0-9][0-9]-*/ [0-9][0-9][0-9]-*/; do
     [ -d "$d" ] || continue
     name=${d%/}
     want "$@" || continue

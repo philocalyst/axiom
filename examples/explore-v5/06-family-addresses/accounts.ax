@@ -1,0 +1,122 @@
+// Native v4 accounts and counterparties for the household. Places describe
+// custody and ownership; parties and purposes describe what each flow means.
+
+kind dependent-care-fsa : tax-deferred
+  basis zero
+  liquidity 5d
+  pays childcare
+  law contribution-limit
+    on in
+    when purpose is #household-pre-tax
+    count amount as dcfsa-contributions
+    require value(tally(dcfsa-contributions), USD) <= dependent-care-limit[year] "dependent-care FSA over the yearly cap"
+
+purpose childcare : spending
+purpose payroll-tax : spending
+purpose school-expense : spending
+purpose auto-expense : spending
+purpose shopping : spending
+purpose kids : spending
+purpose subscriptions : spending
+purpose dcfsa-contributions : spending
+purpose state-disability : tax-paid
+  law itemize-sdi
+    on flow
+    count amount as salt
+purpose household-pre-tax : pretax-benefit
+  law household-pre-tax
+    on flow
+    count amount as pretax
+    count -amount as total-income
+purpose household-deferral : pre-tax-deferral
+  law household-deferral
+    on flow
+    count amount as pretax
+    count -amount as total-income
+
+commodity HOME : real-estate
+  name "the house"
+  precision 0
+commodity CRV : commodity
+  name "the car"
+  precision 0
+
+// Each account is written once, as the entities that fill its slots and then its name. `jordan/bluefin/401k` is
+// jordan's 401(k), sponsored by bluefin: the original called it `jordan-401k` and said `owner jordan` and `employer
+// bluefin` on two lines under it, which nothing checked against the name. A word is placed in the slot its entity's kind
+// fits, and the journal says the shortest address that means one account: `checking`, `me/401k`, `jordan/401k`,
+// `riley/529`. `at` is the custodian: a path word cannot say it until a `has` line can say `as with`.
+account family/checking : deposit at chase
+account family/savings : deposit at chase
+account family/escrow at lender
+
+account me/acme/401k at fidelity
+account jordan/bluefin/401k at fidelity
+account me/hsa at fidelity
+  coverage family
+account family/dcfsa : dependent-care-fsa at acme
+account family/riley/529 : 529-plan at fidelity
+
+asset house : home
+  owner family
+asset crv : vehicle
+  owner family
+
+account family/mortgage at lender
+account family/car-loan : loan at honda-finance
+account family/card : credit-card at chase
+
+entity chase : org
+entity fidelity : org
+entity acme : employer
+entity bluefin : employer
+entity lender : lender
+entity honda-finance : lender
+entity county : government
+entity homeguard : insurer
+entity costco : grocer
+entity trader-joes : grocer
+entity shell : merchant
+entity amazon : store
+entity target : store
+entity pge : utility
+entity comcast : utility
+entity verizon : utility
+entity netflix : streaming
+entity spotify : streaming
+entity statefarm : insurer
+entity brake-shop : contractor
+entity st-annes-parish #charity
+entity food-bank #charity
+entity little-sprouts #childcare
+entity kids-club #childcare
+entity st-annes-school #education
+entity dr-chen #medical
+entity smile-dental #medical
+entity cvs #medical
+entity er-clinic #medical
+entity grandma : org
+entity interest-source #interest-income
+entity payroll-office #payroll-tax
+entity ssa #payroll-tax
+entity edd #payroll-tax
+entity restaurant #dining
+entity household-store : store
+entity kids-market : store
+entity trip-vendor : merchant
+entity gifts #contribution
+entity rewards #contribution
+entity blue-shield : health-insurer
+
+code mortgage-* on mortgage
+code car-loan-* on car-loan
+code 529-* on riley/529
+
+param dependent-care-limit
+  2024 5_000 USD
+  2025 5_000 USD
+  2026 7_500 USD
+
+// Statements identify the employer and custodian; payroll destinations are
+// separate native flows so the tax systems can classify the gross pay and each
+// pretax, withholding, and net-pay leg.

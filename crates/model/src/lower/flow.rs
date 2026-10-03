@@ -434,7 +434,7 @@ pub(super) fn resolve_end<'s>(
 ) -> Option<ResolvedEnd> {
     let (home, file) = (cx.home, cx.file);
     let word = Word::of(file, written.name.0);
-    let end = world.end(home, word).or_report(diags)?;
+    let end = world.end_on(home, word, Some(cx.day)).or_report(diags)?;
     let start = world.book.selectors.len();
     for selector in &file[written.select] {
         let resolved = match *selector {
@@ -445,9 +445,10 @@ pub(super) fn resolve_end<'s>(
                 world.purpose(home, Word::of(file, name.0)).or_report(diags).map(Select::Purpose)
             }
             ast::Select::Unit(name) => world.commodity_of(Word::of(file, name.0)).or_report(diags).map(Select::Unit),
-            ast::Select::End(name) => {
-                world.end(home, Word::of(file, name.0)).or_report(diags).map(|id| Select::End(id.place))
-            }
+            ast::Select::End(name) => world
+                .end_on(home, Word::of(file, name.0), Some(cx.day))
+                .or_report(diags)
+                .map(|id| Select::End(id.place)),
         };
         match resolved {
             Some(select) => {

@@ -167,7 +167,7 @@ fn statement_target<'s>(
 ) -> Option<StatementTarget> {
     let (home, file) = (at.home(), at.file());
     match at.statement.subject {
-        Subject::Name(name) => named_target(world, home, Word::of(file, name.0), diags),
+        Subject::Name(name) => named_target(world, home, Word::of(file, name.0), at.statement.date, diags),
         Subject::Code(code) => Some(StatementTarget::Code(world.book.names.intern(code.name()))),
         Subject::Purpose(name) => {
             world.purpose(home, Word::of(file, name.0)).map(|_| StatementTarget::Purpose).or_report(diags)
@@ -177,7 +177,13 @@ fn statement_target<'s>(
 }
 
 /// What a plain name is: an asset, a loan's debt, a party, or a place.
-fn named_target(world: &World<'_>, home: Home, word: Word<'_>, diags: &mut Vec<Diagnostic>) -> Option<StatementTarget> {
+fn named_target(
+    world: &World<'_>,
+    home: Home,
+    word: Word<'_>,
+    day: Day,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<StatementTarget> {
     if let Some(asset) = world.book.asset(word.text) {
         return Some(StatementTarget::Asset(asset));
     }
@@ -188,7 +194,7 @@ fn named_target(world: &World<'_>, home: Home, word: Word<'_>, diags: &mut Vec<D
         // resolves as its ordinary flow endpoint.
         return Some(StatementTarget::Place(loan.debt));
     }
-    let end = world.end(home, word).or_report(diags)?;
+    let end = world.end_on(home, word, Some(day)).or_report(diags)?;
     Some(match (end.entity, world.book.places[end.place].role) {
         (Some(entity), _) => StatementTarget::Entity(entity),
         (None, Role::Asset(asset)) => StatementTarget::Asset(asset),
@@ -353,7 +359,7 @@ fn assertion_gap<'s>(world: &mut World<'s>, at: Stated<'_, '_, 's>, diags: &mut 
     for clause in &file[at.statement.tail] {
         match clause.kind {
             ClauseKind::Via(name) => {
-                let end = world.end(home, Word::of(file, name.0)).or_report(diags)?;
+                let end = world.end_on(home, Word::of(file, name.0), Some(at.statement.date)).or_report(diags)?;
                 gap = Gap::Via { place: end.place, loc: clause.at };
             }
             ClauseKind::Waive(waive) => {
@@ -643,7 +649,7 @@ fn end_target<'s>(
     if let Some(asset) = world.book.asset(name.0) {
         return Some(EndTarget::Asset(asset));
     }
-    let end = world.end(at.home(), Word::of(at.file(), name.0)).or_report(diags)?;
+    let end = world.end_on(at.home(), Word::of(at.file(), name.0), Some(at.statement.date)).or_report(diags)?;
     Some(match world.book.places[end.place].role {
         Role::Asset(asset) => EndTarget::Asset(asset),
         _ => EndTarget::Place(end.place),

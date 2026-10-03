@@ -10,6 +10,7 @@ use crate::book::{Asset, Class, Entity, Kind, Share, Sort};
 use crate::collect::Collected;
 use crate::errors::Word;
 use crate::problem::{self, Noun};
+use crate::spelled::leading;
 
 pub(super) struct AccountDraft<'s> {
     pub path: &'s str,
@@ -18,6 +19,8 @@ pub(super) struct AccountDraft<'s> {
     pub owner: Id<Entity>,
     pub shares: Box<[Share]>,
     pub institution: Option<Id<Entity>>,
+    /// Written with the entities that fill its slots before its name: a root of the tree, with no place for a prefix.
+    pub spelled: bool,
     pub loc: Loc,
 }
 
@@ -40,17 +43,10 @@ pub(super) fn declare_accounts<'a, 's>(
             continue;
         }
         declared.insert(path, file.loc(path));
-        let kind = resolving.kind(names, written, Sort::Place(Class::Asset), resolving.kind_roots.asset, diags);
-        let class = match resolving.kinds.tree[kind].sort {
-            Sort::Place(class) => class,
-            found => {
-                diags.push(
-                    axiom_core::Diagnostic::error("account-kind-sort", "an account needs a place kind")
-                        .label(file.loc(path), format!("this kind classifies {found:?}")),
-                );
-                Class::Asset
-            }
-        };
+        let scope = resolving.seeing.scopes.of(written.home());
+        let fillers = leading(&entities.index, &entities.tree, names, scope, path);
+        let kind = resolving.account_kind(names, written, fillers.as_deref(), diags);
+        let class = class_of(resolving, kind, file.loc(path), diags);
         let shares = resolving.owners(names, written, &entities.index, &entities.tree, entities.me, diags);
         let owner = shares.first().map_or_else(
             || {
@@ -61,7 +57,6 @@ pub(super) fn declare_accounts<'a, 's>(
             |share| share.entity,
         );
         let institution = decl.at.and_then(|name| {
-            let scope = resolving.seeing.scopes.of(written.home());
             entities
                 .index
                 .resolve(names, scope, name.0)
@@ -80,10 +75,25 @@ pub(super) fn declare_accounts<'a, 's>(
             owner,
             shares: shares.into_boxed_slice(),
             institution,
+            spelled: fillers.is_some(),
             loc: file.loc(path),
         });
     }
     drafts
+}
+
+/// The class of places an account's kind classifies; an account needs a place kind, and is an asset when it has none.
+fn class_of(resolving: &Resolving<'_>, kind: Id<Kind>, loc: Loc, diags: &mut Vec<Diagnostic>) -> Class {
+    match resolving.kinds.tree[kind].sort {
+        Sort::Place(class) => class,
+        found => {
+            diags.push(
+                Diagnostic::error("account-kind-sort", "an account needs a place kind")
+                    .label(loc, format!("this kind classifies {found:?}")),
+            );
+            Class::Asset
+        }
+    }
 }
 
 /// The assets written, each with the commodity that counts it.

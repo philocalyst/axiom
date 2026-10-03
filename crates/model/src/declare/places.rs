@@ -47,6 +47,7 @@ pub(super) fn declare<'s>(
 ) -> Places {
     let paths = keys(inputs.accounts, entities, assets);
     let positions: Map<Key<'s>, usize> = paths.iter().enumerate().map(|(at, &key)| (key, at)).collect();
+    let spelled = spelled_roots(inputs.accounts);
     let issuer_units = issuer_units(inputs);
     let nodes = Nodes::of(inputs, entities, assets);
     let mut place_nodes = Vec::with_capacity(paths.len() + issuer_units.len());
@@ -56,7 +57,7 @@ pub(super) fn declare<'s>(
         let (node, is_indexed) = nodes.node(names, namespace, path);
         indexed.insert((namespace, path), (place_nodes.len(), is_indexed));
         place_nodes.push(node);
-        parents.push(path.rsplit_once('/').and_then(|(parent, _)| positions.get(&(namespace, parent)).copied()));
+        parents.push(parent_of(&positions, &spelled, (namespace, path)));
     }
     let issuer_at: Vec<_> = issuer_units
         .iter()
@@ -68,8 +69,32 @@ pub(super) fn declare<'s>(
         .collect();
     let (tree, remap) = Tree::build(place_nodes, &parents).expect("place parents are prefixes without cycles");
 
+    let place_names = locate(&indexed, &remap, entities, assets, names);
+    Places { tree, issuers: issuer_at.into_iter().map(|(unit, old)| (unit, remap[old])).collect(), names: place_names }
+}
+
+/// The paths of the accounts written with the entities that fill their slots before their name.
+fn spelled_roots<'s>(accounts: &[AccountDraft<'s>]) -> Set<&'s str> {
+    accounts.iter().filter(|account| account.spelled).map(|account| account.path).collect()
+}
+
+/// The place a path hangs under: that of the path before its last word, unless it is a spelled account, which is a root.
+fn parent_of<'s>(positions: &Map<Key<'s>, usize>, spelled: &Set<&'s str>, (namespace, path): Key<'s>) -> Option<usize> {
+    let (parent, _) = path.rsplit_once('/')?;
+    let is_root = namespace == ACCOUNTS && spelled.contains(path);
+    positions.get(&(namespace, parent)).copied().filter(|_| !is_root)
+}
+
+/// Tells the names, the entities and the assets which place of the built tree is theirs; `remap` is where each draft went.
+fn locate<'s>(
+    indexed: &Map<Key<'s>, (usize, bool)>,
+    remap: &[Id<Place>],
+    entities: &mut Entities<'s>,
+    assets: &mut Assets<'s>,
+    names: &mut Interner<'s>,
+) -> Names<Place> {
     let mut place_names = Names::default();
-    for (&(namespace, path), &(old, is_indexed)) in &indexed {
+    for (&(namespace, path), &(old, is_indexed)) in indexed {
         if is_indexed && (namespace == ACCOUNTS || namespace == ASSET_PLACES) {
             place_names.insert_path(names, path, remap[old]);
         }
@@ -84,26 +109,32 @@ pub(super) fn declare<'s>(
             assets.arena[asset].place = remap[old];
         }
     }
-    Places { tree, issuers: issuer_at.into_iter().map(|(unit, old)| (unit, remap[old])).collect(), names: place_names }
+    place_names
 }
 
 /// Every path of the three namespaces and each of its prefixes, ordered as the tree will have them.
 fn keys<'s>(accounts: &[AccountDraft<'s>], entities: &Entities<'s>, assets: &Assets<'s>) -> Vec<Key<'s>> {
     let mut keys: Set<Key<'s>> = Set::default();
-    let mut add =
-        |namespace: u8, path: &'s str| keys.extend(crate::paths::prefixes(path).map(|prefix| (namespace, prefix)));
+    // A spelled account has no place for its prefixes: the words before its name are no groups of accounts.
     for account in accounts {
-        add(ACCOUNTS, account.path);
+        match account.spelled {
+            true => drop(keys.insert((ACCOUNTS, account.path))),
+            false => add_prefixes(&mut keys, ACCOUNTS, account.path),
+        }
     }
     for &path in entities.ids.keys() {
-        add(ENTITY_PLACES, path);
+        add_prefixes(&mut keys, ENTITY_PLACES, path);
     }
     for &(path, _) in &assets.paths {
-        add(ASSET_PLACES, path);
+        add_prefixes(&mut keys, ASSET_PLACES, path);
     }
     let mut keys: Vec<_> = keys.into_iter().collect();
     keys.sort_unstable_by(|(ns_a, a), (ns_b, b)| ns_a.cmp(ns_b).then_with(|| path_key(a).cmp(path_key(b))));
     keys
+}
+
+fn add_prefixes<'s>(keys: &mut Set<Key<'s>>, namespace: u8, path: &'s str) {
+    keys.extend(crate::paths::prefixes(path).map(|prefix| (namespace, prefix)));
 }
 
 /// The commodities whose kind pays (is, or inherits from, a kind that says `pays`), each of which is issued from

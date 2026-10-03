@@ -9,6 +9,13 @@ use crate::hash::Map;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Sym(u32);
 
+impl Sym {
+    /// The symbol's place among the names interned, from zero: what a table indexed by name is indexed by.
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 #[derive(Default)]
 pub struct Interner<'s> {
     ids: Map<&'s str, Sym>,
@@ -30,5 +37,31 @@ impl<'s> Interner<'s> {
 
     pub fn name(&self, sym: Sym) -> &'s str {
         self.names[sym.0 as usize]
+    }
+
+    /// How many names are interned: one more than the greatest [`Sym::index`].
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbols_are_numbered_in_the_order_names_are_first_interned() {
+        let mut names = Interner::default();
+        assert!(names.is_empty());
+        let (a, b, again) = (names.intern("jordan"), names.intern("401k"), names.intern("jordan"));
+        assert_eq!((a.index(), b.index()), (0, 1));
+        assert_eq!(again, a, "a name is interned once");
+        assert_eq!(names.len(), 2, "one more than the greatest index");
+        assert_eq!((names.get("401k"), names.get("riley")), (Some(b), None));
+        assert_eq!(names.name(b), "401k");
     }
 }

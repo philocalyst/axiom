@@ -21,6 +21,7 @@ use crate::problem::{self, Among, Noun};
 use crate::resolve::End;
 use crate::scope::{Home, Scopes, Seeing};
 use crate::sources::{Site, SystemIndex};
+use crate::spelled::Leading;
 use crate::taxonomy::{self, Taxonomy};
 use crate::{kinds, purposes};
 
@@ -40,6 +41,9 @@ pub(crate) struct World<'s> {
     /// A loan contract's name stands for its debt tab, before the contract's terms have been compiled as well as after:
     /// a template may name a loan declared after it.
     pub(crate) contract_endpoints: Map<Sym, End>,
+    /// The names of two words or more that the sources write as an end, until `settle_addresses` has worked out what
+    /// each means.
+    pub(crate) references: Vec<&'s str>,
 }
 
 impl World<'_> {
@@ -426,7 +430,7 @@ pub(crate) fn declare<'a, 's>(
     let resolving = Resolving { seeing, kinds: &native_kinds, kind_roots, purposes: &native_purposes };
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
-    let parties = parties::find(said, &resolving, &commodities, &mut names, diags);
+    let (parties, references) = parties::find(said, &resolving, &commodities, &mut names, diags);
     let mut entities = parties::declare(collected, parties, &resolving, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
@@ -438,7 +442,8 @@ pub(crate) fn declare<'a, 's>(
     let book = book(made, names, systems_tree, settings);
     let painter = Facts::builder(book.holders.len());
     let (tabs, contract_endpoints) = (Tabs::default(), Map::default());
-    let mut world = World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints };
+    let mut world =
+        World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints, references };
     world.say_tabs_are_claims();
     // What an entity's own declaration says its purpose is, said as a line under it would.
     for (entity, purpose) in entity_purposes {
@@ -651,6 +656,26 @@ impl Resolving<'_> {
                     .label(loc, format!("expected {expected:?}, found {found:?}")),
             );
             fallback
+        }
+    }
+
+    /// The kind an account is written as; of a spelled path with none written, the kind its name is (`alex/401k`).
+    /// `fillers` are the entities written before the name: none, for a path in a tree.
+    fn account_kind(
+        &self,
+        names: &Interner,
+        written: &Written<Decl>,
+        fillers: Option<&[Leading]>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Id<Kind> {
+        let by_name = || {
+            let (name, scope) = (written.node.name.0.rsplit('/').next()?, self.seeing.scopes.of(written.home()));
+            let kind = self.kinds.index.resolve(names, scope, name).ok()?;
+            matches!(self.kinds.tree[kind].sort, Sort::Place(_)).then_some(kind)
+        };
+        match written.node.kind {
+            None if fillers.is_some() => by_name().unwrap_or(self.kind_roots.asset),
+            _ => self.kind(names, written, Sort::Place(Class::Asset), self.kind_roots.asset, diags),
         }
     }
 

@@ -1,7 +1,7 @@
 //! Parties: the entities a book has, those written and those a journal implies, and who owns what.
 
 use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Set, Sym, Tree};
-use axiom_syntax::{Decl, DeclKind};
+use axiom_syntax::{Decl, DeclKind, ExprKind};
 
 use super::commodities::Commodities;
 use super::mentions::Mentions;
@@ -51,16 +51,18 @@ pub(super) struct Entities<'s> {
     pub purposes: Vec<(Id<Entity>, At<Id<Purpose>>)>,
 }
 
-/// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones.
+/// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones; and the
+/// names of two words or more that a journal or a contract writes as an end, in the order they sort: what a reference
+/// may be an address of.
 pub(super) fn find<'a, 's>(
     said: Said<'_, 'a, 's>,
     resolving: &Resolving<'_>,
     commodities: &Commodities<'s>,
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Parties<'a, 's> {
+) -> (Parties<'a, 's>, Vec<&'s str>) {
     let (written, first_paths, owner_names) = written_entities(said.collected, names, diags);
-    let implied = implied_parties(said, resolving, commodities, names, &written);
+    let (implied, references) = implied_parties(said, resolving, commodities, names, &written);
     // A written suffix such as `acme` can resolve to one implied path such as `vendors/acme`; a second `acme`
     // entity would make that reference ambiguous. All full paths are kept, so genuinely ambiguous suffixes are
     // diagnosed by the scoped entity resolver.
@@ -80,7 +82,7 @@ pub(super) fn find<'a, 's>(
             drafts.push(EntityDraft { path, home: Home::Builtin });
         }
     }
-    Parties { drafts, written, implied, owner_names }
+    (Parties { drafts, written, implied, owner_names }, references)
 }
 
 /// The entities written, each once (a repeat is said), in the order written, and the names things are owned by.
@@ -114,24 +116,23 @@ fn written_entities<'a, 's>(
 }
 
 /// The parties that endpoint names and claims, contracts and `for` clauses mention and nothing declares, each with
-/// where it is first mentioned: a name that is an account, an asset, a kind or any such thing is not a party.
+/// where it is first mentioned: a name that is an account, an asset, a kind or any such thing is not a party. And
+/// every name of two words or more that is mentioned, whatever it is.
 fn implied_parties<'a, 's>(
     said: Said<'_, 'a, 's>,
     resolving: &Resolving<'_>,
     commodities: &Commodities<'s>,
     names: &Interner<'s>,
     written: &Map<&'s str, Written_<'a, 's>>,
-) -> Map<&'s str, Loc> {
+) -> (Map<&'s str, Loc>, Vec<&'s str>) {
     let collected = said.collected;
     let Mentions { first: mentioned, parties } = Mentions::of(said.sites);
+    let references = of_two_words(&mentioned);
     let mut places = Set::default();
     for decl in collected.decls.iter().filter(|decl| matches!(decl.node.what, DeclKind::Account | DeclKind::Asset)) {
         add_path_spellings(&mut places, decl.node.name.0);
     }
-    let mut entities = Set::default();
-    for &path in written.keys() {
-        add_path_spellings(&mut entities, path);
-    }
+    let mut entities = spellings(written.keys().copied());
     entities.extend(BUILT_IN);
     // Kinds, purposes, commodities, systems and assets.
     let mut others = Set::default();
@@ -146,13 +147,11 @@ fn implied_parties<'a, 's>(
     for decl in collected.decls_of(DeclKind::Asset) {
         add_path_spellings(&mut others, decl.node.name.0);
     }
-    let mut contracts = Set::default();
-    for contract in &collected.contracts {
-        add_path_spellings(&mut contracts, contract.node.name.0);
-    }
+    let contracts = spellings(collected.contracts.iter().map(|contract| contract.node.name.0));
+    let meant = Addressed::of(collected, written);
     let mut implied = Map::default();
     for (&path, &loc) in &mentioned {
-        if entities.contains(path) || places.contains(path) || others.contains(path) {
+        if entities.contains(path) || places.contains(path) || others.contains(path) || meant.is_an_address(path) {
             continue;
         }
         // A contract may be named for its party, but is not a party for being named.
@@ -161,7 +160,63 @@ fn implied_parties<'a, 's>(
         }
         implied.insert(path, loc);
     }
-    implied
+    (implied, references)
+}
+
+/// Every spelling a path of `paths` is written by: the path, each prefix of it, and each suffix of those.
+fn spellings<'s>(paths: impl Iterator<Item = &'s str>) -> Set<&'s str> {
+    let mut spellings = Set::default();
+    for path in paths {
+        add_path_spellings(&mut spellings, path);
+    }
+    spellings
+}
+
+/// The names of two words or more, in the order they sort: what a reference may be an address of.
+fn of_two_words<'s>(mentioned: &Map<&'s str, Loc>) -> Vec<&'s str> {
+    let mut references: Vec<&'s str> = mentioned.keys().copied().filter(|name| name.contains('/')).collect();
+    references.sort_unstable();
+    references
+}
+
+/// What the accounts' declarations say a reference of two words or more may be meant as: the written entities that fill
+/// some account's slots (before its name, after `at`, or as an argument of one of its lines), and the names accounts
+/// are called. A path that begins with one of the first or ends in one of the second is meant as an address: if no
+/// account has it, that is for the lookup to say, and the journal brings no party into being by it. Only in a book that
+/// writes some account as an address: any other is read as it always was, and its mentions make the parties they made.
+struct Addressed<'s> {
+    fillers: Set<&'s str>,
+    names: Set<&'s str>,
+    used: bool,
+}
+
+impl<'s> Addressed<'s> {
+    fn of(collected: &Collected<'_, 's>, written: &Map<&'s str, Written_<'_, 's>>) -> Addressed<'s> {
+        let (mut fillers, mut names, mut used) = (Set::default(), Set::default(), false);
+        let is_entity = |&word: &&str| written.contains_key(word) || word == "me";
+        for decl in collected.decls_of(DeclKind::Account) {
+            let (file, node) = (decl.file(), decl.node);
+            let leading: Vec<&str> =
+                node.name.0.rsplit_once('/').map_or(Vec::new(), |(words, _)| words.split('/').collect());
+            used |= !leading.is_empty() && leading.iter().all(is_entity);
+            let lines = file[node.props].iter().flat_map(|line| file[line.args].iter());
+            let args = lines.filter_map(|&arg| match file.exprs[arg].kind {
+                ExprKind::Name(name) => Some(name.0),
+                _ => None,
+            });
+            let named = leading.into_iter().chain(node.at.map(|at| at.0)).chain(args);
+            fillers.extend(named.filter(is_entity));
+            names.extend(node.name.0.rsplit('/').next());
+        }
+        Addressed { fillers, names, used }
+    }
+
+    /// Whether a path of two words or more begins with a filler or ends in an account's name.
+    fn is_an_address(&self, path: &str) -> bool {
+        self.used
+            && (path.split_once('/').is_some_and(|(first, _)| self.fillers.contains(first))
+                || path.rsplit_once('/').is_some_and(|(_, last)| self.names.contains(last)))
+    }
 }
 
 /// The entities made from the drafts, with their kinds and purposes resolved, indexed, and owned.

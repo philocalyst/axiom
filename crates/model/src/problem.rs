@@ -17,6 +17,7 @@ use crate::scope::Home;
 #[derive(Clone, Copy)]
 pub(crate) enum Noun {
     Account,
+    Address,
     Asset,
     Commodity,
     Contract,
@@ -40,6 +41,7 @@ impl Noun {
     const fn words(self) -> (&'static str, &'static str) {
         match self {
             Noun::Account => ("account", "accounts"),
+            Noun::Address => ("address", "addresses"),
             Noun::Asset => ("asset", "assets"),
             Noun::Commodity => ("commodity", "commodities"),
             Noun::Contract => ("contract", "contracts"),
@@ -548,4 +550,63 @@ pub(crate) fn split_remainders(leg: Loc, header: (Loc, &str)) -> Diagnostic {
 pub(crate) fn split_overflow(loc: Loc) -> Diagnostic {
     Diagnostic::error("split-imbalance", "the amounts of this split are too large to add up")
         .label(loc, "this split's legs and items cannot be summed")
+}
+
+// ─── The words before an account's name ─────────────────────────────────────
+
+/// What a word before the name of an account is, and what the account is called: the pieces of one sentence.
+pub(crate) struct Placing<'a> {
+    pub word: Word<'a>,
+    /// The account's written path, and the kind it is of.
+    pub path: &'a str,
+    pub kind: &'a str,
+}
+
+/// One way out of a word that could fill several slots: the role that says which, as the edit that writes it.
+pub(crate) struct Role<'a> {
+    pub slot: &'a str,
+    pub edit: (Loc, String),
+}
+
+/// A word before an account's name that could fill several slots, and every way of placing all the words agrees on
+/// none of them. `roles` write each: the word comes out of the path and goes on a line of its own.
+pub(crate) fn ambiguous_placement(placing: &Placing, slots: &[&str], roles: Vec<Role>) -> Diagnostic {
+    let Placing { word, path, .. } = placing;
+    let diagnostic = Diagnostic::error(
+        "ambiguous-placement",
+        format!("`{}` could fill {} of `{path}`", word.text, list_names(slots)),
+    )
+    .label(word.loc, "fits more than one slot")
+    .note("a word before the name is placed only where every way of placing all the words puts it, so a word that could go in two slots needs a role line");
+    roles.into_iter().fold(diagnostic, |diagnostic, Role { slot, edit: (loc, text) }| {
+        diagnostic.fix(format!("write that `{}` is the `{slot}`", word.text), loc, text)
+    })
+}
+
+/// A word before an account's name that fits none of the slots the account still has to fill.
+pub(crate) fn word_fits_no_slot(placing: &Placing, free: &[(&str, String)]) -> Diagnostic {
+    let Placing { word, path, kind } = placing;
+    let takes: Vec<String> = free.iter().map(|(slot, takes)| format!("`{slot}` takes {takes}")).collect();
+    let diagnostic =
+        Diagnostic::error("wrong-kind", format!("`{}` fits no slot of `{path}` that is still free", word.text))
+            .label(word.loc, format!("not something a {kind} can still take"));
+    match takes.is_empty() {
+        true => diagnostic.note(format!("every slot of a {kind} is already filled")),
+        false => diagnostic.note(format!("a {kind} still has: {}", takes.join("; "))),
+    }
+    .help("write the word as a role line if it is meant for a slot, or take it out of the path")
+}
+
+/// The words before an account's name that cannot all be placed: each fits some slots, and there are not enough.
+/// `fits` says, for each word, the slots it fits.
+pub(crate) fn words_that_do_not_fit_together(placing: &Placing, fits: &[(&str, Vec<&str>)]) -> Diagnostic {
+    let Placing { word, path, kind } = placing;
+    let fits: Vec<String> = fits.iter().map(|(word, slots)| format!("`{word}` fits {}", list_names(slots))).collect();
+    Diagnostic::error(
+        "too-many",
+        format!("the words before the name of `{path}` do not fit the slots of a {kind} together"),
+    )
+    .label(word.loc, "each slot that takes one value takes one word")
+    .note(fits.join("; "))
+    .help("write the words that are not meant for the slot they would take as role lines, or take them out of the path")
 }
