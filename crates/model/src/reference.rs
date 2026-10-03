@@ -58,14 +58,15 @@ impl World<'_> {
         day: Option<Day>,
         reached: Reached,
     ) -> Option<Result<End, Diagnostic>> {
-        // A word alone that no name answers to is for the party and commodity tables, and so is any in a book that
-        // writes no account as an address.
-        let alone = reached == Reached::Nothing && !word.text.contains('/');
-        if alone || !self.book.lookup.addresses.is_used() {
+        if !self.book.lookup.addresses.is_used() {
             return None;
         }
         if let Some(place) = self.settled(home, word) {
             return Some(Ok(End { place, entity: None }));
+        }
+        // A word alone that no name answers to is for the party and commodity tables.
+        if reached == Reached::Nothing && !word.text.contains('/') {
+            return None;
         }
         let (leading, name) = word.text.rsplit_once('/').map_or(("", word.text), |(leading, name)| (leading, name));
         let fillers = match self.fillers(home, word, leading, reached) {
