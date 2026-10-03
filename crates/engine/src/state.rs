@@ -119,6 +119,8 @@ pub(crate) struct Record {
     pub missing: Set<Missing>,
     /// Native contract occurrences already kept by a journal transaction.
     pub promises: Vec<crate::Promise>,
+    /// The occurrences a forecast ledger posted as they fell due.
+    pub planned: Vec<crate::Planned>,
     /// Shared item-level flows for the kept promise ranges.
     pub promised_flows: Vec<RuntimeFlow>,
     /// Runtime detail overrides referenced by `promised_flows`.

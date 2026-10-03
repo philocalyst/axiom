@@ -61,10 +61,14 @@ impl Waiting {
         })
     }
 
-    /// Where the stream sorts: by contract, the regular schedule before the standing one.
     fn key(&self) -> (usize, bool) {
-        (self.contract.index(), self.schedule == ScheduleKind::Standing)
+        stream_key(self.contract, self.schedule)
     }
+}
+
+/// Where a stream sorts: by contract, the regular schedule before the standing one.
+pub(crate) fn stream_key(contract: Id<Contract>, schedule: ScheduleKind) -> (usize, bool) {
+    (contract.index(), schedule == ScheduleKind::Standing)
 }
 
 /// Every stream of the book's promises, and when each next occurrence is missed.
@@ -136,7 +140,7 @@ impl Monitor {
         ordinal: u32,
         mut missed: impl FnMut(Promise),
     ) {
-        let key = (contract.index(), schedule == ScheduleKind::Standing);
+        let key = stream_key(contract, schedule);
         let at = self.waiting.partition_point(|waiting| waiting.key() < key);
         let Some(waiting) = self.waiting.get_mut(at).filter(|waiting| waiting.key() == key) else { return };
         let before = waiting.residual;
