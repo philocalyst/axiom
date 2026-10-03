@@ -449,28 +449,35 @@ pub enum On {
 
 impl On {
     /// The day this asks for, in the month, year or week `base` is in.
-    fn land(self, base: Day, (year, month, _): (i32, u32, u32)) -> Option<Day> {
-        let clamped = |month: u32, day: u32| checked_day(year, month, day.min(days_in_month(year, month)));
+    fn land(self, base: Day, civil: (i32, u32, u32)) -> Option<Day> {
+        self.land_number(base, civil).and_then(|number| i32::try_from(number).ok()).map(Day)
+    }
+
+    /// [`land`](On::land) as a day number, which can lie past what a [`Day`] counts: a schedule near the ends of the
+    /// calendar needs to know which way a day that is not one fell.
+    pub(crate) fn land_number(self, base: Day, (year, month, _): (i32, u32, u32)) -> Option<i64> {
+        let clamped = |month: u32, day: u32| checked_number(year, month, day.min(days_in_month(year, month)));
         match self {
             On::MonthDay(day) => clamped(month, u32::from(day)),
-            On::Last => checked_day(year, month, days_in_month(year, month)),
+            On::Last => checked_number(year, month, days_in_month(year, month)),
             On::YearDay { month, day } => clamped(u32::from(month).clamp(1, 12), u32::from(day)),
-            On::Weekday(weekday) => {
-                i32::try_from(i64::from(base.0) + i64::from((u32::from(weekday) + 7 - base.weekday()) % 7))
-                    .ok()
-                    .map(Day)
-            }
+            On::Weekday(weekday) => Some(i64::from(base.0) + i64::from((u32::from(weekday) + 7 - base.weekday()) % 7)),
         }
     }
 }
 
 /// Converts a civil date without the user-facing year bound on `Day::from_ymd`.
 fn checked_day(year: i32, month: u32, day: u32) -> Option<Day> {
+    checked_number(year, month, day).and_then(|number| i32::try_from(number).ok()).map(Day)
+}
+
+/// The day number of a civil date, past what a [`Day`] counts if the date is: none for a date that does not exist.
+fn checked_number(year: i32, month: u32, day: u32) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
         return None;
     }
     if (-999_999..=999_999).contains(&year) {
-        return Day::from_ymd(year, month, day);
+        return Day::from_ymd(year, month, day).map(|day| i64::from(day.0));
     }
     let mut year = i64::from(year);
     let month = i64::from(month);
@@ -480,8 +487,7 @@ fn checked_day(year: i32, month: u32, day: u32) -> Option<Day> {
     let month_from_march = month + if month > 2 { -3 } else { 9 };
     let day_of_year = (153 * month_from_march + 2) / 5 + i64::from(day) - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let ordinal = era * 146_097 + day_of_era - 719_468;
-    i32::try_from(ordinal).ok().map(Day)
+    Some(era * 146_097 + day_of_era - 719_468)
 }
 
 fn checked_add(day: Day, months: i64, days: i64) -> Option<Day> {
@@ -493,7 +499,7 @@ fn checked_add(day: Day, months: i64, days: i64) -> Option<Day> {
     i32::try_from(i64::from(landed.0).checked_add(days)?).ok().map(Day)
 }
 
-fn cadence_day(anchor: Day, step: Span, n: u64) -> Option<Day> {
+pub(crate) fn cadence_day(anchor: Day, step: Span, n: u64) -> Option<Day> {
     let n = i64::try_from(n).ok()?;
     checked_add(anchor, i64::from(step.months).checked_mul(n)?, i64::from(step.days).checked_mul(n)?)
 }

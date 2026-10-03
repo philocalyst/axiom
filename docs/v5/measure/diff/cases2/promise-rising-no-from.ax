@@ -1,0 +1,10 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  rising 3% yearly

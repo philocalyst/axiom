@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+// A contract with no `from` begins at Day::MIN, and the ordinal of each kept occurrence counts every due day since:
+// about 71 million months. `axiom check` takes about 4 seconds for each kept line.
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+2026-02-01 flat
+2026-03-01 flat
