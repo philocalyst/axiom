@@ -2,8 +2,10 @@
 """A generator of small projects full of contracts, and the oracle that compares what two ways of reading them say.
 
     contracts.py gen DIR N [SEED] [--slow]    write N projects into DIR (p0000/main.ax ...), and DIR/forms.json
-    contracts.py build TREE OUT [--new]       build the dump (promises/) against the crates of TREE into OUT/
-                                              (--new: with the compiled promise, which `check` asks)
+    contracts.py build TREE OUT [--new] [--debug-assertions]
+                                              build the dump (promises/) against the crates of TREE into OUT/
+                                              (--new: with the compiled promise, which `check` asks;
+                                              --debug-assertions: with the asserts the compile makes of the book)
     contracts.py dump BINARY DIR [JOBS] [TAG] [--slow]
                                               what BINARY says of every project: DIR/pNNNN/dump.TAG.txt (default TAG: old)
     contracts.py compare DIR A B              the projects whose dump.A.txt and dump.B.txt differ
@@ -59,6 +61,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
@@ -459,7 +462,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CRATES = ["core", "syntax", "model", "engine", "systems"]
 
 
-def build(tree, out, new=False, source=None, profile="opt-level = 1\ncodegen-units = 16\nincremental = true"):
+PROFILE = "opt-level = 1\ncodegen-units = 16\nincremental = true"
+DEBUG_PROFILE = PROFILE + "\ndebug-assertions = true"
+
+
+def build(tree, out, new=False, source=None, profile=PROFILE):
     """Builds the dump against the crates of TREE. Its own profile, because a dependency is built with the profile of
     the workspace that asks for it, and the tree's is `lto = thin`. With NEW it also has the compiled promise to ask
     (`--check`), which a tree from before the lane does not. SOURCE is where the dump's files are read from."""
@@ -515,14 +522,18 @@ def limit_resources():
     resource.setrlimit(resource.RLIMIT_FSIZE, (MOST_OUTPUT, MOST_OUTPUT))
 
 
-def dump(binary, directory, jobs=3, tag="old", extra=(), limit=300):
-    """Runs BINARY over every project. After three that do not answer in time the rest are not asked."""
+def dump(binary, directory, jobs=3, tag="old", extra=(), limit=300, times=None):
+    """Runs BINARY over every project. After three that do not answer in time the rest are not asked. With TIMES, how
+    long each took (seconds) is added to it."""
     hung = []
 
     def one(path):
         if len(hung) >= 3:
             return path, 124
+        began = time.monotonic()
         code, out, err = run_dump(binary, path, extra, limit)
+        if times is not None:
+            times.append(time.monotonic() - began)
         if code == 124:
             hung.append(path)
         with open(os.path.join(path, f"dump.{tag}.txt"), "w") as handle:
@@ -755,8 +766,13 @@ def mutate(tree, work, directory, only=None, new=False):
         baseline = verdict(binary, directory, 4)[1]
         assert not baseline, f"the baseline fails its own verdict: {baseline[:2]}"
         assert not own_tests_fail(source, work), "the baseline fails its own tests"
+        limit = 20
     else:
-        dump(binary, directory, 4, "base")
+        times = []
+        dump(binary, directory, 4, "base", times=times)
+        # The old code is slow on some projects (a cadence of no days is walked for a minute): a mutant is given three
+        # times what the slowest of them took, or it would be caught by a clock and not by what it says.
+        limit = max(20, int(3 * max(times)) + 1)
     results = []
     for number, (path, old, replacement, what) in enumerate(table):
         if only is not None and number not in only:
@@ -770,10 +786,10 @@ def mutate(tree, work, directory, only=None, new=False):
         try:
             binary = build(source, out, new=new, source=snapshot)
             if new:
-                caught = bool(verdict(binary, directory, 4, limit=20, enough=3)[1])
+                caught = bool(verdict(binary, directory, 4, limit=limit, enough=3)[1])
                 by_tests = not caught and own_tests_fail(source, work)
             else:
-                dump(binary, directory, 4, tag, limit=20)
+                dump(binary, directory, 4, tag, limit=limit)
                 caught = bool(compare(directory, "base", tag, show=0))
             outcome = "killed" if caught else "killed by the tests" if by_tests else "SURVIVED"
         except SystemExit:
@@ -907,7 +923,8 @@ def main(argv):
             print(f"  {form:<34} {count}")
         return 0
     if len(argv) >= 4 and argv[1] == "build":
-        print(build(argv[2], argv[3], new="--new" in argv))
+        profile = DEBUG_PROFILE if "--debug-assertions" in argv else PROFILE
+        print(build(argv[2], argv[3], new="--new" in argv, profile=profile))
         return 0
     if len(argv) >= 4 and argv[1] == "check":
         extra = ("--slow",) if "--slow" in argv else ()
