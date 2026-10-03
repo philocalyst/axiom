@@ -22,7 +22,7 @@
 
 use axiom_core::{Diagnostic, Id, Qty};
 use axiom_model::{
-    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, PurposeRoot, RuntimeTxn, Select, Subject,
+    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, PurposeRoot, RuntimeTxn, Select, Subject, Watch,
 };
 
 use crate::eval::{Occasion, Realized};
@@ -80,7 +80,7 @@ impl Ledger<'_, '_, '_> {
         if watched {
             self.count(m);
             self.sample_temporal(m.day);
-            self.fire(&book.rules.on_out[m.from], &Occasion { amount: Some(m.out), skip_internal: true, ..on });
+            self.fire(book.rules.at(Watch::Out(m.from)), &Occasion { amount: Some(m.out), skip_internal: true, ..on });
         }
         if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
             self.relieve(m);
@@ -96,12 +96,12 @@ impl Ledger<'_, '_, '_> {
         self.record_capital_outflow(m);
         self.sample_temporal(m.day);
         if watched {
-            self.fire(&book.rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
+            self.fire(book.rules.at(Watch::In(m.to)), &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
             self.fire_purpose(m, &on);
             self.fire_spend(m);
-            self.fire(&book.rules.always[m.from], &on);
+            self.fire(book.rules.at(Watch::Always(m.from)), &on);
             if m.to != m.from {
-                self.fire(&book.rules.always[m.to], &on);
+                self.fire(book.rules.at(Watch::Always(m.to)), &on);
             }
         }
         if self.is_asset_sale(m) {
@@ -116,10 +116,10 @@ impl Ledger<'_, '_, '_> {
         let Some(purpose) = m.purpose else { return };
         let book = self.plan.book;
         let purpose_on = Occasion { amount: Some(m.out), ..*on };
-        self.fire_as(&book.rules.purposes[purpose.purpose], &purpose_on, Some(Subject::Entity(m.owner)));
+        self.fire_as(book.rules.at(Watch::Purpose(purpose.purpose)), &purpose_on, Some(Subject::Entity(m.owner)));
         if let Some(Object::Asset(asset)) = purpose.of {
             let place = book.assets[asset].place;
-            self.fire(&book.rules.about[place], &purpose_on);
+            self.fire(book.rules.at(Watch::About(place)), &purpose_on);
         }
     }
 
@@ -404,7 +404,7 @@ impl Ledger<'_, '_, '_> {
                 purpose,
                 ..Occasion::flow(m)
             };
-            self.fire(&book.rules.on_gain[m.from], &on);
+            self.fire(book.rules.at(Watch::Gain(m.from)), &on);
         }
     }
 
@@ -812,7 +812,7 @@ impl Ledger<'_, '_, '_> {
 
         let on_out =
             Occasion { amount: Some(Amount::new(quantity, declaration.unit)), purpose: m.purpose, ..Occasion::flow(m) };
-        self.fire(&book.rules.on_out[declaration.place], &on_out);
+        self.fire(book.rules.at(Watch::Out(declaration.place)), &on_out);
         let mut shares = Shares::new(proceeds, quantity);
         for at in 0..self.scratch.relief.slices.len() {
             let slice = self.scratch.relief.slices[at];
@@ -846,7 +846,7 @@ impl Ledger<'_, '_, '_> {
                 purpose: m.purpose,
                 ..Occasion::flow(m)
             };
-            self.fire(&book.rules.on_gain[declaration.place], &on_gain);
+            self.fire(book.rules.at(Watch::Gain(declaration.place)), &on_gain);
         }
         if let Err(error) = self.dispose_asset(asset, m.txn, self.source_flow(m), boundary) {
             self.report_asset_state_error(m, error);
@@ -960,7 +960,7 @@ impl Ledger<'_, '_, '_> {
             }
             let spent: Qty = slices.iter().filter(|s| s.tied == Some(entity)).map(|s| s.qty).sum();
             let on = Occasion { amount: Some(Amount::new(spent, m.out.unit)), ..Occasion::flow(m) };
-            self.fire(&book.rules.on_spend[entity], &on);
+            self.fire(book.rules.at(Watch::Spend(entity)), &on);
         }
     }
 

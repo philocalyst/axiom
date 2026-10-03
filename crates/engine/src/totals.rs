@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Set, Sym, spread};
-use axiom_model::{Book, Dir, Entity, Fault, Place, Purpose, Subject, Window};
+use axiom_model::{Book, Dir, Entity, Fault, Place, Purpose, Subject, Table, Window};
 
 use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
@@ -294,7 +294,7 @@ impl Watch {
 fn watched_slots(book: &Book, laws: &[LawFacts], numbering: Numbering) -> Vec<bool> {
     let mut watched = vec![false; numbering.len()];
     let (places, entities) = (numbering.places, numbering.entities);
-    for rule in book.rules.all().chain(book.rules.about.values()) {
+    for rule in book.rules.all() {
         match laws[rule.law.index()].totals {
             TotalsRead::Nothing => {}
             TotalsRead::Subject => watched[numbering.slot(rule.subject)] = true,
@@ -305,7 +305,7 @@ fn watched_slots(book: &Book, laws: &[LawFacts], numbering: Numbering) -> Vec<bo
     // Purpose rules are evaluated once for each flow owner at run time;
     // their stored subject is only a placeholder. Reserve owner slots for
     // each such read so a non-placeholder owner's total is never missing.
-    for rule in book.rules.purposes.values() {
+    for rule in book.rules.table(Table::Purpose) {
         match laws[rule.law.index()].totals {
             TotalsRead::Nothing => {}
             TotalsRead::Subject => watched[places..places + entities].fill(true),

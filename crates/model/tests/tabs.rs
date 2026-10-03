@@ -2,7 +2,7 @@
 
 use axiom_core::{FileId, Id};
 use axiom_model::book::Book;
-use axiom_model::{Class, Entity, Place, Role, Source, build};
+use axiom_model::{Class, Entity, Place, Role, Source, Watch, build};
 use axiom_syntax::{Folder, parse};
 
 /// The book's owner, another owner, parties of both kinds, and an account of the other owner's that is `assets/joint`.
@@ -60,10 +60,13 @@ fn a_tab_made_while_the_journal_is_lowered_has_rules_and_a_row_of_facts_like_eve
         let debt = book.contracts[book.contract("mortgage").unwrap()].loan.expect("a loan").debt;
         let (claim, ..) = tabs(book).into_iter().find(|&(id, ..)| id != debt).expect("the claim's tab");
 
-        assert_eq!(book.rules.on_in.keys(), book.places.len(), "rules are worked out once every place exists");
+        assert!(
+            book.places.ids().all(|place| !book.rules.at(Watch::In(place)).is_empty()),
+            "rules are worked out once every place exists"
+        );
         assert_eq!(book.touching.keys(), book.places.len());
         for tab in [debt, claim] {
-            assert!(!book.rules.on_in[tab].is_empty(), "the project's law watches a tab as it does any place");
+            assert!(!book.rules.at(Watch::In(tab)).is_empty(), "the project's law watches a tab as it does any place");
             assert!(
                 book.is_claim(tab) && book.holds(tab).is_none(),
                 "a tab says nothing of itself: its kind's defaults"

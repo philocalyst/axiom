@@ -505,17 +505,20 @@ impl Fixture {
             [Some((flow.from, id)), (flow.to != flow.from).then_some((flow.to, id))]
         };
         let touching = Groups::build(places, self.flows.iter().enumerate().flat_map(ends).flatten());
-        let rules = Rules {
-            on_in: Groups::build(places, self.on_in.iter().copied()),
-            on_out: Groups::build(places, self.on_out.iter().copied()),
-            on_gain: Groups::build(places, self.on_gain.iter().copied()),
-            always: Groups::build(places, self.always.iter().copied()),
-            on_spend: Groups::build(self.entities.len(), self.on_spend.iter().copied()),
-            purposes: Groups::default(),
-            about: Groups::default(),
-            contracts: Groups::default(),
-            timed: self.timed,
+        let placed = |watch: fn(Id<Place>) -> Watch, rules: &[(Id<Place>, Rule)]| -> Vec<(Watch, Rule)> {
+            rules.iter().map(|&(place, rule)| (watch(place), rule)).collect()
         };
+        let entries: Vec<_> = [
+            placed(Watch::In, &self.on_in),
+            placed(Watch::Out, &self.on_out),
+            placed(Watch::Gain, &self.on_gain),
+            placed(Watch::Always, &self.always),
+            self.on_spend.iter().map(|&(entity, rule)| (Watch::Spend(entity), rule)).collect(),
+            self.timed.iter().map(|&rule| (Watch::Timed, rule)).collect(),
+        ]
+        .concat();
+        let keys = Keys { places, entities: self.entities.len(), purposes: 0, contracts: 0 };
+        let rules = Rules::build(keys, entries.into_iter());
         let (mut txns, mut flows) = (Arena::new(), Arena::new());
         self.txns.into_iter().for_each(|txn| {
             txns.push(txn);

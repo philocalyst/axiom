@@ -526,14 +526,14 @@ pub(crate) fn household() -> Household {
     let lapsed = Rule { law: Id::new(2), subject: Subject::Place(retirement), days: ends_2025 };
     let in_force = Rule { law: Id::new(3), subject: Subject::Place(retirement), days: Days::ALWAYS };
     let penalty = Rule { law: Id::new(4), subject: Subject::Place(retirement), days: Days::ALWAYS };
-    let rules = Rules {
-        on_in: Groups::build(
-            cast.places.len(),
-            [(food, budget_rule), (retirement, lapsed), (retirement, in_force)].into_iter(),
-        ),
-        on_out: Groups::build(cast.places.len(), [(retirement, penalty)].into_iter()),
-        ..Rules::default()
-    };
+    let keys = Keys { places: cast.places.len(), entities: 0, purposes: 0, contracts: 0 };
+    let watching = [
+        (Watch::In(food), budget_rule),
+        (Watch::In(retirement), lapsed),
+        (Watch::In(retirement), in_force),
+        (Watch::Out(retirement), penalty),
+    ];
+    let rules = Rules::build(keys, watching.into_iter());
     let touching =
         Groups::build(cast.places.len(), journal.flows.iter().flat_map(|(id, flow)| [(flow.from, id), (flow.to, id)]));
     let (purposes, [income, spending, capital, transfer]) = Purpose::roots(&mut cast.names);

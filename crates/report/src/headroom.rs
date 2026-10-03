@@ -7,7 +7,7 @@
 use axiom_core::calendar::Window as Calendar;
 use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set, Severity};
 use axiom_engine::{Bound, Headroom, Run};
-use axiom_model::{Amount, Book, Law, Period, StepKind, Subject, Window};
+use axiom_model::{Amount, Book, Law, Period, StepKind, Subject, Table, Window};
 
 use crate::calendar::Periods;
 
@@ -21,7 +21,7 @@ pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
     let mut read: Set<(Id<Law>, u32, Subject, Day)> =
         readings.iter().map(|reading| (reading.law, reading.step, reading.subject, reading.days.first())).collect();
     let (months, years) = (Periods::covering(Period::Month, from, to), Periods::covering(Period::Year, from, to));
-    let rules = book.rules.on_in.values().iter().chain(book.rules.on_out.values());
+    let rules = book.rules.table(Table::In).iter().chain(book.rules.table(Table::Out));
     for rule in rules {
         let law = &book.laws[rule.law];
         let (Subject::Place(place), Some(cap)) = (rule.subject, law.cap()) else { continue };
