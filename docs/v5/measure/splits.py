@@ -886,9 +886,10 @@ def survey(binary, directory, jobs=3):
 def equivalent(rng):
     """One split statement written out, and the plain transfers LANGUAGE §3 says it is: (split, plain, forms).
 
-    Every amount is a literal and the legs add up to the total (or one is `...`), so a build that reads §3 moves
-    exactly what the plain transfers move, whatever else it does. The plain book is run by the BASELINE, which
-    gets plain transfers right; the split book by the NEW build, which is the one being checked.
+    The legs add up to the total (or one is `...`), so a build that reads §3 moves exactly what the plain transfers
+    move. A leg may be a computed amount (`25% of 400 USD`) or a target (`= 5_040 USD` of an account that holds
+    5,000), which the fold solves when the split lands; an item may be a share of the total (`- 6%`) or a share of
+    `amount`. The plain book is run by the BASELINE, which gets plain transfers right; the split book by the NEW build.
     """
     forms = Counter()
     day = "2026-03-%02d" % rng.randint(2, 27)
@@ -896,31 +897,52 @@ def equivalent(rng):
     from_side = rng.random() < 0.5
     source = "checking"
     ends = rng.sample(["shop", "acme", "savings", "bonus", "reserve", "buyer"], rng.randint(1, 3))
+    total = rng.choice(range(800, 1201, 20))
+    shared = rng.choice(["before", "after", "none"]) if not named else "before"
     items = []
     for _ in range(rng.choice([0, 0, 1, 2])):
-        items.append((rng.choice(["carve", "add", "less", "less-bare"]), rng.randint(1, 20), rng.choice(["fees", "fun", "groceries"])))
-    carved = sum(amount for kind, amount, _ in items if kind in ("carve", "less-bare"))
+        kind = rng.choice(["carve", "add", "less", "less-bare", "share-carve", "share-add", "share-less", "pct-carve", "pct-less"])
+        if kind.startswith(("share", "pct")) and shared == "none":
+            kind = "carve"
+        rate = rng.choice([5, 10])
+        value = total * rate // 100 if kind.startswith(("share", "pct")) else rng.randint(1, 20)
+        items.append((kind, value, rate, rng.choice(["fees", "fun", "groceries"])))
+    taking = ("carve", "less-bare", "share-carve", "pct-carve")
+    carved = sum(value for kind, value, _, _ in items if kind in taking)
     if named:
         forms["named"] += 1
         end = rng.choice(["shop", "acme", "savings"])
-        header = rng.randint(carved + 30, carved + 300)
         purpose = rng.choice(["", " #household", " #fun"])
-        split = [f"{day} {source} -> {end} {header} USD{purpose}"]
-        plain = [f"{day} {source} -> {end} {header - carved} USD{purpose}"]
-        extra = items
+        split = [f"{day} {source} -> {end} {total} USD{purpose}"]
+        plain = [f"{day} {source} -> {end} {total - carved} USD{purpose}"]
     else:
         forms["split:from" if from_side else "split:to"] += 1
         rest_at = rng.choice([None, "last", "first"]) if len(ends) > 1 or rng.random() < 0.5 else None
-        kinds = ["rest" if (rest_at == "last" and i == len(ends) - 1) or (rest_at == "first" and i == 0) else "amount" for i in range(len(ends))]
+        kinds = []
+        for index in range(len(ends)):
+            if (rest_at == "last" and index == len(ends) - 1) or (rest_at == "first" and index == 0):
+                kinds.append("rest")
+            else:
+                targets = from_side and ends[index] in ("savings", "bonus", "reserve")
+                kinds.append(rng.choices(["amount", "computed", "target"], [6, 2, 2 if targets else 0])[0])
         amounts = [rng.randint(5, 120) for _ in ends]
-        spoken = sum(a for a, k in zip(amounts, kinds) if k == "amount")
-        total_kind = rng.choice(["before", "after", "none"]) if rest_at is None else rng.choice(["before", "after"])
-        if rest_at is not None:
-            rest = rng.randint(5, 100)
-            total = spoken + carved + rest
-        else:
-            total = spoken + carved
-        forms["total:" + total_kind] += 1
+        for index, kind in enumerate(kinds):
+            if kind == "computed":
+                amounts[index] = rng.choice([5, 10, 25, 50]) * rng.choice([20, 40, 100, 200]) // 100
+        if rest_at is None:
+            # no remainder: the last leg that is not computed takes what the others leave of the total
+            index = max(i for i, kind in enumerate(kinds) if kind == "amount") if "amount" in kinds else None
+            others = sum(a for i, a in enumerate(amounts) if i != index)
+            if index is None or total - carved - others < 5:
+                kinds = ["amount"] * len(ends)
+                amounts = [5 for _ in ends]
+                index = len(ends) - 1
+                amounts[index] = total - carved - 5 * (len(ends) - 1)
+            else:
+                amounts[index] = total - carved - others
+        if rest_at is not None and shared == "none":
+            shared = "before"
+        forms["total:" + shared] += 1
         forms["rest:" + str(rest_at)] += 1
         head = {
             (True, "before"): f"{day} {source} {total} USD ->",
@@ -929,34 +951,52 @@ def equivalent(rng):
             (False, "before"): f"{day} -> {source} {total} USD",
             (False, "after"): f"{day} {total} USD -> {source}",
             (False, "none"): f"{day} -> {source}",
-        }[from_side, total_kind]
+        }[from_side, shared]
         split = [head]
         plain = []
-        leg_purposes = [rng.choice(["", "", " #fun", " #groceries"]) for _ in ends]
         remainder_end = None
-        for end, kind, amount, purpose in zip(ends, kinds, amounts, leg_purposes):
-            split.append(f"  {end} {'...' if kind == 'rest' else str(amount) + ' USD'}{purpose}")
-            moved = (total - spoken - carved) if kind == "rest" else amount
+        for end, kind, amount in zip(ends, kinds, amounts):
+            purpose = rng.choice(["", "", " #fun", " #groceries"])
+            forms["leg:" + kind] += 1
             if kind == "rest":
+                text, moved = "...", None
                 remainder_end = end
+            elif kind == "computed":
+                rate = amount * 100 // rng.choice([20, 40, 100, 200]) if False else None
+                text = f"{amount * 100 // 100} USD"
+                base = rng.choice([20, 40, 100, 200])
+                for percent in (5, 10, 25, 50):
+                    if amount * 100 % base == 0 and amount * 100 // base == percent:
+                        text = f"{percent}% of {base} USD"
+                        break
+                moved = amount
+            elif kind == "target":
+                text, moved = f"= {5_000 + amount} USD", amount
+            else:
+                text, moved = f"{amount} USD", amount
+            split.append(f"  {end} {text}{purpose}")
+            if moved is None:
+                moved = total - sum(m for m in amounts if m) + 0
+                moved = total - carved - sum(a for a, k in zip(amounts, kinds) if k != "rest")
             plain.append(f"{day} {source} -> {end} {moved} USD{purpose}" if from_side else f"{day} {end} -> {source} {moved} USD{purpose}")
         carry = remainder_end or ends[0]
-        extra = items
         forms["leg-count:%d" % len(ends)] += 1
-    for kind, amount, purpose in extra:
+    for kind, value, rate, purpose in items:
         forms["item:" + kind] += 1
-        sign = {"carve": "", "add": "+ ", "less": "- ", "less-bare": "- "}[kind]
+        sign = {"carve": "", "add": "+ ", "less": "- ", "less-bare": "- ", "share-carve": "", "share-add": "+ ", "share-less": "- ",
+                "pct-carve": "", "pct-less": "- "}[kind]
+        written = {"share": f"{rate}%", "pct": f"{rate}% of amount"}.get(kind.split("-")[0], f"{value} USD")
         tail = "" if kind == "less-bare" else f" #{purpose}"
-        split.append(f"  {sign}{amount} USD{tail}")
+        split.append(f"  {sign}{written}{tail}")
         if kind == "less-bare":
             continue
         if named:
             a, b = source, end
         else:
             a, b = (source, carry) if from_side else (carry, source)
-        if kind == "less":
+        if kind.endswith("less"):
             a, b = b, a
-        plain.append(f"{day} {a} -> {b} {amount} USD #{purpose}")
+        plain.append(f"{day} {a} -> {b} {value} USD #{purpose}")
     return "\n".join(split) + "\n", "\n".join(plain) + "\n", forms
 
 
