@@ -145,6 +145,11 @@ pub struct Resolved {
 }
 
 impl Resolved {
+    /// What a part that says no amount of its own carries: the remainder, which the solver settles, and a share.
+    pub fn unsaid(unit: Id<Commodity>) -> Resolved {
+        Resolved { amount: Amount::zero(unit), infer: Infer::Known, mode: None, exact: true }
+    }
+
     /// An amount a flow will move, if it is not `later`.
     fn amount(amount: Amount, exact: bool) -> Resolved {
         Resolved { amount, infer: Infer::Known, mode: None, exact }
@@ -194,6 +199,17 @@ impl Quantity {
             Some(amount) => Resolved { amount, exact: true, ..marker },
             None => marker,
         }))
+    }
+}
+
+impl Quantity {
+    /// What a flow carries for it until the fold has read it, counting in `unit` where it names none: the literal,
+    /// or zero.
+    pub fn stand_in(self, unit: Id<Commodity>) -> Amount {
+        match self.resolve(&mut LiteralEnv, Line::Leg(0), None, End::From, unit) {
+            Ok(resolved) => resolved.map_or(Amount::zero(unit), |resolved| resolved.amount),
+            Err(never) => match never {},
+        }
     }
 }
 

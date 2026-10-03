@@ -158,7 +158,10 @@ fn the_language_example_a_cost_withheld_from_proceeds_is_a_share_of_the_header()
   - 6% #fees \"commission\"
 ";
     with_run(lines, |book, run| {
-        assert_eq!(moves(book, run), ["buyer -> checking 1,000.00 USD #household", "checking -> buyer 60.00 USD #fees"]);
+        assert_eq!(
+            moves(book, run),
+            ["buyer -> checking 1,000.00 USD #household", "checking -> buyer 60.00 USD #fees"]
+        );
         assert_eq!(cents(book, run, "checking"), 100_000 + 94_000);
     });
 }
@@ -355,4 +358,16 @@ fn a_split_that_adds_up_is_not_an_error() {
   savings 10 USD
 ";
     assert!(imbalances(lines).is_empty());
+}
+
+#[test]
+fn an_all_leg_is_everything_the_source_holds_when_the_split_lands() {
+    let lines = "\
+2026-03-14 savings ->
+  shop all
+";
+    with_run(lines, |book, run| {
+        assert_eq!(moves(book, run), ["savings -> shop 500.00 USD"]);
+        assert_eq!(cents(book, run, "savings"), 0);
+    });
 }

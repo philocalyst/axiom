@@ -17,6 +17,7 @@ use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Program
 use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
+use crate::solve::{Line, LiteralEnv, Resolved};
 use crate::split::{Cut, Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
 
 #[derive(Clone, Copy)]
@@ -152,8 +153,20 @@ pub(super) fn push_quantity_root<'s>(quantity: ast::Quantity<'s>, roots: &mut Ve
 }
 
 impl ResolvedQuantity {
-    fn new(amount: Amount, infer: Infer, mode: Mode, part: Part) -> ResolvedQuantity {
-        ResolvedQuantity { amount, infer, mode, part }
+    /// What a written part comes to as a flow carries it: its amount, how it is known and how real it is. What the
+    /// fold computes or the book says is the zero a flow carries meanwhile, which is what an environment that
+    /// evaluates nothing makes of it. `own` is the mode of the flow that carries it.
+    fn of(part: Part, own: Mode, fallback: Id<Commodity>, side: FlowSide) -> ResolvedQuantity {
+        let said = match part {
+            Part::Of(quantity) => {
+                match quantity.resolve(&mut LiteralEnv, Line::Header(side), None, side.end(), fallback) {
+                    Ok(resolved) => resolved.expect("a literal environment leaves nothing out"),
+                    Err(never) => match never {},
+                }
+            }
+            Part::Rest | Part::Share(_) => Resolved::unsaid(fallback),
+        };
+        ResolvedQuantity { amount: said.amount, infer: said.infer, mode: said.mode.unwrap_or(own), part }
     }
 
     /// The node that computes its amount, if it is computed.
@@ -182,47 +195,33 @@ pub(super) fn resolve_quantity<'s>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
     let file = cx.file;
-    let resolved = match quantity {
+    let mut commodity = |unit: ast::Name<'s>| world.commodity_of(Word::of(file, unit.0)).or_report(diags);
+    let (part, own) = match quantity {
         ast::Quantity::Amount(written) => {
-            let expr = stated_amount(world, cx, written, fallback)?;
-            ResolvedQuantity::new(expr.stand_in(fallback), Infer::Known, Mode::Actual, Part::Of(Quantity::Amount(expr)))
+            (Part::Of(Quantity::Amount(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
         }
         ast::Quantity::Pending(written) => {
-            let expr = stated_amount(world, cx, written, fallback)?;
-            ResolvedQuantity::new(
-                expr.stand_in(fallback),
-                Infer::Known,
-                Mode::Pending,
-                Part::Of(Quantity::Pending(expr)),
-            )
+            (Part::Of(Quantity::Pending(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
         }
         ast::Quantity::Target(written) => {
-            let expr = stated_amount(world, cx, written, fallback)?;
-            let amount = expr.stand_in(fallback);
-            let end = side.end();
-            let infer = Infer::Target { end, balance: amount.qty };
-            ResolvedQuantity::new(amount, infer, Mode::Actual, Part::Of(Quantity::Target(expr)))
+            (Part::Of(Quantity::Target(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
         }
-        ast::Quantity::Unknown(unit) => {
-            let unit = world.commodity_of(Word::of(file, unit.0)).or_report(diags)?;
-            ResolvedQuantity::new(Amount::zero(unit), Infer::Unknown, Mode::Actual, Part::Of(Quantity::Unknown(unit)))
-        }
+        ast::Quantity::Unknown(unit) => (Part::Of(Quantity::Unknown(commodity(unit)?)), Mode::Actual),
         ast::Quantity::All(unit) => {
             let unit = match unit {
-                Some(unit) => Some(world.commodity_of(Word::of(file, unit.0)).or_report(diags)?),
+                Some(unit) => Some(commodity(unit)?),
                 None => None,
             };
-            let amount = Amount::zero(unit.unwrap_or(fallback));
-            ResolvedQuantity::new(amount, Infer::All, Mode::Actual, Part::Of(Quantity::All(unit)))
+            (Part::Of(Quantity::All(unit)), Mode::Actual)
         }
-        ast::Quantity::Rest => ResolvedQuantity::new(Amount::zero(fallback), Infer::Known, Mode::Actual, Part::Rest),
+        ast::Quantity::Rest => (Part::Rest, Mode::Actual),
         // An opening line's one unit of an asset: nothing keeps it as a quantity, only as an amount.
         ast::Quantity::Whole => {
             let one = Amount::new(Qty(1), fallback);
-            ResolvedQuantity::new(one, Infer::Known, Mode::Opening, Part::Of(Quantity::Amount(Expr::Literal(one))))
+            (Part::Of(Quantity::Amount(Expr::Literal(one))), Mode::Opening)
         }
     };
-    Some(resolved)
+    Some(ResolvedQuantity::of(part, own, fallback, side))
 }
 
 /// A written amount: its literal, or the node that computes it. A literal that is no amount costs the
