@@ -466,7 +466,10 @@ differ and every one has an `=` leg; 2,000 books on the whole CLI, 448 differ an
 - **The statement-path oracle, per recipe** (600 books each, `splits.py gen ... recipe:NAME`, new against baseline on `check`,
   `balance` and `flow`): transfer 0 differ, claims 0, basis 0 (the recipes with no split); `unknown` 105 differ (0 without a `?` leg),
   `items_under_header` 355 (0 without a carved or computed item), `exchange` 61 (0 without a computed cost item), `split` 588 (the
-  recipe is splits; 12 do not differ, all legs computed). **0 differences are unclassified.**
+  recipe is splits, so every project is explained by it; the 12 that do not differ have a header with no total and legs that are all computed fractions, pending amounts, `=` targets or `...`: nothing the baseline left unposted). **0 differences are unclassified** at that grain. A finer rule, by the forms each statement holds (a literal leg, `...` under a
+  total, a computed or pending leg under a total, a carved item), agrees with 591 of the 600 `split` books; of the 9 it does not
+  predict, 2 differ because an item sits at the remainder leg and no longer at the first (row 7), and 7 are headers with no total
+  whose legs are pending, `=`, `all` or `...`, which the baseline posted right already or does not count as money.
 - **The static check** over the 2,000 books of `splits.py gen statements`: 488 raise `split-imbalance` (524 errors: 308 legs short
   of the total, 216 over it), the baseline none. No book of `examples/` raises it, and the 2 mistakes that do are the ones that are
   meant to.
