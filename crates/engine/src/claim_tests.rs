@@ -222,18 +222,98 @@ fn a_claim_place_that_names_a_policy_keeps_it() {
     });
 }
 
-/// "A later flow between them settles open claims": a payment from the party reaches the claim. Not built: a tab has no
-/// name, and settling it by the party's flow needs `books` read and a flow posted as two movements (K3c-map section 6).
-#[test]
-#[ignore = "K3c-map section 6: a payment from the party does not settle its claims (not built)"]
-fn a_payment_from_the_party_settles_the_claims_it_names() {
-    let lines = "\
+// ─── A payment from the party settles its claims ────────────────────────────
+
+/// Three claims on `ann`, the oldest not the one that is exactly 200.00, and what each is left at after a payment of hers.
+const OWED_BY_ANN: &str = "\
 2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
 2026-01-03 ann owes me 200 USD due 2026-02-01 ^i2
-2026-01-20 ann -> checking 200 USD ^i2
+2026-01-04 ann owes me 300 USD due 2026-02-01 ^i3
+";
+
+fn paid(payment: &str) -> String {
+    format!("{OWED_BY_ANN}{payment}\n")
+}
+
+/// "A later flow between them settles open claims ... the one whose open amount is exactly the flow's".
+#[test]
+fn a_payment_from_the_party_settles_the_claim_whose_open_amount_is_exactly_its_own() {
+    with_run(&paid("2026-01-20 ann -> checking 200 USD"), |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00), ("i3", 300_00)]));
+    });
+}
+
+/// "else the oldest first".
+#[test]
+fn a_payment_that_is_exactly_no_claim_settles_the_oldest_first() {
+    with_run(&paid("2026-01-20 ann -> checking 400 USD"), |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i2", 100_00), ("i3", 300_00)]));
+    });
+}
+
+/// "those its codes name": the code on the payment beats the exact amount and the oldest.
+#[test]
+fn a_payment_that_carries_the_code_of_a_claim_settles_that_claim() {
+    with_run(&paid("2026-01-20 ann -> checking 200 USD ^i3"), |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00), ("i2", 200_00), ("i3", 100_00)]));
+    });
+}
+
+/// "What remains is an ordinary flow": it pays checking all the same, and more than the claims is no claim.
+#[test]
+fn what_a_payment_does_not_settle_is_an_ordinary_flow() {
+    with_run(&paid("2026-01-20 ann -> checking 1_000 USD"), |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[]));
+        let checking = book.place("assets/checking").unwrap();
+        let held: i64 = run.holdings.iter().filter(|h| h.place == checking).map(|h| h.qty().0).sum();
+        assert_eq!(held, 2_000_00, "the thousand arrived whole");
+        assert!(said(run, "overdue").is_empty());
+    });
+}
+
+/// Value is conserved: what the party was debited, with what the claims were, adds up to what checking was paid.
+#[test]
+fn settling_a_claim_does_not_create_or_lose_value() {
+    with_run(&paid("2026-01-20 ann -> checking 500 USD"), |book, run| {
+        let total: i64 = run.holdings.iter().filter(|h| h.unit == book.base).map(|h| h.qty().0).sum();
+        assert_eq!(total, 0, "every place, the parties' too: {:?}", run.holdings);
+    });
+}
+
+/// A party the owner holds no claim on pays as before; and so does one who pays before there is a claim.
+#[test]
+fn a_payment_settles_only_what_was_owed_by_its_party_and_already() {
+    let lines = "\
+2026-01-01 bob -> checking 50 USD
+2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
+2026-01-03 bob -> checking 300 USD
+2026-01-04 ann -> checking 20 USD
 ";
     with_run(lines, |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i1", 280_00)]), "ann's 20.00 settled in part");
+    });
+}
+
+/// A payment in another commodity than the claim is not the claim's settlement.
+#[test]
+fn a_payment_in_another_commodity_is_no_settlement() {
+    let lines = "2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1\n2026-01-04 ann -> stockroom 5 BOX\n";
+    with_run(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00)]));
+    });
+}
+
+/// A payment that bounces runs backwards: the claim it settled is open again, as it was.
+#[test]
+fn a_payment_that_is_returned_opens_the_claims_it_settled() {
+    let lines = "\
+2026-01-20 ann -> checking 200 USD ^pay-1
+2026-01-25 ^pay-1 returned
+";
+    with_run(&paid(lines).replace("\n\n", "\n"), |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00), ("i2", 200_00), ("i3", 300_00)]));
+        let total: i64 = run.holdings.iter().filter(|h| h.unit == book.base).map(|h| h.qty().0).sum();
+        assert_eq!(total, 0, "nothing was lost when it was put back");
     });
 }
 

@@ -7,7 +7,7 @@
 //! entity and one by commodity, which the fold then reads as it reads a place's class.
 
 use axiom_core::Id;
-use axiom_model::{Basis, Book, Commodity, Entity, Place, Policy};
+use axiom_model::{Basis, Book, Class, Commodity, Entity, Place, Policy, Role};
 
 /// What the fold asks of a place.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -40,6 +40,9 @@ pub(crate) struct Traits {
     places: Box<[PlaceTraits]>,
     entities: Box<[EntityTraits]>,
     units: Box<[Option<Policy>]>,
+    /// The tab that holds what a party owes an owner, by the party's place and the owner, sorted: a flow out of a party's
+    /// place finds the claims it may settle by a search over the few owners the party owes.
+    claims: Box<[(Id<Place>, Id<Entity>, Id<Place>)]>,
 }
 
 impl Traits {
@@ -56,7 +59,26 @@ impl Traits {
             currency: book.currency(entity),
         });
         let units = book.commodities.ids().map(|unit| book.select(unit));
-        Traits { places: places.collect(), entities: entities.collect(), units: units.collect() }
+        let owed = book.places.iter().filter(|(_, tab)| tab.class == Class::Asset);
+        let mut claims: Vec<_> = owed
+            .filter_map(|(id, tab)| match tab.role {
+                Role::Tab(party) => Some((book.entities[party].place?, tab.owner, id)),
+                _ => None,
+            })
+            .collect();
+        claims.sort_unstable();
+        Traits {
+            places: places.collect(),
+            entities: entities.collect(),
+            units: units.collect(),
+            claims: claims.into_boxed_slice(),
+        }
+    }
+
+    /// The tab that holds what the party whose place this is owes `owner`, if the party owes it anything on record.
+    pub fn tab_of(&self, party: Id<Place>, owner: Id<Entity>) -> Option<Id<Place>> {
+        let at = self.claims.partition_point(|&(found, by, _)| (found, by) < (party, owner));
+        self.claims.get(at).filter(|&&(found, by, _)| (found, by) == (party, owner)).map(|&(_, _, tab)| tab)
     }
 
     pub fn entity(&self, entity: Id<Entity>) -> EntityTraits {

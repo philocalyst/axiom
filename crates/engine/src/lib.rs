@@ -55,6 +55,7 @@ mod plan;
 mod post;
 mod reconcile;
 mod scope;
+mod settle;
 mod show;
 mod sides;
 mod state;

@@ -23,7 +23,7 @@ use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
 use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
-use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation, WriteOff};
+use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Parcel, Violation, WriteOff};
 
 #[derive(Clone)]
 pub(crate) struct World {
@@ -44,6 +44,14 @@ impl World {
             temporal: TemporalHistory::default(),
         }
     }
+}
+
+/// What a payment from a party settled: the claims it took out of the tab that held them.
+#[derive(Clone, Hash)]
+pub(crate) struct Settled {
+    pub tab: Id<Place>,
+    pub unit: Id<Commodity>,
+    pub parcels: Box<[Parcel]>,
 }
 
 /// Where the assertions on one place and commodity left off.
@@ -70,6 +78,8 @@ pub(crate) struct Record {
     /// checkpoint identity, keyed by the source flow rather than copied into
     /// every Flow record.
     pub computed_basis: Map<Id<Flow>, Qty>,
+    /// The claims each flow from a party settled, as the parcels they were: a flow that is returned puts them back.
+    pub settled: Map<Id<Flow>, Settled>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     /// Basis changes caused by timed asset laws and deferred-loss matching.
@@ -142,6 +152,7 @@ impl Record {
         Record {
             resolved: self.resolved.clone(),
             computed_basis: self.computed_basis.clone(),
+            settled: self.settled.clone(),
             checks: vec![0; self.checks.len()],
             checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),
@@ -236,6 +247,7 @@ impl Hash for Record {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unordered(&self.resolved).hash(state);
         unordered(&self.computed_basis).hash(state);
+        unordered(&self.settled).hash(state);
         unordered(&self.checkpoints).hash(state);
         unordered(&self.headroom).hash(state);
         unordered(&self.waivers).hash(state);

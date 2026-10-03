@@ -164,6 +164,21 @@ impl Slice {
         }
     }
 
+    /// The parcel this slice was before it left: what a return puts back.
+    pub fn parcel(&self) -> Parcel {
+        Parcel {
+            qty: self.qty,
+            basis: self.basis,
+            acquired: self.acquired,
+            held_since: self.held_since,
+            wash_matched: self.wash_matched,
+            txn: self.txn,
+            part: self.part,
+            codes: self.codes,
+            tied: self.tied,
+        }
+    }
+
     /// Value that nothing gave up: base currency is at its face, anything else
     /// has no basis of its own.
     pub fn fresh(qty: Qty, is_base: bool, now: (Day, RuntimeTxn)) -> Slice {
