@@ -57,9 +57,13 @@ kind firm : entity
 kind bank-co : entity
 kind plan : asset
   has sponsor firm optional
+kind gift : plan
   has beneficiary saver optional
 kind pot : asset
 """
+
+# The slots each kind of account has beside the owner, in the order the kinds declare them: `gift` adds one to `plan`'s.
+SLOTS = {"plan": ["sponsor"], "gift": ["sponsor", "beneficiary"], "pot": []}
 
 SAVERS = ["ann", "bea", "cal", "dee"]
 KIDS = ["kai", "lou"]
@@ -68,8 +72,7 @@ FIRMS = ["acme", "bluefin", "cobalt"]
 BANKS = ["first", "second"]
 ENTITIES = {**{e: "saver" for e in SAVERS}, **{e: "kid" for e in KIDS}, **{e: "household" for e in HOUSEHOLDS},
             **{e: "firm" for e in FIRMS}, **{e: "bank-co" for e in BANKS}}
-NAMES = ["plan", "pot", "nest", "fund", "cash"]
-KIND_NAMED = {"plan", "pot"}
+NAMES = ["plan", "gift", "pot", "nest", "fund", "cash"]
 
 # What each entity's kind fits, as a slot of `plan`: owner takes any entity, sponsor a firm, beneficiary a saver or a kid.
 FITS = {"owner": lambda kind: True, "sponsor": lambda kind: kind == "firm",
@@ -110,16 +113,17 @@ def forced(words, free):
 
 
 class Account:
-    def __init__(self, index, kind, name, owner, sponsor, beneficiary, custodian, opened, closed):
+    def __init__(self, index, kind, name, owner, sponsor, beneficiary, custodian, opened, closed, co_owner=None):
         self.index, self.kind, self.name = index, kind, name
         self.owner, self.sponsor, self.beneficiary, self.custodian = owner, sponsor, beneficiary, custodian
+        self.co_owner = co_owner  # `owner ann 60%, bea 40%`: flat books only, a path cannot say a share
         self.opened, self.closed = opened, closed
         self.path = name  # as written; set by `declare`
         self.lines = []
 
     @property
     def address(self):
-        fillers = [self.owner, self.sponsor, self.beneficiary, self.custodian]
+        fillers = [self.owner, self.co_owner, self.sponsor, self.beneficiary, self.custodian]
         return [w for w in fillers if w] + [self.name]
 
     def is_open(self, day):
@@ -141,7 +145,7 @@ def slots_of(account):
 def path_choices(account):
     """Every subset of the account's words that the placement takes from the path to the slots they were meant for, the
     rest going on role lines, largest first: the rungs of the ladder this account can be written at."""
-    free_all = ["owner"] + (["sponsor", "beneficiary"] if account.kind == "plan" else [])
+    free_all = ["owner"] + SLOTS[account.kind]
     pairs = slots_of(account)
     found = []
     for size in range(len(pairs), -1, -1):
@@ -163,6 +167,8 @@ def declare(account, style, rng):
         chosen = choices[0] if rng.random() < 0.75 else rng.choice(choices)
     words = [w for _, w in chosen]
     roles = [f"{slot} {w}" for slot, w in slots_of(account) if (slot, w) not in chosen]
+    if account.co_owner:
+        roles = [f"owner {account.owner} 60%, {account.co_owner} 40%" if r.startswith("owner ") else r for r in roles]
     account.path = "/".join(words + [account.name])
     omit_kind = account.spelled and account.name == account.kind and rng.random() < 0.7
     out = [f"account {account.path}" + ("" if omit_kind else f" : {account.kind}")
@@ -177,18 +183,21 @@ def declare(account, style, rng):
 
 def draw_account(rng, index, style, taken):
     for _ in range(50):
-        kind = rng.choice(["plan", "pot"])
+        kind = rng.choice(list(SLOTS))
         name = rng.choice(NAMES) if style == "spelled" else f"{rng.choice(NAMES)}{index}"
         owner = rng.choice(SAVERS + KIDS + HOUSEHOLDS + FIRMS[:1])
-        sponsor = rng.choice(FIRMS) if kind == "plan" and rng.random() < 0.6 else None
-        beneficiary = rng.choice(SAVERS + KIDS) if kind == "plan" and rng.random() < 0.4 else None
+        sponsor = rng.choice(FIRMS) if "sponsor" in SLOTS[kind] and rng.random() < 0.6 else None
+        beneficiary = rng.choice(SAVERS + KIDS) if "beneficiary" in SLOTS[kind] and rng.random() < 0.5 else None
+        co_owner = rng.choice(SAVERS + KIDS) if style == "flat" and rng.random() < 0.2 else None
+        if co_owner == owner:
+            co_owner = None
         custodian = rng.choice(BANKS) if rng.random() < 0.6 else None
         opened = day_at(rng.randrange(0, 200)) if rng.random() < 0.35 else None
         closed = day_at(rng.randrange(150, 336)) if rng.random() < 0.25 else None
         if opened and closed and closed < opened:
             continue
-        account = Account(index, kind, name, owner, sponsor, beneficiary, custodian, opened, closed)
-        key = (account.owner, account.sponsor, account.beneficiary, account.custodian, name)
+        account = Account(index, kind, name, owner, sponsor, beneficiary, custodian, opened, closed, co_owner)
+        key = (account.owner, account.co_owner, account.sponsor, account.beneficiary, account.custodian, name)
         if key not in taken:
             taken.add(key)
             return account
@@ -484,13 +493,15 @@ def placement(binary, directory, count, seed):
     rng = random.Random(seed)
     wrong, seen = [], Counter()
     for index in range(count):
-        kind = rng.choice(["plan", "pot"])
+        kind = rng.choice(list(SLOTS))
         n = rng.randrange(1, 5)
         words = [rng.choice(list(ENTITIES)) for _ in range(n)]
-        free = ["owner"] + (["sponsor", "beneficiary"] if kind == "plan" else [])
+        owner_line = rng.random() < 0.3
+        free = ([] if owner_line else ["owner"]) + SLOTS[kind]
         options, found = placements(words, free)
         path = "/".join(words + [kind])
-        book = PRELUDE + "".join(f"entity {e} : {ENTITIES[e]}\n" for e in sorted(set(words))) + f"account {path}\n"
+        book = PRELUDE + "".join(f"entity {e} : {ENTITIES[e]}\n" for e in sorted(set(words) | {"ann"}))
+        book += f"account {path}\n" + ("  owner ann\n" if owner_line else "")
         folder = os.path.join(directory, f"q{index:04d}")
         os.makedirs(folder, exist_ok=True)
         open(os.path.join(folder, "main.ax"), "w").write(book)
@@ -534,13 +545,13 @@ MUTANTS = [
     ("custodian dropped", "addresses.rs", "let all = owners.into_iter().chain(by_slot).chain(institution);", "let all = owners.into_iter().chain(by_slot);"),
     ("custodian first", "addresses.rs", "let all = owners.into_iter().chain(by_slot).chain(institution);", "let all = institution.into_iter().chain(owners).chain(by_slot);"),
     ("slots in the other order", "slots.rs", "lineage.reverse();", ""),
-    ("a name that found several is final", "resolve.rs", "if places.iter().any(|&place| self.book.is_spelled(place)) {", "if false {"),
+    ("a name that found several is final", "resolve.rs", "let spelled = places.iter().any(|&place| self.book.is_spelled(place));", "let spelled = false;"),
     ("addresses never asked", "resolve.rs", "if let Some(end) = self.address_end(home, word, day, Reached::Nothing) {", "if let Some(end) = None::<Result<End, Diagnostic>> {"),
     ("an unknown word of an address is a party", "reference.rs", "Found::Nothing if at > 0 => return Err(self.unknown_address(word, &fillers, None)),", "Found::Nothing if at > 0 => return Ok(None),"),
     ("every first word is an attempt", "reference.rs", "reached == Reached::Several || fillers.first().is_some_and(|&first| book.lookup.addresses.fills_any(first))", "true"),
     ("no first word is an attempt", "reference.rs", "reached == Reached::Several || fillers.first().is_some_and(|&first| book.lookup.addresses.fills_any(first))", "reached == Reached::Several"),
     ("placement takes the first slot", "spelled.rs", "Placed::Forced(slot) => fills[usize::from(slot)].push(word),", "Placed::Forced(_) => fills[0].push(word),"),
-    ("an ambiguous word is placed", "spelled.rs", "Placed::Ambiguous(set) => {\n                        diags.push(ambiguous(world, spelling, word, &free, set));", "Placed::Ambiguous(set) => {\n                        fills[set.trailing_zeros() as usize].push(word);\n                        diags.push(ambiguous(world, spelling, word, &free, set));"),
+    ("an ambiguous word is placed", "spelled.rs", "Placed::Ambiguous(set) => {\n                diags.push(spelling.ambiguous(&world.book, word, set));", "Placed::Ambiguous(set) => {\n                fills[set.trailing_zeros() as usize].push(word);\n                diags.push(spelling.ambiguous(&world.book, word, set));"),
     ("the owner is not free when a line says it", "spelled.rs", ".then_some(Free::Owner);", ".then_some(Free::Owner).or(Some(Free::Owner));"),
     ("owner takes only a household", "spelled.rs", "Free::Owner => true,\n            Free::Slot { slot: Slot", "Free::Owner => book.name(book.kinds[book.entities[entity].kind].name) == \"household\",\n            Free::Slot { slot: Slot"),
     ("a filled slot is free", "spelled.rs", "let slots = book.schema.entity_slots(&book.kinds, kind).into_iter().filter(|&(number, _)| !is_filled(number));", "let slots = book.schema.entity_slots(&book.kinds, kind).into_iter();"),
