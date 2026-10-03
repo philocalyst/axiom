@@ -24,6 +24,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
 | K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | running (map first) |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
+| K6b the post host | a law of a kind, purpose, entity or account derives a flow from a posted one (cash back, a processor's fee), with a cause, a record, a cycle guard and returns that reverse | brief written (after K6) |
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | running (map first) |
 | **K7a** the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | **merged** (`368e5e8`) |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | brief written (after K7a, K3d) |
