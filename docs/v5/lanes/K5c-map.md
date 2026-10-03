@@ -275,6 +275,8 @@ the interface this lane leaves. **Not decided here.**
 | `f5cb4d1` | `report/claims.rs`: the cell that says what a claim is, in a function of its own |
 | `61e57d7` | `forecast.py`: ten mutants of the claim item beside the nineteen of the forecast |
 | `dd80bfd` | `forecast.py`: layer C, the occurrences a forecast lists against another build's (the first mutation sweep showed that layers A and B cannot see an occurrence the forecast leaves out) |
+| `5a41713`, `7087417`, `577581c` | `forecast.py`: a mutant that hangs is killed; a test build that does not compile is not a kill; **a test kills a mutant only by a failure the unmutated tree does not have** (two tests fail without any mutant, so the first sweep had killed every mutant by them, and every one of its "killed by the tests" was empty) |
+| `6b358fe`, `3bf0d04`, `76736d5`, `d287d66` | tests for the six mutants the corrected sweep let survive (§15) |
 
 ### 13.2 The forecast is the fold (items 1 and 2)
 
@@ -317,7 +319,7 @@ What it is not, and why each is where the brief said to stop:
 
 - **Recognition is not built.** The claim has no purpose, so nothing is recognized by it that `books cash|accrual` has not said
   (nothing reads it; K3d's). With a purpose it would count as income when made and again when paid, as K3c's own claims do. A test
-  checks that `flow` shows no income for it.
+  says that a law which counts the flows of a purpose does not count it (`flow` shows no flow an occurrence made, so it cannot tell).
 - **The claim is made on the day the day is *missed*** (the later of reach and deadline, plus one), not on the day the deadline passes
   when that is before the reach ends. A line within reach still keeps the occurrence; a claim made earlier would be settled by that
   line's payment by *oldest first*, which is not necessarily the claim of the day it keeps. That differs from the brief's literal
@@ -361,12 +363,12 @@ c. **A leg that reads a balance (`all`, `= TARGET`, `...`) is read once.** The o
 **Goldens (`tests/golden/`): none.** `sh tests/golden.sh` regenerates every file byte for byte; `git diff tests/` is empty after it and
 after `sh tests/mistakes/run.sh`. No example has a `due` in a contract, so the claim does not show in them.
 
-**Tests.** None deleted, none weakened: the names of the 1,047 tests at `c8c1695` are all still there. Four bodies changed, none an
+**Tests.** None deleted, none weakened: the names of the 1,047 tests at `c8c1695` are all still there (1,076 now). Four bodies changed, none an
 assertion: `a_loan_expects_its_payments_and_no_more` (model) reads the owed days from a `Residual` where it read `Promises::expected`,
 which is deleted, and asserts the same days and the same count; `projection_resumes_the_supplied_checkpoint_without_refolding` and
 `projected_worth_uses_cent_conserving_owner_shares` (report, now in `trace.rs`) call `Trace::run(lens, past, options, habits,
 checkpoints)`; `a_promise_is_late_by_the_days_until_it_is_kept_or_the_horizon_if_it_never_is` builds a `Promise` with the new field
-`claimed`. Twenty-five tests are added (`promising.rs` 13, `claim_tests.rs` 9, `forecast.rs` 1, `source_tests.rs` 2). `a_context_forecast_keeps_historical_and_same_day_obligations_once` **still fails, as at
+`claimed`. Twenty-nine tests are added (`promising.rs` 14, `claim_tests.rs` 11, `forecast.rs` 2, `source_tests.rs` 2). `a_context_forecast_keeps_historical_and_same_day_obligations_once` **still fails, as at
 `c8c1695`, for the reason of §0.5 and §8**; `a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot` fails as at
 `c8c1695` (the user's).
 
@@ -380,7 +382,7 @@ checkpoints)`; `a_promise_is_late_by_the_days_until_it_is_kept_or_the_horizon_if
 | K5b's promise oracle: 18 of 1,500 projects disagreed on the missed days of a stream whose deadline is longer than its reach | `docs/v5/measure/promises/monitor.rs` | the fold now misses at the later of reach and deadline; the reference reads the deadline from the terms, and the 1,500 agree (`51e38f3`) |
 | `docs/v5/measure/internals/main.rs` | | it asks the ledger to promise and reads `recorded().planned` |
 
-No other output changed: `fuzz.py` (two seeds, 2,000 mutants of the examples) shows 0 outputs that differ and 0 panics; K3c's claims
+No other output changed: `fuzz.py` (three seeds, 3,000 mutants of the examples) shows 0 outputs that differ and 0 panics; K3c's claims
 oracle shows 150 of 150 projects byte for byte the same as the baseline's and held to the reference; K4b's splits oracle differs only
 as the table says.
 
@@ -409,10 +411,28 @@ do (the one is `p0297`, a `savings = 56104 USD` leg the old forecast resolved in
 book that wrote the forecast down, §13.4 (c)). The mutation sweep runs it after layer A.
 
 **Mutation.** `forecast.py mutate` builds each mutant of the code under test and holds it to layer B, then layer A, then layer C, then
-the unit tests of the engine and the report; one that none kills is listed. The sweep of the 30 mutants is running as this is written; its table is in the next commit of this file.
+the unit tests of the engine and the report; one that none kills is listed. 
 
-**Everything else.** `cargo test --workspace --release --no-fail-fast`: see the next commit of this file. `sh tests/mistakes/run.sh` and `sh tests/golden.sh`:
-no diff. `fuzz.py` against the baseline binary (seeds 7 and 11, 1,000 mutants each, `diff`): 0 panics and 0 differences (every mutant is
+| layer that killed it | mutants |
+|---|---|
+| layer B, the dump (7) | 00 promises the day it stands on too; 04 an ordinal one too many; 05 the monitor told of a failure and not of a success; 06 an occurrence posted a day late; 10 a promise before the journal's facts of earlier days; 11 a promise after the closings of its day; 12 a day's facts that do not miss what is out of reach first |
+| layer C, the occurrences listed (3) | 01 leaves out the day after today; 08 streams due on one day in the wrong order; 14 the forecast's horizon is the day it stands on |
+| a hang (1) | 02 promises only what a line wrote: it looks for a day that never comes |
+| the unit tests (19) | 03, 07, 09, 13, 15, 16, 17, 18, 19 to 29: a written standing day looked up as a regular one; what a line wrote ahead promised again; a step and the fold past the horizon; one owner's forecast promising everyone's contracts; today not closed first; the report not seeing each occurrence; habits out of date order; and the ten of the claim item (where a claim is paid, its purpose, its date, an amount of nothing, whose debt, the later of reach and deadline, a day early, warned of twice, said to be claimed, a tab for every contract, no due day) |
+
+**Thirty mutants, none survives.** Layer A (the CLI, forecast against history) killed none that layer B had not: B subsumes it. What the sweep
+taught is more than its table: (1) a mutant that makes the forecast leave an occurrence out is invisible to A and B, which is why layer
+C exists; (2) its first run took two tests that fail without any mutant (the user's prorata test and the year-end test) for the tests
+killing every mutant, so all nineteen kills by the tests were empty, and the harness now counts only a failure the unmutated tree does not
+have; (3) with that, six mutants survived (03, 18, 20, 22, 26, 28), each for want of a test, and a test was written for each (`a_line_written_ahead_for_a_standing_day_is_not_promised_again`,
+`the_flows_habits_expect_come_in_date_order`, `a_claim_the_monitor_made_has_no_purpose_for_a_law_to_count`, `an_occurrence_of_no_amount_is_warned_of_and_claims_nothing`,
+and two assertions of the claim tests); the six were run again against the tree with them and are killed. (4) One of the six was a test
+of mine that could not fail: `flow` shows no flow an occurrence made, so a check that a claim shows no income there was empty; the claim's
+purpose is seen by a law that counts the flows of a purpose, which is what the engine test uses now.
+
+
+**Everything else.** `cargo test --workspace --release --no-fail-fast`: **1,060 passed, 2 failed, 19 ignored** (1,031 passed, 2 failed, 19 ignored at `c8c1695`; the two failures are the same two). `sh tests/mistakes/run.sh` and `sh tests/golden.sh`:
+no diff. `fuzz.py` against the baseline binary (seeds 7, 11 and 19, 1,000 mutants each, `diff`): 0 panics and 0 differences (every mutant is
 rejected by `check`, as every mutant of the examples is at today 2026-06-01 on both builds, so this shows no new panic and no new
 output on a book that already has errors, and nothing more).
 
@@ -436,18 +456,18 @@ builds. The promised occurrences are now the fold's own work, which K5b measured
 | core | 3,465 | 3,465 |
 | engine | 11,233 | 11,448 |
 | model | 17,682 | 17,697 |
-| report | 7,097 | 6,964 |
+| report | 7,097 | 6,965 |
 | sync | 4,277 | 4,277 |
 | syntax | 5,595 | 5,595 |
 | systems | 14 | 14 |
-| **total** | **51,870** | **51,967** |
+| **total** | **51,870** | **51,968** |
 
-**The target of about -900 is missed: the lane lands at +97.** Deleted by file (lines of code): `report/forecast.rs` -113, `report/forecast/projection.rs`
+**The target of about -900 is missed: the lane lands at +98.** Deleted by file (lines of code): `report/forecast.rs` -113, `report/forecast/projection.rs`
 -26 (what remains is `trace.rs`), `engine/ledger.rs` -71 (moved to `promising.rs`), `model/promise.rs` -12 (`expected`, `payments`,
 `of_life`, less `Terms::blame` and two readers), `model/journal.rs` -5 (`RuntimeFlow::source`); raw deleted lines in non-test files are
 590 against 1,099 added, 531 of them `promising.rs` with its 300 lines of tests. What was added is what the fold learned: `promising.rs`
 217, `engine/lib.rs` 15 (`Planned`, `Recorded`), `state.rs` 17, `claims.rs` 21, `book.rs` 24 (`Claim`, `claim_of`). The second driver was
-about 330 lines, not the 1,200 the target assumed. Function lengths (`hist.py crates`): over 40 lines, 143 functions against 146; the
+about 330 lines, not the 1,200 the target assumed. Function lengths (`hist.py crates`): over 40 lines, 142 functions against 146; the
 longest is unchanged at 403.
 
 ## 16. What is not finished, and what I am least proud of
@@ -462,7 +482,7 @@ longest is unchanged at 403.
   report, and the forecast is promises only.
 - The claim has no recognition (K3d), covers only what a party owes (`Blame::Party`), does not read `else ITEM`, and is made on the day
   the day is missed and not on the day the deadline passes (§13.3).
-- The target of about -900 lines is missed: +97 (§15).
+- The target of about -900 lines is missed: +98 (§15).
 - `fuzz.py` rejects every mutant of the examples at its day, because every example's `check` has errors at `c8c1695` as well (05-family:
   141): it shows no new panic and no new output on books that already have errors, and nothing about valid ones.
 
