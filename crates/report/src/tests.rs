@@ -549,6 +549,8 @@ pub(crate) fn household() -> Household {
             commodity: Id::new(0),
             measure: Id::new(0),
             entity: Id::new(0),
+            claim: Id::new(0),
+            debt_claim: Id::new(0),
         },
         purposes: PurposeRoots { income, spending, capital, transfer },
     };
@@ -626,6 +628,7 @@ pub(crate) fn household() -> Household {
         headroom: Vec::new(),
         pads: Vec::new(),
         assets: Vec::new(),
+        written_off: Vec::new(),
         pending_carries: Vec::new(),
         promises: Vec::new(),
         adjustments: Vec::new(),

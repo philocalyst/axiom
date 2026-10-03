@@ -586,6 +586,9 @@ pub enum Select {
     Unit(Id<Commodity>),
     /// `[retirement]`: only parcels whose fact names this destination.
     End(Id<Place>),
+    /// Only the parcels this transaction made: the claim a write-off forgives. No line of the language writes it; the
+    /// statement already named the transaction.
+    Txn(Id<Txn>),
 }
 
 /// Flows written together.

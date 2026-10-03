@@ -191,6 +191,10 @@ pub struct KindRoots {
     pub commodity: Id<Kind>,
     pub measure: Id<Kind>,
     pub entity: Id<Kind>,
+    /// What a party owes an owner: the kind of an `Asset`-class tab, which says `claim`, so that its parcels stay apart.
+    pub claim: Id<Kind>,
+    /// What an owner owes a party: the kind of a `Debt`-class tab, which says `claim` as well.
+    pub debt_claim: Id<Kind>,
 }
 
 /// The four disjoint roots of the purpose tree.

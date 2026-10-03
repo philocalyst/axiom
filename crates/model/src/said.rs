@@ -9,9 +9,10 @@ use axiom_core::tagless::Field;
 use axiom_core::{Day, DaySet, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Book, Commodity, Entity, Kind, Place, Purpose, Role, System};
+use crate::book::{Basis, Book, Class, Commodity, Entity, Kind, Place, Purpose, System};
 use crate::builtin::{self, Coded};
 use crate::holders::Holder;
+use crate::journal::Flow;
 use crate::law::Value;
 
 impl Holder {
@@ -164,9 +165,21 @@ impl Book<'_> {
     }
 
     /// Whether a place holds what others owe, so that its parcels stay apart by the transaction that made them: what
-    /// its kinds say, and every tab.
+    /// its kinds say, and a tab's kind says it.
     pub fn is_claim(&self, place: Id<Place>) -> bool {
-        self.fact(builtin::CLAIM, place).unwrap_or(false) || matches!(self.places[place].role, Role::Tab(_))
+        self.fact(builtin::CLAIM, place).unwrap_or(false)
+    }
+
+    /// Whether a flow is the making of a claim on a party: value from outside paid into a place that holds what is owed.
+    /// The claim is a parcel that can be forgiven, and forgiving it gives the value back to where it came from.
+    pub fn makes_claim(&self, flow: &Flow) -> bool {
+        self.is_claim(flow.to) && self.places[flow.from].class == Class::Outside
+    }
+
+    /// Whether a flow is the making of a debt of an owner's: a claim place of the `Debt` class paying a party. What is owed
+    /// is a plain balance there, with no parcel of the debt to forgive.
+    pub fn makes_debt(&self, flow: &Flow) -> bool {
+        self.is_claim(flow.from) && self.places[flow.from].class == Class::Debt
     }
 
     fn said_of(&self, holder: u32, name: Sym, day: Day) -> Option<Value> {

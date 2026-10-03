@@ -490,18 +490,21 @@ fn claim_target<'s>(
 ) -> Option<Id<Txn>> {
     let reference_loc = at.file().loc(code.name());
     let target = at.code_index.resolve(world, code, reference_loc, CodeUse::ClaimWaiver, diags)?;
-    let source = &world.book.txns[target];
-    let makes_claim = source.flows.ids().any(|flow_id| {
-        let flow = &world.book.flows[flow_id];
-        matches!(world.book.places[flow.from].role, Role::Tab(_))
-            || matches!(world.book.places[flow.to].role, Role::Tab(_))
-    });
-    if !makes_claim {
+    let (book, source) = (&world.book, &world.book.txns[target]);
+    let flows = || source.flows.ids().map(|flow| &book.flows[flow]);
+    if !flows().any(|flow| book.makes_claim(flow)) {
+        let (what, help) = match flows().any(|flow| book.makes_debt(flow)) {
+            true => (
+                "this transaction made a debt of yours, which has nothing to forgive",
+                "what you owe is a plain balance, not a claim of yours: only a claim on a party can be written off",
+            ),
+            false => ("this transaction did not create an open claim", "use the code on an earlier `owes` statement"),
+        };
         diags.push(
-            Diagnostic::error("claim-writeoff-target", "this transaction did not create an open claim")
+            Diagnostic::error("claim-writeoff-target", what)
                 .label(reference_loc, "the referenced transaction has no claim flow")
                 .context(source.loc, "the transaction identified by this code is here")
-                .help("use the code on an earlier `owes` statement"),
+                .help(help),
         );
         return None;
     }

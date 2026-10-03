@@ -1,0 +1,19 @@
+base USD
+kind rental : std/property
+  has in-service date
+  law depreciation
+    each month
+    consume 10 USD
+entity me : person
+account assets/checking
+entity seller
+entity buyer
+asset condo : rental
+  in-service 2025-01-01
+
+opening 2025-01-01
+  checking 2_000 USD
+
+2025-01-02 checking -> seller 1_000 USD #purchase of condo
+2025-02-15 checking -> seller 120 USD #improvement of condo
+2025-03-15 checking -> seller 60 USD #improvement of condo

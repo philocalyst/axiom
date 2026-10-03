@@ -487,7 +487,16 @@ impl Fixture {
             unknown: self.unknown_entity,
             opening: self.opening_entity,
             market: self.trader,
-            kinds: KindRoots { asset: k, debt: k, thing: k, commodity: k, measure: k, entity: k },
+            kinds: KindRoots {
+                asset: k,
+                debt: k,
+                thing: k,
+                commodity: k,
+                measure: k,
+                entity: k,
+                claim: k,
+                debt_claim: k,
+            },
             purposes: PurposeRoots { income, spending, capital, transfer },
         };
         let places = self.places.len();

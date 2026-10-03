@@ -104,7 +104,7 @@ impl World<'_> {
             path: self.book.entities[party].path,
             class,
             role: Role::Tab(party),
-            kind: if class == Class::Debt { kinds.debt } else { kinds.asset },
+            kind: if class == Class::Debt { kinds.debt_claim } else { kinds.claim },
             owner,
             shares: Box::default(),
             known_as: Box::default(),
@@ -114,6 +114,13 @@ impl World<'_> {
         let place = self.open_place(tab);
         self.tabs.insert(key, place);
         place
+    }
+
+    /// A tab is a place that holds what is owed, and its kind says so: no reader asks a place for its role.
+    fn say_tabs_are_claims(&mut self) {
+        let kinds = self.book.roots.kinds;
+        self.say(kinds.claim, builtin::CLAIM, true);
+        self.say(kinds.debt_claim, builtin::CLAIM, true);
     }
 
     /// A place that comes to be once the place tree and the facts about it are frozen: the last root of the tree, the last
@@ -432,6 +439,7 @@ pub(crate) fn declare<'a, 's>(
     let painter = Facts::builder(book.holders.len());
     let (tabs, contract_endpoints) = (Tabs::default(), Map::default());
     let mut world = World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints };
+    world.say_tabs_are_claims();
     // What an entity's own declaration says its purpose is, said as a line under it would.
     for (entity, purpose) in entity_purposes {
         world.say(entity, builtin::PURPOSE, purpose.value);

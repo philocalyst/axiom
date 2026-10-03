@@ -1053,38 +1053,20 @@ What you can spend
   Available to spend   58,468.95 USD
 
 Coming in
-  Counterparty  What                     Left  Made        Age      Due         Status
-  ──────────────────────────────────────────────────────────────────────────────────────────
-  brightwave    ^inv-2025-b01    3,200.00 USD  2025-01-02  1y3m14d  2025-02-01  overdue 439d
-  brightwave    ^inv-2025-b02    3,200.00 USD  2025-02-03  1y2m13d  2025-03-05  overdue 407d
-  fernhill      ^inv-2025-f1     4,500.00 USD  2025-02-14  1y2m2d   2025-03-16  overdue 396d
-  brightwave    ^inv-2025-b03    3,200.00 USD  2025-03-03  1y1m13d  2025-04-02  overdue 379d
-  orbit-labs    ^inv-2025-o1     5,500.00 USD  2025-03-03  1y1m13d  2025-04-02  overdue 379d
-  brightwave    ^inv-2025-b04    3,200.00 USD  2025-04-01  1y15d    2025-05-01  overdue 350d
-  brightwave    ^inv-2025-b05    3,200.00 USD  2025-05-01  11m15d   2025-05-31  overdue 320d
-  fernhill      ^inv-2025-f2     2,800.00 USD  2025-05-09  11m7d    2025-06-08  overdue 312d
-  brightwave    ^inv-2025-b06    3,200.00 USD  2025-06-02  10m14d   2025-07-02  overdue 288d
-  delta-rugs    ^inv-2025-d1     3,800.00 USD  2025-06-02  10m14d   2025-07-02  overdue 288d
-  brightwave    ^inv-2025-b07    3,200.00 USD  2025-07-01  9m15d    2025-07-31  overdue 259d
-  northpeak     ^inv-2025-n1     7,400.00 USD  2025-07-07  9m9d     2025-08-06  overdue 253d
-  brightwave    ^inv-2025-b08    3,200.00 USD  2025-08-01  8m15d    2025-08-31  overdue 228d
-  fernhill      ^inv-2025-f3     6,200.00 USD  2025-08-18  7m29d    2025-09-17  overdue 211d
-  brightwave    ^inv-2025-b09    3,200.00 USD  2025-09-02  7m14d    2025-10-02  overdue 196d
-  orbit-labs    ^inv-2025-o2     4,200.00 USD  2025-09-22  6m25d    2025-10-22  overdue 176d
-  brightwave    ^inv-2025-b10    3,200.00 USD  2025-10-01  6m15d    2025-10-31  overdue 167d
-  northpeak     ^inv-2025-n2     5,900.00 USD  2025-10-06  6m10d    2025-11-05  overdue 162d
-  brightwave    ^inv-2025-b11    3,200.00 USD  2025-11-03  5m13d    2025-12-03  overdue 134d
-  fernhill      ^inv-2025-f4     3,100.00 USD  2025-11-12  5m4d     2025-12-12  overdue 125d
-  brightwave    ^inv-2025-b12    3,200.00 USD  2025-12-01  4m15d    2025-12-31  overdue 106d
-  northpeak     ^inv-2025-n3     2,600.00 USD  2025-12-01  4m15d    2025-12-31  overdue 106d
-  brightwave    ^inv-2026-b01    3,200.00 USD  2026-01-02  3m14d    2026-02-01  overdue 74d
-  brightwave    ^inv-2026-b02    3,200.00 USD  2026-02-02  2m14d    2026-03-04  overdue 43d
-  fernhill      ^inv-2026-f1     4,800.00 USD  2026-02-20  1m27d    2026-03-22  overdue 25d
-  brightwave    ^inv-2026-b03    3,200.00 USD  2026-03-02  1m14d    2026-04-01  overdue 15d
-  orbit-labs    ^inv-2026-o1     6,000.00 USD  2026-03-10  1m6d     2026-04-09  overdue 7d
-  brightwave    ^inv-2026-b04    3,200.00 USD  2026-04-01  15d      2026-05-01  in 15d
-  ──────────────────────────────────────────────────────────────────────────────────────────
-  Total                        108,000.00 USD
+  Counterparty  What                    Left  Made        Age      Due         Status
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  fernhill      ^inv-2025-f1    4,500.00 USD  2025-02-14  1y2m2d   2025-03-16  overdue 396d
+  orbit-labs    ^inv-2025-o1    5,500.00 USD  2025-03-03  1y1m13d  2025-04-02  overdue 379d
+  fernhill      ^inv-2025-f2    2,800.00 USD  2025-05-09  11m7d    2025-06-08  overdue 312d
+  fernhill      ^inv-2025-f3    6,200.00 USD  2025-08-18  7m29d    2025-09-17  overdue 211d
+  orbit-labs    ^inv-2025-o2    4,200.00 USD  2025-09-22  6m25d    2025-10-22  overdue 176d
+  fernhill      ^inv-2025-f4    3,100.00 USD  2025-11-12  5m4d     2025-12-12  overdue 125d
+  northpeak     ^inv-2025-n3    2,600.00 USD  2025-12-01  4m15d    2025-12-31  overdue 106d
+  fernhill      ^inv-2026-f1    4,800.00 USD  2026-02-20  1m27d    2026-03-22  overdue 25d
+  orbit-labs    ^inv-2026-o1    6,000.00 USD  2026-03-10  1m6d     2026-04-09  overdue 7d
+  brightwave    ^inv-2026-b04   3,200.00 USD  2026-04-01  15d      2026-05-01  in 15d
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  Total                        42,900.00 USD
 
 What it would take to reach the rest
   Holding                         Liquid in          Value          Cost            Net  Because

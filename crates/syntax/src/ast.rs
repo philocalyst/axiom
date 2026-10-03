@@ -589,12 +589,19 @@ pub enum Policy {
     Hifo,
     /// Every parcel in proportion to what it holds.
     Prorata,
+    /// The parcel that holds exactly what is asked, else the oldest first: how a claim is settled.
+    Exact,
 }
 
 impl Policy {
     /// Every policy, by the word that names it: the one table of them.
-    pub const WORDS: [(&'static str, Policy); 4] =
-        [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
+    pub const WORDS: [(&'static str, Policy); 5] = [
+        ("fifo", Policy::Fifo),
+        ("lifo", Policy::Lifo),
+        ("hifo", Policy::Hifo),
+        ("prorata", Policy::Prorata),
+        ("exact", Policy::Exact),
+    ];
 }
 
 /// How much moves on one side or leg.

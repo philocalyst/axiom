@@ -1,10 +1,11 @@
-//! `why ^CODE`: the flows a code marks and the events that changed their state.
+//! `why ^CODE`: the flows a code marks and the events that changed their state: a check cleared, a claim waived.
 
 use std::collections::BTreeSet;
 
 use axiom_core::glob::glob;
 use axiom_core::{Diagnostic, Sym};
 use axiom_engine::Run;
+use axiom_model::{Amount, Book, ClaimChange};
 
 use super::{event_words, flows_table};
 use crate::history::postings;
@@ -31,10 +32,33 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
         happened.push(Row::new([Cell::Day(event.day), Cell::text(event_words(event.state)), Cell::Source(event.loc)]));
     }
 
+    for (at, change) in book.claim_changes.iter().enumerate() {
+        let mut codes = book.codes[book.txns[change.target].codes].iter().copied();
+        if codes.any(|code| event_visible(code) && marked(code)) {
+            happened.push(waiver(book, run, at, change));
+        }
+    }
+
     if flows.is_empty() && happened.rows.is_empty() {
         let events = book.events.iter().filter(|event| event_visible(event.code)).map(|event| event.code);
         let known: BTreeSet<&str> = visible_codes.iter().copied().chain(events).map(|code| book.name(code)).collect();
         return Err(resolve::nothing_named("code", pattern, known));
     }
     Ok(Report::new(format!("Why ^{pattern}")).with(flows_table(lens, run, &flows, "Flows")).with(happened))
+}
+
+/// A claim written off: the day it was said, and what it forgave.
+fn waiver<'s>(book: &Book<'s>, run: &Run, at: usize, change: &ClaimChange) -> Row<'s> {
+    let forgiven: Vec<String> = run
+        .written_off
+        .iter()
+        .filter(|off| off.change as usize == at)
+        .map(|off| book.show(Amount::new(off.qty, off.unit)).to_string())
+        .collect();
+    let said = if forgiven.is_empty() {
+        "waived, nothing was open".to_string()
+    } else {
+        format!("waived, {} forgiven", forgiven.join(", "))
+    };
+    Row::new([Cell::Day(change.day), Cell::text(said), Cell::Source(change.loc)])
 }

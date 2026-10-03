@@ -125,6 +125,7 @@ pub fn journal_ends_by(book: &Book, day: Day) -> bool {
         && by(book.events.last().map(|event| event.day))
         && by(book.splits.last().map(|split| split.day))
         && by(book.asserts.last().map(|assert| assert.day))
+        && by(book.claim_changes.last().map(|change| change.day))
 }
 
 /// What a place held of one commodity: how many, and, for places that are not

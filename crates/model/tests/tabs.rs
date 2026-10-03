@@ -187,3 +187,26 @@ fn a_loan_whose_lender_is_the_owner_is_refused_and_makes_no_tab() {
     assert_eq!(codes, ["contract-loan-party"]);
     assert_eq!(tabs(&book), []);
 }
+
+#[test]
+fn a_tab_is_a_claim_because_its_kind_says_so_and_not_because_of_its_role() {
+    let text = format!("{PARTIES}2026-01-10 jo owes me 20 USD\n2026-01-11 me owes jo 5 USD\n");
+    with_book(&text, |book| {
+        let kinds = book.roots.kinds;
+        let found = tabs(book);
+        assert_eq!(found.len(), 2);
+        for (tab, _, _, class) in found {
+            let kind = if class == Class::Debt { kinds.debt_claim } else { kinds.claim };
+            assert_eq!(book.places[tab].kind, kind, "{class:?}");
+            assert!(book.is_a(kind, if class == Class::Debt { kinds.debt } else { kinds.asset }));
+            assert_eq!(
+                book.fact(axiom_model::builtin::CLAIM, tab),
+                Some(true),
+                "the kind says `claim`, and the tab says nothing"
+            );
+            assert!(book.is_claim(tab));
+        }
+        let checking = book.place("checking").unwrap();
+        assert!(!book.is_claim(checking), "a place whose kind does not say `claim` is not one");
+    });
+}

@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 use axiom_core::hash::FxHasher;
 use axiom_core::{Arena, Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
 use axiom_model::{
-    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Subject, Value,
+    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Select, Subject, Value,
 };
 
 use crate::assets::Assets;
@@ -23,7 +23,7 @@ use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
 use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
-use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation};
+use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Parcel, Violation, WriteOff};
 
 #[derive(Clone)]
 pub(crate) struct World {
@@ -44,6 +44,14 @@ impl World {
             temporal: TemporalHistory::default(),
         }
     }
+}
+
+/// What a payment from a party settled: the claims it took out of the tab that held them.
+#[derive(Clone, Hash)]
+pub(crate) struct Settled {
+    pub tab: Id<Place>,
+    pub unit: Id<Commodity>,
+    pub parcels: Box<[Parcel]>,
 }
 
 /// Where the assertions on one place and commodity left off.
@@ -72,10 +80,14 @@ pub(crate) struct Record {
     pub computed_basis: Map<Id<Flow>, Qty>,
     /// Statements whose split could not be solved when its first flow landed: said once, and none of its flows posts.
     pub unsolved: Set<Id<axiom_model::Txn>>,
+    /// The claims each flow from a party settled, as the parcels they were: a flow that is returned puts them back.
+    pub settled: Map<Id<Flow>, Settled>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     /// Basis changes caused by timed asset laws and deferred-loss matching.
     pub adjustments: Vec<Adjustment>,
+    /// The claim parcels forgiven by `waived` statements.
+    pub written_off: Vec<WriteOff>,
     pub violations: Vec<Violation>,
     pub pads: Vec<Pad>,
     pub diagnostics: Vec<Diagnostic>,
@@ -143,6 +155,7 @@ impl Record {
             resolved: self.resolved.clone(),
             computed_basis: self.computed_basis.clone(),
             unsolved: self.unsolved.clone(),
+            settled: self.settled.clone(),
             checks: vec![0; self.checks.len()],
             checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),
@@ -196,6 +209,8 @@ pub(crate) struct Scratch {
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.
     pub permits: Vec<(Id<Entity>, bool)>,
+    /// What a flow out of a claim place selects: its written selectors and the claims its own codes name.
+    pub selectors: Vec<Select>,
     /// What each amount of the flow being posted is worth in the base currency
     /// on its day: the totals, the proceeds and the fee each ask, and a price
     /// is looked up once.
@@ -236,6 +251,7 @@ impl Hash for Record {
         unordered(&self.resolved).hash(state);
         unordered(&self.computed_basis).hash(state);
         unordered(&self.unsolved).hash(state);
+        unordered(&self.settled).hash(state);
         unordered(&self.checkpoints).hash(state);
         unordered(&self.headroom).hash(state);
         unordered(&self.waivers).hash(state);

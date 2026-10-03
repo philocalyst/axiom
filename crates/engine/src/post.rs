@@ -21,7 +21,9 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, PurposeRoot, RuntimeTxn, Subject};
+use axiom_model::{
+    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, PurposeRoot, RuntimeTxn, Select, Subject,
+};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -184,19 +186,17 @@ impl Ledger<'_, '_, '_> {
     /// `scratch.relief.slices`.
     fn relieve(&mut self, m: &Motion) {
         let book = self.plan.book;
-        let (unit, source, now) = (m.out.unit, m.source, (m.day, m.txn));
-        let is_base = unit == book.base;
+        let (unit, now) = (m.out.unit, (m.day, m.txn));
         self.scratch.relief.slices.clear();
-        if source.class != Class::Asset {
-            self.world.holdings.credit(m.from, unit, -m.out.qty);
-            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
-            return;
+        if m.source.class != Class::Asset {
+            return self.relieve_balance(m);
         }
         self.ask_ties(m);
+        let named = self.name_claims(m, m.from);
         let request = Request {
             need: m.out.qty,
             money: is_money(self.plan, m.from, unit),
-            selectors: m.select(),
+            selectors: if named { &self.scratch.selectors } else { m.select() },
             // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
             policy: self.plan.traits.place(m.from).select.or(self.plan.traits.unit_select(unit)),
             codes: &book.codes,
@@ -206,6 +206,24 @@ impl Ledger<'_, '_, '_> {
             explain: &|| !self.record.ambiguous.contains(&m.from),
         };
         self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
+        self.account_for_relief(m);
+    }
+
+    /// A source that holds no parcels, a debt or the outside, only a balance: the balance falls by what leaves, less
+    /// what settled a claim, and the value in flight is one fresh slice.
+    fn relieve_balance(&mut self, m: &Motion) {
+        let settled = self.settle_claims(m);
+        self.scratch.relief.slices.clear();
+        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
+        let fresh = fresh_slice(m, m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn));
+        self.scratch.relief.slices.push(fresh);
+    }
+
+    /// What a relief that has been made says: an ambiguous choice, what was missing, and the fresh slice for it.
+    fn account_for_relief(&mut self, m: &Motion) {
+        let book = self.plan.book;
+        let (unit, now) = (m.out.unit, (m.day, m.txn));
+        let is_base = unit == book.base;
         if self.scratch.relief.ambiguous && self.record.ambiguous.insert(m.from) {
             let proceeds = self.realizes(m);
             let diagnostic = explain::ambiguous(book, m, &self.scratch.relief.candidates, proceeds);
@@ -226,6 +244,22 @@ impl Ledger<'_, '_, '_> {
         } else if self.scratch.relief.slices.is_empty() {
             self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
         }
+    }
+
+    /// Lets the codes a flow carries name the claims it settles at `at` (LANGUAGE §7: "those its codes name"): each code
+    /// that a claim there carries joins the selectors in `scratch.selectors`, unless the flow chose by a code or a day
+    /// itself. A code that names no claim there is a label, as it was. Whether there is anything to select by.
+    pub(crate) fn name_claims(&mut self, m: &Motion, at: Id<Place>) -> bool {
+        let book = self.plan.book;
+        let chosen = m.select().iter().any(|select| matches!(select, Select::Code(_) | Select::Range(_)));
+        let slot = self.world.holdings.get(at, m.out.unit);
+        let Some(slot) = slot.filter(|_| self.plan.traits.place(at).claim && !chosen) else { return false };
+        let codes = [m.code_runs.header, m.code_runs.local].into_iter().flat_map(|run| book.codes[run].iter().copied());
+        let named = codes.filter(|&code| slot.carries(code, &book.codes));
+        self.scratch.selectors.clear();
+        self.scratch.selectors.extend(m.select());
+        self.scratch.selectors.extend(named.map(Select::Code));
+        self.scratch.selectors.len() > m.select().len()
     }
 
     /// Learns, for each entity a parcel at the source is tied to, whether its
@@ -391,16 +425,22 @@ impl Ledger<'_, '_, '_> {
         purpose
     }
 
+    /// A target that holds no parcels, a debt or the outside, only a balance: it rises by what arrives, and a payment that
+    /// bounces opens the claims it had settled.
+    fn arrive_balance(&mut self, m: &Motion) {
+        self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
+        self.reopen_claims(m);
+        if m.moves == Moves::Loss {
+            self.keep_basis(m);
+        }
+        self.sample_temporal(m.day);
+    }
+
     /// Lands the slices at the target.
     fn arrive(&mut self, m: &Motion, keeps: bool) {
         let book = self.plan.book;
         if m.target.class != Class::Asset {
-            self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
-            if m.moves == Moves::Loss {
-                self.keep_basis(m);
-            }
-            self.sample_temporal(m.day);
-            return;
+            return self.arrive_balance(m);
         }
         let (stays, restricted) = (stays_with_owner(m), self.restricted_source(m));
         // `for` an entity ties what arrives to it; `for` the owner (or its household) unties it.

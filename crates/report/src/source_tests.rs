@@ -1791,3 +1791,48 @@ fn claims_are_listed_by_whom_they_are_with_and_not_in_the_order_their_tabs_were_
         assert_eq!(parcels, ["ann", "bob", "cy"]);
     });
 }
+
+/// Two claims on one party, one of them written off on a later day.
+const WRITTEN_OFF: &str = "\
+use std
+base USD
+entity me : person
+entity ann : org
+account checking : bank
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
+2026-01-03 ann owes me 200 USD due 2026-02-01 ^i2
+2026-02-15 ^i1 waived \"not collected\"
+";
+
+/// A claim that is written off is no longer owed: `claims` lists what is left, and so does `balance`.
+#[test]
+fn a_written_off_claim_is_not_listed_as_owed_or_counted_in_the_balance() {
+    with_std(WRITTEN_OFF, day(2026, 3, 1), |book, run| {
+        let owed = rows(book, run, Query::Claims { at: None });
+        assert!(owed.iter().any(|row| row.contains("^i2") && row.contains("200.00 USD")), "{owed:?}");
+        assert!(owed.iter().all(|row| !row.contains("^i1")), "{owed:?}");
+        let balance = Query::Balance { globs: vec![], at: None, value: false, monthly: false };
+        assert_eq!(rows(book, run, balance), ["=checking | 1,000.00 USD", "=ann | 200.00 USD"]);
+    });
+}
+
+/// Before the day it is forgiven it is owed, as it was.
+#[test]
+fn a_claim_is_owed_until_the_day_it_is_written_off() {
+    with_std(WRITTEN_OFF, day(2026, 2, 14), |book, run| {
+        let owed = rows(book, run, Query::Claims { at: None });
+        assert!(owed.iter().any(|row| row.contains("^i1") && row.contains("300.00 USD")), "{owed:?}");
+    });
+}
+
+/// `why ^code` lists what happened to the claim, and a waiver is one of the events.
+#[test]
+fn why_a_claims_code_says_the_day_it_was_waived_and_what_was_forgiven() {
+    with_std(WRITTEN_OFF, day(2026, 3, 1), |book, run| {
+        let report = crate::report(book, run, &Query::Why { target: "^i1" }, None).expect("the code names a claim");
+        let events = lines(&report.sections[1]);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(events[0].contains("2026-02-15") && events[0].contains("waived, 300.00 USD forgiven"), "{events:?}");
+    });
+}
