@@ -63,7 +63,8 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
 }
 
 /// `check`: every diagnostic, with the ones found reading the data files a `read` source names between the book's and
-/// the run's, and what nothing recognized in them.
+/// the run's, and what nothing recognized in them. The session folds with the checkpoint that views resume from, which
+/// `check` never reads; it costs about 1% of the fold, and a session that served only `check` would be the one to skip it.
 fn check(session: &Session<'_>, project: &Project, shown: Shown) -> Outcome {
     let mut sources = session.sources().clone();
     let (reader, suggestions) = check_memos(session.book(), project, &mut sources);
