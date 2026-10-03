@@ -150,7 +150,6 @@ fn of_two_claims_that_are_exactly_the_flows_amount_the_older_is_settled() {
 
 /// "those its codes name": `^i3` is named, so 200.00 comes out of it, though `^i2` is exactly 200.00 and `^i1` is the oldest.
 #[test]
-#[ignore = "K3c: a flow's own codes are a label, not a settlement"]
 fn a_code_beats_both_the_exact_amount_and_the_oldest() {
     let lines = format!("{THREE}2026-01-20 owed -> checking 200 USD ^i3\n");
     with_run(&lines, |book, run| {
@@ -160,7 +159,6 @@ fn a_code_beats_both_the_exact_amount_and_the_oldest() {
 
 /// Two codes: the claims they name are the ones that can be settled, oldest first among them.
 #[test]
-#[ignore = "K3c: a flow's own codes are a label, not a settlement"]
 fn several_codes_name_the_claims_that_may_be_settled_and_the_oldest_of_them_goes_first() {
     let lines = format!("{THREE}2026-01-20 owed -> checking 400 USD ^i2 ^i3\n");
     with_run(&lines, |book, run| {

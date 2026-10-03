@@ -659,6 +659,11 @@ impl Slot {
         out.extend(admitted.map(|(at, lot)| Candidate::new(Source::Lot(at), lot, money)));
     }
 
+    /// Whether a lot still held carries `code`: a code a flow writes names a claim here only if one does.
+    pub fn carries(&self, code: Sym, pool: &Arena<Sym>) -> bool {
+        self.holding.lots[self.first..].iter().any(|lot| !lot.qty.is_zero() && carries(lot, code, pool))
+    }
+
     /// How much of the holding the selectors admit: what `all` means.
     pub fn admitted(&self, money: bool, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
         let selection = Selection { selectors, codes };
@@ -799,12 +804,14 @@ impl Selection<'_> {
         let codes = self.selectors.iter().filter_map(|s| if let Select::Code(c) = *s { Some(c) } else { None });
         let (mut ranges, mut codes) = (ranges.peekable(), codes.peekable());
         let in_range = ranges.peek().is_none() || ranges.any(|days| days.contains(lot.acquired));
-        let marked = codes.peek().is_none()
-            || codes.any(|code| {
-                self.codes[lot.codes.header].contains(&code) || self.codes[lot.codes.local].contains(&code)
-            });
+        let marked = codes.peek().is_none() || codes.any(|code| carries(lot, code, self.codes));
         in_range && marked
     }
+}
+
+/// Whether the transaction that made `lot` carries `code`, in its header or on its own line.
+fn carries(lot: &Parcel, code: Sym, pool: &Arena<Sym>) -> bool {
+    pool[lot.codes.header].contains(&code) || pool[lot.codes.local].contains(&code)
 }
 
 impl Candidate {

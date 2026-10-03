@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 use axiom_core::hash::FxHasher;
 use axiom_core::{Arena, Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
 use axiom_model::{
-    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Subject, Value,
+    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Select, Subject, Value,
 };
 
 use crate::assets::Assets;
@@ -193,6 +193,8 @@ pub(crate) struct Scratch {
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.
     pub permits: Vec<(Id<Entity>, bool)>,
+    /// What a flow out of a claim place selects: its written selectors and the claims its own codes name.
+    pub selectors: Vec<Select>,
     /// What each amount of the flow being posted is worth in the base currency
     /// on its day: the totals, the proceeds and the fee each ask, and a price
     /// is looked up once.

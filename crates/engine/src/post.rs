@@ -21,7 +21,7 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, PurposeRoot, RuntimeTxn, Subject};
+use axiom_model::{Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, PurposeRoot, RuntimeTxn, Select, Subject};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -193,10 +193,11 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         self.ask_ties(m);
+        let named = self.name_claims(m);
         let request = Request {
             need: m.out.qty,
             money: is_money(self.plan, m.from, unit),
-            selectors: m.select(),
+            selectors: if named { &self.scratch.selectors } else { m.select() },
             // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
             policy: self.plan.traits.place(m.from).select.or(self.plan.traits.unit_select(unit)),
             codes: &book.codes,
@@ -226,6 +227,22 @@ impl Ledger<'_, '_, '_> {
         } else if self.scratch.relief.slices.is_empty() {
             self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
         }
+    }
+
+    /// Lets the codes a flow carries name the claims it settles (LANGUAGE §7: "those its codes name"): each code that a
+    /// claim at the source carries joins the selectors in `scratch.selectors`, unless the flow chose by a code or a day
+    /// itself. A code that names no claim there is a label, as it was. Whether there is anything to select by.
+    fn name_claims(&mut self, m: &Motion) -> bool {
+        let book = self.plan.book;
+        let chosen = m.select().iter().any(|select| matches!(select, Select::Code(_) | Select::Range(_)));
+        let slot = self.world.holdings.get(m.from, m.out.unit);
+        let Some(slot) = slot.filter(|_| self.plan.traits.place(m.from).claim && !chosen) else { return false };
+        let codes = [m.code_runs.header, m.code_runs.local].into_iter().flat_map(|run| book.codes[run].iter().copied());
+        let named = codes.filter(|&code| slot.carries(code, &book.codes));
+        self.scratch.selectors.clear();
+        self.scratch.selectors.extend(m.select());
+        self.scratch.selectors.extend(named.map(Select::Code));
+        self.scratch.selectors.len() > m.select().len()
     }
 
     /// Learns, for each entity a parcel at the source is tied to, whether its
