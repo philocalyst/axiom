@@ -163,9 +163,28 @@ fn a_slot_a_word_fills_is_not_called_missing_and_one_nothing_fills_still_is() {
 }
 
 #[test]
-fn the_old_spelling_keeps_working_and_has_an_address_too() {
+fn a_book_with_no_account_written_as_an_address_reads_every_reference_as_it_always_did() {
     let text = "account jordan-401k : 401k at fidelity\n  owner jordan\n  employer bluefin\n\
 account me-checking : deposit\nopening 2026-01-01\n  me-checking 10 USD\n2026-01-02 me-checking -> jordan-401k 5 USD\n";
+    clean(text, |book| {
+        let place = book.place("jordan-401k").unwrap();
+        assert!(!book.is_spelled(place));
+        assert!(matches!(book.place("jordan/jordan-401k"), Err(Miss::Unknown { .. })), "no address is asked for");
+    });
+    // A mention that ends in an account's name, or begins with an entity that fills a slot, is a party, as it was.
+    let party = "account bank/rent : deposit\naccount jordan-401k : 401k\n  owner jordan\n\
+opening 2026-01-01\n  bank/rent 10 USD\n2026-01-02 bank/rent -> clients/rent 5 USD\n\
+2026-01-03 bank/rent -> jordan/landlord 5 USD\n";
+    clean(party, |book| {
+        assert!(book.entity("clients/rent").is_ok() && book.entity("jordan/landlord").is_ok());
+    });
+}
+
+#[test]
+fn the_old_spelling_keeps_working_and_has_an_address_too_where_the_book_writes_one_account_as_an_address() {
+    let text = "account jordan-401k : 401k at fidelity\n  owner jordan\n  employer bluefin\n\
+account me/acme/401k at fidelity\naccount me-checking : deposit\nopening 2026-01-01\n  me-checking 10 USD\n\
+2026-01-02 me-checking -> jordan-401k 5 USD\n";
     clean(text, |book| {
         let place = book.place("jordan-401k").unwrap();
         assert!(!book.is_spelled(place));

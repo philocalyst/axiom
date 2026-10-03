@@ -66,6 +66,9 @@ pub(crate) struct Addresses {
     /// The references a journal writes whose meaning no day or home can change, each worked out once, by the text as
     /// written: the account it means. See `World::settle_addresses`.
     once: Map<Sym, Id<Place>>,
+    /// Whether the book writes some account with the entities that fill its slots before its name. A book that does not
+    /// reads every reference as it always did: the index is asked for none, and no mention is kept from being a party.
+    used: bool,
 }
 
 impl Addresses {
@@ -96,7 +99,13 @@ impl Addresses {
                 open: open_days(book, place),
             })
             .collect();
-        Addresses::build(book.entities.len(), book.names.len(), book.places.len(), &accounts)
+        let used = book.places.iter().any(|(place, _)| book.is_spelled(place));
+        Addresses { used, ..Addresses::build(book.entities.len(), book.names.len(), book.places.len(), &accounts) }
+    }
+
+    /// Whether the book writes some account as an address; if it does not, nothing is read as one.
+    pub fn is_used(&self) -> bool {
+        self.used
     }
 
     /// The index of `accounts`, in the order of their places. `entities`, `names` and `places` are how many of each
@@ -130,6 +139,7 @@ impl Addresses {
             address: Groups::build(places, written.into_iter()),
             open,
             once: Map::default(),
+            used: false,
         }
     }
 

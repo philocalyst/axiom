@@ -34,7 +34,9 @@ impl Book<'_> {
     /// The accounts `text` is an address of, on any day, when it is written as one: two words or more, each before the
     /// last an entity. For a setting or a report, which have no line and no home to look the words up from.
     pub(crate) fn address_place(&self, text: &str) -> Found<Place> {
-        let Some((leading, name)) = text.rsplit_once('/') else { return Found::Nothing };
+        let Some((leading, name)) = text.rsplit_once('/').filter(|_| self.lookup.addresses.is_used()) else {
+            return Found::Nothing;
+        };
         let fillers: Result<Vec<Id<Entity>>, _> = leading.split('/').map(|word| self.entity(word)).collect();
         match (fillers, self.names.get(name)) {
             (Ok(fillers), Some(name)) => self.lookup.addresses.resolve(&fillers, name, None),
@@ -53,6 +55,9 @@ impl World<'_> {
         day: Option<Day>,
         reached: Reached,
     ) -> Option<Result<End, Diagnostic>> {
+        if !self.book.lookup.addresses.is_used() {
+            return None;
+        }
         if let Some(place) = self.settled(home, word, reached) {
             return Some(Ok(End { place, entity: None }));
         }
@@ -83,6 +88,9 @@ impl World<'_> {
     /// of the accounts, the entities and the contracts are all declared when this is called, so what it finds is what
     /// each of them would find again, and a hit costs one lookup of the text.
     pub(crate) fn settle_addresses(&mut self) {
+        if !self.book.lookup.addresses.is_used() {
+            return;
+        }
         let mut once = axiom_core::Map::default();
         for text in std::mem::take(&mut self.references) {
             let word = Word { text, loc: axiom_core::Loc::default() };

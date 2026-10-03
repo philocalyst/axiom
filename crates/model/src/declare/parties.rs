@@ -183,34 +183,40 @@ fn of_two_words<'s>(mentioned: &Map<&'s str, Loc>) -> Vec<&'s str> {
 /// What the accounts' declarations say a reference of two words or more may be meant as: the written entities that fill
 /// some account's slots (before its name, after `at`, or as an argument of one of its lines), and the names accounts
 /// are called. A path that begins with one of the first or ends in one of the second is meant as an address: if no
-/// account has it, that is for the lookup to say, and the journal brings no party into being by it.
+/// account has it, that is for the lookup to say, and the journal brings no party into being by it. Only in a book that
+/// writes some account as an address: any other is read as it always was, and its mentions make the parties they made.
 struct Addressed<'s> {
     fillers: Set<&'s str>,
     names: Set<&'s str>,
+    used: bool,
 }
 
 impl<'s> Addressed<'s> {
     fn of(collected: &Collected<'_, 's>, written: &Map<&'s str, Written_<'_, 's>>) -> Addressed<'s> {
-        let (mut fillers, mut names) = (Set::default(), Set::default());
+        let (mut fillers, mut names, mut used) = (Set::default(), Set::default(), false);
+        let is_entity = |&word: &&str| written.contains_key(word) || word == "me";
         for decl in collected.decls_of(DeclKind::Account) {
             let (file, node) = (decl.file(), decl.node);
-            let leading = node.name.0.rsplit_once('/').into_iter().flat_map(|(leading, _)| leading.split('/'));
+            let leading: Vec<&str> =
+                node.name.0.rsplit_once('/').map_or(Vec::new(), |(words, _)| words.split('/').collect());
+            used |= !leading.is_empty() && leading.iter().all(is_entity);
             let lines = file[node.props].iter().flat_map(|line| file[line.args].iter());
             let args = lines.filter_map(|&arg| match file.exprs[arg].kind {
                 ExprKind::Name(name) => Some(name.0),
                 _ => None,
             });
-            let named = leading.chain(node.at.map(|at| at.0)).chain(args);
-            fillers.extend(named.filter(|&word| written.contains_key(word) || word == "me"));
+            let named = leading.into_iter().chain(node.at.map(|at| at.0)).chain(args);
+            fillers.extend(named.filter(is_entity));
             names.extend(node.name.0.rsplit('/').next());
         }
-        Addressed { fillers, names }
+        Addressed { fillers, names, used }
     }
 
     /// Whether a path of two words or more begins with a filler or ends in an account's name.
     fn is_an_address(&self, path: &str) -> bool {
-        path.split_once('/').is_some_and(|(first, _)| self.fillers.contains(first))
-            || path.rsplit_once('/').is_some_and(|(_, last)| self.names.contains(last))
+        self.used
+            && (path.split_once('/').is_some_and(|(first, _)| self.fillers.contains(first))
+                || path.rsplit_once('/').is_some_and(|(_, last)| self.names.contains(last)))
     }
 }
 
