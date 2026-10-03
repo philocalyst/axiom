@@ -370,7 +370,9 @@ fn total_of(total: Option<ResolvedQuantity>) -> Total {
         Some(Quantity::Amount(Expr::Literal(amount)) | Quantity::Pending(Expr::Literal(amount))) => {
             Total::Is(Remaining { out: amount, arrive: amount })
         }
-        Some(Quantity::Amount(Expr::Computed(_)) | Quantity::Pending(Expr::Computed(_))) => Total::Later,
+        Some(Quantity::Amount(Expr::Computed(_)) | Quantity::Pending(Expr::Computed(_)) | Quantity::All(_)) => {
+            Total::Later
+        }
         _ => Total::Nothing,
     }
 }
@@ -384,6 +386,7 @@ fn lower_split_flow<'s>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let (cx, written) = (&txn.cx, txn.flow);
+    let said = diags.len();
     let stated = stated_total(source, written);
     let base = staged.book.base;
     let total = stated.and_then(|(quantity, side)| resolve_quantity(staged, cx, quantity, base, side, diags));
@@ -407,7 +410,10 @@ fn lower_split_flow<'s>(
     let header = Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) };
     let group = Made { header, side: source.side, legs: made.legs.into_boxed_slice(), items };
     let flows = staged.flows();
-    let settled = balance::settle(&mut staged.book, &group, flows, total_of(total), cx.loc);
+    // A leg or a total that failed to lower is not there to add up, and what is missing would be what the split is
+    // short of: the error already said is the one to read.
+    let total = if diags.len() == said { total_of(total) } else { Total::Later };
+    let settled = balance::settle(&mut staged.book, &group, flows, total, cx.loc);
     built.keep(group, settled, diags);
 }
 
@@ -439,7 +445,14 @@ impl<'s> Split<'_, 's> {
         let quantity = resolve_quantity(staged, cx, leg.amount, unit, side.other(), diags)?;
         let at = staged.flows().len();
         let basis = tail.basis_root;
-        let (out, arrive) = (quantity.amount, quantity.amount);
+        // A leg written in another commodity than the total is the exchange of what the others leave: it keeps the
+        // amount it says on its own side, and the source's side is the solver's to say.
+        let exchange = self.total.is_some() && quantity.infer == Infer::Known && quantity.amount.unit != unit;
+        let (out, arrive) = match (exchange, source_is_from) {
+            (false, _) => (quantity.amount, quantity.amount),
+            (true, true) => (Amount::zero(unit), quantity.amount),
+            (true, false) => (quantity.amount, Amount::zero(unit)),
+        };
         let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
         let codes = Codes { header: self.txn.codes, local: leg_codes };
         let flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags)?;

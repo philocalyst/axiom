@@ -20,14 +20,14 @@ use crate::journal::Flow;
 use crate::law::Fault;
 use crate::problem::{self, Unbalanced};
 use crate::solve::{Bear, Draw, Drawn, Failed, Line, LiteralEnv, Remainder, Remaining, Solved, solve};
-use crate::split::{Cut, Expr, Heading, Item, Made, Sign};
+use crate::split::{Cut, Expr, FlowSide, Heading, Item, Made, Part, Sign};
 
 /// What a statement's header says it moves.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Total {
-    /// It says no amount, or one that is the book's to say (`=`, `all`, `?`): the parts are what they are.
+    /// It says no amount, or one that is the book's to say (`=`, `?`): the parts are what they are.
     Nothing,
-    /// It says an amount the fold computes.
+    /// It says an amount the fold computes or reads: an expression, or `all`.
     Later,
     /// It says this.
     Is(Remaining),
@@ -51,7 +51,13 @@ impl Statement<'_> {
             .group
             .legs
             .iter()
-            .map(|leg| Draw { part: leg.part, side, unit: self.flows[leg.flow as usize].out.unit })
+            .map(|leg| {
+                let flow = &self.flows[leg.flow as usize];
+                // A leg in another commodity than the total is the exchange of what the others leave: its own amount is
+                // the flow's already, and what is asked is the remainder it is exchanged for.
+                let part = if flow.is_exchange() { Part::Rest } else { leg.part };
+                Draw { part, side, unit: flow.out.unit }
+            })
             .collect();
         // An exchange has two amounts and an item is carved from neither: its costs are the fold's, as they always were.
         let carves = header.is_some_and(|header| header.out.unit == header.arrive.unit);
@@ -99,11 +105,15 @@ impl Statement<'_> {
 
     fn unbalanced(&self, solved: &Solved) -> Option<Unbalanced> {
         let left = solved.header?.of(self.group.takes_from()).qty.0;
-        let rest =
-            solved.legs.iter().find_map(|drawn| if let Drawn::Rest(rest) = drawn { Some(rest.qty.0) } else { None });
+        let rest = self.group.legs.iter().zip(solved.legs.iter()).find_map(|(leg, drawn)| match drawn {
+            Drawn::Rest(rest) => Some((rest.qty.0, self.flows[leg.flow as usize].is_exchange())),
+            _ => None,
+        });
         match (self.group.header, rest) {
             (Heading::Flow(_), _) => (left < 0).then_some(Unbalanced::Over),
-            (Heading::Source { .. }, Some(rest)) => (rest < 0).then_some(Unbalanced::Over),
+            (Heading::Source { .. }, Some((rest, _))) if rest < 0 => Some(Unbalanced::Over),
+            (Heading::Source { .. }, Some((0, true))) => Some(Unbalanced::Unfunded),
+            (Heading::Source { .. }, Some(_)) => None,
             (Heading::Source { .. }, None) => match left {
                 0 => None,
                 left if left > 0 => Some(Unbalanced::Short),
@@ -127,6 +137,29 @@ impl Statement<'_> {
             }
             _ => problem::split_overflow(self.loc),
         }
+    }
+}
+
+impl Statement<'_> {
+    /// Why two legs want the remainder: where the second is.
+    pub fn two_remainders(&self, book: &Book<'_>, header: Option<Remaining>, at: Line) -> Diagnostic {
+        let loc = match at {
+            Line::Leg(index) => self.flows[self.group.legs[index].flow as usize].loc,
+            Line::Item(_) | Line::Header(_) => self.loc,
+        };
+        let total = header.map_or_else(String::new, |header| book.show(header.of(self.group.takes_from())).to_string());
+        problem::split_remainders(loc, (self.loc, &total))
+    }
+}
+
+/// What a leg's flow moves when the leg takes `amount` of the header: that on both sides, or, for a leg in another
+/// commodity than the total (the exchange of what the others leave), on the source's side alone, because the leg's own
+/// amount, on its own side `own`, is what it was written as.
+pub fn moved(flow: &Flow, own: FlowSide, amount: Amount) -> (Amount, Amount) {
+    match (flow.is_exchange(), own) {
+        (false, _) => (amount, amount),
+        (true, FlowSide::Out) => (flow.out, amount),
+        (true, FlowSide::Arrive) => (amount, flow.arrive),
     }
 }
 
@@ -176,7 +209,7 @@ pub fn settle(
             Ok(solved) => solved,
             Err(Failed::Env(never)) => match never {},
             Err(Failed::Fault { at, fault }) => return Err(statement.fault(book, header, at, fault)),
-            Err(Failed::TwoRests { at }) => return Err(statement.fault(book, header, at, Fault::Overflow)),
+            Err(Failed::TwoRests { at }) => return Err(statement.two_remainders(book, header, at)),
         };
         if !solved.exact {
             return Ok(Settled::Open);
@@ -204,7 +237,7 @@ fn put(book: &mut Book<'_>, group: &Made, first: Id<Flow>, solved: &Solved) {
             Drawn::Omitted => continue,
         };
         let flow = &mut book.flows[at(leg.flow)];
-        (flow.out, flow.arrive) = (amount, amount);
+        (flow.out, flow.arrive) = moved(flow, group.takes_from(), amount);
     }
     for (item, amount) in group.items.iter().zip(solved.items.iter()) {
         if let (Some(offset), Some(amount)) = (item.flow, *amount) {

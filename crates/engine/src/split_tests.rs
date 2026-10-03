@@ -72,9 +72,13 @@ fn moves(book: &Book, run: &Run) -> Vec<String> {
         let place = |id| book.name(book.places[id].path).rsplit('/').next().unwrap_or_default();
         let purpose =
             flow.purpose.map_or(String::new(), |said| format!(" #{}", book.name(book.purposes[said.purpose].name)));
-        let amount = |qty| book.show(Amount::new(qty, flow.out.unit));
-        let shown =
-            if out == arrive { amount(out).to_string() } else { format!("{} out, {} in", amount(out), amount(arrive)) };
+        let (gave, got) =
+            (book.show(Amount::new(out, flow.out.unit)), book.show(Amount::new(arrive, flow.arrive.unit)));
+        let shown = if flow.out.unit == flow.arrive.unit && out == arrive {
+            gave.to_string()
+        } else {
+            format!("{gave} out, {got} in")
+        };
         said.push(format!("{} -> {} {shown}{purpose}", place(flow.from), place(flow.to)));
     }
     said
@@ -82,10 +86,14 @@ fn moves(book: &Book, run: &Run) -> Vec<String> {
 
 /// What `place` holds, in whole cents.
 fn cents(book: &Book, run: &Run, place: &str) -> i64 {
-    let (place, usd) = (book.place(place).unwrap(), book.commodity("USD").unwrap());
+    holds(book, run, place, "USD")
+}
+
+fn holds(book: &Book, run: &Run, place: &str, unit: &str) -> i64 {
+    let (place, unit) = (book.place(place).unwrap(), book.commodity(unit).unwrap());
     run.holdings
         .iter()
-        .find(|holding| holding.place == place && holding.unit == usd)
+        .find(|holding| holding.place == place && holding.unit == unit)
         .map_or(0, |holding| holding.qty().0)
 }
 
@@ -325,14 +333,27 @@ fn legs_that_take_more_than_the_total_leave_a_negative_remainder_and_are_an_erro
 }
 
 #[test]
-fn a_leg_in_another_commodity_than_the_total_cannot_add_to_it() {
+fn a_leg_in_another_commodity_and_a_remainder_both_want_what_the_others_leave_and_are_an_error() {
     let lines = "\
 2026-03-14 checking 100 USD ->
   shop 40 EUR
   savings ...
 ";
-    let diagnostics = built(lines);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.is_error()), "{diagnostics:?}");
+    let said = imbalances(lines);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].message.contains("two legs"), "{}", said[0].message);
+}
+
+#[test]
+fn an_exchange_leg_with_nothing_left_to_exchange_is_an_error() {
+    let lines = "\
+2026-03-14 checking 100 USD ->
+  shop 100 USD
+  savings 90 EUR
+";
+    let said = imbalances(lines);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].message.contains("nothing is left"), "{}", said[0].message);
 }
 
 #[test]
@@ -342,6 +363,19 @@ fn items_that_take_more_than_their_header_are_an_error() {
   150 USD #fun
 ";
     assert_eq!(imbalances(lines).len(), 1);
+}
+
+#[test]
+fn a_leg_that_cannot_be_read_is_the_error_and_the_split_is_not_judged_short_of_it() {
+    let lines = "\
+2026-03-14 checking 100 USD ->
+  groceries 40 USD
+  shop 30 USD
+  acme 30 USD
+";
+    let diagnostics = built(lines);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "unknown-entity"), "{diagnostics:?}");
+    assert!(imbalances(lines).is_empty(), "{diagnostics:?}");
 }
 
 #[test]
@@ -358,6 +392,72 @@ fn a_split_that_adds_up_is_not_an_error() {
   savings 10 USD
 ";
     assert!(imbalances(lines).is_empty());
+}
+
+#[test]
+fn a_leg_in_another_commodity_is_the_exchange_of_what_the_others_leave() {
+    // README of example 08: `girokonto 900 EUR ->` with a fee leg and a USD leg. 5.00 USD is the fee, and what is left of
+    // the 900.00 USD is exchanged for the 800.00 EUR the leg says.
+    let lines = "\
+2026-03-14 checking 900 USD ->
+  shop 5 USD
+  savings 800 EUR
+";
+    with_run(lines, |book, run| {
+        assert_eq!(
+            moves(book, run),
+            ["checking -> shop 5.00 USD", "checking -> savings 895.00 USD out, 800.00 EUR in"]
+        );
+        assert_eq!(cents(book, run, "checking"), 10_000);
+        assert_eq!(holds(book, run, "savings", "EUR"), 80_000);
+        assert_eq!(cents(book, run, "savings"), 50_000);
+    });
+}
+
+#[test]
+fn an_exchange_leg_of_a_total_the_fold_computes_is_exchanged_for_what_is_left_of_it_then() {
+    let lines = "\
+2026-03-14 checking 50% of 1_800 USD ->
+  shop 5 USD
+  savings 800 EUR
+";
+    with_run(lines, |book, run| {
+        assert_eq!(
+            moves(book, run),
+            ["checking -> shop 5.00 USD", "checking -> savings 895.00 USD out, 800.00 EUR in"]
+        );
+        assert_eq!(cents(book, run, "checking"), 10_000);
+    });
+}
+
+#[test]
+fn an_exchange_leg_into_the_source_of_a_split_that_arrives_takes_the_remainder_the_other_way() {
+    let lines = "\
+2026-03-14 -> checking 900 USD
+  shop 5 USD
+  savings 800 EUR
+";
+    with_run(lines, |book, run| {
+        assert_eq!(
+            moves(book, run),
+            ["shop -> checking 5.00 USD", "savings -> checking 800.00 EUR out, 895.00 USD in"]
+        );
+    });
+}
+
+#[test]
+fn an_all_header_is_everything_its_source_holds_and_the_remainder_is_what_the_legs_leave() {
+    // `SOURCE := [END [SELECT]] [AMOUNT | all [UNIT]]`: savings holds 500.00, which is the total.
+    let lines = "\
+2026-03-14 savings all ->
+  checking 60 USD
+  shop ...
+";
+    with_run(lines, |book, run| {
+        assert_eq!(moves(book, run), ["savings -> checking 60.00 USD", "savings -> shop 440.00 USD"]);
+        assert_eq!(cents(book, run, "savings"), 0);
+        assert_eq!(cents(book, run, "checking"), 106_000);
+    });
 }
 
 #[test]

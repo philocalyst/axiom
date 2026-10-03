@@ -489,6 +489,8 @@ pub(crate) enum Unbalanced {
     Short,
     /// The parts take more than there is.
     Over,
+    /// The parts take all of it, and a leg in another commodity has nothing left to be exchanged for.
+    Unfunded,
 }
 
 /// A split whose parts cannot add up to what it says it moves: `parts` are what takes from it, each where it is
@@ -510,6 +512,10 @@ pub(crate) fn split_imbalance(
             format!("the {what} of this split take {taken}, and its total is only {total}"),
             "take less, or raise the total",
         ),
+        Unbalanced::Unfunded => (
+            format!("the {what} of this split take {taken} of its total of {total}, and nothing is left to exchange"),
+            "take less of the total for the others, or write the leg in the commodity of the total",
+        ),
     };
     let mut diagnostic =
         Diagnostic::error("split-imbalance", message).label(loc, format!("the total is {total}")).help(help);
@@ -526,6 +532,16 @@ pub(crate) fn split_unit(leg: Loc, found: &str, header: (Loc, &str)) -> Diagnost
         .label(leg, "a leg takes from the total in the total's commodity")
         .context(loc, format!("the total is {total}"))
         .help("write the leg in the commodity of the total, or leave the total out")
+}
+
+/// Two legs that both take what the others leave: `...`, or a leg in another commodity than the total, which is the
+/// exchange of it.
+pub(crate) fn split_remainders(leg: Loc, header: (Loc, &str)) -> Diagnostic {
+    let (loc, total) = header;
+    Diagnostic::error("split-imbalance", "two legs of this split take what the others leave")
+        .label(leg, "this leg wants the remainder as well")
+        .context(loc, format!("the total is {total}"))
+        .help("a split has one remainder: `...`, or the one leg in another commodity")
 }
 
 /// Amounts of a split too large to be added: no total can be said of them.

@@ -13,9 +13,9 @@
 
 use axiom_core::{Day, Diagnostic, Id, Qty, Run};
 use axiom_model::{
-    Amount, Answer, Book, Cut, Drawn, End, Env, Expr, Failed, Fault, Flow, FlowExpressions, Heading, Infer, Item, Line,
-    Made, Program, PurposeRoot, Quantity, Remainder, Remaining, Resolved, RuntimeTxn, Sign, Statement, Txn, Value,
-    solve,
+    Amount, Answer, Book, Cut, Drawn, End, Env, Expr, Failed, Fault, Flow, FlowExpressions, FlowSide, Heading, Infer,
+    Item, Line, Made, Program, PurposeRoot, Quantity, Remainder, Remaining, Resolved, RuntimeTxn, Sign, Statement, Txn,
+    Value, solve,
 };
 
 use crate::Cause;
@@ -168,7 +168,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             Ok(solved) => solved,
             Err(Failed::Env(problem)) => return Err(problem),
             Err(Failed::Fault { at, fault }) => return Err(statement.fault(book, header, at, fault)),
-            Err(Failed::TwoRests { at }) => return Err(statement.fault(book, header, at, Fault::Overflow)),
+            Err(Failed::TwoRests { at }) => return Err(statement.two_remainders(book, header, at)),
         };
         if let Some(problem) =
             header.filter(|_| solved.exact).and_then(|header| statement.imbalance(book, header, &solved))
@@ -183,11 +183,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 Drawn::Omitted => continue,
             };
             let flow = &book.flows[at(leg.flow)];
-            if amount.unit != flow.out.unit {
+            let (out, arrive) = axiom_model::balance::moved(flow, group.takes_from(), amount);
+            if (out.unit, arrive.unit) != (flow.out.unit, flow.arrive.unit) {
                 let fault = Fault::UnitMismatch { found: amount.unit, expected: flow.out.unit };
                 return Err(statement.fault(book, header, Line::Leg(index), fault));
             }
-            self.record.resolved.insert(at(leg.flow), said(amount));
+            self.record.resolved.insert(at(leg.flow), Amounts { out: out.qty, arrive: arrive.qty });
         }
         for (item, amount) in group.items.iter().zip(solved.items.iter()) {
             if let (Some(offset), Some(amount)) = (item.flow, *amount) {
@@ -234,8 +235,20 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 flow.day = day;
                 Some(counted(self.amount_of(at(0), &flow, program, root, day)?))
             }
+            Some(Quantity::All(_)) => self.all_of(&statement, day),
             _ => None,
         })
+    }
+
+    /// A split header's `all`: everything its source holds, which the way its first leg's flow leaves the source says
+    /// how to read (the unit, the parcels it selects).
+    fn all_of(&mut self, statement: &Statement<'_>, day: Day) -> Option<Remaining> {
+        let leg = statement.group.legs.first().filter(|_| statement.group.side == FlowSide::Out)?;
+        let mut flow = statement.flows[leg.flow as usize].clone();
+        flow.day = day;
+        let held = self.everything(&flow, Amounts::written(&flow));
+        let amount = Amount::new(held.out, flow.out.unit);
+        Some(Remaining { out: amount, arrive: amount })
     }
 }
 
