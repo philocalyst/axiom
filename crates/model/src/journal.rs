@@ -126,12 +126,6 @@ pub struct RuntimeFlow {
 }
 
 impl RuntimeFlow {
-    pub fn source(flow: Flow) -> RuntimeFlow {
-        let txn =
-            RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
-        RuntimeFlow { txn, flow, detail: None, ordinal: 0 }
-    }
-
     pub fn source_at(flow: Flow, ordinal: u32) -> RuntimeFlow {
         let txn =
             RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");

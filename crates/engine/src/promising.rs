@@ -25,9 +25,9 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use axiom_core::{Day, Diagnostic, Id, Loc};
+use axiom_core::{Arena, Day, Diagnostic, Id, Loc};
 use axiom_model::promise::{Promises, Residual};
-use axiom_model::{Contract, ScheduleKind, Txn};
+use axiom_model::{Contract, RuntimeDetail, RuntimeFlow, ScheduleKind, Txn};
 
 use crate::ledger::{Ledger, Upcoming};
 use crate::monitor::stream_key;
@@ -224,22 +224,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     }
 
     /// Makes the occurrence into flows (`instantiate_occurrence`) and posts them on `day`, the day a line kept it or
-    /// the day it falls due, keeping them in the record for whoever reads what was made. Said where it came from by
-    /// `source`: the line that wrote it, or none.
+    /// the day it falls due. Said where it came from by `source`: the line that wrote it, or none.
     fn post_occurrence(
         &mut self,
         occurrence: Occurrence,
         source: Option<Id<Txn>>,
         day: Day,
     ) -> Result<OccurrenceOutput, TemplateError> {
-        // Reuse pools between occurrences. Taking them from Scratch keeps the materializer borrow disjoint from the
-        // mutable posting path.
-        let mut flows = std::mem::take(&mut self.scratch.runtime_flows);
-        let mut details = std::mem::take(&mut self.scratch.runtime_details);
-        let mut missing = std::mem::take(&mut self.scratch.missing_inputs);
-        flows.clear();
-        details.truncate(0);
-        missing.clear();
+        let (mut flows, mut details, mut missing) = self.scratch.take_pools();
         let Occurrence { contract, schedule, ordinal, due } = occurrence;
         let made = self.instantiate_occurrence(
             contract,
@@ -251,31 +243,41 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             &mut details,
             &mut missing,
         );
-        let book = self.plan.book;
         let output = made.map(|made| {
-            let flow_start = self.record.promised_flows.len();
-            let missing_start = self.record.promise_missing_inputs.len();
-            for runtime in made.flows(&flows).unwrap_or_default() {
-                let mut retained = runtime.clone();
-                if let Some(detail) = runtime.detail.and_then(|id| details.get(id).copied()) {
-                    retained.detail = Some(self.record.promise_runtime_details.push(detail));
-                }
-                self.record.promised_flows.push(retained);
-                let cause = source.map_or_else(|| self.applied(), Cause::Transaction);
-                let view = book.runtime_flow_view(runtime, &details);
-                let amounts = Amounts::written(&runtime.flow);
-                self.post(&Motion::from_view_at(book, view, runtime.txn, cause, day, amounts, runtime.ordinal));
-            }
-            self.record.promise_missing_inputs.extend_from_slice(made.missing(&missing).unwrap_or_default());
-            OccurrenceOutput {
-                flows: PromisedFlows::of(flow_start..self.record.promised_flows.len()),
-                missing_inputs: OmittedInputs::of(missing_start..self.record.promise_missing_inputs.len()),
-            }
+            let (made_flows, omitted) = (made.flows(&flows), made.missing(&missing));
+            self.post_made(made_flows.unwrap_or_default(), &details, omitted.unwrap_or_default(), source, day)
         });
-        self.scratch.runtime_flows = flows;
-        self.scratch.runtime_details = details;
-        self.scratch.missing_inputs = missing;
+        self.scratch.give_pools(flows, details, missing);
         output
+    }
+
+    /// Posts the flows an occurrence made, and keeps them in the record for whoever reads what was made.
+    fn post_made(
+        &mut self,
+        flows: &[RuntimeFlow],
+        details: &Arena<RuntimeDetail>,
+        omitted: &[u16],
+        source: Option<Id<Txn>>,
+        day: Day,
+    ) -> OccurrenceOutput {
+        let book = self.plan.book;
+        let (flow_start, missing_start) = (self.record.promised_flows.len(), self.record.promise_missing_inputs.len());
+        for runtime in flows {
+            let mut retained = runtime.clone();
+            if let Some(detail) = runtime.detail.and_then(|id| details.get(id).copied()) {
+                retained.detail = Some(self.record.promise_runtime_details.push(detail));
+            }
+            self.record.promised_flows.push(retained);
+            let cause = source.map_or_else(|| self.applied(), Cause::Transaction);
+            let amounts = Amounts::written(&runtime.flow);
+            let view = book.runtime_flow_view(runtime, details);
+            self.post(&Motion::from_view_at(book, view, runtime.txn, cause, day, amounts, runtime.ordinal));
+        }
+        self.record.promise_missing_inputs.extend_from_slice(omitted);
+        OccurrenceOutput {
+            flows: PromisedFlows::of(flow_start..self.record.promised_flows.len()),
+            missing_inputs: OmittedInputs::of(missing_start..self.record.promise_missing_inputs.len()),
+        }
     }
 }
 
@@ -410,6 +412,16 @@ opening 2026-01-01
     }
 
     #[test]
+    fn a_step_does_not_go_past_the_horizon() {
+        with_book(&rent("", ""), |book| {
+            let plan = Plan::new(book);
+            let mut ledger = promising(&plan, "2026-03-15", "2026-04-30");
+            assert!(ledger.promise_through(parse("2026-12-31")).is_some(), "04-15 is inside it");
+            assert!(ledger.promise_through(parse("2026-12-31")).is_none(), "05-15 is not");
+        });
+    }
+
+    #[test]
     fn one_step_posts_the_next_occurrence_after_the_journal_facts_before_it() {
         let journal = "2026-05-10 checking -> shop 50.00 USD\n";
         with_book(&rent("", journal), |book| {
@@ -451,6 +463,35 @@ opening 2026-01-01
                 planned(&ledger),
                 [("2026-02-01".into(), 1), ("2026-03-01".into(), 2), ("2026-04-01".into(), 3)]
             );
+        });
+    }
+
+    #[test]
+    fn an_occurrence_that_cannot_be_made_is_recorded_with_its_error_and_the_stream_goes_on() {
+        // The index the escalation reads begins after the contract does, so none of its occurrences can be made.
+        let text = format!(
+            "{PRELUDE}param cpi\n  2026-12-01 100\ncontract rent with landlord\n  100.00 USD monthly on 15 from checking\n  from 2026-01-15\n  indexed to cpi yearly\n"
+        );
+        with_book(&text, |book| {
+            let plan = Plan::new(book);
+            let mut ledger = promising(&plan, "2026-11-20", "2027-02-28");
+            ledger.advance(parse("2027-02-28"));
+            let recorded = ledger.recorded();
+            let made: Vec<_> =
+                recorded.planned.iter().map(|planned| (planned.due.to_string(), planned.made.is_ok())).collect();
+            assert_eq!(
+                made,
+                [
+                    ("2026-12-15".to_string(), false),
+                    ("2027-01-15".to_string(), false),
+                    ("2027-02-15".to_string(), false)
+                ]
+            );
+            assert!(matches!(
+                recorded.planned[1].made,
+                Err(crate::TemplateError::Forecast(axiom_model::ForecastError::MissingIndex { .. }))
+            ));
+            assert_eq!(checking(book, &ledger), Qty(100_000), "nothing was posted");
         });
     }
 

@@ -10,6 +10,7 @@ use axiom_engine::{Checkpoint, Ledger, Options, Plan, Run};
 use axiom_model::Book;
 
 use crate::closings;
+use crate::forecast::Past;
 use crate::lens::{Lens, Whose};
 use crate::resolve;
 use crate::{FlowBy, Query, Report, SourceProvider};
@@ -99,8 +100,9 @@ impl<'b, 's> Context<'b, 's> {
     /// The forecast from the stored pre-close state, over `paths` simulated futures.
     fn forecast(&self, until: Option<Day>, paths: u32) -> Report<'b> {
         let effects = &self.run.effects[..self.effects_prefix_len];
-        let lens = self.lens(self.run.today);
-        super::forecast::view_from(&self.plan, &self.checkpoint, &self.run, effects, lens, self.relaxed, until, paths)
+        let past = Past::Checkpoint { at: &self.checkpoint, effects };
+        let options = Options { today: self.run.today, relaxed: self.relaxed };
+        super::forecast::view(past, &self.run, self.lens(self.run.today), options, until, paths)
     }
 
     /// Resolves source-backed `why FILE:LINE` queries through the client's

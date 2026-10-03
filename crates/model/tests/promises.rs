@@ -301,12 +301,23 @@ contract car-loan with bank
 ";
     with_book(text, |book| {
         let loan = book.contract("car-loan").unwrap();
-        let ever = window(day(2026, 1, 1), day(2030, 1, 1));
-        let owed: Vec<_> = book.promises.expected(loan, ScheduleKind::Regular, ever).collect();
+        let every = book.promises.of(loan).regular.unwrap().every;
+        // What a stream still owes from `day` on: its residual walked to the end.
+        let owed_from = |day| {
+            let mut residual = Residual::starting_at(&book.promises, every, day);
+            let mut owed = Vec::new();
+            while let Some(due) = residual.next() {
+                owed.push((residual.ordinal(), due));
+                residual.advance(&book.promises);
+            }
+            owed
+        };
         let first = book.promises.schedule(loan, ScheduleKind::Regular).unwrap().ordinal(day(2026, 2, 1)).unwrap();
-        assert_eq!(owed, [(first, day(2026, 2, 1)), (first + 1, day(2026, 3, 1)), (first + 2, day(2026, 4, 1))]);
-        let later = window(day(2026, 3, 1), day(2030, 1, 1));
-        assert_eq!(book.promises.expected(loan, ScheduleKind::Regular, later).count(), 2);
+        assert_eq!(
+            owed_from(day(2026, 1, 1)),
+            [(first, day(2026, 2, 1)), (first + 1, day(2026, 3, 1)), (first + 2, day(2026, 4, 1))]
+        );
+        assert_eq!(owed_from(day(2026, 3, 1)).len(), 2);
     });
 }
 

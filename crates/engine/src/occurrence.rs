@@ -181,7 +181,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// Materializes one scheduled contract occurrence into caller-owned pools.
     /// Journaled and forecast occurrences use this same path; grouped header,
     /// split-leg, and item order is preserved, and an omitted input suppresses
-    /// only the template component whose expression reads it.
+    /// only the template component whose expression reads it. The fold asks it
+    /// for the occurrences it posts; it is public for the oracle of
+    /// `docs/v5/measure/promises`, which asks it for days nothing falls due on.
     pub fn instantiate_occurrence(
         &mut self,
         contract_id: Id<Contract>,

@@ -37,7 +37,7 @@ pub use reckon::{Proration, Reckoning, Recognition};
 pub use residual::Residual;
 pub use schedule::{Keep, Nearest, Sched, Schedule, Skip};
 
-use axiom_core::{Arena, Cadence, Day, DaySet, Days, Dues, Id, On, Run, Span};
+use axiom_core::{Arena, Cadence, DaySet, Days, Dues, Id, On, Run, Span};
 
 use crate::book::{Book, Contract, Entity, ScheduleKind, Terms};
 use crate::split::FlowSide;
@@ -223,39 +223,6 @@ impl Promises {
         let stream = self.get(contract)?.regular?;
         let Term::Every { body, .. } = self.term(stream.every) else { return None };
         self.annuity_of(body).map(|annuity| self.annuity(annuity))
-    }
-
-    /// The occurrences a stream expects in `window`, each with its ordinal: the days it owes there, and of a loan's
-    /// stream only its payments, from the first after the loan was made to the last.
-    pub fn expected(
-        &self,
-        contract: Id<Contract>,
-        kind: ScheduleKind,
-        window: Days,
-    ) -> impl Iterator<Item = (u32, Day)> + '_ {
-        let schedule = self.schedule(contract, kind);
-        let payments = schedule.map_or(0..0, |schedule| self.payments(contract, &schedule));
-        let first = schedule
-            .zip(window.intersect(self.of_life(contract)))
-            .map(|(schedule, window)| (schedule.before(window.first()), schedule, window));
-        let days = first.into_iter().flat_map(|(from, schedule, window)| (from..).zip(schedule.days(window)));
-        days.skip_while(move |(ordinal, _)| *ordinal < payments.start)
-            .take_while(move |(ordinal, _)| *ordinal < payments.end)
-    }
-
-    /// The ordinals a contract's regular schedule owes: all of them, or a loan's payments.
-    fn payments(&self, contract: Id<Contract>, schedule: &schedule::Sched<'_>) -> std::ops::Range<u32> {
-        match self.loan(contract).filter(|_| schedule.kind() == ScheduleKind::Regular) {
-            Some(loan) => {
-                let began = schedule.before(Day(loan.begins().0.saturating_add(1)));
-                began..began.saturating_add(loan.periods())
-            }
-            None => 0..u32::MAX,
-        }
-    }
-
-    fn of_life(&self, contract: Id<Contract>) -> Days {
-        self.get(contract).map_or(Days::on(Day::MIN), |promise| promise.life)
     }
 
     fn promise(&mut self, contract: &Contract) -> Promise {
