@@ -259,6 +259,14 @@ fn a_payment_that_carries_the_code_of_a_claim_settles_that_claim() {
     });
 }
 
+/// A code written on a line item of the payment is the code of that item's flow, and names its claim as the header's does.
+#[test]
+fn a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles() {
+    with_run(&paid("2026-01-20 ann -> checking 400 USD\n  100 USD ^i3"), |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i2", 100_00), ("i3", 200_00)]));
+    });
+}
+
 /// "What remains is an ordinary flow": it pays checking all the same, and more than the claims is no claim.
 #[test]
 fn what_a_payment_does_not_settle_is_an_ordinary_flow() {
