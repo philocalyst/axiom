@@ -642,7 +642,7 @@ MUTANTS = [
     ("each word is looked for from the first place", "addresses.rs", "from = later.trailing_zeros() + 1;", "from = 0;"),
     ("the line's day is ignored", "addresses.rs", "(Some(days), Some(day)) => days.contains(day),", "(Some(_), Some(_)) => true,"),
     ("an account that is never open is open on a day", "addresses.rs", "(None, Some(_)) => false,", "(None, Some(_)) => true,"),
-    ("with no day, nothing is open", "addresses.rs", "(open, None) => open.is_some(),", "(_, None) => false,"),
+    ("with no day nothing is open", "addresses.rs", "(open, None) => open.is_some(),", "(_, None) => false,"),
     ("the name is not required", "addresses.rs", "let called = &self.called[Id::new(name.index() as u32)];", "let called = &self.called[Id::new(0)];"),
     ("an entity stands only where it last does", "addresses.rs", "fold(0, |bits, (at, _)| bits | 1 << at)", "fold(0, |_, (at, _)| 1 << at)"),
     ("the leftmost fillers are not preferred", "addresses.rs", "(set.count_ones(), !set.reverse_bits())", "(set.count_ones(), set.reverse_bits())"),
@@ -664,7 +664,7 @@ MUTANTS = [
     ("a settled reference ignores the days", "reference.rs", "if self.book.lookup.addresses.is_always_open(place) {", "if true {"),
     ("a suggestion is no number's", "reference.rs", "if !text.contains('/') && numeric(&text) {", "if false {"),
     ("a suggestion ignores the names every account has", "reference.rs", "[only] => *only == place,", "[_] => true,"),
-    ("a word alone that no name answers to is an address attempt", "reference.rs", "reached == Reached::Nothing && !word.text.contains('/');", "false;"),
+    ("a word alone that no name answers to is an address attempt", "reference.rs", "if reached == Reached::Nothing && !word.text.contains('/') {", "if false {"),
     ("a report's target ignores addresses", "book.rs", "match by_address.then(|| self.address_place(text)).unwrap_or(Found::Nothing) {", "match Found::<Place>::Nothing {"),
     # Placing the words before the name
     ("every word goes in the first slot", "spelled.rs", "Placed::Forced(slot) => fills[usize::from(slot)].push(word),", "Placed::Forced(_) => fills[0].push(word),"),

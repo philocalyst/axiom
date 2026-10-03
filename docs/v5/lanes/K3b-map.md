@@ -366,17 +366,20 @@ The `owner` line of every account whose owner is a path word (12 of the 16 relat
 
 Numbers are of the tree after the last commit unless said otherwise.
 
-- **Lines** (`briefs/loc.py`, before to after): core 3461 to 3472, model 17961 to 18819, report 7088 to 7091; the other
-  crates unchanged; total 52079 to 52951 (+872). The design asked for +250 and the oracle's support in the model is not
-  in it: nothing has been deleted yet (section 9 is L's).
-- **Functions** (`hist.py crates`): 41-80 lines 137 to 136 functions, nothing else moved by more than the new functions
-  (1908 to 1954 of 1-10 lines, 666 to 681 of 11-20, 487 to 497 of 21-40). 70 new functions, the longest 32 lines
-  (`Addresses::build`); the three functions the lane grew past 38 lines are 40 (`resolve_end`, `declare`) and 38
-  (`found_end`).
+- **Lines** (`briefs/loc.py`, before to after): core 3461 to 3472, model 17961 to 18806, report 7088 to 7091; the other
+  crates unchanged; total 52079 to 52938 (+859). The design asked for +250. `git diff --numstat` of `crates/` is +1757
+  -71, of which 312 are the integration tests of `model/tests/addresses.rs` and the rest the new modules
+  (`addresses.rs` 513 with its 9 unit tests, `spelled.rs` 326, `reference.rs` 233) and small edits. Nothing has been
+  deleted yet: section 9 is L's, and 11.5 says what it is worth.
+- **Functions** (`hist.py crates`): 41-80 lines 137 to 136 functions; 1908 to 1952 of 1-10 lines, 666 to 682 of 11-20, 487
+  to 496 of 21-40. 70 new functions, the longest 32 lines (`Addresses::build`); the functions the lane grew are 40
+  (`resolve_end`, `declare`) and 38 (`found_end`), and the three it had made longer than they were (`implied_parties`,
+  `declare_accounts`, `places::declare`) it cut back to their old length or less.
 - **Lookup cost** (callgrind instructions of `check` on `bench/gen.py` projects, baseline `0089678` against this tree):
-  100k flows 1,855,756,956 to 1,857,625,340 (+0.10%); 1m flows 17,148,503,376 to 17,163,680,209 (+0.09%). The same
-  projects written as addresses (`addresses.py bench`): 100k 1,888,223,514 (+1.75%), 1m 17,474,812,742 (+1.90%).
-- **Tests**: `cargo test --workspace --release`: 1046 passed, 4 failed. Three are the known failures. The fourth,
+  100k flows 1,855,756,956 to 1,858,562,866 (+0.15%); 1m flows 17,148,503,376 to 17,170,503,237 (+0.13%). The same
+  projects written as addresses (`addresses.py bench`, the same flows): 100k 1,887,302,348 (+1.70%), 1m 17,472,136,349
+  (+1.89%). Instruction counts only; the wall clock of this machine moves more between runs than this.
+- **Tests**: `cargo test --workspace --release`: 1047 passed, 4 failed. Three are the known failures. The fourth,
   `claim_tests::a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles`, fails the same on `0089678`.
 - **Goldens**: `tests/golden.sh` changes four files, `04-freelancer-{available,balance,check,claims}.txt`, and the
   baseline binary prints the same: they were stale at `0089678` (K3c settles the invoices by their payments). None of
@@ -390,10 +393,39 @@ Numbers are of the tree after the last commit unless said otherwise.
   of the books write no account as an address. The same at seeds 5, 7 and 8 over 300 books each, 0 wrong. `placement`:
   words before a name against a brute-force placement of them, 400 of them, 0 wrong (73 placed, 50 ambiguous, 99 wrong
   kind, 178 too many).
-- **Mutants**: see the end of this section.
+- **Mutants** (33 of them, each a one-line change to the model built into a copy and run over 150 books of seed 21 and
+  the placement books; `addresses.py mutate`, which first holds the unmutated model to the same books): 31 are killed. Two
+  are not:
+  - *a suggestion is no number's* (`means` takes a word of digits as a name, so the shortest address of an account called
+    `529` may be `529`). Not killed by 150 books, nor by 400 at another seed: it needs an ambiguous reference whose
+    candidate called `529` is the only one open that day, and the generator rarely draws that.
+  - *a word alone that no name answers to is an address attempt* (the guard in `address_end`). The oracle's books have no
+    end that is a commodity, which is what the guard keeps from being `unknown-address`; a unit test with a commodity that
+    has an issuer would kill it, and none was written.
+  Three more were killed once and then deleted with the code they mutated, which the lane simplified when they would
+  not die: the party pass decides which mentions are addresses, so the resolver's own test of the same was redundant.
+  The first sweep ran on the code of two commits before the last, and the two that were then not built (the machine ran
+  out of memory) or skipped (the text moved) were run alone on the last.
 - **Acceptance**: `family_addresses.py prove target/release/axiom` runs the eleven commands of the goldens over
   `05-family` and over the copy: the same 141 diagnostics (the v3 syntax every example still carries) in the same lines,
   and the same balances, claims, tallies, limits and tax, with each account called what the copy calls it. The copy
   says each account once, and drops the 13 relation lines under its accounts (`owner`, `employer`, `beneficiary`) that
   its words place, and the names that carried a relation (`jordan-401k`, `riley-529`, `joint-checking`); the two
   `owner` lines under assets stay, an asset not being an address.
+
+### 11.5 What lane L deletes, and what it needs from here
+
+- **In the examples**: 33 `owner`, `employer` and `beneficiary` lines under accounts and assets in the six examples that
+  have any (`05-family` 15, `09-shared` 12, `02-household` 2, `04-freelancer` 2, `06-investor` 1, `08-expat` 1), and the
+  relation each account's name carries (`jordan-401k`, `riley-529`, `joint-checking`). The acceptance copy drops 13 of
+  `05-family`'s 15 and keeps the two under assets, an asset not being an address. The `at` lines stay until nesting.
+- **In the model**: little. The code that reads `owner` lines (`Resolving::owners`, about 65 lines, and the fallback that
+  finds an owner by name) stays for shares, which a path cannot say; `AccountDraft.institution`, `Role::Account {
+  institution }` and `unknown-institution` (about 25 lines in all, read by nothing but the address) go when `at`
+  becomes nesting; `missing_roles` is half-subsumed. That is about a hundred lines against the 859 this lane added. The
+  claim that the new spelling pays for itself in lines is **not** shown here: what it buys is that a relation is said
+  once, and the name cannot disagree with it.
+- **What L needs from K3b**: nothing before it starts. Section 7 is all L's: the nesting parse (`decl_line`), the `as with`
+  marker, and a range for `owner` (`FIELD_WORDS`). When `as with` exists, `Spelling::free_slots` in `spelled.rs` is where
+  a custodian slot becomes a placement target (today `with` is never one); the index reads the custodian from
+  `Role::Account { institution }` last, as `at` fills it, and needs no change if nesting fills the same field.
