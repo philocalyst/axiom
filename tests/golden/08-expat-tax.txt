@@ -532,48 +532,49 @@ error[unknown-entity]: there is no entity `interest`
    = note: also at journal/2025/02.ax:24, journal/2025/03.ax:24, journal/2025/04.ax:29,
            journal/2025/05.ax:24, … (7 more)
 
-… 165 more diagnostics not shown (165 errors); `--all` shows every one
+… 158 more diagnostics not shown (158 errors); `--all` shows every one
 
-✗ 461 errors
-✗ rests on a book with 461 errors (`axiom check` lists them): what they touch may be wrong
+✗ 454 errors
+✗ rests on a book with 454 errors (`axiom check` lists them): what they touch may be wrong
 
 Taxes 2025 for me
 
 Counted
   Tally                          Amount  From
-  ───────────────────────────────────────────────────────────
+  ────────────────────────────────────────────────────────────
   project
-    fbar-tagesgeld        24,000.00 USD  journal/2025/07.ax:5
-    fbar-girokonto         5,499.04 USD  2 sources
-  ───────────────────────────────────────────────────────────
+    fbar-girokonto        22,023.97 USD  8 sources
+    fbar-kaution           4,197.60 USD  journal/2025/06.ax:38
+    fbar-tagesgeld        24,029.15 USD  2 sources
+  ────────────────────────────────────────────────────────────
   us
-    wages                 30,081.18 USD  36 sources
-    total-income          30,081.18 USD  36 sources
-    agi                   30,081.18 USD  period end
+    wages                 96,461.88 USD  48 sources
+    total-income          96,461.88 USD  48 sources
+    agi                   96,461.88 USD  period end
     deductions            15,750.00 USD  period end
-    taxable-income        14,331.18 USD  period end
-    income-tax             1,481.24 USD  period end
-    total-tax              1,481.24 USD  period end
-  ───────────────────────────────────────────────────────────
+    taxable-income        80,711.88 USD  period end
+    income-tax            12,670.61 USD  period end
+    total-tax             12,670.61 USD  period end
+  ────────────────────────────────────────────────────────────
     us/401k
       elective-deferrals   3,750.00 USD  6 sources
-  ───────────────────────────────────────────────────────────
+  ────────────────────────────────────────────────────────────
     us/ca
-      ca-taxable-income   24,375.18 USD  period end
-      ca-income-tax          376.71 USD  period end
+      ca-taxable-income   90,755.88 USD  period end
+      ca-income-tax        4,878.93 USD  period end
 
 Owed
-  Owed                  To   Due               Amount  From
-  ───────────────────────────────────────────────────────────────
+  Owed                  To   Due                Amount  From
+  ────────────────────────────────────────────────────────────────
   us
-    federal-income-tax  irs  2026-04-15  1,481.24 USD  period end
-  ───────────────────────────────────────────────────────────────
-    Total us                             1,481.24 USD
-  ───────────────────────────────────────────────────────────────
+    federal-income-tax  irs  2026-04-15  12,670.61 USD  period end
+  ────────────────────────────────────────────────────────────────
+    Total us                             12,670.61 USD
+  ────────────────────────────────────────────────────────────────
     us/ca
-      ca-income-tax     ftb  2026-04-15    376.71 USD  period end
-  ───────────────────────────────────────────────────────────────
-      Total us/ca                          376.71 USD
-  ───────────────────────────────────────────────────────────────
-  Total owed                             1,857.95 USD
+      ca-income-tax     ftb  2026-04-15   4,878.93 USD  period end
+  ────────────────────────────────────────────────────────────────
+      Total us/ca                         4,878.93 USD
+  ────────────────────────────────────────────────────────────────
+  Total owed                             17,549.54 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

@@ -585,28 +585,28 @@ error[v3-party]: `/ mint-mobile` is written the other way round now
 32 - 2025-09-08 visa -> phone 40 USD / mint-mobile
 32 + 2025-09-08 visa -> mint-mobile 40 USD #purchase of phone
 
-… 108 more diagnostics not shown (108 errors); `--all` shows every one
+… 105 more diagnostics not shown (105 errors); `--all` shows every one
 
-✗ 284 errors
-✗ rests on a book with 284 errors (`axiom check` lists them): what they touch may be wrong
+✗ 281 errors
+✗ rests on a book with 281 errors (`axiom check` lists them): what they touch may be wrong
 
 Balances at 2026-02-14
 
   Place               Balance
   ───────────────────────────
-  assets         7,137.14 USD
-    bank         7,079.92 USD
-      checking     679.92 USD
+  assets        20,053.19 USD
+    bank        19,630.57 USD
+      checking  13,230.57 USD
       savings    6,400.00 USD
-    cash            57.22 USD
-      wallet        57.22 USD
+    cash           422.62 USD
+      wallet       422.62 USD
   ───────────────────────────
   liabilities   -2,561.93 USD
     visa        -2,561.93 USD
 
   Net worth      Value (USD)
   ──────────────────────────
-  Assets        7,137.14 USD
+  Assets       20,053.19 USD
   Liabilities  -2,561.93 USD
   ──────────────────────────
-  Net worth     9,699.07 USD
+  Net worth    22,615.12 USD

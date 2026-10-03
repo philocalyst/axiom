@@ -532,33 +532,33 @@ error[unknown-entity]: there is no entity `interest`
    = note: also at journal/2025/02.ax:24, journal/2025/03.ax:24, journal/2025/04.ax:29,
            journal/2025/05.ax:24, … (7 more)
 
-… 165 more diagnostics not shown (165 errors); `--all` shows every one
+… 158 more diagnostics not shown (158 errors); `--all` shows every one
 
-✗ 461 errors
-✗ rests on a book with 461 errors (`axiom check` lists them): what they touch may be wrong
+✗ 454 errors
+✗ rests on a book with 454 errors (`axiom check` lists them): what they touch may be wrong
 
 Available on 2026-04-16
 
 What you can spend
-  In hand                                       Amount
-  ────────────────────────────────────────────────────
-  Money in hand                          59,149.62 USD
-    assets/bank/us-checking              12,576.95 USD
-    assets/bank/us-savings               17,300.00 USD
-    assets/de/girokonto (4,467.29 EUR)    5,272.67 USD
-    assets/de/tagesgeld (20,334.11 EUR)  24,000.00 USD
-  ────────────────────────────────────────────────────
-  Available to spend                     59,149.62 USD
+  In hand                                        Amount
+  ─────────────────────────────────────────────────────
+  Money in hand                          109,518.70 USD
+    assets/bank/us-checking               46,395.75 USD
+    assets/bank/us-savings                17,300.00 USD
+    assets/de/girokonto (18,955.09 EUR)   22,023.97 USD
+    assets/de/tagesgeld (20,482.77 EUR)   23,798.98 USD
+  ─────────────────────────────────────────────────────
+  Available to spend                     109,518.70 USD
   · 1 amount have no price and are left out.
 
 What it would take to reach the rest
   Holding                           Liquid in          Value           Cost            Net  Because
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/de/kaution (3,600.00 EUR)  700d        4,249.02 USD                  4,249.02 USD
+  assets/de/kaution (3,600.00 EUR)  700d        4,182.85 USD                  4,182.85 USD
   assets/retirement/us-401k         5d         66,600.00 USD  12,482.00 USD  54,118.00 USD  driven by early-withdrawal-penalty 6,660.00 USD, federal-income-tax 5,822.00 USD
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today               70,849.02 USD  12,482.00 USD  58,367.02 USD
-  · Each line withdraws that owner's share of a holding into assets/bank/us-savings on 2026-04-16
+  If everything were drawn today               70,782.85 USD  12,482.00 USD  58,300.85 USD
+  · Each line withdraws that owner's share of a holding into assets/bank/us-checking on 2026-04-16
     and runs the books the books on to 2027-04-15, when the year's return closes, through the laws.
     Cost is what they would then owe beyond what they already will: penalties, and the tax on any
     income it creates.

@@ -532,10 +532,10 @@ error[unknown-entity]: there is no entity `interest`
    = note: also at journal/2025/02.ax:24, journal/2025/03.ax:24, journal/2025/04.ax:29,
            journal/2025/05.ax:24, … (7 more)
 
-… 165 more diagnostics not shown (165 errors); `--all` shows every one
+… 158 more diagnostics not shown (158 errors); `--all` shows every one
 
-✗ 461 errors
-✗ rests on a book with 461 errors (`axiom check` lists them): what they touch may be wrong
+✗ 454 errors
+✗ rests on a book with 454 errors (`axiom check` lists them): what they touch may be wrong
 
 Claims on 2026-04-16
 

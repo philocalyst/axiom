@@ -29,5 +29,20 @@ error[unknown-place]: there is no place `income/salary`
    = note: assets, liabilities, income, expenses and equity are not special account roots
    = help: declare a full account path and its kind: `account income/salary`
 
-✗ 3 errors
+error[split-imbalance]: the legs of this split take 5,500.00 USD, and its total is only 5,000.00 USD
+   ╭─[35-split-over.ax:13:1]
+   │
+13 │ 2026-01-15 acme -> 5_000 USD
+   │ ──────────────┬─────────────
+   │               ╰── the total is 5,000.00 USD
+14 │   savings   3_000 USD
+   │   ─────────┬─────────
+   │            ╰── takes 3,000.00 USD
+15 │   checking  2_500 USD
+   │   ─────────┬─────────
+   │            ╰── takes 2,500.00 USD
+   │
+   = help: take less, or raise the total
+
+✗ 4 errors
 [exit status 1]
