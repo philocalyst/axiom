@@ -123,6 +123,14 @@ pub enum FlowSide {
 }
 
 impl FlowSide {
+    /// Where it is in a pair that holds one of each, `Out` first.
+    pub fn index(self) -> usize {
+        match self {
+            FlowSide::Out => 0,
+            FlowSide::Arrive => 1,
+        }
+    }
+
     /// The other side.
     pub fn other(self) -> FlowSide {
         match self {
@@ -172,12 +180,31 @@ pub struct Leg<F> {
     pub part: Part,
 }
 
+/// What an item cuts of its header: an amount, or a share of the header's (`- 6% #selling-costs`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cut {
+    Of(Expr),
+    /// That share of the header's side as it was given, before any leg or item took from it: what a leg's `Part::Share`
+    /// is of it.
+    Share(Ratio),
+}
+
+impl Cut {
+    /// The node that computes its amount, if it is computed.
+    pub fn root(self) -> Option<NodeId> {
+        match self {
+            Cut::Of(expr) => expr.root(),
+            Cut::Share(_) => None,
+        }
+    }
+}
+
 /// One item, a signed amount carved out of, added to or taken off the header. It makes a flow of its own when it
 /// says something its parent does not: `I` is how.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Item<I> {
     pub sign: Sign,
-    pub amount: Expr,
+    pub amount: Cut,
     pub loc: Loc,
     pub flow: I,
 }
@@ -219,6 +246,17 @@ pub enum Heading {
     Flow(u32),
     /// Only the end it names, which the legs share, and what it says of their total, when it says anything.
     Source { end: Endpoint, total: Option<Quantity> },
+}
+
+impl Made {
+    /// The side of its flows that the legs and the items of a record take from: a header with items takes from its
+    /// own out side, and a split's legs are on the side opposite the end that is its source.
+    pub fn takes_from(&self) -> FlowSide {
+        match self.header {
+            Heading::Flow(_) => FlowSide::Out,
+            Heading::Source { .. } => self.side.other(),
+        }
+    }
 }
 
 /// A contract's template: its flows are values, and its items are what they say over their parent.

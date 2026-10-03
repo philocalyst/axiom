@@ -24,7 +24,7 @@ use crate::problem::{self, Noun};
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
-use crate::split::{Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
+use crate::split::{Cut, Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
 
 /// A contract as written, with the id reserved for it and its name.
 #[derive(Clone, Copy)]
@@ -806,12 +806,12 @@ fn schedule_amount<'s>(
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
             let expr = template_amount(world, file, amount, roots, world.book.base, diags)?;
-            (Quantity::Amount(expr), expr.stand_in(world.book.base), None)
+            (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), None)
         }
         Some(ast::Payment::Buy { unit, spend }) => {
             let buy_unit = resolve_commodity(world, file, unit, diags)?;
             let expr = template_amount(world, file, spend, roots, world.book.base, diags)?;
-            (Quantity::Amount(expr), expr.stand_in(world.book.base), Some(buy_unit))
+            (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), Some(buy_unit))
         }
         None => (Quantity::Derived, Amount::zero(world.book.base), None),
     };
@@ -876,34 +876,28 @@ fn template_quantity<'s>(
         }
         return Some((Part::Share(rate), Amount::zero(fallback)));
     }
-    let of = |quantity: Quantity, stand_in: Amount| Some((Part::Of(quantity), stand_in));
-    match quantity {
+    let written = match quantity {
         ast::Quantity::Amount(amount) => {
-            let expr = template_amount(world, file, amount, roots, fallback, diags)?;
-            of(Quantity::Amount(expr), expr.stand_in(fallback))
+            Quantity::Amount(template_amount(world, file, amount, roots, fallback, diags)?)
         }
         ast::Quantity::Pending(amount) => {
-            let expr = template_amount(world, file, amount, roots, fallback, diags)?;
-            of(Quantity::Pending(expr), expr.stand_in(fallback))
+            Quantity::Pending(template_amount(world, file, amount, roots, fallback, diags)?)
         }
         ast::Quantity::Target(amount) => {
-            let expr = template_amount(world, file, amount, roots, fallback, diags)?;
-            of(Quantity::Target(expr), expr.stand_in(fallback))
+            Quantity::Target(template_amount(world, file, amount, roots, fallback, diags)?)
         }
-        ast::Quantity::Unknown(unit) => {
-            let unit = resolve_commodity(world, file, unit, diags)?;
-            of(Quantity::Unknown(unit), Amount::zero(unit))
-        }
+        ast::Quantity::Unknown(unit) => Quantity::Unknown(resolve_commodity(world, file, unit, diags)?),
         ast::Quantity::All(unit) => {
             let unit = match unit {
                 Some(unit) => Some(resolve_commodity(world, file, unit, diags)?),
                 None => None,
             };
-            of(Quantity::All(unit), Amount::zero(unit.unwrap_or(fallback)))
+            Quantity::All(unit)
         }
-        ast::Quantity::Rest => Some((Part::Rest, Amount::zero(fallback))),
+        ast::Quantity::Rest => return Some((Part::Rest, Amount::zero(fallback))),
         ast::Quantity::Whole => unreachable!("the parser reads `basis` as a quantity only in an opening"),
-    }
+    };
+    Some((Part::Of(written), written.stand_in(fallback)))
 }
 
 /// A written amount of a promise: its literal, or the node of the terms' program that computes it.
@@ -950,7 +944,7 @@ fn lower_header_item<'s>(
             ast::Sign::Add => Sign::Add,
             ast::Sign::Less => Sign::Less,
         },
-        amount,
+        amount: Cut::Of(amount),
         loc: item.loc,
         flow: Says {
             purpose: tail.purpose.map(|at| at.value),

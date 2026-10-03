@@ -532,38 +532,38 @@ error[unknown-entity]: there is no entity `interest`
    = note: also at journal/2025/02.ax:24, journal/2025/03.ax:24, journal/2025/04.ax:29,
            journal/2025/05.ax:24, … (7 more)
 
-… 165 more diagnostics not shown (165 errors); `--all` shows every one
+… 158 more diagnostics not shown (158 errors); `--all` shows every one
 
-✗ 461 errors
-✗ rests on a book with 461 errors (`axiom check` lists them): what they touch may be wrong
+✗ 454 errors
+✗ rests on a book with 454 errors (`axiom check` lists them): what they touch may be wrong
 
 Balances at 2026-04-16
 
-  Place                  Balance
-  ──────────────────────────────
-  assets           96,476.95 USD
-                   28,401.40 EUR
-                      869.04 GBP
-    bank           29,876.95 USD
-      us-checking  12,576.95 USD
-      us-savings   17,300.00 USD
-    de             28,401.40 EUR
-      girokonto     4,467.29 EUR
-      kaution       3,600.00 EUR
-      tagesgeld    20,334.11 EUR
-    retirement     66,600.00 USD
-      us-401k      66,600.00 USD
-    uk                869.04 GBP
-      wise            869.04 GBP
-  ──────────────────────────────
-  liabilities      23,961.16 USD
-    student-loan   31,120.40 USD
-    visa           -7,159.24 USD
+  Place                   Balance
+  ───────────────────────────────
+  assets           130,295.75 USD
+                    43,037.86 EUR
+                       558.30 GBP
+    bank            63,695.75 USD
+      us-checking   46,395.75 USD
+      us-savings    17,300.00 USD
+    de              43,037.86 EUR
+      girokonto     18,955.09 EUR
+      kaution        3,600.00 EUR
+      tagesgeld     20,482.77 EUR
+    retirement      66,600.00 USD
+      us-401k       66,600.00 USD
+    uk                 558.30 GBP
+      wise             558.30 GBP
+  ───────────────────────────────
+  liabilities       23,961.16 USD
+    student-loan    31,120.40 USD
+    visa            -7,159.24 USD
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       129,998.63 USD
+  Assets       180,301.55 USD
   Liabilities   23,961.16 USD
   ───────────────────────────
-  Net worth    106,037.47 USD
+  Net worth    156,340.39 USD
   · 1 holdings have no price and are not counted.

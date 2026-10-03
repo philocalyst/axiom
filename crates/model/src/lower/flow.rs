@@ -9,6 +9,7 @@ use super::push_amount_root;
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::Tail;
+use crate::balance::Settled;
 use crate::book::{Amount, Commodity, Place};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -16,7 +17,8 @@ use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Program
 use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
-use crate::split::{Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
+use crate::solve::{Line, LiteralEnv, Resolved};
+use crate::split::{Cut, Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedEnd {
@@ -109,10 +111,24 @@ pub(super) fn flow_roots<'s>(file: &ast::File<'s>, flow: &ast::Flow<'s>) -> Vec<
         push_tail_roots(file, leg.tail, &mut roots);
     }
     for item in &file[flow.body.items] {
-        push_amount_root(item.amount, &mut roots);
+        push_item_root(file, item.amount, &mut roots);
         push_tail_roots(file, item.tail, &mut roots);
     }
     roots
+}
+
+/// The share of its header an item says, if its amount is only `6%`: what a percentage alone under a header is of.
+fn share_of(file: &ast::File<'_>, amount: ast::Amount<'_>) -> Option<Ratio> {
+    let ast::Amount::Computed(expr) = amount else { return None };
+    let ast::ExprKind::Pct(percent) = file.exprs[expr].kind else { return None };
+    Ratio::percent(percent.mantissa as i128, percent.scale)
+}
+
+/// An item's amount is a root unless it is a share, which is not an expression the program computes.
+pub(super) fn push_item_root<'s>(file: &ast::File<'s>, amount: ast::Amount<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
+    if share_of(file, amount).is_none() {
+        push_amount_root(amount, roots);
+    }
 }
 
 pub(super) fn push_tail_roots<'s>(
@@ -137,8 +153,20 @@ pub(super) fn push_quantity_root<'s>(quantity: ast::Quantity<'s>, roots: &mut Ve
 }
 
 impl ResolvedQuantity {
-    fn new(amount: Amount, infer: Infer, mode: Mode, part: Part) -> ResolvedQuantity {
-        ResolvedQuantity { amount, infer, mode, part }
+    /// What a written part comes to as a flow carries it: its amount, how it is known and how real it is. What the
+    /// fold computes or the book says is the zero a flow carries meanwhile, which is what an environment that
+    /// evaluates nothing makes of it. `own` is the mode of the flow that carries it.
+    fn of(part: Part, own: Mode, fallback: Id<Commodity>, side: FlowSide) -> ResolvedQuantity {
+        let said = match part {
+            Part::Of(quantity) => {
+                match quantity.resolve(&mut LiteralEnv, Line::Header(side), None, side.end(), fallback) {
+                    Ok(resolved) => resolved.expect("a literal environment leaves nothing out"),
+                    Err(never) => match never {},
+                }
+            }
+            Part::Rest | Part::Share(_) => Resolved::unsaid(fallback),
+        };
+        ResolvedQuantity { amount: said.amount, infer: said.infer, mode: said.mode.unwrap_or(own), part }
     }
 
     /// The node that computes its amount, if it is computed.
@@ -167,47 +195,33 @@ pub(super) fn resolve_quantity<'s>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedQuantity> {
     let file = cx.file;
-    let resolved = match quantity {
+    let mut commodity = |unit: ast::Name<'s>| world.commodity_of(Word::of(file, unit.0)).or_report(diags);
+    let (part, own) = match quantity {
         ast::Quantity::Amount(written) => {
-            let expr = stated_amount(world, cx, written, fallback)?;
-            ResolvedQuantity::new(expr.stand_in(fallback), Infer::Known, Mode::Actual, Part::Of(Quantity::Amount(expr)))
+            (Part::Of(Quantity::Amount(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
         }
         ast::Quantity::Pending(written) => {
-            let expr = stated_amount(world, cx, written, fallback)?;
-            ResolvedQuantity::new(
-                expr.stand_in(fallback),
-                Infer::Known,
-                Mode::Pending,
-                Part::Of(Quantity::Pending(expr)),
-            )
+            (Part::Of(Quantity::Pending(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
         }
         ast::Quantity::Target(written) => {
-            let expr = stated_amount(world, cx, written, fallback)?;
-            let amount = expr.stand_in(fallback);
-            let end = side.end();
-            let infer = Infer::Target { end, balance: amount.qty };
-            ResolvedQuantity::new(amount, infer, Mode::Actual, Part::Of(Quantity::Target(expr)))
+            (Part::Of(Quantity::Target(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
         }
-        ast::Quantity::Unknown(unit) => {
-            let unit = world.commodity_of(Word::of(file, unit.0)).or_report(diags)?;
-            ResolvedQuantity::new(Amount::zero(unit), Infer::Unknown, Mode::Actual, Part::Of(Quantity::Unknown(unit)))
-        }
+        ast::Quantity::Unknown(unit) => (Part::Of(Quantity::Unknown(commodity(unit)?)), Mode::Actual),
         ast::Quantity::All(unit) => {
             let unit = match unit {
-                Some(unit) => Some(world.commodity_of(Word::of(file, unit.0)).or_report(diags)?),
+                Some(unit) => Some(commodity(unit)?),
                 None => None,
             };
-            let amount = Amount::zero(unit.unwrap_or(fallback));
-            ResolvedQuantity::new(amount, Infer::All, Mode::Actual, Part::Of(Quantity::All(unit)))
+            (Part::Of(Quantity::All(unit)), Mode::Actual)
         }
-        ast::Quantity::Rest => ResolvedQuantity::new(Amount::zero(fallback), Infer::Known, Mode::Actual, Part::Rest),
+        ast::Quantity::Rest => (Part::Rest, Mode::Actual),
         // An opening line's one unit of an asset: nothing keeps it as a quantity, only as an amount.
         ast::Quantity::Whole => {
             let one = Amount::new(Qty(1), fallback);
-            ResolvedQuantity::new(one, Infer::Known, Mode::Opening, Part::Of(Quantity::Amount(Expr::Literal(one))))
+            (Part::Of(Quantity::Amount(Expr::Literal(one))), Mode::Opening)
         }
     };
-    Some(resolved)
+    Some(ResolvedQuantity::of(part, own, fallback, side))
 }
 
 /// A written amount: its literal, or the node that computes it. A literal that is no amount costs the
@@ -464,10 +478,17 @@ pub(super) fn lower_items<'s>(
 ) -> Box<[Item<Option<u32>>]> {
     let mut lowered = Vec::with_capacity(items.len());
     for item in &cx.file[items] {
-        let Some(expr) = resolve_amount(staged, cx, item.amount, staged.book.base, diags) else {
-            continue;
+        let cut = match share_of(cx.file, item.amount) {
+            Some(rate) => Cut::Share(rate),
+            None => match resolve_amount(staged, cx, item.amount, staged.book.base, diags) {
+                Some(expr) => Cut::Of(expr),
+                None => continue,
+            },
         };
-        let amount = expr.stand_in(staged.book.base);
+        let amount = match cut {
+            Cut::Of(expr) => expr.stand_in(staged.book.base),
+            Cut::Share(_) => Amount::zero(staged.book.base),
+        };
         let (local_codes, item_tail) = cx.lower_tail(staged, item.tail, diags);
         let tail = parent.tail.cloned().unwrap_or_else(Tail::new).merge(item_tail);
         let says_something = tail.purpose.is_some()
@@ -503,7 +524,7 @@ pub(super) fn lower_items<'s>(
                 ast::Sign::Add => Sign::Add,
                 ast::Sign::Less => Sign::Less,
             },
-            amount: expr,
+            amount: cut,
             loc: item.loc,
             flow,
         });
@@ -517,9 +538,11 @@ pub(super) fn keep_program(
     staged: &mut Staged<'_, '_>,
     nodes: Program,
     roots: Vec<FlowExpressions>,
-    group: Option<Made>,
+    group: Option<(Made, Settled)>,
 ) -> Option<Id<Program>> {
-    let program = Program { roots: roots.into_boxed_slice(), group: group.map(Box::new), ..nodes };
+    let open = matches!(group, Some((_, Settled::Open)));
+    let program =
+        Program { roots: roots.into_boxed_slice(), group: group.map(|(made, _)| Box::new(made)), open, ..nodes };
     let says = !program.nodes.is_empty() || !program.roots.is_empty() || program.group.is_some();
     says.then(|| staged.book.journal_programs.push(program))
 }

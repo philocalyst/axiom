@@ -585,10 +585,10 @@ error[v3-party]: `/ mint-mobile` is written the other way round now
 32 - 2025-09-08 visa -> phone 40 USD / mint-mobile
 32 + 2025-09-08 visa -> mint-mobile 40 USD #purchase of phone
 
-… 108 more diagnostics not shown (108 errors); `--all` shows every one
+… 105 more diagnostics not shown (105 errors); `--all` shows every one
 
-✗ 284 errors
-✗ rests on a book with 284 errors (`axiom check` lists them): what they touch may be wrong
+✗ 281 errors
+✗ rests on a book with 281 errors (`axiom check` lists them): what they touch may be wrong
 
 Limits in 2026
 

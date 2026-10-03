@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use axiom_core::{Days, Id, Qty};
 use axiom_engine::Run;
 use axiom_model::{
-    Cadence, Contract, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, Sign, Terms, TermsState,
+    Cadence, Contract, Cut, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, Sign, Terms, TermsState,
 };
 
 use crate::lens::Lens;
@@ -178,14 +178,15 @@ fn template_item_cell<'s>(lens: Lens<'s, '_, '_, '_>, template: &'s Promised, it
         Sign::Less => "takes off",
     };
     let amount = match item.amount {
-        Expr::Literal(amount) => Cell::amount(
+        Cut::Of(Expr::Literal(amount)) => Cell::amount(
             book,
             axiom_model::Amount::new(
                 crate::flow::scoped_movement_qty(lens, &template.header.flow, amount.qty),
                 amount.unit,
             ),
         ),
-        Expr::Computed(_) => Cell::Word("computed per occurrence"),
+        Cut::Of(Expr::Computed(_)) => Cell::Word("computed per occurrence"),
+        Cut::Share(_) => Cell::Word("a share of the header"),
     };
     let says = &item.flow;
     let purpose =

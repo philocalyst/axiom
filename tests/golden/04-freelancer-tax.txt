@@ -1044,31 +1044,31 @@ Counted
   Tally                        Amount  From
   ───────────────────────────────────────────────
   project
-    gross-receipts     132,900.00 USD  35 sources
-    business-expenses    6,320.31 USD  19 sources
+    gross-receipts     158,672.40 USD  42 sources
+    business-expenses    6,847.91 USD  26 sources
     sep-contributions    8,000.00 USD  4 sources
-    net-profit         126,579.69 USD  period end
-    se-tax              17,885.14 USD  period end
-    other-taxes         17,885.14 USD  period end
-    se-deduction         8,942.57 USD  period end
+    net-profit         151,824.49 USD  period end
+    se-tax              21,452.12 USD  period end
+    other-taxes         21,452.12 USD  period end
+    se-deduction        10,726.06 USD  period end
   ───────────────────────────────────────────────
   us
     interest               290.12 USD  12 sources
-    total-income       126,869.81 USD  13 sources
+    total-income       152,114.61 USD  13 sources
     investment-income      290.12 USD  12 sources
     payments            11,100.00 USD  5 sources
-    adjustments         16,942.57 USD  5 sources
-    deductions          34,585.45 USD  2 sources
-    agi                109,927.24 USD  period end
-    taxable-income      75,341.79 USD  period end
-    income-tax          11,489.19 USD  period end
-    total-tax           29,374.33 USD  period end
+    adjustments         18,726.06 USD  5 sources
+    deductions          39,277.71 USD  2 sources
+    agi                133,388.55 USD  period end
+    taxable-income      94,110.84 USD  period end
+    income-tax          15,618.38 USD  period end
+    total-tax           37,070.50 USD  period end
 
 Owed
   Owed                  To   Due                Amount  From
   ────────────────────────────────────────────────────────────────
   us
-    federal-income-tax  irs  2026-04-15  18,274.33 USD  period end
+    federal-income-tax  irs  2026-04-15  25,970.50 USD  period end
   ────────────────────────────────────────────────────────────────
-  Total owed                             18,274.33 USD
+  Total owed                             25,970.50 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

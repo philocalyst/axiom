@@ -539,8 +539,8 @@ Available on 2026-04-16
 What you can spend
   In hand                                   Amount
   ────────────────────────────────────────────────
-  Money in hand                      20,719.49 USD
-    assets/bank/checking              1,031.39 USD
+  Money in hand                      45,569.90 USD
+    assets/bank/checking             25,881.80 USD
     assets/bank/collective-checking   8,830.06 USD
     assets/bank/savings              10,100.00 USD
     assets/cash/collective-cash         109.00 USD
@@ -548,4 +548,4 @@ What you can spend
   Held for others                    -6,000.00 USD
     held for riverfront              -6,000.00 USD
   ────────────────────────────────────────────────
-  Available to spend                 14,719.49 USD
+  Available to spend                 39,569.90 USD

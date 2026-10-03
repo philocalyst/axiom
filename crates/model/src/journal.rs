@@ -703,6 +703,10 @@ pub struct Program {
     pub roots: Box<[FlowExpressions]>,
     /// The split, or the header with items, that the flows are. A transaction has at most one.
     pub group: Option<Box<Made>>,
+    /// Whether the fold has the group left to solve: some amount of it is computed, or is `=`, `all` or `?`, and
+    /// the flows carry the zero they carry until it lands. A group with every amount written is solved by the
+    /// model, and its flows say what they come to.
+    pub open: bool,
 }
 
 impl Program {
@@ -715,6 +719,19 @@ impl Program {
     pub fn roots_of(&self, offset: u32) -> Option<FlowExpressions> {
         let at = self.roots.partition_point(|roots| roots.flow < offset);
         self.roots.get(at).filter(|roots| roots.flow == offset).copied()
+    }
+
+    /// Whether the amount of the flow at `offset` is the fold's to say, though no expression of its own computes
+    /// it: it is the remainder of an open split, the header an open group carves, or an item that is computed.
+    pub fn folded_at(&self, offset: u32) -> bool {
+        use crate::split::{Cut, Expr, Heading, Part};
+        let Some(group) = self.group.as_deref().filter(|_| self.open) else { return false };
+        group.header == Heading::Flow(offset)
+            || group.legs.iter().any(|leg| leg.flow == offset && matches!(leg.part, Part::Rest))
+            || group
+                .items
+                .iter()
+                .any(|item| item.flow == Some(offset) && matches!(item.amount, Cut::Of(Expr::Computed(_))))
     }
 }
 

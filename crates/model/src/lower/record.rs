@@ -7,8 +7,8 @@ use axiom_syntax::Subject;
 
 use super::flow::{
     Codes, Ends, FlowCx, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, endpoint, flow_roots,
-    keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root,
-    push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
+    keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_item_root,
+    push_quantity_root, push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
 };
 use super::push_amount_root;
 use super::staged::Staged;
@@ -16,6 +16,7 @@ use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
+use crate::balance::{self, Settled, Total};
 use crate::book::{Amount, Place, ScheduleKind};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
@@ -27,8 +28,9 @@ use crate::journal::{
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
 use crate::scope::Home;
+use crate::solve::Remaining;
 use crate::sources::Site;
-use crate::split::{Endpoint, FlowSide, Heading, Item, Leg, Made, Part, Promised, Quantity};
+use crate::split::{Endpoint, Expr, FlowSide, Heading, Item, Leg, Made, Part, Promised, Quantity};
 
 /// A dated record of the journal, whichever kind of item wrote it.
 #[derive(Clone, Copy)]
@@ -197,8 +199,8 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
 /// What the lowering of one transaction has made so far.
 struct Built {
     flow_roots: Vec<FlowExpressions>,
-    /// The split, or the header with items, the transaction is: at most one.
-    group: Option<Made>,
+    /// The split, or the header with items, the transaction is: at most one, and whether the fold has it left to solve.
+    group: Option<(Made, Settled)>,
     /// Whether anything said so far makes the transaction wrong.
     successful: bool,
 }
@@ -208,6 +210,14 @@ impl Built {
     fn reject(&mut self, problem: Diagnostic, diags: &mut Vec<Diagnostic>) {
         diags.push(problem);
         self.successful = false;
+    }
+
+    /// Keeps the group the transaction is, solved as far as what is written allows; or says why it cannot add up.
+    fn keep(&mut self, group: Made, settled: Result<Settled, Diagnostic>, diags: &mut Vec<Diagnostic>) {
+        match settled {
+            Ok(settled) => self.group = Some((group, settled)),
+            Err(problem) => self.reject(problem, diags),
+        }
     }
 }
 
@@ -306,6 +316,9 @@ fn lower_named_flow<'s>(
         built.successful = false;
         return;
     };
+    let says_amount =
+        flow.infer == Infer::Known && exprs.is_none_or(|exprs| exprs.out.is_none() && exprs.arrive.is_none());
+    let header = Remaining { out: flow.out, arrive: flow.arrive };
     staged.book.flows.push(flow);
     if let Some(exprs) = exprs {
         built.flow_roots.push(FlowExpressions { flow: flow_at, ..exprs });
@@ -315,7 +328,11 @@ fn lower_named_flow<'s>(
     }
     let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
     let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots, diags);
-    built.group = Some(Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items });
+    let group = Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items };
+    let total = if says_amount { Total::Is(header) } else { Total::Later };
+    let flows = staged.flows();
+    let settled = balance::settle(&mut staged.book, &group, flows, total, cx.loc);
+    built.keep(group, settled, diags);
 }
 
 /// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
@@ -337,6 +354,29 @@ struct SplitLegs {
     legs: Vec<Leg<u32>>,
 }
 
+/// What a split's header says it moves, if it says: the amount on the source's own side of the arrow, or else the one
+/// on the other. Either is the total the legs and the items add up to.
+fn stated_total<'s>(source: SplitEnd, written: &ast::Flow<'s>) -> Option<(ast::Quantity<'s>, FlowSide)> {
+    let (own, over) = match source.side {
+        FlowSide::Out => (written.from.amount, written.to.amount),
+        FlowSide::Arrive => (written.to.amount, written.from.amount),
+    };
+    own.map(|quantity| (quantity, source.side)).or(over.map(|quantity| (quantity, source.side.other())))
+}
+
+/// What the header's total gives the solver to take from: an amount that is written, one the fold computes, or none.
+fn total_of(total: Option<ResolvedQuantity>) -> Total {
+    match total.map(|total| total.quantity()) {
+        Some(Quantity::Amount(Expr::Literal(amount)) | Quantity::Pending(Expr::Literal(amount))) => {
+            Total::Is(Remaining { out: amount, arrive: amount })
+        }
+        Some(Quantity::Amount(Expr::Computed(_)) | Quantity::Pending(Expr::Computed(_)) | Quantity::All(_)) => {
+            Total::Later
+        }
+        _ => Total::Nothing,
+    }
+}
+
 /// A header that names one end is the source of its legs, which name the others, and of the items under it.
 fn lower_split_flow<'s>(
     staged: &mut Staged<'_, 's>,
@@ -346,13 +386,11 @@ fn lower_split_flow<'s>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let (cx, written) = (&txn.cx, txn.flow);
-    let source_qty = match source.side {
-        FlowSide::Out => written.from.amount,
-        FlowSide::Arrive => written.to.amount,
-    };
+    let said = diags.len();
+    let stated = stated_total(source, written);
     let base = staged.book.base;
-    let total = source_qty.and_then(|qty| resolve_quantity(staged, cx, qty, base, source.side, diags));
-    if source_qty.is_some() && total.is_none() {
+    let total = stated.and_then(|(quantity, side)| resolve_quantity(staged, cx, quantity, base, side, diags));
+    if stated.is_some() && total.is_none() {
         built.successful = false;
     }
     let split = Split { txn, source, total };
@@ -369,12 +407,14 @@ fn lower_split_flow<'s>(
     if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && made.legs.is_empty() {
         built.successful = false;
     }
-    built.group = Some(Made {
-        header: Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) },
-        side: source.side,
-        legs: made.legs.into_boxed_slice(),
-        items,
-    });
+    let header = Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) };
+    let group = Made { header, side: source.side, legs: made.legs.into_boxed_slice(), items };
+    let flows = staged.flows();
+    // A leg or a total that failed to lower is not there to add up, and what is missing would be what the split is
+    // short of: the error already said is the one to read.
+    let total = if diags.len() == said { total_of(total) } else { Total::Later };
+    let settled = balance::settle(&mut staged.book, &group, flows, total, cx.loc);
+    built.keep(group, settled, diags);
 }
 
 /// One leg of a split once its flow is made: where the flow is, what the leg said it moved, and the expressions
@@ -403,10 +443,16 @@ impl<'s> Split<'_, 's> {
         let tail = self.txn.tail.clone().merge(leg_tail);
         let unit = self.total.map_or(staged.book.base, |total| total.amount.unit);
         let quantity = resolve_quantity(staged, cx, leg.amount, unit, side.other(), diags)?;
-        let zero = Amount::zero(unit);
-        let (out, arrive) = if source_is_from { (zero, quantity.amount) } else { (quantity.amount, zero) };
         let at = staged.flows().len();
         let basis = tail.basis_root;
+        // A leg written in another commodity than the total is the exchange of what the others leave: it keeps the
+        // amount it says on its own side, and the source's side is the solver's to say.
+        let exchange = self.total.is_some() && quantity.infer == Infer::Known && quantity.amount.unit != unit;
+        let (out, arrive) = match (exchange, source_is_from) {
+            (false, _) => (quantity.amount, quantity.amount),
+            (true, true) => (Amount::zero(unit), quantity.amount),
+            (true, false) => (quantity.amount, Amount::zero(unit)),
+        };
         let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
         let codes = Codes { header: self.txn.codes, local: leg_codes };
         let flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags)?;
@@ -415,8 +461,8 @@ impl<'s> Split<'_, 's> {
         Some(MadeLeg { at, quantity: quantity.part, out, arrive, basis })
     }
 
-    /// The items under the header: expenses of the legs, or what the source's own flow is, which each leg's end
-    /// stands in for.
+    /// The items under the header: between the source and the remainder leg's end, or the first leg's when none is the
+    /// remainder, which is what an item of the source's own flow is.
     fn items(
         &self,
         staged: &mut Staged<'_, 's>,
@@ -425,12 +471,17 @@ impl<'s> Split<'_, 's> {
         diags: &mut Vec<Diagnostic>,
     ) -> Box<[Item<Option<u32>>]> {
         let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
-        let leg_end = made.legs.first().map(|leg| {
+        let remainder = made.legs.iter().find(|leg| matches!(leg.part, Part::Rest));
+        let leg_end = remainder.or(made.legs.first()).map(|leg| {
             let leg = staged.flow(leg.flow);
             let place = if side == FlowSide::Out { leg.to } else { leg.from };
             ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) }
         });
-        let ends = Ends { from: source, to: leg_end.unwrap_or(source) };
+        // An item goes the way the legs do: from the source to the end that is the other side of it, or the other way
+        // when the source is where the legs arrive.
+        let other = leg_end.unwrap_or(source);
+        let ends =
+            if side == FlowSide::Out { Ends { from: source, to: other } } else { Ends { from: other, to: source } };
         let parent = Parent { ends, mode: Mode::Actual, header_codes: self.txn.codes, tail: None };
         lower_items(staged, cx, self.txn.flow.body.items, parent, &mut built.flow_roots, diags)
     }
@@ -666,7 +717,7 @@ fn lower_occurrence<'a, 's>(
         push_tail_roots(file, leg.tail, &mut expressions);
     }
     for item in &file[statement.body.items] {
-        push_amount_root(item.amount, &mut expressions);
+        push_item_root(file, item.amount, &mut expressions);
         push_tail_roots(file, item.tail, &mut expressions);
     }
     let name = staged.book.names.intern("journal");
@@ -1239,49 +1290,48 @@ pub fn nearest_occurrence<'a>(
     }
 }
 
-fn lower_owes<'a, 's>(
+/// The ends of a claim and whose it is: the party it is with on one end, and on the other the tab the owners keep it in.
+/// None after the problem is said.
+fn claim_ends<'a, 's>(
     world: &mut World<'s>,
     site: &Site<'a, 's>,
     loc: Loc,
     statement: &ast::Statement<'s>,
     creditor_name: ast::Name<'s>,
-    amount: Option<ast::Amount<'s>>,
-    code_index: &CodeIndex,
-    opening: bool,
     diags: &mut Vec<Diagnostic>,
-) {
+) -> Option<(Ends, Id<crate::book::Entity>)> {
     let file = &site.source.file;
     if let Some(leg) = file[statement.body.legs].first() {
         diags.push(
             Diagnostic::error("claim-split", "a claim cannot contain split flow legs")
                 .label(leg.loc, "write claim line items here, not a transfer between endpoints"),
         );
-        return;
+        return None;
     }
     let Subject::Name(debtor_name) = statement.subject else {
         unsupported_statement(loc, "a claim needs a named debtor", diags);
-        return;
+        return None;
     };
     let entity = |world: &World<'s>, name: ast::Name<'s>| world.entity(site.home, Word::of(file, name.0));
     let debtor = match entity(world, debtor_name) {
         Ok(entity) => entity,
         Err(problem) => {
             diags.push(problem);
-            return;
+            return None;
         }
     };
     let creditor = match entity(world, creditor_name) {
         Ok(entity) => entity,
         Err(problem) => {
             diags.push(problem);
-            return;
+            return None;
         }
     };
     if debtor == creditor {
         diags.push(
             Diagnostic::error("self-claim", "an entity cannot owe itself").label(loc, "name a different creditor"),
         );
-        return;
+        return None;
     }
     let debtor_is_owner = world.book.entities[debtor].place.is_some_and(
         |place| matches!(world.book.places[place].role, crate::book::Role::Holding(owner) if owner == debtor),
@@ -1303,32 +1353,61 @@ fn lower_owes<'a, 's>(
             Diagnostic::error("claim-party-place", "the claim party has no flow endpoint")
                 .label(loc, "this claim cannot be attached to a party"),
         );
-        return;
+        return None;
     };
     let empty = Run::new(Id::new(0), 0);
     let outside = ResolvedEnd { place: party_place, entity: Some(party_end), select: empty };
     let tab = ResolvedEnd { place: tab, entity: None, select: empty };
     let (from, to) = if class == crate::book::Class::Asset { (outside, tab) } else { (tab, outside) };
+    Some((Ends { from, to }, owner))
+}
 
+/// The expressions of a claim (its amount, its items' and its tail's), compiled; a claim says what is owed by one or the
+/// other. None after the problem is said.
+fn claim_program<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    (loc, statement): (Loc, &ast::Statement<'s>),
+    amount: Option<ast::Amount<'s>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Program, Map<ast::ExprId, NodeId>)> {
+    let file = &site.source.file;
     if amount.is_none() && statement.body.items.is_empty() {
         diags.push(
             Diagnostic::error("claim-amount", "a claim needs an amount or line items")
                 .label(loc, "nothing states what is owed"),
         );
-        return;
+        return None;
     }
     let mut exprs = Vec::new();
     if let Some(amount) = amount {
         push_amount_root(amount, &mut exprs);
     }
     for item in &file[statement.body.items] {
-        push_amount_root(item.amount, &mut exprs);
+        push_item_root(file, item.amount, &mut exprs);
         push_tail_roots(file, item.tail, &mut exprs);
     }
     push_tail_roots(file, statement.tail, &mut exprs);
     let name = world.book.names.intern("journal");
-    let Some((program, roots)) = super::compile_roots(world, file, site.home, Ty::Flow, name, &[], &exprs, diags)
-    else {
+    super::compile_roots(world, file, site.home, Ty::Flow, name, &[], &exprs, diags)
+}
+
+fn lower_owes<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    creditor_name: ast::Name<'s>,
+    amount: Option<ast::Amount<'s>>,
+    code_index: &CodeIndex,
+    opening: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Some((Ends { from, to }, owner)) = claim_ends(world, site, loc, statement, creditor_name, diags) else {
+        return;
+    };
+    let Some((program, roots)) = claim_program(world, site, (loc, statement), amount, diags) else {
         return;
     };
     let mut staged = Staged::open(world);
@@ -1340,8 +1419,7 @@ fn lower_owes<'a, 's>(
         return;
     }
     let mode = if opening { Mode::Opening } else { Mode::Actual };
-    let mut flow_roots = Vec::new();
-    let mut group = None;
+    let mut built = Built { flow_roots: Vec::new(), group: None, successful: true };
     if let Some(written_amount) = amount {
         let base = staged.book.base;
         let Some(expr) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
@@ -1353,23 +1431,33 @@ fn lower_owes<'a, 's>(
         if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, header_tail.clone(), loc, diags) {
             flow.owner = owner;
             staged.book.flows.push(flow);
-            push_flow_expressions(&mut flow_roots, 0, root, root, header_tail.basis_root);
+            push_flow_expressions(&mut built.flow_roots, 0, root, root, header_tail.basis_root);
             if !statement.body.items.is_empty() {
                 let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
-                let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
-                group = Some(Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items });
+                let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut built.flow_roots, diags);
+                let made = Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items };
+                let total = match expr {
+                    Expr::Literal(_) => Total::Is(Remaining { out: amount, arrive: amount }),
+                    Expr::Computed(_) => Total::Later,
+                };
+                let flows = staged.flows();
+                let settled = balance::settle(&mut staged.book, &made, flows, total, loc);
+                built.keep(made, settled, diags);
             }
         }
     } else {
         let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
-        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
+        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut built.flow_roots, diags);
         let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
-        group = Some(Made { header, side: FlowSide::Out, legs: Box::default(), items });
+        let made = Made { header, side: FlowSide::Out, legs: Box::default(), items };
+        let flows = staged.flows();
+        let settled = balance::settle(&mut staged.book, &made, flows, Total::Nothing, loc);
+        built.keep(made, settled, diags);
     }
     if diags.len() != diagnostic_start {
         return;
     }
-    let program_id = keep_program(&mut staged, program, flow_roots, group);
+    let program_id = keep_program(&mut staged, program, built.flow_roots, built.group);
     let txn = Txn {
         program: program_id,
         codes: header_codes,

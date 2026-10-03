@@ -537,11 +537,22 @@ error[unknown-entity]: there is no entity `dining`
 Taxes 2025 for me
 
 Counted
-  Tally                  Amount  From
-  ─────────────────────────────────────────
+  Tally                    Amount  From
+  ───────────────────────────────────────────
   us
-    wages          6,232.01 USD  44 sources
-    total-income   6,232.01 USD  44 sources
-    agi            6,232.01 USD  period end
-    deductions    15,750.00 USD  period end
+    wages           31,082.42 USD  66 sources
+    total-income    31,082.42 USD  66 sources
+    agi             31,082.42 USD  period end
+    deductions      15,750.00 USD  period end
+    taxable-income  15,332.42 USD  period end
+    income-tax       1,601.39 USD  period end
+    total-tax        1,601.39 USD  period end
+
+Owed
+  Owed                  To   Due               Amount  From
+  ───────────────────────────────────────────────────────────────
+  us
+    federal-income-tax  irs  2026-04-15  1,601.39 USD  period end
+  ───────────────────────────────────────────────────────────────
+  Total owed                             1,601.39 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

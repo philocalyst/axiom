@@ -538,9 +538,9 @@ Balances at 2026-04-16
 
   Place                          Balance
   ──────────────────────────────────────
-  assets                   20,719.49 USD
-    bank                   19,961.45 USD
-      checking              1,031.39 USD
+  assets                   45,569.90 USD
+    bank                   44,811.86 USD
+      checking             25,881.80 USD
       collective-checking   8,830.06 USD
       savings              10,100.00 USD
     cash                      758.04 USD
@@ -552,7 +552,7 @@ Balances at 2026-04-16
 
   Net worth      Value (USD)
   ──────────────────────────
-  Assets       20,719.49 USD
+  Assets       45,569.90 USD
   Liabilities  -4,232.11 USD
   ──────────────────────────
-  Net worth    24,951.60 USD
+  Net worth    49,802.01 USD

@@ -1198,7 +1198,10 @@ contract flat with landlord
     );
     assert_eq!(overlay.items.len(), 1);
     assert_eq!(overlay.items[0].sign, axiom_model::Sign::Add);
-    assert_eq!(overlay.items[0].amount, axiom_model::Expr::Literal(axiom_model::Amount::new(axiom_core::Qty(25), usd)),);
+    assert_eq!(
+        overlay.items[0].amount,
+        axiom_model::Cut::Of(axiom_model::Expr::Literal(axiom_model::Amount::new(axiom_core::Qty(25), usd)))
+    );
     assert_eq!(txn.flows.len(), 2, "override offsets point into the occurrence transaction");
     assert_eq!(book.name(book.codes[txn.codes.start()]), "fee");
 }
@@ -1452,7 +1455,7 @@ fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
                 if let Some(flow) = item.flow {
                     local_flow(flow);
                 }
-                if let axiom_model::Expr::Computed(root) = item.amount {
+                if let axiom_model::Cut::Of(axiom_model::Expr::Computed(root)) = item.amount {
                     assert!(program.nodes[root].typed_ty().is_some());
                 }
             }

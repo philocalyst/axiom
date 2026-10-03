@@ -41,6 +41,7 @@ mod budget;
 mod calc;
 mod checkpoint;
 mod eval;
+mod evaluate;
 mod events;
 mod explain;
 mod facts;
@@ -49,6 +50,7 @@ mod infer;
 mod ledger;
 mod lots;
 mod motion;
+mod occurrence;
 mod owners;
 mod plan;
 mod post;
@@ -57,6 +59,7 @@ mod scope;
 mod show;
 mod sides;
 mod state;
+mod statement;
 mod temporal;
 mod timeline;
 mod totals;
@@ -66,6 +69,8 @@ mod traits;
 mod fixture;
 #[cfg(test)]
 mod source_tests;
+#[cfg(test)]
+mod split_tests;
 #[cfg(test)]
 mod tests;
 
@@ -82,7 +87,8 @@ pub use assets::{
     PartKind, PendingCarry,
 };
 pub use checkpoint::Checkpoint;
-pub use ledger::{Ledger, OccurrenceOutput, TemplateError};
+pub use ledger::Ledger;
+pub use occurrence::{OccurrenceOutput, TemplateError};
 pub use plan::{Known, Plan, run};
 pub use sides::Sides;
 
