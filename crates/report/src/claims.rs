@@ -6,14 +6,13 @@
 //! you, it is a debt in a `payable` place, which holds a plain balance, so it is
 //! told apart by the code on the flows that made and settled it.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Sym};
-use axiom_engine::{Holding, Options, Plan, Run};
+use axiom_engine::{Holding, Run};
 use axiom_model::{Amount, Book, Class, Entity, Flow, Place, RuntimeTxn, Select};
 
-use crate::history::{Posting, journal_ends_by};
+use crate::history::Posting;
 use crate::lens::Lens;
 use crate::places::path;
 use crate::table::{code_labels, doc_headline};
@@ -45,18 +44,6 @@ impl Claim {
     pub fn with(&self, entity: Id<Entity>) -> bool {
         self.payee == Some(entity)
     }
-}
-
-/// The holdings on `day`: the run's, unless the journal goes on after it, in
-/// which case the ledger is folded up to it.
-pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]> {
-    if journal_ends_by(book, day) {
-        return Cow::Borrowed(&run.holdings);
-    }
-    let plan = Plan::new(book);
-    let mut ledger = plan.start(Options { today: day, relaxed: book.relaxed });
-    ledger.advance(day);
-    Cow::Owned(ledger.holdings().cloned().collect())
 }
 
 /// Every claim open on the lens's day, for its owners, given the holdings on

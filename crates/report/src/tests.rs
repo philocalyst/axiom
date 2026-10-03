@@ -18,9 +18,13 @@ use axiom_model::Effect as Consequence;
 use axiom_model::builtin;
 use axiom_model::*;
 
-use crate::lens::Whose;
+use crate::lens::{Lens, Whose};
 use crate::why::Found;
 use crate::{Cell, FlowBy, Query, Report, Row, Section, Style};
+use crate::{
+    Context, Folded, available, balance, budget, claims, contracts, flow, gains, limits, lots, register, tax, why,
+};
+use axiom_engine::Options;
 
 fn day(y: i32, m: u32, d: u32) -> Day {
     Day::from_ymd(y, m, d).unwrap()
@@ -50,7 +54,7 @@ impl Household {
     fn report_for<'a>(&'a self, query: Query, whose: Option<&str>) -> Result<Report<'a>, axiom_core::Diagnostic> {
         let whose = whose.map_or_else(Whose::default, |name| Whose::of(&self.book, self.entity(name)));
         let plan = axiom_engine::Plan::new(&self.book);
-        crate::views(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, &query)
+        views(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, &query)
     }
 
     fn why<'a>(&'a self, found: Found) -> Report<'a> {
@@ -62,6 +66,62 @@ impl Household {
     fn report<'a>(&'a self, query: Query) -> Report<'a> {
         self.report_for(query, None).expect("the query resolves")
     }
+}
+
+/// A context over `book`, folded through the day `options` say: what a client that folds once and asks many questions holds.
+pub(crate) fn context<'b, 's>(
+    book: &'b Book<'s>,
+    options: Options,
+    whose: Option<&str>,
+) -> Result<Context<'b, 's>, axiom_core::Diagnostic> {
+    let plan = axiom_engine::Plan::new(book);
+    let folded = Folded::of(&plan, options);
+    Context::over(plan, folded, whose)
+}
+
+/// The view `query` asks for, from a context folded through the run's day.
+pub(crate) fn report<'s>(
+    book: &'s Book<'_>,
+    run: &Run,
+    query: &Query,
+    whose: Option<&str>,
+) -> Result<Report<'s>, axiom_core::Diagnostic> {
+    context(book, Options { today: run.today, relaxed: book.relaxed }, whose)?.report(query)
+}
+
+/// The views over a run made by hand. No fold made it, so no context can hold it: what a context asks of the fold it
+/// kept (a ledger on a day, a checkpoint to forecast from) is asked of the final holdings and of the book instead, and a
+/// hand-built run has no forecast.
+fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Report<'s>, axiom_core::Diagnostic> {
+    let at = |at: &Option<Day>| lens.on(at.unwrap_or(run.today));
+    Ok(match query {
+        Query::Balance { globs, at: day, value, monthly } => {
+            return balance::view_with_lens(at(day), run, globs, *value, *monthly);
+        }
+        Query::Register { place, from, to } => return register::view_with_lens(at(to), run, place, *from, *to),
+        Query::Flow { by: FlowBy::Period(by), from, to } => flow::view_with_lens(at(to), run, *by, *from),
+        Query::Flow { by: FlowBy::Party, from, to } => flow::view_by_party_with_lens(at(to), run, *from),
+        Query::Available { at: day } => {
+            let lens = at(day);
+            let horizon = crate::closings::judged_through(lens.book(), lens.day);
+            let mut ledger = lens.plan().start(Options { today: horizon.max(run.today), relaxed: false });
+            ledger.advance_to_closing(lens.day);
+            available::from_ledger(lens, run, &ledger, horizon)
+        }
+        Query::Budget { at: day, by } => budget::view_with_lens(at(day), run, *day, *by),
+        Query::Limits { year } => limits::view_with_lens(lens, run, *year),
+        Query::Claims { at: day } => claims::view_from(at(day), run, run.holdings.iter()),
+        Query::Contracts => contracts::view_with_lens(lens, run),
+        Query::Tax { year } => tax::view_with_lens(lens, run, *year),
+        Query::Gains { year } => gains::view_with_lens(lens, run, *year),
+        Query::Lots { place, at: day } => {
+            let scope = place.map(|text| crate::resolve::place(lens.book(), text)).transpose()?;
+            lots::view_from(at(day), scope, run.holdings.iter())
+        }
+        Query::Forecast { .. } => unimplemented!("a hand-built run has no checkpoint to go on from"),
+        Query::Why { target } => return why::target_with_lens(lens, run, target),
+        Query::Line { loc } => why::line_with_lens(lens, run, *loc),
+    })
 }
 
 // ─── The cast ───────────────────────────────────────────────────────────────
@@ -834,23 +894,6 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
 }
 
 #[test]
-fn the_legacy_report_keeps_the_run_its_caller_supplied() {
-    let mut house = household();
-    // A balance is read from the histories the run carries: give checking one more step, 1.00 USD richer on the last day.
-    let checking = house.place("assets/bank/checking");
-    let steps = house.run.histories.positions().map(|(id, at)| {
-        let mut steps: Vec<_> = house.run.histories.steps(id).iter().collect();
-        if at.place == checking {
-            steps.push((house.run.today, steps.last().map_or(Qty::ZERO, |&(_, held)| held) + Qty(100)));
-        }
-        (at, steps)
-    });
-    house.run.histories = Histories::from_steps(house.book.places.len(), steps.collect::<Vec<_>>());
-    let report = crate::report(&house.book, &house.run, &balance(vec!["checking"], None, false, false), None).unwrap();
-    assert!(lines(&report.sections[0]).iter().any(|row| row == "    checking | 8,956.80 USD"));
-}
-
-#[test]
 fn the_balances_on_the_last_day_are_what_the_run_holds() {
     // The run's holdings are the journal's final state; the histories are made from the same flows, a day at a time.
     let house = household();
@@ -1234,7 +1277,7 @@ fn claims_and_registers_are_about_whose_money_they_are() {
     assert!(claims.sections[0].rows.is_empty(), "the invoice is the first person's");
     let me = house.entity("me");
     let plan = axiom_engine::Plan::new(&house.book);
-    let mine = crate::views(
+    let mine = views(
         crate::lens::Lens::new(&plan, &Whose::of(&house.book, me), house.run.today),
         &house.run,
         &Query::Claims { at: None },

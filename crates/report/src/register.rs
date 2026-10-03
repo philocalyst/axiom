@@ -15,7 +15,7 @@ use crate::history::{Change, Posting, pad_ends, postings};
 use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
-use crate::table::{code_labels, gap_words};
+use crate::table::gap_words;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Builds a register using owner scope and display signs from the shared lens.

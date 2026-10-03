@@ -58,17 +58,6 @@ impl Whose {
     pub fn label<'b>(&self, book: &'b Book<'_>) -> &'b str {
         self.label.map_or("everyone", |entity| book.name(book.entities[entity].path))
     }
-
-    /// Whether a law's subject is one of these owners': the entity itself, or
-    /// the owner of the place.
-    pub fn governs(&self, book: &Book, subject: Subject) -> bool {
-        self.includes(match subject {
-            Subject::Place(place) => book.places[place].owner,
-            Subject::Entity(entity) => entity,
-            Subject::Asset(asset) => book.assets[asset].owner,
-            Subject::Contract(contract) => book.contracts[contract].owner,
-        })
-    }
 }
 
 /// How spendable a holding is.
@@ -133,15 +122,6 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
             Subject::Entity(entity) => self.owns_entity(entity),
             Subject::Asset(asset) => self.owns_entity(self.book().assets[asset].owner),
             Subject::Contract(contract) => self.owns_entity(self.book().contracts[contract].owner),
-        }
-    }
-
-    pub fn subject_qty(self, subject: Subject, qty: Qty) -> Qty {
-        match subject {
-            Subject::Place(place) => self.place_qty(place, qty),
-            Subject::Entity(entity) => self.entity_qty(entity, qty),
-            Subject::Asset(asset) => self.entity_qty(self.book().assets[asset].owner, qty),
-            Subject::Contract(contract) => self.entity_qty(self.book().contracts[contract].owner, qty),
         }
     }
 

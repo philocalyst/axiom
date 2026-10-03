@@ -111,14 +111,3 @@ pub fn postings<'a>(book: &'a Book, run: &'a Run) -> impl Iterator<Item = Postin
         Posting { id, flow, posted, settlement }
     })
 }
-
-/// Whether the journal holds nothing after `day`, so the run's final state is
-/// the state on `day`.
-pub fn journal_ends_by(book: &Book, day: Day) -> bool {
-    let by = |last: Option<Day>| last.is_none_or(|last| last <= day);
-    by(book.flows.as_slice().last().map(|flow| flow.day))
-        && by(book.events.last().map(|event| event.day))
-        && by(book.splits.last().map(|split| split.day))
-        && by(book.asserts.last().map(|assert| assert.day))
-        && by(book.claim_changes.last().map(|change| change.day))
-}

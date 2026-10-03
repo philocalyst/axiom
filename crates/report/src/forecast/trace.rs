@@ -65,8 +65,7 @@ impl<'p, 'b, 's> Trace<'p, 'b, 's> {
     }
 }
 
-/// The ledger a forecast goes on with: the run's fold, resumed from its checkpoint or folded from the journal, closed
-/// through today, made to reach the last checkpoint and to promise the contracts of the lens's owners.
+/// The ledger a forecast goes on with: the run's fold, resumed from its checkpoint, closed through today, made to reach the last checkpoint and to promise the contracts of the lens's owners.
 fn promising<'p, 'b, 's>(
     lens: Lens<'b, 's, '_, 'p>,
     past: &Past<'_>,
@@ -76,13 +75,8 @@ fn promising<'p, 'b, 's>(
     let (plan, book) = (lens.plan(), lens.book());
     let (today, horizon) = (options.today, checkpoints[checkpoints.len() - 1]);
     debug_assert_eq!(today, checkpoints[0], "the forecast begins on the day the run stands on");
-    let mut ledger = match past {
-        Past::Checkpoint { at, .. } => {
-            debug_assert!(at.day() <= today, "a forecast cannot rewind the checkpoint it goes on from");
-            plan.resume(at, options)
-        }
-        Past::Journal => plan.start(options),
-    };
+    debug_assert!(past.at.day() <= today, "a forecast cannot rewind the checkpoint it goes on from");
+    let mut ledger = plan.resume(past.at, options);
     ledger.advance(today);
     ledger.reach(horizon);
     ledger.promise(|contract| lens.owns_entity(book.contracts[contract].owner));
@@ -242,13 +236,19 @@ mod tests {
         let lens = Lens::new(&plan, &whose, tomorrow);
         let resumed = Trace::run(
             lens,
-            &Past::Checkpoint { at: &checkpoint, effects: &[] },
+            &Past { at: &checkpoint, effects: &[] },
             Options { today: tomorrow, relaxed: false },
             Vec::new(),
             &[tomorrow],
         );
-        let folded =
-            Trace::run(lens, &Past::Journal, Options { today: tomorrow, relaxed: false }, Vec::new(), &[tomorrow]);
+        let start = plan.start(Options { today: tomorrow, relaxed: false }).checkpoint();
+        let folded = Trace::run(
+            lens,
+            &Past { at: &start, effects: &[] },
+            Options { today: tomorrow, relaxed: false },
+            Vec::new(),
+            &[tomorrow],
+        );
 
         assert_eq!(resumed.liquid[0] - folded.liquid[0], Qty(1_000));
         assert_eq!(resumed.worth[0] - folded.worth[0], Qty(1_000));
@@ -278,11 +278,13 @@ opening 2026-01-01
             let owner = |name| {
                 book.entities.iter().find(|(_, entity)| book.name(entity.path) == name).map(|(id, _)| id).unwrap()
             };
+            let options = Options { today: run.today, relaxed: false };
+            let start = plan.start(options).checkpoint();
+            let past = Past { at: &start, effects: &[] };
             let forecast_for = |name| {
                 let whose = crate::lens::Whose::of(book, owner(name));
                 let lens = Lens::new(&plan, &whose, run.today);
-                Trace::run(lens, &Past::Journal, Options { today: run.today, relaxed: false }, Vec::new(), &[run.today])
-                    .worth[0]
+                Trace::run(lens, &past, options, Vec::new(), &[run.today]).worth[0]
             };
 
             assert_eq!(forecast_for("me"), Qty(6_000));
@@ -290,17 +292,7 @@ opening 2026-01-01
 
             let everyone = crate::lens::Whose::default();
             let lens = Lens::new(&plan, &everyone, run.today);
-            assert_eq!(
-                Trace::run(
-                    lens,
-                    &Past::Journal,
-                    Options { today: run.today, relaxed: false },
-                    Vec::new(),
-                    &[run.today]
-                )
-                .worth[0],
-                Qty(10_000)
-            );
+            assert_eq!(Trace::run(lens, &past, options, Vec::new(), &[run.today]).worth[0], Qty(10_000));
             assert_eq!(plan.allocate(place, Qty(10_000)).map(|(_, amount)| amount).sum::<Qty>(), Qty(10_000));
         });
     }

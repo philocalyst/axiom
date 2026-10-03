@@ -1,7 +1,7 @@
 use axiom_core::{Day, FileId, Qty};
-use axiom_engine::Options;
+use axiom_engine::{Options, Plan};
 use axiom_model::Source;
-use axiom_report::{Cell, Context, Query};
+use axiom_report::{Cell, Context, Folded, Query};
 
 fn day(year: i32, month: u32, date: u32) -> Day {
     Day::from_ymd(year, month, date).unwrap()
@@ -26,7 +26,9 @@ opening 2026-01-01
     assert!(parsed.is_empty(), "source parse failed: {parsed:?}");
     let (book, diagnostics) = axiom_model::build(&[Source { path: "owners.ax", file, embedded: false }]);
     assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "book build failed: {diagnostics:?}");
-    let context = Context::new(&book, Options { today: day(2026, 1, 4), relaxed: false }, owner).unwrap();
+    let plan = Plan::new(&book);
+    let folded = Folded::of(&plan, Options { today: day(2026, 1, 4), relaxed: false });
+    let context = Context::over(plan, folded, owner).unwrap();
     then(&context)
 }
 

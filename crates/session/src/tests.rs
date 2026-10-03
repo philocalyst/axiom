@@ -61,7 +61,9 @@ fn a_session_answers_as_the_pipeline_it_wraps() {
     assert_eq!((ours.flows, ours.places, ours.laws), (summary.flows, summary.places, summary.laws));
     assert_eq!(ours.net_worth, summary.net_worth);
     assert_eq!(ours.net_worth.qty, Qty(9_500), "100.00 USD less the 5.00 USD spent");
-    let direct = axiom_report::report(&book, &run, &balance(), None).unwrap();
+    let plan = axiom_engine::Plan::new(&book);
+    let folded = axiom_report::Folded::of(&plan, options());
+    let direct = axiom_report::Context::over(plan, folded, None).unwrap().report(&balance()).unwrap();
     assert_eq!(shown(&session), json::render(&direct, session.sources()));
 }
 

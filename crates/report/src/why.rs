@@ -17,8 +17,6 @@ mod system;
 mod taxline;
 mod text;
 
-pub use self::line::line;
-
 use std::borrow::Cow;
 
 use axiom_core::{Diagnostic, Id, Sym};

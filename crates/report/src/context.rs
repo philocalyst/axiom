@@ -56,17 +56,6 @@ pub struct Context<'b, 's, F = Folded> {
     whose: Whose,
 }
 
-impl<'b, 's> Context<'b, 's> {
-    /// Builds a plan, run and pre-closing checkpoint together so a client
-    /// cannot accidentally pair a checkpoint with a different run or book.
-    pub fn new(book: &'b Book<'s>, options: Options, whose: Option<&str>) -> Result<Context<'b, 's>, Diagnostic> {
-        let whose = Whose::resolve(book, whose)?;
-        let plan = Plan::new(book);
-        let folded = Folded::of(&plan, options);
-        Ok(Context { plan, folded, whose })
-    }
-}
-
 impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
     /// The reports of `whose` money, from `plan` and the fold of the book it was built for. An owner nobody declared is
     /// an error with a suggestion.
@@ -144,7 +133,7 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
     fn forecast(&self, until: Option<Day>, paths: u32) -> Report<'b> {
         let folded = self.folded();
         let effects = &folded.run.effects[..folded.effects_prefix_len];
-        let past = Past::Checkpoint { at: &folded.checkpoint, effects };
+        let past = Past { at: &folded.checkpoint, effects };
         let options = Options { today: folded.run.today, relaxed: folded.options.relaxed };
         super::forecast::view(past, &folded.run, self.lens(folded.run.today), options, until, paths)
     }
