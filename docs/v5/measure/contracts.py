@@ -708,6 +708,11 @@ MUTANTS_NEW = [
     (ANNUITY, "loan.term.months.checked_add(months - 1)?", "loan.term.months.checked_add(months)?", "a loan has a payment too many"),
     (ANNUITY, "if index + 1 >= self.periods {", "if index + 1 > self.periods {", "the last payment is the level payment"),
     (RESIDUAL, "self.ordinal - self.began", "self.ordinal", "a loan's payments are counted from the schedule's first day"),
+    (RESIDUAL, "schedule.before(Day(annuity.begins().0.saturating_add(1)))", "schedule.before(annuity.begins())",
+     "a loan's first payment is on the day it was made"),
+    (RESIDUAL, "            self.open == Qty::ZERO\n", "            false\n", "a loan is never done"),
+    (RESIDUAL, "paid.map_or(Qty::ZERO, |paid| paid.open)", "paid.map_or(self.open, |paid| paid.open + Qty(1))",
+     "a payment leaves a cent more owed"),
 ]
 
 

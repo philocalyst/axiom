@@ -46,7 +46,7 @@ impl Tally {
         }
     }
 
-    fn new(&mut self, what: &'static str, agrees: bool, context: impl FnOnce() -> String) {
+    pub(crate) fn new(&mut self, what: &'static str, agrees: bool, context: impl FnOnce() -> String) {
         if agrees {
             *self.agreed.entry(what).or_default() += 1;
         } else {
@@ -71,7 +71,7 @@ pub struct Reference<'a> {
 
 impl Reference<'_> {
     /// The days the schedule owes in `window`: each once, in order.
-    fn owed(&self, kind: ScheduleKind, window: Days) -> Vec<Day> {
+    pub(crate) fn owed(&self, kind: ScheduleKind, window: Days) -> Vec<Day> {
         let timeline = match kind {
             ScheduleKind::Regular => self.contract.terms.as_ref(),
             ScheduleKind::Standing => self.contract.standing.as_ref(),
@@ -208,5 +208,6 @@ pub fn check(book: &Book<'_>, facts: &Facts<'_>, reading: &impl Reading, old: &A
     tally.new("payment", old.payment == new.payment, || {
         format!("{}: {:?} against {:?}", name(), old.payment, new.payment)
     });
+    crate::walk::walk(book, facts, &reference, &mut tally);
     tally
 }

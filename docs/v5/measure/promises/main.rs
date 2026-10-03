@@ -26,6 +26,8 @@ mod ask;
 #[cfg(feature = "new")]
 mod check;
 mod reading;
+#[cfg(feature = "new")]
+mod walk;
 
 use axiom_core::{Day, Days, FileId};
 use axiom_engine::{Options, Plan};
