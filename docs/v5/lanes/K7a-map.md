@@ -39,8 +39,9 @@ Eleven things in the brief do not match the code, and each decides something bel
    then `axiom_report::summary`, which builds a second `Plan::new` (`report/src/lib.rs:339`); a report goes through
    `Context::new` (`Plan::new`, a fold that also forks the ledger at today and keeps a `Checkpoint`). The comment at
    `commands.rs:70` says why `check` does not pay for the checkpoint. Measured here: **the fork and the checkpoint cost 1% of the fold;
-   the second `Plan::new` costs 4% of a 1m `check`** (§3). A session that keeps the checkpoint *and* builds the plan once makes
-   `check` faster, not slower.
+   the second `Plan::new` costs 4% of a 1m `check`** (§3). A session that keeps the checkpoint costs `check` that 1%; it does not
+   remove the second plan, because `check` asks for the diagnostics (which folds, with a plan that is then dropped) before it asks for
+   the summary (which needs a plan again): §14.
 9. **"Three known failures" is two.** On `bdc25f9` exactly two tests fail:
    `source_tests::a_context_forecast_keeps_historical_and_same_day_obligations_once` (K5c's map §0.5: the year-end test cannot pass as
    written) and `tests::a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot` (STATUS "Waiting on you" 3).
@@ -345,3 +346,134 @@ At the end: `check`, `balance` and the views of §3 on the 100k and 1m books, th
 
 `cargo test --workspace --release --no-fail-fast` on `bdc25f9`: **1,060 passed, 2 failed, 19 ignored** (the two of §0.9; the ignored
 are benchmarks and the oracle runs). Every later commit is held to: the same failures, and no passing test fewer.
+
+## 13. What was built
+
+Six commits on `bdc25f9` (`git log --oneline bdc25f9..`):
+
+| commit | what |
+|---|---|
+| K7a-map | this file, before any code |
+| `axiom-session`: the text store | `crates/session`: `Texts` (the arena), `Sources`, `SourceFile` moved out of `cli/project.rs`; `Project::load(&Texts)`; the `files`/`auxiliary` pair, `append_auxiliary_to`, `parse_files` gone |
+| `report`: `Folded` | `Folded` (run and checkpoint, no lifetime), `Context<'b, 's, F = Folded>`, `Context::over`, `summary_of`, `json::diagnostic` |
+| `Session` and the CLI as its client | `open`, `query`, `diagnostics` (and the two halves), `summary`, `run`; `commands.rs` opens a session and presents it |
+| edits | `Edit`, `Refused`, `Applied`, `what_if`, `apply`, `NewTransaction`; the example; the doc tests |
+| this section | what was built, measured and left |
+
+Non-test lines (`briefs/loc.py`), before and after: **cli 2,507 to 2,338 (-169), report 6,965 to 6,997 (+32), session 0 to 500; total
+51,968 to 52,331 (+363)**, against the brief's "about +400". Why, honestly:
+
+- **session +500:** about 150 of it is the CLI's text store moved (`SourceFile` and `Sources`, so cli lost the same), 33 the arena, 93 the
+  session, 110 `edit.rs`, 75 `transaction.rs`, 13 the crate root, and about 25 more on `Sources` (`empty`, `auxiliary`, `files`, `axiom_file`,
+  `with`, `reading`, `texts`).
+- **cli -169:** the text store (about -150), `append_auxiliary_to` and `parse_files`, `source_by_id`, `LocalFiles`'s `parsed` count, and
+  the parse/build/run orchestration in `run` (about -60 together), less the `Presenter`'s fields and the `check` and `sync` glue (about
+  +40).
+- **report +32:** `Folded` (+20) and the generic `Context` (+8), `summary_of`, `json::diagnostic` (+7).
+- **The brief's "deletes the CLI's duplicated loading" is smaller than hoped**: what is duplicated is not loading but the
+  *orchestration* of it (parse, build, fold, choose between `Context` and `engine::run`), and that was 60 lines. The text store was one
+  copy, which moved.
+
+Function lengths (`hist.py`): 3,242 to 3,290 functions; 1 to 10 lines 1,940 to 1,979; 11 to 20: 668 to 675; 21 to 40: 492 to 495; **41 to 80: 133
+to 132**; over 80: 9 to 9, the same nine. No function this lane wrote is over 40 lines. `Context::report` is 42 (it was 41: an exhaustive match,
+one arm for each of the 14 queries, which is what it is for); `run` in `commands.rs` is 38.
+
+Tests: **1,091 passed, 2 failed (the two of §0.9), 19 ignored**, against 1,060, 2 and 19: five moved from `cli` to `session` and 31
+written (26 unit tests, 3 doc tests, 2 `compile_fail`). No test deleted or weakened; the ones that moved or were touched changed in
+plumbing only (a `Texts` to keep texts in).
+
+## 14. Where the build parts from the plan above
+
+1. **`check` still builds two plans when the book has no errors.** §0.8 hoped a session would remove the second. It cannot: `check` asks for
+   the diagnostics first (to know whether to print a summary), which folds with a plan that is dropped, and the summary then builds
+   another. A report builds one, as before: the CLI makes the query first, so the fold is made with the query's plan and the diagnostics read
+   it. (The first version of the CLI read the diagnostics first and built two plans for every report; the timings caught it.)
+2. **`diagnostics()` is an iterator**, with `book_diagnostics()` and `run_diagnostics()` as the slices behind it, so that `check` can put
+   the diagnostics of a sync source's data files between them and keep `--json` in its order.
+3. **`Applied::between` is public.** A client that asks `what_if` needs to know what the hypothetical session found that this one did not,
+   and `apply` returns the same value.
+4. **`Project` stays in the CLI and the example has its own 15-line loader.** An MCP server will want `Project`; moving it is a `git mv`
+   and a `Texts` parameter, and it is not this lane's.
+5. **No `Session::reopen`.** §10 said it would not be built. `Texts::len()` says how many texts it holds.
+6. **One flow shape in `NewTransaction`**: `DAY FROM -> TO AMOUNT` with a purpose, a description and codes. A split with legs and a
+   flow with `@ PRICE` or `for` are the same writer extended; they are not written.
+
+## 15. Measured
+
+Release build, the generated books of §3, a four-core machine shared with another lane (**load average 3 to 5.5 throughout**, so single
+runs are good to about ±10%): the figures are from 8 to 12 *interleaved* runs of the two binaries (`ab.py`), the baseline being a binary built
+from `bdc25f9`.
+
+| | baseline min / median | with the Session min / median |
+|---|---|---|
+| 100k `check` | 0.468 / 0.499 s | 0.434 / 0.511 s |
+| 100k `balance` | 0.472 / 0.492 s | 0.447 / 0.495 s |
+| 1m `check` | 4.646 / 4.805 s | 4.721 / 4.908 s (+1.6% / +2.1%; user CPU 4.407 / 4.410 s) |
+| 1m `balance` | 4.540 / 4.993 s | 4.387 / 4.742 s |
+
+The other views (fastest of three, two rounds, not interleaved): 100k `balance --monthly` 0.461 / 0.466 s, `available` 0.466 / 0.454 s,
+`forecast` 0.488 / 0.478 s; 1m `balance --monthly` 4.648 / 4.573 s, `available` 4.972 / 4.986 s, `forecast` 5.502 / 5.427 s. Peak RSS
+680,052 / 680,004 KB (1m `check`): the retained checkpoint costs nothing a measurement can see. **There is no slowdown from going through
+`Session` beyond the 1% of the fold that the checkpoint costs `check`.**
+
+What a client that holds a session pays (`Session` on the same books, one process):
+
+| | 100k | 1m |
+|---|---|---|
+| `open` (parse and build) | 301 ms | 2.58 s |
+| the first query (the fold, and its plan) | 172 ms | 2.05 s |
+| the next query (a plan, and the view) | 16 to 18 ms | 174 to 202 ms |
+| `apply` of one flow (build, fold, and the fold of the old book to compare) | 398 ms | 4.85 s |
+| the query after an `apply` | 17 ms | 198 ms |
+
+## 16. How it was checked
+
+- **No output changed.** `sh tests/golden.sh` and `sh tests/mistakes/run.sh`: `git diff tests/` empty after every commit. The 1,592
+  outputs of `allcmds.sh` (every command, text and `--json`, on every example, with `--at`, `--for`, `--all`, `--relaxed`,
+  `fmt --check`, `sync --dry`, a missing project, and two one-file projects) and the 468 of `docs/v5/measure/diff/run.sh`: **identical to the
+  baseline binary, byte for byte, after every commit.** `fuzz.py ... diff` on 400 mutated examples: 0 differ. A new script
+  (`fuzzcmds.py`) mutates an example and compares 15 commands through both binaries, stdout, stderr and exit status: 250 mutants, 3,750 comparisons,
+  0 differ.
+- **Mutants.** 26 changes to the new code, one at a time (the arena's slot arithmetic and counter; the table's replacement and its
+  paths; the span check, the tail and the newline of an edit; the multiset and the identity of a diagnostic; the swap of added and
+  removed; the JSON; the syntax and embedded-file refusals; forgetting to assign the new session; keeping a hypothesis's text; the order
+  of the diagnostics; the owner; the written line's order, padding, escaping, token and sign). **24 were killed at once; 2 survived and showed
+  two missing assertions** (a diagnostic's code is part of its identity; `Applied::file` names the edited file, not file 0): both were
+  added, and both mutants were killed. Every mutant is named in the harness.
+- **The `compile_fail` doc tests.** Rustdoc on stable does not check an error code, so the two bodies were compiled by hand: the first
+  gives `E0502` ("cannot borrow `session` as mutable because it is also borrowed as immutable", at `apply`, with the report "later used
+  here"), the second "lifetime may not live long enough" (the closure's return type `Result<Report<'2>, _>` against `&'1 Session<'_>`).
+  Each has a passing twin that is the same code with the one offending line moved or changed.
+
+## 17. What K7b can now delete, and what it can build on
+
+- **The free-function path of `report`**: `report`, `report_with_sources`, `views` (about 60 lines of `lib.rs`: a second dispatch
+  of the 14 queries), `claims::holdings_at` and `available::view_with_lens` (each builds a plan and folds), and the `Past::Journal`
+  variant with its branch in `forecast/trace.rs`: **about 90 non-test lines**, and the tests that run a query both ways and compare
+  (`context_views_match_the_legacy_views...`, `source_tests.rs`: about 60 call sites of `crate::report`) become one test of
+  `Session::query`. `Context::new`, the owning constructor, goes with them.
+- **A plan per answer**, once views read the run: `Session::with_plan` and the `Plan` in `Context` are the last reasons a session
+  builds one (31 ms at 100k, 175 ms at 1m, per query).
+- **`Context::ledger_at` and `available`'s forks**, as steppers: §3 is the list; the session is where they hang.
+- **`Applied` computed by comparing two folds**: with the trail, the diff is what the re-fold changed.
+- **To build on:** `Session::apply` has the signature that survives §9; `Sources::with` and `Texts::keep` are where a retained tree
+  per file would live (§9.1); `Edit` is already what a code action, a sync `Change` (whole-file `Replace`) and an LSP edit are.
+
+## 18. What is not finished, and the three places I am least proud of
+
+Not finished: an incremental `apply` (§9: it is a rebuild, 4.85 s at 1m); `Edit::Insert { day }` (sync's `Layout` knows where a dated
+line goes); `NewTransaction` for splits, prices and `for`; moving `Project` to a library so an MCP server does not write its own loader;
+`Session::reopen` for a server that applies for days; `why` and the other K7b queries as `Query` variants (the session answers what
+`Query` has).
+
+1. **A plan per answer, and a lazy fold.** `with_plan` is the honest consequence of `Plan` borrowing `Book`, and it works, but a `OnceLock`
+   filled by "whichever answer comes first, with its plan" is a thing a reader has to be told. `diagnostics()` can fold; `summary()` after
+   it builds a second plan. It is correct and measured, and it is a wart until K7b makes views read the run.
+2. **The arena grows and the owner is the client's.** A `Texts` keeps every applied edit's old text until it is dropped, `what_if` is a
+   closure because a returned hypothesis would have to be kept there too, and a GUI that wants to hold a `Session` in a struct must
+   leak or scope its `Texts`. The alternatives (§4) were worse, but this is the part of the surface a GUI author will meet first.
+3. **`apply`'s notion of "worse" and of "the same diagnostic".** Refusing an edit that adds a syntax error, and identifying a
+   diagnostic by severity, code and message, are policies I chose and argued, not facts. A change to a balance changes every assertion
+   message in a book (`apply` of one flow to the 100k book says 1 added and 1 removed; the 1m book 49 and 49), so `Applied` is noisy where
+   messages carry numbers. It also folds both books to say it. A stable identity (the diagnostic's anchor mapped through the edit) is
+   the better answer and is more code than this lane.
