@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+// `on last` is the end of a month, up to 30 days after the step it belongs to. A stretch that begins after the step
+// and before the end of the month (here a waiver that ends on the 15th) loses that due day: 2026-03-31 is not due.
+contract flat with greystar
+  2_900 USD monthly on last from checking
+  from 2026-01-10
+2026-03-01 flat waived until 2026-03-15

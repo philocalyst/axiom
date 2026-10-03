@@ -134,6 +134,14 @@ day is yielded once per step** (`weekly on 15`, `daily on monday`, `every 3d on 
 checks nothing against the cadence). The doc comment of `due` says "a day two of them land on is due once" for the days of
 one step; across steps it is not. Section 6 lists it; the new structure's due days are the set.
 
+**And a window can lose a due day.** `due` starts at the first step on or after its window, less a slack for the days a
+step lands before or after itself (`forward_landing`). `on last` lands up to 30 days after its step and the slack for it is 0
+(calendar.rs:630: `(On::Weekday(_) | On::Last, true) | (On::Last, false) => 0`, where `(On::Last, false)` is the forward
+slack). A window that begins after the step and before the month's end therefore misses that month's last day, and the
+windows `occurrences` asks are cut by waived stretches: `monthly on last from 2026-01-10` waived 03-01 to 03-15 has no due day
+on 2026-03-31 (`promise-last-after-waiver.ax`, `forecast` skips March). The set above is what a walk from the anchor finds, and
+this is where a walk from a window disagrees with it.
+
 `Day::MIN` as an anchor is a number, not a missing value: `due` counts steps from it (`schedules_fast_forward_from_day_min..`
 in the tests), so a contract with no `from` has a phase decided by `Day::MIN`'s day of month and weekday when it has no `on`.
 
@@ -258,6 +266,7 @@ The oracle reports each of these as listed, not as a failure; the new structure'
 | g | `loan_payment` is O(periods) per occurrence; the loan forecast does not stop | `source_tests.rs:852` | the payment once; the loan is done after its last payment |
 | h | recognition of a due day is `Days::on(anchor).moved(day - anchor)`, which overflows for an anchor of `Day::MIN` (any due day from 1970 on) and which the engine papers over (ledger.rs:540) | read; `promise-no-from.ax` goes through it | `Days::on(day)` |
 | i | an escalating contract with no `from` is `ForecastError::Overflow` (a ratio compounded over 5.9 million years) | `promise-rising-no-from.ax`, `forecast` | the same error; a contract that escalates needs a start (a language question) |
+| j | a due day is lost when a window begins after its step and before the month's end (`on last`, slack 0) | `promise-last-after-waiver.ax` | the day is due |
 
 ## 8. What this decides
 

@@ -464,14 +464,26 @@ def projects(directory):
     return sorted(os.path.join(directory, name) for name in os.listdir(directory) if name.startswith("p"))
 
 
-def run_dump(binary, path, extra=()):
-    result = subprocess.run([binary, *extra, path], capture_output=True, text=True, timeout=600)
+def run_dump(binary, path, extra=(), limit=300):
+    """What the dump says of a project. One that does not answer in LIMIT seconds is a hang: a mutant that loops is
+    caught like one that is wrong."""
+    try:
+        result = subprocess.run([binary, *extra, path], capture_output=True, text=True, timeout=limit)
+    except subprocess.TimeoutExpired:
+        return 124, "", f"no answer in {limit} seconds"
     return result.returncode, result.stdout, result.stderr
 
 
-def dump(binary, directory, jobs=3, tag="old", extra=()):
+def dump(binary, directory, jobs=3, tag="old", extra=(), limit=300):
+    """Runs BINARY over every project. After three that do not answer in time the rest are not asked."""
+    hung = []
+
     def one(path):
-        code, out, err = run_dump(binary, path, extra)
+        if len(hung) >= 3:
+            return path, 124
+        code, out, err = run_dump(binary, path, extra, limit)
+        if code == 124:
+            hung.append(path)
         with open(os.path.join(path, f"dump.{tag}.txt"), "w") as handle:
             handle.write(out)
             if code:
@@ -490,8 +502,12 @@ def dump(binary, directory, jobs=3, tag="old", extra=()):
 def compare(directory, a, b, show=3):
     different = []
     for path in projects(directory):
-        left = open(os.path.join(path, f"dump.{a}.txt")).read().split("\n")
-        right = open(os.path.join(path, f"dump.{b}.txt")).read().split("\n")
+        try:
+            left = open(os.path.join(path, f"dump.{a}.txt")).read().split("\n")
+            right = open(os.path.join(path, f"dump.{b}.txt")).read().split("\n")
+        except FileNotFoundError:
+            different.append((path, 0, ["not run"], ["not run"]))  # the mutant hung, and the rest were not asked
+            continue
         if left != right:
             at = next((i for i, (x, y) in enumerate(zip(left, right)) if x != y), min(len(left), len(right)))
             different.append((path, at, left[at:at + 1], right[at:at + 1]))
@@ -623,7 +639,7 @@ def mutate(tree, work, directory, only=None):
         try:
             binary = build(source, out)
             tag = f"m{number:02d}"
-            dump(binary, directory, 4, tag)
+            dump(binary, directory, 4, tag, limit=20)
             different = compare(directory, "base", tag, show=0)
             verdict = "killed" if different else "SURVIVED"
         except SystemExit:
