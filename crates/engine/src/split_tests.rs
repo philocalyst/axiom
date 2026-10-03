@@ -151,7 +151,6 @@ fn a_share_of_amount_in_an_item_is_a_share_of_the_header() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: `6%` is not an amount, and §3's second example does not compile"]
 fn the_language_example_a_cost_withheld_from_proceeds_is_a_share_of_the_header() {
     // §3: `15 title-co -> checking 627_000 USD #sale of condo` with `- 6% #selling-costs "commission"`: 37,620 withheld.
     let lines = "\
@@ -159,7 +158,7 @@ fn the_language_example_a_cost_withheld_from_proceeds_is_a_share_of_the_header()
   - 6% #fees \"commission\"
 ";
     with_run(lines, |book, run| {
-        assert_eq!(moves(book, run), ["buyer -> checking 1000.00 USD #household", "checking -> buyer 60.00 USD #fees"]);
+        assert_eq!(moves(book, run), ["buyer -> checking 1,000.00 USD #household", "checking -> buyer 60.00 USD #fees"]);
         assert_eq!(cents(book, run, "checking"), 100_000 + 94_000);
     });
 }

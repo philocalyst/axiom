@@ -7,8 +7,8 @@ use axiom_syntax::Subject;
 
 use super::flow::{
     Codes, Ends, FlowCx, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, endpoint, flow_roots,
-    keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_quantity_root,
-    push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
+    keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_item_root,
+    push_quantity_root, push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
 };
 use super::push_amount_root;
 use super::staged::Staged;
@@ -464,7 +464,11 @@ impl<'s> Split<'_, 's> {
             let place = if side == FlowSide::Out { leg.to } else { leg.from };
             ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) }
         });
-        let ends = Ends { from: source, to: leg_end.unwrap_or(source) };
+        // An item goes the way the legs do: from the source to the end that is the other side of it, or the other way
+        // when the source is where the legs arrive.
+        let other = leg_end.unwrap_or(source);
+        let ends =
+            if side == FlowSide::Out { Ends { from: source, to: other } } else { Ends { from: other, to: source } };
         let parent = Parent { ends, mode: Mode::Actual, header_codes: self.txn.codes, tail: None };
         lower_items(staged, cx, self.txn.flow.body.items, parent, &mut built.flow_roots, diags)
     }
@@ -700,7 +704,7 @@ fn lower_occurrence<'a, 's>(
         push_tail_roots(file, leg.tail, &mut expressions);
     }
     for item in &file[statement.body.items] {
-        push_amount_root(item.amount, &mut expressions);
+        push_item_root(file, item.amount, &mut expressions);
         push_tail_roots(file, item.tail, &mut expressions);
     }
     let name = staged.book.names.intern("journal");
@@ -1354,7 +1358,7 @@ fn lower_owes<'a, 's>(
         push_amount_root(amount, &mut exprs);
     }
     for item in &file[statement.body.items] {
-        push_amount_root(item.amount, &mut exprs);
+        push_item_root(file, item.amount, &mut exprs);
         push_tail_roots(file, item.tail, &mut exprs);
     }
     push_tail_roots(file, statement.tail, &mut exprs);

@@ -17,8 +17,8 @@
 
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, par};
 use axiom_model::{
-    Amount, Book, Commodity, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Item, Made, Place,
-    PurposeRoot, RuntimeDetail, RuntimeFlow, RuntimeTxn, Sign,
+    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Place, RuntimeDetail,
+    RuntimeFlow, RuntimeTxn,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -26,6 +26,7 @@ use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
+use crate::statement::is_exchange_cost;
 use crate::timeline::{Fact, Moment, SourceFact, Timeline};
 use crate::{
     Applied, Cause, Holding, OmittedInputs, Options, Posted, Promise, PromisedFlows, Recorded, Run, State, explain,
@@ -540,7 +541,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let cost_item = item.filter(|(group, item)| is_exchange_cost(book, transaction.flows, group, item));
         let cost_header =
             group.filter(|group| group.items.iter().any(|item| is_exchange_cost(book, transaction.flows, group, item)));
-        let computed_cost_item = cost_item.is_some_and(|(_, item)| matches!(item.amount, Expr::Computed(_)));
+        let computed_cost_item = cost_item.is_some_and(|(_, item)| matches!(item.amount, Cut::Of(Expr::Computed(_))));
         if roots.is_none() && cost_header.is_none() && !computed_cost_item {
             let motion = self.journal_motion(id, day);
             self.post(&if reversed { motion.reversed() } else { motion });
@@ -592,73 +593,13 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             }
         }
 
-        // A purpose-bearing `Less` item on an exchange is also the exchange's
-        // cost evidence. The item remains an ordinary posted flow for cash and
-        // purpose totals; the header carries its aggregate cost so a sale's
-        // realized proceeds shrink and a purchase's parcel basis grows.
         if let Some(group) = cost_header {
-            let mut total = match detail.cost {
-                Some(cost) => match book.convert(cost, book.base, day) {
-                    Some(base) => base.qty.0,
-                    None => {
-                        self.record.report(
-                            Diagnostic::error(
-                                "exchange-cost-price",
-                                format!("cannot value the exchange cost {}", book.show(cost)),
-                            )
-                            .label(source.loc, "needed to value this exchange cost"),
-                        );
-                        return;
-                    }
-                },
-                None => 0,
-            };
-            let mut has_cost = detail.cost.is_some();
-            for item in group.items.iter().filter(|item| is_exchange_cost(book, transaction.flows, group, item)) {
-                let Some(item_local) = item.flow else {
-                    continue;
-                };
-                let Some(start) = transaction.flows.start().index().checked_add(item_local as usize) else {
-                    continue;
-                };
-                let Ok(raw) = u32::try_from(start) else {
-                    continue;
-                };
-                let item_id = Id::new(raw);
-                let item_flow = &book.flows[item_id];
-                // An item that is computed is in an open group, which was solved when its first flow landed.
-                let amount = match (self.record.resolved.get(&item_id), item.amount) {
-                    (Some(cached), _) => Amount::new(cached.out, item_flow.out.unit),
-                    (None, Expr::Literal(amount)) => amount,
-                    (None, Expr::Computed(root)) => {
-                        let fault = Fault::InvalidProgram;
-                        self.record
-                            .report(explain::journal_expression_fault(book, item_flow, program, root, fault, day));
-                        return;
-                    }
-                };
-                let Some(cost) = book.convert(amount, book.base, day) else {
-                    self.record.report(
-                        Diagnostic::error(
-                            "exchange-cost-price",
-                            format!("cannot value the exchange cost {}", book.show(amount)),
-                        )
-                        .label(item.loc, "needed to value this exchange cost"),
-                    );
+            match self.exchange_costs(group, (transaction.flows, source.loc), detail.cost, day) {
+                Ok(cost) => detail.cost = cost.or(detail.cost),
+                Err(problem) => {
+                    self.record.report(problem);
                     return;
-                };
-                let Some(sum) = total.checked_add(cost.qty.0) else {
-                    self.record.report(
-                        Diagnostic::error("exchange-cost-overflow", "exchange costs exceed the supported amount range")
-                            .label(item.loc, "these costs do not fit in one amount"),
-                    );
-                    return;
-                };
-                total = sum;
-                has_cost = true;
-            }
-            if has_cost {
-                detail.cost = Some(Amount::new(Qty(total), book.base));
+                }
             }
         }
 
@@ -737,33 +678,6 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             (End::To, true) => Amounts { arrive: qty, ..written },
         }
     }
-}
-
-/// Whether this line item is a `Less` cost attached to an exchange header.
-/// The group retains the relationship; no endpoint guessing or transaction
-/// range scan is needed when the flow is posted.
-fn is_exchange_cost(book: &Book, flows: axiom_core::Run<Flow>, group: &Made, item: &Item<Option<u32>>) -> bool {
-    if item.sign != Sign::Less {
-        return false;
-    }
-    let (Heading::Flow(header), Some(item)) = (group.header, item.flow) else {
-        return false;
-    };
-    let Some(header_index) = flows.start().index().checked_add(header as usize) else {
-        return false;
-    };
-    let Some(item_index) = flows.start().index().checked_add(item as usize) else {
-        return false;
-    };
-    let (Ok(header_raw), Ok(item_raw)) = (u32::try_from(header_index), u32::try_from(item_index)) else {
-        return false;
-    };
-    let (header_id, item_id) = (Id::new(header_raw), Id::new(item_raw));
-    let (Some(header), Some(item)) = (book.flows.get(header_id), book.flows.get(item_id)) else {
-        return false;
-    };
-    header.is_exchange()
-        && item.purpose.is_some_and(|purpose| book.purposes[purpose.purpose].root == PurposeRoot::Spending)
 }
 
 /// Every journal flow as solved and settled. Each depends on nothing but the

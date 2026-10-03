@@ -11,10 +11,11 @@
 //! leg and item leaves: the legs must all be known before it can be. A leg that reads the book (an `=`, an `all`)
 //! reads it then. This module also reads one flow's computed amounts, which a flow that is in no group needs.
 
-use axiom_core::{Day, Diagnostic, Id};
+use axiom_core::{Day, Diagnostic, Id, Qty, Run};
 use axiom_model::{
-    Amount, Answer, Drawn, End, Env, Expr, Failed, Fault, Flow, FlowExpressions, Heading, Infer, Line, Program,
-    Quantity, Remainder, Remaining, Resolved, RuntimeTxn, Statement, Txn, Value, solve,
+    Amount, Answer, Book, Cut, Drawn, End, Env, Expr, Failed, Fault, Flow, FlowExpressions, Heading, Infer, Item, Line,
+    Made, Program, PurposeRoot, Quantity, Remainder, Remaining, Resolved, RuntimeTxn, Sign, Statement, Txn, Value,
+    solve,
 };
 
 use crate::Cause;
@@ -83,6 +84,52 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             flow.infer = Infer::Target { end, balance: flow.amount_at(end).qty };
         }
         Ok(read)
+    }
+
+    /// What an exchange's cost items add to its header's cost, in the base currency: a purpose-bearing `Less` item on
+    /// an exchange is also the exchange's cost evidence. The item remains an ordinary posted flow for cash and
+    /// purpose totals; the header carries its aggregate cost so a sale's realized proceeds shrink and a purchase's
+    /// parcel basis grows. `own` is the cost the header already says. None when there is none to say. An item that is
+    /// computed is in an open group, which was solved when its first flow landed.
+    pub(crate) fn exchange_costs(
+        &mut self,
+        group: &Made,
+        (flows, loc): (Run<Flow>, axiom_core::Loc),
+        own: Option<Amount>,
+        day: Day,
+    ) -> Result<Option<Amount>, Diagnostic> {
+        let book = self.plan.book;
+        let price = |amount: Amount, at| {
+            book.convert(amount, book.base, day).ok_or_else(|| {
+                Diagnostic::error(
+                    "exchange-cost-price",
+                    format!("cannot value the exchange cost {}", book.show(amount)),
+                )
+                .label(at, "needed to value this exchange cost")
+            })
+        };
+        let mut total = own.map_or(Ok(0), |cost| price(cost, loc).map(|base| base.qty.0))?;
+        let mut has_cost = own.is_some();
+        for item in group.items.iter().filter(|item| is_exchange_cost(book, flows, group, item)) {
+            let Some(offset) = item.flow else { continue };
+            let Some(item_id) = (flows.start().index() + offset as usize).try_into().ok().map(Id::new) else {
+                continue;
+            };
+            let item_flow = &book.flows[item_id];
+            // What a share or a computed item came to is in the flow it made, as the model or the first landing put it.
+            let amount = match (self.record.resolved.get(&item_id), item.amount) {
+                (Some(cached), _) => Amount::new(cached.out, item_flow.out.unit),
+                (None, Cut::Of(Expr::Literal(amount))) => amount,
+                (None, _) => item_flow.out,
+            };
+            let cost = price(amount, item.loc)?;
+            total = total.checked_add(cost.qty.0).ok_or_else(|| {
+                Diagnostic::error("exchange-cost-overflow", "exchange costs exceed the supported amount range")
+                    .label(item.loc, "these costs do not fit in one amount")
+            })?;
+            has_cost = true;
+        }
+        Ok(has_cost.then(|| Amount::new(Qty(total), book.base)))
     }
 
     /// Whether the flow `id` of an open statement may post: its group is solved, now if it was not yet, and could
@@ -219,14 +266,20 @@ impl Reads<'_, '_, '_, '_> {
         }
     }
 
-    /// The flow of a part as the expression reads it: with the day it lands, and the header's amount where the
-    /// flow's own is the zero it carries meanwhile.
+    /// The flow of a part as the expression reads it: with the day it lands, and, where the flow's own amount is the
+    /// zero it carries meanwhile, the header's `amount` in the flow's commodity: what a share of the total is a
+    /// share of. An exchange header has an amount of each commodity, and the flow reads the one it counts in.
     fn flow(&self, offset: u32) -> (Id<Flow>, Flow) {
         let id = Id::new(self.first.index() as u32 + offset);
         let mut flow = self.statement.flows[offset as usize].clone();
         flow.day = self.day;
         if let Some(header) = self.header {
-            (flow.out, flow.arrive) = (header.out, header.arrive);
+            let counted = if header.arrive.unit == flow.out.unit && header.out.unit != flow.out.unit {
+                header.arrive
+            } else {
+                header.out
+            };
+            (flow.out, flow.arrive) = (counted, counted);
         }
         (id, flow)
     }
@@ -264,4 +317,36 @@ impl Env for Reads<'_, '_, '_, '_> {
         let qty = if end == End::From { amounts.out } else { amounts.arrive };
         Ok(Some(Amount::new(qty, flow.out.unit)))
     }
+}
+
+/// Whether this line item is a `Less` cost attached to an exchange header.
+/// The group retains the relationship; no endpoint guessing or transaction
+/// range scan is needed when the flow is posted.
+pub(crate) fn is_exchange_cost(
+    book: &Book,
+    flows: axiom_core::Run<Flow>,
+    group: &Made,
+    item: &Item<Option<u32>>,
+) -> bool {
+    if item.sign != Sign::Less {
+        return false;
+    }
+    let (Heading::Flow(header), Some(item)) = (group.header, item.flow) else {
+        return false;
+    };
+    let Some(header_index) = flows.start().index().checked_add(header as usize) else {
+        return false;
+    };
+    let Some(item_index) = flows.start().index().checked_add(item as usize) else {
+        return false;
+    };
+    let (Ok(header_raw), Ok(item_raw)) = (u32::try_from(header_index), u32::try_from(item_index)) else {
+        return false;
+    };
+    let (header_id, item_id) = (Id::new(header_raw), Id::new(item_raw));
+    let (Some(header), Some(item)) = (book.flows.get(header_id), book.flows.get(item_id)) else {
+        return false;
+    };
+    header.is_exchange()
+        && item.purpose.is_some_and(|purpose| book.purposes[purpose.purpose].root == PurposeRoot::Spending)
 }

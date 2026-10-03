@@ -17,7 +17,7 @@ use crate::journal::{Detail, Flow, FlowExpressions, Infer, Mode, Origin, Program
 use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
-use crate::split::{Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
+use crate::split::{Cut, Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedEnd {
@@ -110,10 +110,24 @@ pub(super) fn flow_roots<'s>(file: &ast::File<'s>, flow: &ast::Flow<'s>) -> Vec<
         push_tail_roots(file, leg.tail, &mut roots);
     }
     for item in &file[flow.body.items] {
-        push_amount_root(item.amount, &mut roots);
+        push_item_root(file, item.amount, &mut roots);
         push_tail_roots(file, item.tail, &mut roots);
     }
     roots
+}
+
+/// The share of its header an item says, if its amount is only `6%`: what a percentage alone under a header is of.
+fn share_of(file: &ast::File<'_>, amount: ast::Amount<'_>) -> Option<Ratio> {
+    let ast::Amount::Computed(expr) = amount else { return None };
+    let ast::ExprKind::Pct(percent) = file.exprs[expr].kind else { return None };
+    Ratio::percent(percent.mantissa as i128, percent.scale)
+}
+
+/// An item's amount is a root unless it is a share, which is not an expression the program computes.
+pub(super) fn push_item_root<'s>(file: &ast::File<'s>, amount: ast::Amount<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
+    if share_of(file, amount).is_none() {
+        push_amount_root(amount, roots);
+    }
 }
 
 pub(super) fn push_tail_roots<'s>(
@@ -465,10 +479,17 @@ pub(super) fn lower_items<'s>(
 ) -> Box<[Item<Option<u32>>]> {
     let mut lowered = Vec::with_capacity(items.len());
     for item in &cx.file[items] {
-        let Some(expr) = resolve_amount(staged, cx, item.amount, staged.book.base, diags) else {
-            continue;
+        let cut = match share_of(cx.file, item.amount) {
+            Some(rate) => Cut::Share(rate),
+            None => match resolve_amount(staged, cx, item.amount, staged.book.base, diags) {
+                Some(expr) => Cut::Of(expr),
+                None => continue,
+            },
         };
-        let amount = expr.stand_in(staged.book.base);
+        let amount = match cut {
+            Cut::Of(expr) => expr.stand_in(staged.book.base),
+            Cut::Share(_) => Amount::zero(staged.book.base),
+        };
         let (local_codes, item_tail) = cx.lower_tail(staged, item.tail, diags);
         let tail = parent.tail.cloned().unwrap_or_else(Tail::new).merge(item_tail);
         let says_something = tail.purpose.is_some()
@@ -504,7 +525,7 @@ pub(super) fn lower_items<'s>(
                 ast::Sign::Add => Sign::Add,
                 ast::Sign::Less => Sign::Less,
             },
-            amount: expr,
+            amount: cut,
             loc: item.loc,
             flow,
         });

@@ -180,12 +180,31 @@ pub struct Leg<F> {
     pub part: Part,
 }
 
+/// What an item cuts of its header: an amount, or a share of the header's (`- 6% #selling-costs`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cut {
+    Of(Expr),
+    /// That share of the header's side as it was given, before any leg or item took from it: what a leg's `Part::Share`
+    /// is of it.
+    Share(Ratio),
+}
+
+impl Cut {
+    /// The node that computes its amount, if it is computed.
+    pub fn root(self) -> Option<NodeId> {
+        match self {
+            Cut::Of(expr) => expr.root(),
+            Cut::Share(_) => None,
+        }
+    }
+}
+
 /// One item, a signed amount carved out of, added to or taken off the header. It makes a flow of its own when it
 /// says something its parent does not: `I` is how.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Item<I> {
     pub sign: Sign,
-    pub amount: Expr,
+    pub amount: Cut,
     pub loc: Loc,
     pub flow: I,
 }

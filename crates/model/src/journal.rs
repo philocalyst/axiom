@@ -724,11 +724,14 @@ impl Program {
     /// Whether the amount of the flow at `offset` is the fold's to say, though no expression of its own computes
     /// it: it is the remainder of an open split, the header an open group carves, or an item that is computed.
     pub fn folded_at(&self, offset: u32) -> bool {
-        use crate::split::{Expr, Heading, Part};
+        use crate::split::{Cut, Expr, Heading, Part};
         let Some(group) = self.group.as_deref().filter(|_| self.open) else { return false };
         group.header == Heading::Flow(offset)
             || group.legs.iter().any(|leg| leg.flow == offset && matches!(leg.part, Part::Rest))
-            || group.items.iter().any(|item| item.flow == Some(offset) && matches!(item.amount, Expr::Computed(_)))
+            || group
+                .items
+                .iter()
+                .any(|item| item.flow == Some(offset) && matches!(item.amount, Cut::Of(Expr::Computed(_))))
     }
 }
 

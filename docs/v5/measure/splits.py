@@ -9,6 +9,7 @@
     splits.py all BASELINE NEW DIR N [SEED]     gen, then run
     splits.py internals BASELINE NEW DIR [JOBS] compare what two builds of `internals/main.rs` print for each project
     splits.py survey BINARY DIR                 which diagnostics BINARY raises over the projects
+    splits.py equiv BASELINE NEW DIR N [SEED]   a split statement against the plain transfers it says (LANGUAGE §3)
 
 What it is for. Lane K4a unifies the types that say how a statement or a promise splits (a header, its legs and
 its items) without changing what any of them means. `docs/v5/measure/diff/` has the mistakes and the valid projects
@@ -879,9 +880,134 @@ def survey(binary, directory, jobs=3):
         print(f"  {form:<26} {per_form[form, 'clean']:>4} of {per_form[form, 'all']:>4} clean")
 
 
+# ─── A split against what it says ───────────────────────────────────────────────────────────────────────────────
+
+
+def equivalent(rng):
+    """One split statement written out, and the plain transfers LANGUAGE §3 says it is: (split, plain, forms).
+
+    Every amount is a literal and the legs add up to the total (or one is `...`), so a build that reads §3 moves
+    exactly what the plain transfers move, whatever else it does. The plain book is run by the BASELINE, which
+    gets plain transfers right; the split book by the NEW build, which is the one being checked.
+    """
+    forms = Counter()
+    day = "2026-03-%02d" % rng.randint(2, 27)
+    named = rng.random() < 0.3
+    from_side = rng.random() < 0.5
+    source = "checking"
+    ends = rng.sample(["shop", "acme", "savings", "bonus", "reserve", "buyer"], rng.randint(1, 3))
+    items = []
+    for _ in range(rng.choice([0, 0, 1, 2])):
+        items.append((rng.choice(["carve", "add", "less", "less-bare"]), rng.randint(1, 20), rng.choice(["fees", "fun", "groceries"])))
+    carved = sum(amount for kind, amount, _ in items if kind in ("carve", "less-bare"))
+    if named:
+        forms["named"] += 1
+        end = rng.choice(["shop", "acme", "savings"])
+        header = rng.randint(carved + 30, carved + 300)
+        purpose = rng.choice(["", " #household", " #fun"])
+        split = [f"{day} {source} -> {end} {header} USD{purpose}"]
+        plain = [f"{day} {source} -> {end} {header - carved} USD{purpose}"]
+        extra = items
+    else:
+        forms["split:from" if from_side else "split:to"] += 1
+        rest_at = rng.choice([None, "last", "first"]) if len(ends) > 1 or rng.random() < 0.5 else None
+        kinds = ["rest" if (rest_at == "last" and i == len(ends) - 1) or (rest_at == "first" and i == 0) else "amount" for i in range(len(ends))]
+        amounts = [rng.randint(5, 120) for _ in ends]
+        spoken = sum(a for a, k in zip(amounts, kinds) if k == "amount")
+        total_kind = rng.choice(["before", "after", "none"]) if rest_at is None else rng.choice(["before", "after"])
+        if rest_at is not None:
+            rest = rng.randint(5, 100)
+            total = spoken + carved + rest
+        else:
+            total = spoken + carved
+        forms["total:" + total_kind] += 1
+        forms["rest:" + str(rest_at)] += 1
+        head = {
+            (True, "before"): f"{day} {source} {total} USD ->",
+            (True, "after"): f"{day} {source} -> {total} USD",
+            (True, "none"): f"{day} {source} ->",
+            (False, "before"): f"{day} -> {source} {total} USD",
+            (False, "after"): f"{day} {total} USD -> {source}",
+            (False, "none"): f"{day} -> {source}",
+        }[from_side, total_kind]
+        split = [head]
+        plain = []
+        leg_purposes = [rng.choice(["", "", " #fun", " #groceries"]) for _ in ends]
+        remainder_end = None
+        for end, kind, amount, purpose in zip(ends, kinds, amounts, leg_purposes):
+            split.append(f"  {end} {'...' if kind == 'rest' else str(amount) + ' USD'}{purpose}")
+            moved = (total - spoken - carved) if kind == "rest" else amount
+            if kind == "rest":
+                remainder_end = end
+            plain.append(f"{day} {source} -> {end} {moved} USD{purpose}" if from_side else f"{day} {end} -> {source} {moved} USD{purpose}")
+        carry = remainder_end or ends[0]
+        extra = items
+        forms["leg-count:%d" % len(ends)] += 1
+    for kind, amount, purpose in extra:
+        forms["item:" + kind] += 1
+        sign = {"carve": "", "add": "+ ", "less": "- ", "less-bare": "- "}[kind]
+        tail = "" if kind == "less-bare" else f" #{purpose}"
+        split.append(f"  {sign}{amount} USD{tail}")
+        if kind == "less-bare":
+            continue
+        if named:
+            a, b = source, end
+        else:
+            a, b = (source, carry) if from_side else (carry, source)
+        if kind == "less":
+            a, b = b, a
+        plain.append(f"{day} {a} -> {b} {amount} USD #{purpose}")
+    return "\n".join(split) + "\n", "\n".join(plain) + "\n", forms
+
+
+def equiv(baseline, new, directory, count, seed, jobs=3):
+    """The NEW build on each split against the BASELINE on the plain transfers it is: balance, flow, net worth."""
+    os.makedirs(directory, exist_ok=True)
+    cases = []
+    for index in range(count):
+        rng = random.Random(seed * 7_000_003 + index)
+        split, plain, forms = equivalent(rng)
+        for name, text in (("split", split), ("plain", plain)):
+            path = os.path.join(directory, f"e{index:05d}", name)
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, "main.ax"), "w") as out:
+                out.write(PRELUDE + text)
+        cases.append((index, forms, split, plain))
+
+    def one(case):
+        index, forms, split, plain = case
+        said = {}
+        for name, binary in (("split", new), ("plain", baseline)):
+            path = os.path.join(directory, f"e{index:05d}", name)
+            said[name] = [sh(binary, args, path) for args in (["balance", "-C", "main.ax"], ["flow", "-C", "main.ax"], ["check", "-C", "main.ax"])]
+        return index, forms, split, plain, said
+
+    with ThreadPoolExecutor(jobs) as pool:
+        results = list(pool.map(one, cases))
+    wrong, counts, clean = [], Counter(), 0
+    for index, forms, split, plain, said in results:
+        counts.update(forms)
+        net = lambda out: re.findall(r"net worth ([-0-9,.]+ \w+)", out)
+        same = said["split"][0] == said["plain"][0] and said["split"][1] == said["plain"][1] and net(said["split"][2][1]) == net(said["plain"][2][1])
+        clean += said["split"][2][0] == 0
+        if not same:
+            wrong.append((index, split, plain, said))
+    for index, split, plain, said in wrong[:4]:
+        print(f"DIFFERENT e{index:05d}\n--- the split\n{split}--- the plain transfers\n{plain}")
+        for what, a, b in zip(("balance", "flow", "check"), said["split"], said["plain"]):
+            if a != b:
+                print(f"--- {what}: split said\n{a[1][-900:]}{a[2][-300:]}\n--- {what}: plain said\n{b[1][-900:]}{b[2][-300:]}")
+    print(f"{len(results)} splits, {clean} without an error, {len(wrong)} not the plain transfers they say")
+    for form, number in sorted(counts.items()):
+        print(f"  {form:<24} {number}")
+    return len(wrong)
+
+
 def main(argv):
     if len(argv) >= 5 and argv[1] == "internals":
         return 1 if internals(argv[2], argv[3], argv[4], int(argv[5]) if len(argv) > 5 else 3) else 0
+    if len(argv) >= 6 and argv[1] == "equiv":
+        return 1 if equiv(argv[2], argv[3], argv[4], int(argv[5]), int(argv[6]) if len(argv) > 6 else 1) else 0
     if len(argv) >= 4 and argv[1] == "survey":
         survey(argv[2], argv[3])
         return 0

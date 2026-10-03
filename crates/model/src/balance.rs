@@ -20,7 +20,7 @@ use crate::journal::Flow;
 use crate::law::Fault;
 use crate::problem::{self, Unbalanced};
 use crate::solve::{Bear, Draw, Drawn, Failed, Line, LiteralEnv, Remainder, Remaining, Solved, solve};
-use crate::split::{Expr, Heading, Item, Made, Sign};
+use crate::split::{Cut, Expr, Heading, Item, Made, Sign};
 
 /// What a statement's header says it moves.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -141,8 +141,8 @@ pub fn takes(item: &Item<Option<u32>>, unit: Id<Commodity>) -> bool {
     };
     bears
         && match item.amount {
-            Expr::Literal(amount) => amount.unit == unit,
-            Expr::Computed(_) => true,
+            Cut::Of(Expr::Literal(amount)) => amount.unit == unit,
+            Cut::Of(Expr::Computed(_)) | Cut::Share(_) => true,
         }
 }
 
@@ -205,5 +205,11 @@ fn put(book: &mut Book<'_>, group: &Made, first: Id<Flow>, solved: &Solved) {
         };
         let flow = &mut book.flows[at(leg.flow)];
         (flow.out, flow.arrive) = (amount, amount);
+    }
+    for (item, amount) in group.items.iter().zip(solved.items.iter()) {
+        if let (Some(offset), Some(amount)) = (item.flow, *amount) {
+            let flow = &mut book.flows[at(offset)];
+            (flow.out, flow.arrive) = (amount, amount);
+        }
     }
 }

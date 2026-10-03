@@ -32,7 +32,7 @@ use axiom_core::{Id, Qty, Ratio};
 use crate::book::{Amount, Commodity};
 use crate::journal::{End, Infer, Mode};
 use crate::law::Fault;
-use crate::split::{Expr, FlowSide, Part, Quantity};
+use crate::split::{Cut, Expr, FlowSide, Part, Quantity};
 
 /// Which flow of a group an expression is read against.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -209,7 +209,7 @@ pub struct Draw {
 /// does a `Less` that makes no flow of its own; an `Add` never does, and a `Less` with a purpose is its own flow.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Bear {
-    pub amount: Expr,
+    pub amount: Cut,
     pub side: FlowSide,
     /// What the amount is counted in until the environment can say: the zero a flow carries for it.
     pub unit: Id<Commodity>,
@@ -263,6 +263,8 @@ pub enum Failed<E> {
 
 /// What the header has left, and whether everything taken from it was exact, as the solver goes.
 struct Account {
+    /// What the header was given as.
+    given: Option<Remaining>,
     left: Option<Remaining>,
     exact: bool,
 }
@@ -296,7 +298,7 @@ pub fn solve<E: Env>(
     settles: Remainder,
     env: &mut E,
 ) -> Result<Solved, Failed<E::Failure>> {
-    let mut account = Account { left: header, exact: true };
+    let mut account = Account { given: header, left: header, exact: true };
     let mut drawn = draw(&mut account, header, legs, env)?;
     for (index, one) in drawn.iter().enumerate() {
         if let Drawn::Value(resolved) = one {
@@ -367,7 +369,14 @@ fn bear<E: Env>(account: &mut Account, items: &[Bear], env: &mut E) -> Result<Ve
     let mut amounts = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
         let at = Line::Item(index);
-        let amount = match env.amount(at, account.left.as_ref(), item.amount).map_err(Failed::Env)? {
+        let answer = match item.amount {
+            Cut::Of(expr) => env.amount(at, account.left.as_ref(), expr).map_err(Failed::Env)?,
+            Cut::Share(rate) => {
+                let of = account.given.map_or(Amount::zero(item.unit), |given| given.of(item.side));
+                Answer::Amount(of.scaled(rate).map_err(|fault| Failed::Fault { at, fault })?)
+            }
+        };
+        let amount = match answer {
             Answer::Amount(amount) => amount,
             Answer::Omitted => {
                 amounts.push(None);
@@ -415,7 +424,7 @@ mod tests {
     }
 
     fn carve(amount: i64) -> Bear {
-        Bear { amount: Expr::Literal(usd(amount)), side: FlowSide::Out, unit: USD, takes: true }
+        Bear { amount: Cut::Of(Expr::Literal(usd(amount))), side: FlowSide::Out, unit: USD, takes: true }
     }
 
     fn amounts(solved: &Solved) -> Vec<i64> {
@@ -549,7 +558,7 @@ mod tests {
 
     #[test]
     fn an_item_sees_what_the_legs_and_the_items_before_it_left() {
-        let tenth = Bear { amount: Expr::Computed(NodeId(99)), side: FlowSide::Out, unit: USD, takes: true };
+        let tenth = Bear { amount: Cut::Of(Expr::Computed(NodeId(99))), side: FlowSide::Out, unit: USD, takes: true };
         let mut env = Says::default();
         let solved =
             solve(Some(transfer(1_000)), &[pays(of(usd(500)))], &[tenth, tenth], Remainder::BeforeItems, &mut env)
@@ -562,7 +571,7 @@ mod tests {
     #[test]
     fn an_item_that_takes_from_another_side_takes_from_that_side() {
         let header = Remaining { out: usd(1_000), arrive: eur(70) };
-        let bear = Bear { amount: Expr::Literal(eur(20)), side: FlowSide::Arrive, unit: EUR, takes: true };
+        let bear = Bear { amount: Cut::Of(Expr::Literal(eur(20))), side: FlowSide::Arrive, unit: EUR, takes: true };
         let solved = literal(header, &[], &[bear]).unwrap();
         assert_eq!(solved.header, Some(Remaining { out: usd(1_000), arrive: eur(50) }));
     }
@@ -571,7 +580,7 @@ mod tests {
     fn a_part_that_reads_an_input_not_bound_is_left_out_and_takes_nothing() {
         let mut env = Says { nodes: vec![(1, Answer::Omitted)], ..Says::default() };
         let missing = pays(Part::Of(Quantity::Amount(Expr::Computed(NodeId(1)))));
-        let item = Bear { amount: Expr::Computed(NodeId(1)), side: FlowSide::Out, unit: USD, takes: true };
+        let item = Bear { amount: Cut::Of(Expr::Computed(NodeId(1))), side: FlowSide::Out, unit: USD, takes: true };
         let solved =
             solve(Some(transfer(1_000)), &[missing, pays(Part::Rest)], &[item], Remainder::BeforeItems, &mut env)
                 .unwrap();
@@ -586,7 +595,7 @@ mod tests {
         let solved = literal(transfer(1_000), &[pays(Part::Of(computed))], &[]).unwrap();
         assert_eq!(amounts(&solved), [0]);
         assert!(!solved.exact);
-        let item = Bear { amount: Expr::Computed(NodeId(1)), side: FlowSide::Out, unit: USD, takes: true };
+        let item = Bear { amount: Cut::Of(Expr::Computed(NodeId(1))), side: FlowSide::Out, unit: USD, takes: true };
         assert!(!literal(transfer(1_000), &[], &[item]).unwrap().exact);
         assert_eq!(literal(transfer(1_000), &[], &[item]).unwrap().items[..], [Some(usd(0))]);
     }
@@ -662,7 +671,7 @@ mod tests {
 
     #[test]
     fn an_item_after_the_legs_is_read_against_what_they_left_before_the_remainder_is_settled() {
-        let tenth = Bear { amount: Expr::Computed(NodeId(99)), side: FlowSide::Out, unit: USD, takes: true };
+        let tenth = Bear { amount: Cut::Of(Expr::Computed(NodeId(99))), side: FlowSide::Out, unit: USD, takes: true };
         let legs = [pays(of(usd(500))), pays(Part::Rest)];
         let mut env = Says::default();
         let solved = solve(Some(transfer(1_000)), &legs, &[tenth], Remainder::AfterItems, &mut env).unwrap();
@@ -702,5 +711,387 @@ mod tests {
         assert!(solved.exact);
         let Drawn::Value(target) = solved.legs[0] else { panic!("a value") };
         assert_eq!(target.infer, Infer::Target { end: End::From, balance: Qty(800) }, "it stays the marker it is");
+    }
+
+    #[test]
+    fn an_item_that_is_a_share_is_of_the_header_as_it_was_given() {
+        let tenth = Ratio::new(1, 10).unwrap();
+        let share = Bear { amount: Cut::Share(tenth), side: FlowSide::Out, unit: USD, takes: true };
+        let solved = literal(transfer(1_000), &[pays(of(usd(500)))], &[share, share]).unwrap();
+        // a tenth of 1,000 each time, not of what the leg and the first item left
+        assert_eq!(solved.items[..], [Some(usd(100)), Some(usd(100))]);
+        assert_eq!(solved.header, Some(transfer(300)));
+        assert!(solved.exact);
+        let none = solve(None, &[], &[share], Remainder::AfterItems, &mut LiteralEnv).unwrap();
+        assert_eq!(none.items[..], [Some(usd(0))]);
+    }
+
+    // ─── The solver against a second account of the same rules, on generated groups ────────────────────────────
+
+    /// What the generator draws from: a small deterministic source, so a failure names its seed.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+
+        fn below(&mut self, bound: u64) -> u64 {
+            self.next() % bound
+        }
+
+        fn pick<T: Copy>(&mut self, of: &[T]) -> T {
+            of[self.below(of.len() as u64) as usize]
+        }
+    }
+
+    const UNITS: [Id<Commodity>; 3] = [Id::new(0), Id::new(1), Id::new(2)];
+
+    /// A quantity of the sizes books have, now and then one at the edge of what a quantity can hold.
+    fn quantity_of(rng: &mut Rng) -> i64 {
+        match rng.below(40) {
+            0 => i64::MAX - rng.below(10) as i64,
+            1 => i64::MIN + 1 + rng.below(10) as i64,
+            2 => 0,
+            _ => rng.below(200_000) as i64 - 20_000,
+        }
+    }
+
+    fn amount_of(rng: &mut Rng, unit: Id<Commodity>) -> Amount {
+        let unit = if rng.below(10) == 0 { rng.pick(&UNITS) } else { unit };
+        Amount::new(Qty(quantity_of(rng)), unit)
+    }
+
+    fn expr_of(rng: &mut Rng, unit: Id<Commodity>) -> Expr {
+        if rng.below(10) < 6 {
+            Expr::Literal(amount_of(rng, unit))
+        } else {
+            Expr::Computed(NodeId(rng.below(12) as u32))
+        }
+    }
+
+    fn quantity_drawn(rng: &mut Rng, unit: Id<Commodity>) -> Quantity {
+        match rng.below(20) {
+            0..=7 => Quantity::Amount(expr_of(rng, unit)),
+            8..=10 => Quantity::Pending(expr_of(rng, unit)),
+            11..=13 => Quantity::Target(expr_of(rng, unit)),
+            14 => Quantity::Unknown(rng.pick(&UNITS)),
+            15 => Quantity::All(None),
+            16 => Quantity::All(Some(rng.pick(&UNITS))),
+            _ => Quantity::Derived,
+        }
+    }
+
+    fn share_drawn(rng: &mut Rng) -> Ratio {
+        match rng.below(30) {
+            0 => Ratio::new(i64::MAX as i128 / 3, 1).unwrap(),
+            _ => Ratio::new(rng.below(150) as i128, 100).unwrap(),
+        }
+    }
+
+    struct Group {
+        header: Option<Remaining>,
+        legs: Vec<Draw>,
+        items: Vec<Bear>,
+        settles: Remainder,
+    }
+
+    fn group_drawn(rng: &mut Rng) -> Group {
+        let unit = UNITS[0];
+        let other = if rng.below(4) == 0 { UNITS[1] } else { unit };
+        let header = (rng.below(10) != 0)
+            .then(|| Remaining { out: amount_of(rng, unit), arrive: Amount::new(Qty(quantity_of(rng)), other) });
+        let legs = (0..rng.below(6))
+            .map(|_| {
+                let side = if rng.below(10) < 6 { FlowSide::Out } else { FlowSide::Arrive };
+                let unit = header.map_or(unit, |header| header.of(side).unit);
+                let part = match rng.below(20) {
+                    0..=3 => Part::Rest,
+                    4..=7 => Part::Share(share_drawn(rng)),
+                    _ => Part::Of(quantity_drawn(rng, unit)),
+                };
+                Draw { part, side, unit }
+            })
+            .collect();
+        let items = (0..rng.below(5))
+            .map(|_| {
+                let side = if rng.below(10) < 7 { FlowSide::Out } else { FlowSide::Arrive };
+                let unit = header.map_or(unit, |header| header.of(side).unit);
+                let amount = if rng.below(8) == 0 { Cut::Share(share_drawn(rng)) } else { Cut::Of(expr_of(rng, unit)) };
+                Bear { amount, side, unit, takes: rng.below(2) == 0 }
+            })
+            .collect();
+        let settles = if rng.below(3) == 0 { Remainder::AfterItems } else { Remainder::BeforeItems };
+        Group { header, legs, items, settles }
+    }
+
+    /// An environment whose answers are a function of what is asked and the seed, and which keeps what it was asked.
+    struct Scripted {
+        seed: u64,
+        asked: Vec<(Line, Option<Remaining>, Expr)>,
+    }
+
+    impl Env for Scripted {
+        type Failure = u8;
+
+        fn amount(&mut self, at: Line, left: Option<&Remaining>, expr: Expr) -> Result<Answer, u8> {
+            self.asked.push((at, left.copied(), expr));
+            let Expr::Computed(NodeId(node)) = expr else {
+                let Expr::Literal(amount) = expr else { unreachable!() };
+                return Ok(Answer::Amount(amount));
+            };
+            let mut rng = Rng(self.seed
+                ^ (u64::from(node) << 20)
+                ^ (match at {
+                    Line::Header(_) => 1,
+                    Line::Leg(i) => 100 + i as u64,
+                    Line::Item(i) => 200 + i as u64,
+                })
+                .wrapping_mul(0x9e37_79b9));
+            rng.next();
+            Ok(match rng.below(100) {
+                0..=3 => return Err(rng.below(250) as u8),
+                4..=13 => Answer::Omitted,
+                14..=23 => Answer::Later,
+                // a tenth of what the header has left, when it is read against it
+                24..=33 if left.is_some() => {
+                    Answer::Amount(Amount::new(Qty(left.unwrap().out.qty.0 / 10), left.unwrap().out.unit))
+                }
+                _ => Answer::Amount(Amount::new(Qty(rng.below(100_000) as i64), UNITS[rng.below(8).min(1) as usize])),
+            })
+        }
+
+        fn payment(&mut self, _: Line) -> Result<Answer, u8> {
+            self.asked.push((Line::Header(FlowSide::Out), None, Expr::Computed(NodeId(u32::MAX))));
+            Ok(if self.seed % 3 == 0 { Answer::Later } else { Answer::Amount(usd(777)) })
+        }
+
+        fn lands(&mut self, at: Line, marker: &Resolved) -> Result<Option<Amount>, u8> {
+            self.asked.push((at, None, Expr::Computed(NodeId(u32::MAX - 1))));
+            Ok((self.seed % 5 == 0).then(|| Amount::new(Qty(marker.amount.qty.0 + 5), marker.amount.unit)))
+        }
+    }
+
+    /// The same rules written again in a different shape: two running totals in `i128`, where `solve` takes from a
+    /// pair of amounts one at a time, and the order of events spelled out as three passes over the legs and one over
+    /// the items.
+    fn reference(group: &Group, env: &mut Scripted) -> Result<Solved, Failed<u8>> {
+        type Totals = Option<[(Id<Commodity>, i128); 2]>;
+        fn left_of(totals: &Totals) -> Option<Remaining> {
+            totals.map(|t| Remaining {
+                out: Amount::new(Qty(t[0].1 as i64), t[0].0),
+                arrive: Amount::new(Qty(t[1].1 as i64), t[1].0),
+            })
+        }
+        fn take(totals: &mut Totals, side: FlowSide, amount: Amount, at: Line) -> Result<(), Failed<u8>> {
+            let Some(totals) = totals else { return Ok(()) };
+            let me = side.index();
+            let wrong = |fault| Err(Failed::Fault { at, fault });
+            if totals[me].0 != amount.unit {
+                return wrong(Fault::UnitMismatch { found: amount.unit, expected: totals[me].0 });
+            }
+            totals[me].1 -= i128::from(amount.qty.0);
+            if i64::try_from(totals[me].1).is_err() {
+                return wrong(Fault::Overflow);
+            }
+            if totals[1 - me].0 == totals[me].0 {
+                totals[1 - me].1 -= i128::from(amount.qty.0);
+                if i64::try_from(totals[1 - me].1).is_err() {
+                    return wrong(Fault::Overflow);
+                }
+            }
+            Ok(())
+        }
+        fn share_of(base: Amount, rate: Ratio, at: Line) -> Result<Amount, Failed<u8>> {
+            base.qty
+                .scale(rate)
+                .map(|qty| Amount::new(qty, base.unit))
+                .ok_or(Failed::Fault { at, fault: Fault::Overflow })
+        }
+        let given = group.header;
+        let mut totals: Totals =
+            given.map(|h| [(h.out.unit, i128::from(h.out.qty.0)), (h.arrive.unit, i128::from(h.arrive.qty.0))]);
+        let mut exact = true;
+        let mut drawn: Vec<Drawn> = Vec::new();
+        let mut remainder_on = [false, false];
+        for (index, leg) in group.legs.iter().enumerate() {
+            let at = Line::Leg(index);
+            let one = match leg.part {
+                Part::Rest => {
+                    if std::mem::replace(&mut remainder_on[leg.side.index()], true) {
+                        return Err(Failed::TwoRests { at });
+                    }
+                    Drawn::Rest(Amount::zero(leg.unit))
+                }
+                Part::Share(rate) => {
+                    let base = given.map_or(Amount::zero(leg.unit), |header| header.of(leg.side));
+                    let amount = share_of(base, rate, at)?;
+                    Drawn::Value(Resolved { amount, infer: Infer::Known, mode: None, exact: true })
+                }
+                Part::Of(quantity) => {
+                    match quantity
+                        .resolve(env, at, left_of(&totals).as_ref(), leg.side.end(), leg.unit)
+                        .map_err(Failed::Env)?
+                    {
+                        Some(resolved) => Drawn::Value(resolved),
+                        None => Drawn::Omitted,
+                    }
+                }
+            };
+            exact &= !matches!(one, Drawn::Value(Resolved { exact: false, .. }));
+            drawn.push(one);
+        }
+        let carve = |totals: &mut Totals, drawn: &[Drawn]| -> Result<(), Failed<u8>> {
+            for (index, one) in drawn.iter().enumerate() {
+                if let Drawn::Value(value) = one {
+                    take(totals, group.legs[index].side, value.amount, Line::Leg(index))?;
+                }
+            }
+            Ok(())
+        };
+        let settle = |totals: &mut Totals, drawn: &mut Vec<Drawn>| -> Result<(), Failed<u8>> {
+            for index in 0..drawn.len() {
+                if let Drawn::Rest(_) = drawn[index] {
+                    let (side, unit) = (group.legs[index].side, group.legs[index].unit);
+                    let amount = totals
+                        .map_or(Amount::zero(unit), |t| Amount::new(Qty(t[side.index()].1 as i64), t[side.index()].0));
+                    take(totals, side, amount, Line::Leg(index))?;
+                    drawn[index] = Drawn::Rest(amount);
+                }
+            }
+            Ok(())
+        };
+        carve(&mut totals, &drawn)?;
+        if group.settles == Remainder::BeforeItems {
+            settle(&mut totals, &mut drawn)?;
+        }
+        let mut amounts = Vec::new();
+        for (index, item) in group.items.iter().enumerate() {
+            let at = Line::Item(index);
+            let said = match item.amount {
+                Cut::Share(rate) => {
+                    let base = given.map_or(Amount::zero(item.unit), |header| header.of(item.side));
+                    Answer::Amount(share_of(base, rate, at)?)
+                }
+                Cut::Of(expr) => env.amount(at, left_of(&totals).as_ref(), expr).map_err(Failed::Env)?,
+            };
+            let amount = match said {
+                Answer::Omitted => {
+                    amounts.push(None);
+                    continue;
+                }
+                Answer::Later => {
+                    exact = false;
+                    Amount::zero(item.unit)
+                }
+                Answer::Amount(amount) => amount,
+            };
+            if item.takes {
+                take(&mut totals, item.side, amount, at)?;
+            }
+            amounts.push(Some(amount));
+        }
+        if group.settles == Remainder::AfterItems {
+            settle(&mut totals, &mut drawn)?;
+        }
+        Ok(Solved { header: left_of(&totals), legs: drawn.into(), items: amounts.into(), exact })
+    }
+
+    /// 250,000 generated groups: both give the same answer or the same error, ask the environment the same things in
+    /// the same order, and what is solved conserves: what each side had is what is left and what was taken.
+    #[test]
+    fn the_solver_and_a_second_account_of_its_rules_agree_on_generated_groups() {
+        const GROUPS: u64 = 250_000;
+        let mut seen = std::collections::BTreeMap::<&str, u64>::new();
+        let mut note = |form: &'static str| *seen.entry(form).or_default() += 1;
+        for seed in 1..=GROUPS {
+            let group = group_drawn(&mut Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1));
+            let (mut new, mut old) = (Scripted { seed, asked: Vec::new() }, Scripted { seed, asked: Vec::new() });
+            let solved = solve(group.header, &group.legs, &group.items, group.settles, &mut new);
+            let expected = reference(&group, &mut old);
+            assert_eq!(solved, expected, "seed {seed}");
+            assert_eq!(new.asked, old.asked, "seed {seed}: the environment is asked the same things in the same order");
+            match &solved {
+                Ok(solved) => {
+                    note(if solved.exact { "ok, exact" } else { "ok, not exact" });
+                    for drawn in solved.legs.iter() {
+                        note(match drawn {
+                            Drawn::Omitted => "leg omitted",
+                            Drawn::Value(_) => "leg a value",
+                            Drawn::Rest(_) => "leg the remainder",
+                        });
+                    }
+                    for amount in solved.items.iter() {
+                        note(if amount.is_some() { "item an amount" } else { "item omitted" });
+                    }
+                    if let Some(header) = group.header {
+                        conserves(&group, header, solved);
+                    }
+                    note(if group.header.is_some() { "header with an amount" } else { "header with none" });
+                }
+                Err(Failed::Env(_)) => note("error: the environment's"),
+                Err(Failed::Fault { fault: Fault::Overflow, .. }) => note("error: overflow"),
+                Err(Failed::Fault { .. }) => note("error: a unit mismatch"),
+                Err(Failed::TwoRests { .. }) => note("error: two remainders"),
+            }
+        }
+        for form in [
+            "ok, exact",
+            "ok, not exact",
+            "leg omitted",
+            "leg a value",
+            "leg the remainder",
+            "item an amount",
+            "item omitted",
+            "header with an amount",
+            "header with none",
+            "error: the environment's",
+            "error: overflow",
+            "error: a unit mismatch",
+            "error: two remainders",
+        ] {
+            assert!(
+                seen.get(form).copied().unwrap_or(0) >= GROUPS / 200,
+                "form `{form}` reached only {:?} times",
+                seen.get(form)
+            );
+        }
+        eprintln!("{GROUPS} groups: {seen:?}");
+    }
+
+    /// What the legs, the remainders and the items that take took from each side, with what is left, is what the
+    /// header had: nothing is made or lost, and a transfer's two sides are taken from together.
+    fn conserves(group: &Group, header: Remaining, solved: &Solved) {
+        let left = solved.header.expect("a header with an amount has something left");
+        let mut taken = [0i128; 2];
+        let mut cross = [0i128; 2];
+        let mut note = |side: FlowSide, amount: Amount| {
+            taken[side.index()] += i128::from(amount.qty.0);
+            cross[side.other().index()] += i128::from(amount.qty.0);
+        };
+        for (leg, drawn) in group.legs.iter().zip(solved.legs.iter()) {
+            match drawn {
+                Drawn::Value(value) => note(leg.side, value.amount),
+                Drawn::Rest(amount) => note(leg.side, *amount),
+                Drawn::Omitted => {}
+            }
+        }
+        for (item, amount) in group.items.iter().zip(solved.items.iter()) {
+            if let (true, Some(amount)) = (item.takes, amount) {
+                note(item.side, *amount);
+            }
+        }
+        for side in [FlowSide::Out, FlowSide::Arrive] {
+            let same_unit = header.of(side).unit == header.of(side.other()).unit;
+            let removed = taken[side.index()] + if same_unit { cross[side.index()] } else { 0 };
+            assert_eq!(
+                i128::from(left.of(side).qty.0),
+                i128::from(header.of(side).qty.0) - removed,
+                "{side:?} conserves"
+            );
+        }
     }
 }

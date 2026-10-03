@@ -960,8 +960,14 @@ impl Ledger<'_, '_, '_> {
         let mut total = Qty::ZERO;
         for item in group.items.iter().filter(|item| item.sign == axiom_model::Sign::Less && item.flow.is_some()) {
             let amount = match item.amount {
-                axiom_model::Expr::Literal(amount) => amount,
-                axiom_model::Expr::Computed(_) => {
+                // What a share came to is in the flow it made: the model solved it with the header.
+                axiom_model::Cut::Share(_) => {
+                    let flow =
+                        &book.flows[axiom_core::Id::new(txn.flows.start().index() as u32 + item.flow.unwrap_or(0))];
+                    flow.out
+                }
+                axiom_model::Cut::Of(axiom_model::Expr::Literal(amount)) => amount,
+                axiom_model::Cut::Of(axiom_model::Expr::Computed(_)) => {
                     self.record.report(
                         Diagnostic::error(
                             "asset-sale-cost",

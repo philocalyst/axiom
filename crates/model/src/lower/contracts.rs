@@ -24,7 +24,7 @@ use crate::problem::{self, Noun};
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
-use crate::split::{Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
+use crate::split::{Cut, Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
 
 /// A contract as written, with the id reserved for it and its name.
 #[derive(Clone, Copy)]
@@ -950,7 +950,7 @@ fn lower_header_item<'s>(
             ast::Sign::Add => Sign::Add,
             ast::Sign::Less => Sign::Less,
         },
-        amount,
+        amount: Cut::Of(amount),
         loc: item.loc,
         flow: Says {
             purpose: tail.purpose.map(|at| at.value),
