@@ -76,7 +76,7 @@ pub(crate) struct Monitor {
 }
 
 impl Hash for Monitor {
-    /// What the rest of the fold depends on is where each stream stands; the heap is that, sorted.
+    /// What the rest of the fold depends on is where each stream stands; the heap is made of that.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.waiting.hash(state);
     }
@@ -118,7 +118,9 @@ impl Monitor {
             if self.waiting[at].miss != Some(miss) {
                 continue;
             }
-            missed(self.waiting[at].missed().expect("a stream that waits has a day"));
+            if let Some(promise) = self.waiting[at].missed() {
+                missed(promise);
+            }
             self.waiting[at].residual.advance(promises);
             self.expect(at);
         }
@@ -139,7 +141,9 @@ impl Monitor {
         let Some(waiting) = self.waiting.get_mut(at).filter(|waiting| waiting.key() == key) else { return };
         let before = waiting.residual;
         while !waiting.residual.is_done() && waiting.residual.ordinal() < ordinal {
-            missed(waiting.missed().expect("a stream that is not done has a day"));
+            if let Some(promise) = waiting.missed() {
+                missed(promise);
+            }
             waiting.residual.advance(promises);
         }
         if !waiting.residual.is_done() && waiting.residual.ordinal() == ordinal {

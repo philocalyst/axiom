@@ -614,8 +614,8 @@ pub enum ForecastError {
     InvalidCoverage(Day),
     UnsupportedProration(Day),
     UnsupportedLoan(Day),
-    /// A ratio past what `Ratio` holds (an escalation compounded over the years from a contract with no start,
-    /// which counts from `Day::MIN`: K5 removes that anchor), or a span that runs off the calendar.
+    /// A ratio past what `Ratio` holds (an escalation compounded over more years than it has room for), or a span that
+    /// runs off the calendar.
     Overflow,
 }
 

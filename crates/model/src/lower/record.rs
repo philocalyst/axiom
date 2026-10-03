@@ -17,7 +17,7 @@ use super::statements::{
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
 use crate::balance::{self, Settled, Total};
-use crate::book::{Amount, Place};
+use crate::book::{Amount, Contract, Place, ScheduleKind, Terms};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
@@ -650,6 +650,46 @@ fn lower_statement<'s>(
     }
 }
 
+/// What a line dated `date` keeps of a contract as it stands: the schedule, its due day and the terms the occurrence
+/// is made from, or the error that says why it keeps none.
+fn kept_by<'c>(
+    contract: &'c Contract,
+    date: Day,
+    loc: Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(ScheduleKind, Day, &'c Terms)> {
+    let (promises, promise) = Promises::alone(contract);
+    match promise.keep(&promises, date) {
+        Keep::Kept { schedule, due } => {
+            let kept = contract.terms_of(schedule).map(|terms| (schedule, due, terms));
+            if kept.is_none() {
+                diags.push(outside_every_window(loc));
+            }
+            kept
+        }
+        Keep::Outside => {
+            diags.push(outside_every_window(loc));
+            None
+        }
+        Keep::Ambiguous { regular, standing } => {
+            diags.push(
+                Diagnostic::error(
+                    "ambiguous-contract-occurrence",
+                    "this occurrence is equally close to two contract schedules",
+                )
+                .label(loc, "write it on a date that identifies one schedule")
+                .note(format!("nearest regular due day: {regular}; nearest standing due day: {standing}")),
+            );
+            None
+        }
+    }
+}
+
+fn outside_every_window(loc: Loc) -> Diagnostic {
+    Diagnostic::error("contract-occurrence-date", "this day is outside every contract schedule's grace window")
+        .label(loc, "no active scheduled occurrence is close enough to this date")
+}
+
 fn lower_occurrence<'a, 's>(
     world: &mut World<'s>,
     site: &Site<'a, 's>,
@@ -678,32 +718,7 @@ fn lower_occurrence<'a, 's>(
         return;
     }
     let contract = &world.book.contracts[contract_id];
-    let (promises, promise) = Promises::alone(contract);
-    let (schedule, due) = match promise.keep(&promises, statement.date) {
-        Keep::Kept { schedule, due } => (schedule, due),
-        Keep::Outside => {
-            diags.push(
-                Diagnostic::error(
-                    "contract-occurrence-date",
-                    "this day is outside every contract schedule's grace window",
-                )
-                .label(loc, "no active scheduled occurrence is close enough to this date"),
-            );
-            return;
-        }
-        Keep::Ambiguous { regular, standing } => {
-            diags.push(
-                Diagnostic::error(
-                    "ambiguous-contract-occurrence",
-                    "this occurrence is equally close to two contract schedules",
-                )
-                .label(loc, "write it on a date that identifies one schedule")
-                .note(format!("nearest regular due day: {regular}; nearest standing due day: {standing}")),
-            );
-            return;
-        }
-    };
-    let terms = contract.terms_of(schedule).expect("a kept day belongs to a schedule the contract has");
+    let Some((schedule, due, terms)) = kept_by(contract, statement.date, loc, diags) else { return };
     let inputs = terms.inputs.clone();
     let templates = terms.template.clone();
     let fallback = occurrence_amount_unit(contract, terms, world.book.base);
