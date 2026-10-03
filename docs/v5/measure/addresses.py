@@ -47,6 +47,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 TODAY = "2026-12-31"
+TODAY_LINE = "2026-12-30"
 FIRST_DAY = 20260101
 
 PRELUDE = """\
@@ -74,7 +75,7 @@ FIRMS = ["acme", "bluefin", "cobalt"]
 BANKS = ["first", "second"]
 ENTITIES = {**{e: "saver" for e in SAVERS + IDLE}, **{e: "kid" for e in KIDS}, **{e: "household" for e in HOUSEHOLDS},
             **{e: "firm" for e in FIRMS}, **{e: "bank-co" for e in BANKS}}
-NAMES = ["plan", "gift", "pot", "nest", "fund", "cash"]
+NAMES = ["plan", "gift", "pot", "nest", "fund", "cash", "529"]  # 529: a number by itself, so no reference is it alone
 
 # What each entity's kind fits, as a slot of `plan`: owner takes any entity, sponsor a firm, beneficiary a saver or a kid.
 FITS = {"owner": lambda kind: True, "sponsor": lambda kind: kind == "firm",
@@ -173,6 +174,8 @@ def declare(account, style, rng):
     roles = [f"{slot} {w}" for slot, w in slots_of(account) if (slot, w) not in chosen]
     if account.co_owner:
         roles = [f"owner {account.owner} 60%, {account.co_owner} 40%" if r.startswith("owner ") else r for r in roles]
+    if account.name == "529" and not words:
+        account.name = "nest"  # an account declared as a bare number would not parse
     account.path = "/".join(words + [account.name])
     omit_kind = account.spelled and account.name == account.kind and rng.random() < 0.7
     out = [f"account {account.path}" + ("" if omit_kind else f" : {account.kind}")
@@ -319,6 +322,8 @@ def journal(rng, accounts, style):
         source = rng.choice(sources)
         target = rng.choice([a for a in accounts if a is not source] or [source])
         words = rng.choice(list(runs(target.address)))
+        if len(words) == 1 and re.fullmatch(r"[0-9_.]+", words[0]):
+            continue  # a number cannot be written as a name
         if rng.random() < 0.12 and len(words) >= 2:
             words = typo(rng, words, number)
         answer = resolve(accounts, words, day)
@@ -533,6 +538,35 @@ def run(binary, directory, jobs=3):
 # ─── Placement ───────────────────────────────────────────────────────────────────────────────────────────
 
 
+def expected_address(words, free, owner_line, found, kind):
+    """The address the account has once its words are placed, by the oracle's own placement: its owner, then what fills
+    each slot of its kind in order, then its name. A word that is not placed is not in it."""
+    options, every = placements(words, free)
+    outcome = forced(words, free) if every and all(options) else None
+    slot_of = {}
+    for word, slot in zip(words, outcome or []):
+        if slot:
+            slot_of[slot] = word
+    owner = slot_of.get("owner") or ("ann" if owner_line else "me")
+    return [owner] + [slot_of[slot] for slot in SLOTS[kind] if slot in slot_of] + [kind]
+
+
+def check_fills(binary, folder, path, kind, words, free, owner_line, found):
+    """What the words filled, which the address says: a second account of the same name makes the name ambiguous, and the
+    diagnostic that says so writes out the address of each of the two."""
+    decoy_owner = next(e for e in SAVERS if e not in words[-1:])
+    with open(os.path.join(folder, "main.ax"), "a") as book:
+        book.write(f"account {decoy_owner}/{kind} : {kind}\n{TODAY_LINE} {kind} = 1 USD\n")
+    lines = open(os.path.join(folder, "main.ax")).read().split("\n")
+    mine = next(number for number, line in enumerate(lines, start=1) if line == f"account {path}")
+    said = [d for d in diagnostics(binary, folder) if d["code"] == "ambiguous-address"]
+    if len(said) != 1:
+        return [f"{path} ({kind}): expected the name to be ambiguous, said {[d['code'] for d in diagnostics(binary, folder)]}"]
+    text = next((l["text"] for l in said[0]["labels"] if not l["primary"] and l["line"] == mine), None)
+    expected = "/".join(expected_address(words, free, owner_line, found, kind))
+    return [] if text == f"`{expected}` is declared here" else [f"{path} ({kind}): expected the address {expected}, said {text}"]
+
+
 def placement(binary, directory, count, seed):
     """The words before an account's name, against a brute-force placement of them in the slots of its kind."""
     os.makedirs(directory, exist_ok=True)
@@ -567,6 +601,7 @@ def placement(binary, directory, count, seed):
             del codes["missing-role"]
         if codes != +expected and not (not expected and not codes):
             wrong.append(f"{path} ({kind}): expected {dict(expected)}, said {dict(codes)}")
+        wrong += check_fills(binary, folder, path, kind, words, free, owner_line, found)
         shutil.rmtree(folder)
     for w in wrong[:10]:
         print("WRONG", w)
@@ -577,30 +612,45 @@ def placement(binary, directory, count, seed):
 # ─── Mutants of the model ────────────────────────────────────────────────────────────────────────────────
 
 MUTANTS = [
-    # (name, file, old text, new text)
-    ("order ignored", "addresses.rs", "if later == 0 {\n                return false;\n            }", "if later == 0 {\n                return true;\n            }"),
-    ("order from the lowest place only", "addresses.rs", "from = later.trailing_zeros() + 1;", "from = 0;"),
-    ("days ignored", "addresses.rs", "(Some(days), Some(day)) => days.contains(day),", "(Some(_), Some(_)) => true,"),
-    ("never open when closed", "addresses.rs", "(None, Some(_)) => false,", "(None, Some(_)) => true,"),
-    ("no day sees only open accounts", "addresses.rs", "(open, None) => open.is_some(),", "(_, None) => false,"),
-    ("the name is not required", "addresses.rs", "lists.push(&self.called[Id::new(name.index() as u32)]);", "lists.push(&self.called[Id::new(0)]);"),
-    ("the last filler of an entity only", "addresses.rs", "fold(0, |bits, (at, _)| bits | 1 << at)", "fold(0, |_, (at, _)| 1 << at)"),
-    ("first shortest is the last filler", "addresses.rs", "(set.count_ones(), !set.reverse_bits())", "(set.count_ones(), set.reverse_bits())"),
-    ("the shortest never shorter than all", "addresses.rs", "subsets.sort_by_key(|set| (set.count_ones(), !set.reverse_bits()));", "subsets.sort_by_key(|set| (u32::MAX - set.count_ones(), !set.reverse_bits()));"),
-    ("the owner is the first of the shares only", "addresses.rs", "false => account.shares.iter().map(|share| share.entity).collect(),", "false => vec![account.shares[0].entity],"),
-    ("custodian dropped", "addresses.rs", "let all = owners.into_iter().chain(by_slot).chain(institution);", "let all = owners.into_iter().chain(by_slot);"),
-    ("custodian first", "addresses.rs", "let all = owners.into_iter().chain(by_slot).chain(institution);", "let all = institution.into_iter().chain(owners).chain(by_slot);"),
-    ("slots in the other order", "slots.rs", "lineage.reverse();", ""),
-    ("a name that found several is final", "resolve.rs", "let spelled = places.iter().any(|&place| self.book.is_spelled(place));", "let spelled = false;"),
-    ("addresses never asked", "resolve.rs", "if let Some(end) = self.address_end(home, word, day, Reached::Nothing) {", "if let Some(end) = None::<Result<End, Diagnostic>> {"),
-    ("an unknown word of an address is a party", "reference.rs", "Found::Nothing if at > 0 => return Err(self.unknown_address(word, &fillers, None)),", "Found::Nothing if at > 0 => return Ok(None),"),
-    ("every first word is an attempt", "reference.rs", "reached == Reached::Several || fillers.first().is_some_and(|&first| book.lookup.addresses.fills_any(first))", "true"),
-    ("no first word is an attempt", "reference.rs", "reached == Reached::Several || fillers.first().is_some_and(|&first| book.lookup.addresses.fills_any(first))", "reached == Reached::Several"),
-    ("placement takes the first slot", "spelled.rs", "Placed::Forced(slot) => fills[usize::from(slot)].push(word),", "Placed::Forced(_) => fills[0].push(word),"),
-    ("an ambiguous word is placed", "spelled.rs", "Placed::Ambiguous(set) => {\n                diags.push(spelling.ambiguous(&world.book, word, set));", "Placed::Ambiguous(set) => {\n                fills[set.trailing_zeros() as usize].push(word);\n                diags.push(spelling.ambiguous(&world.book, word, set));"),
-    ("the owner is not free when a line says it", "spelled.rs", ".then_some(Free::Owner);", ".then_some(Free::Owner).or(Some(Free::Owner));"),
-    ("owner takes only a household", "spelled.rs", "Free::Owner => true,\n            Free::Slot { slot: Slot", "Free::Owner => book.name(book.kinds[book.entities[entity].kind].name) == \"household\",\n            Free::Slot { slot: Slot"),
-    ("a filled slot is free", "spelled.rs", "let slots = book.schema.entity_slots(&book.kinds, kind).into_iter().filter(|&(number, _)| !is_filled(number));", "let slots = book.schema.entity_slots(&book.kinds, kind).into_iter();"),
+    # (name, file of crates/model/src, the text it changes, what the text becomes)
+    # The index
+    ("the order of the words is ignored", "addresses.rs", "if later == 0 {\n                return false;\n            }", "if later == 0 {\n                return true;\n            }"),
+    ("each word is looked for from the first place", "addresses.rs", "from = later.trailing_zeros() + 1;", "from = 0;"),
+    ("the line's day is ignored", "addresses.rs", "(Some(days), Some(day)) => days.contains(day),", "(Some(_), Some(_)) => true,"),
+    ("an account that is never open is open on a day", "addresses.rs", "(None, Some(_)) => false,", "(None, Some(_)) => true,"),
+    ("with no day, nothing is open", "addresses.rs", "(open, None) => open.is_some(),", "(_, None) => false,"),
+    ("the name is not required", "addresses.rs", "let called = &self.called[Id::new(name.index() as u32)];", "let called = &self.called[Id::new(0)];"),
+    ("an entity stands only where it last does", "addresses.rs", "fold(0, |bits, (at, _)| bits | 1 << at)", "fold(0, |_, (at, _)| 1 << at)"),
+    ("the leftmost fillers are not preferred", "addresses.rs", "(set.count_ones(), !set.reverse_bits())", "(set.count_ones(), set.reverse_bits())"),
+    ("the shortest address is the longest", "addresses.rs", "subsets.sort_by_key(|set| (set.count_ones(), !set.reverse_bits()));", "subsets.sort_by_key(|set| (u32::MAX - set.count_ones(), !set.reverse_bits()));"),
+    ("an account owned in shares has its first owner only", "addresses.rs", "false => account.shares.iter().map(|share| share.entity).collect(),", "false => vec![account.shares[0].entity],"),
+    ("the custodian is not in the address", "addresses.rs", "let all = owners.into_iter().chain(by_slot).chain(institution);", "let all = owners.into_iter().chain(by_slot);"),
+    ("the custodian is the first word", "addresses.rs", "let all = owners.into_iter().chain(by_slot).chain(institution);", "let all = institution.into_iter().chain(owners).chain(by_slot);"),
+    ("a kind's slots are in the order of the kind beneath", "slots.rs", "lineage.reverse();", ""),
+    ("an account closes the day before it says", "addresses.rs", "Days::new(opened, book.fact(builtin::CLOSED, place).unwrap_or(Day::MAX))", "Days::new(opened, book.fact(builtin::CLOSED, place).map_or(Day::MAX, |day| Day(day.0 - 1)))"),
+    ("an account opens the day after it says", "addresses.rs", "let opened = book.fact(builtin::OPENED, place).unwrap_or(Day::MIN);", "let opened = book.fact(builtin::OPENED, place).map_or(Day::MIN, |day| Day(day.0 + 1));"),
+    # Reading a reference
+    ("a name that found several accounts is final", "resolve.rs", "let spelled = places.iter().any(|&place| self.book.is_spelled(place));", "let spelled = false;"),
+    ("the index is never asked", "resolve.rs", "if let Some(end) = self.address_end(home, word, day, Reached::Nothing) {", "if let Some(end) = None::<Result<End, Diagnostic>> {"),
+    ("a word of an address that is no entity is a party", "reference.rs", "Found::Nothing if reached == Reached::Nothing && attempt(&fillers) => {", "Found::Nothing if false => {"),
+    ("an entity that fills nothing begins an address", "reference.rs", "fillers.first().is_some_and(|&first| addresses.fills_any(first))", "!fillers.is_empty()"),
+    ("no entity begins an address", "reference.rs", "fillers.first().is_some_and(|&first| addresses.fills_any(first))", "false"),
+    ("a name no account has ends an address", "reference.rs", "|fillers: &[Id<Entity>]| called ||", "|fillers: &[Id<Entity>]| true ||"),
+    ("an account's name does not make a reference an address", "reference.rs", "|fillers: &[Id<Entity>]| called ||", "|fillers: &[Id<Entity>]| false ||"),
+    ("the journal makes a party of an address that ends in an account's name", "declare/parties.rs", "|| path.rsplit_once('/').is_some_and(|(_, last)| self.names.contains(last))", "|| false"),
+    ("the journal makes a party of an address that begins with a filler", "declare/parties.rs", "path.split_once('/').is_some_and(|(first, _)| self.fillers.contains(first))", "false"),
+    ("a settled reference ignores the days", "reference.rs", "if self.book.lookup.addresses.is_always_open(place) {", "if true {"),
+    ("a settled reference is read when several accounts were found", "reference.rs", "let settled = home == Home::Project && reached == Reached::Nothing;", "let settled = home == Home::Project;"),
+    ("a suggestion is no number's", "reference.rs", "if !text.contains('/') && numeric(&text) {", "if false {"),
+    ("a suggestion ignores the names every account has", "reference.rs", "[only] => *only == place,", "[_] => true,"),
+    ("a report's target ignores addresses", "book.rs", "Found::One(place) => return Ok(place),\n            Found::Several(places) => return Err(Miss::Ambiguous(places.into())),", "Found::One(_) => {}\n            Found::Several(_) => {}"),
+    # Placing the words before the name
+    ("every word goes in the first slot", "spelled.rs", "Placed::Forced(slot) => fills[usize::from(slot)].push(word),", "Placed::Forced(_) => fills[0].push(word),"),
+    ("a word that could go two ways is placed too", "spelled.rs", "Placed::Ambiguous(set) => {\n                diags.push(spelling.ambiguous(&world.book, word, set));", "Placed::Ambiguous(set) => {\n                fills[set.trailing_zeros() as usize].push(word);\n                diags.push(spelling.ambiguous(&world.book, word, set));"),
+    ("a line that names the owner leaves the owner free", "spelled.rs", ".then_some(Free::Owner);", ".then_some(Free::Owner).or(Some(Free::Owner));"),
+    ("the owner takes only a household", "spelled.rs", "Free::Owner => true,\n            Free::Slot { slot: Slot", "Free::Owner => book.name(book.kinds[book.entities[entity].kind].name) == \"household\",\n            Free::Slot { slot: Slot"),
+    ("a slot a line fills is free", "spelled.rs", "let slots = book.schema.entity_slots(&book.kinds, kind).into_iter().filter(|&(number, _)| !is_filled(number));", "let slots = book.schema.entity_slots(&book.kinds, kind).into_iter();"),
+    ("the owner takes any number of words", "spelled.rs", "Free::Owner => true,\n            Free::Slot { slot, .. } => holds_one(slot.mult),", "Free::Owner => false,\n            Free::Slot { slot, .. } => holds_one(slot.mult),"),
 ]
 
 
