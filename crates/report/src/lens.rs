@@ -13,7 +13,6 @@ use axiom_core::{Day, Diagnostic, Id, Qty, Span};
 use axiom_engine::{Holding, Known, OwnerShare, Plan};
 use axiom_model::{Amount, Book, Class, Commodity, Entity, Place, Subject};
 
-use crate::history::Held;
 use crate::resolve;
 
 /// Whose money a view is about: everyone's, or one entity's, which for a
@@ -246,36 +245,33 @@ pub fn on_balance_sheet(class: Class) -> bool {
 
 /// Quantities of several commodities: what a place, or a whole subtree, holds.
 #[derive(Clone, Default, Debug)]
-pub struct Basket(BTreeMap<Id<Commodity>, Held>);
+pub struct Basket(BTreeMap<Id<Commodity>, Qty>);
 
 impl Basket {
-    pub fn add(&mut self, unit: Id<Commodity>, held: Held) {
-        *self.0.entry(unit).or_default() += held;
+    pub fn add(&mut self, unit: Id<Commodity>, qty: Qty) {
+        *self.0.entry(unit).or_default() += qty;
     }
 
     pub fn merge(&mut self, other: &Basket) {
-        for (&unit, &held) in &other.0 {
-            self.add(unit, held);
+        for (&unit, &qty) in &other.0 {
+            self.add(unit, qty);
         }
     }
 
     pub fn get(&self, unit: Id<Commodity>) -> Qty {
-        self.0.get(&unit).map_or(Qty::ZERO, |held| held.qty)
+        self.0.get(&unit).copied().unwrap_or_default()
     }
 
     /// The commodities held, without those that net to nothing.
     pub fn amounts(&self) -> impl Iterator<Item = Amount> + '_ {
-        self.0.iter().filter(|(_, held)| !held.qty.is_zero()).map(|(&unit, held)| Amount::new(held.qty, unit))
+        self.0.iter().filter(|(_, qty)| !qty.is_zero()).map(|(&unit, &qty)| Amount::new(qty, unit))
     }
 
-    /// Everything priceable summed in the base currency, each commodity priced
-    /// once as a whole; the rest listed apart. Places of `class` that are not
-    /// on the balance sheet are worth what their flows booked, never a new price.
-    pub fn value(&self, lens: Lens, class: Class) -> Valued {
+    /// Everything priceable summed in the base currency, each commodity priced once as a whole; the rest listed apart.
+    pub fn value(&self, lens: Lens) -> Valued {
         let (mut valued, mut exact) = (Valued::default(), 0);
         for amount in self.amounts() {
-            let booked = i128::from(self.0[&amount.unit].booked.0) * POW10[EXTRA_DIGITS];
-            match if on_balance_sheet(class) { lens.exact(amount) } else { Some(booked) } {
+            match lens.exact(amount) {
                 Some(worth) => {
                     exact += worth;
                     valued.priced += 1;

@@ -10,6 +10,7 @@
 
 mod available;
 mod balance;
+mod balances;
 mod budget;
 mod calendar;
 mod claims;
@@ -46,7 +47,7 @@ use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
 use axiom_engine::{Options, Plan, Run};
 use axiom_model::{Amount, Book, Period, Place, Trigger};
 
-use crate::history::Snapshots;
+use crate::balances::Balances;
 use crate::lens::{Lens, Whose};
 
 /// What to show. A client builds this from its own input surface.
@@ -344,7 +345,7 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
 pub fn summary_of(plan: &Plan<'_, '_>, run: &Run) -> Summary {
     let (everyone, today, book) = (Whose::default(), run.today, plan.book());
     let lens = Lens::new(plan, &everyone, today);
-    let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, run, &[today], false), 0);
+    let worth = balance::NetWorth::of(lens, &Balances::of(lens, run, &[today]), 0);
     // Built-in place rows exist in every book: only declared or used places
     // contribute to the summary.
     let used = |place: Id<Place>| {

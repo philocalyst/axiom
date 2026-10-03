@@ -13,7 +13,6 @@ use axiom_engine::{Holding, Ledger, Options};
 use axiom_model::{Book, Class, Commodity, Flow, Place};
 
 use super::Past;
-use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};
 
 /// A cash place that goes below zero.
@@ -134,7 +133,7 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
         if qty.is_zero() {
             continue;
         }
-        basket.add(holding.unit, Held { qty, booked: Qty::ZERO });
+        basket.add(holding.unit, qty);
     }
     basket.amounts().filter_map(|amount| Some(compound(lens.book(), amount.unit, lens.value(amount)?, months))).sum()
 }

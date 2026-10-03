@@ -1723,22 +1723,22 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
 }
 
 #[test]
-fn snapshots_apply_assertion_pads_through_each_requested_day() {
+fn balances_apply_assertion_pads_through_each_requested_day() {
     with_run(GAPS, day(2025, 12, 31), |book, run| {
         let whose = crate::lens::Whose::default();
         let plan = axiom_engine::Plan::new(book);
         let lens = crate::lens::Lens::new(&plan, &whose, run.today);
         let days = [day(2025, 1, 1), day(2025, 3, 31), day(2025, 6, 30), day(2025, 9, 30)];
-        let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
+        let balances = crate::balances::Balances::of(lens, run, &days);
         let place = book.place("assets/k").unwrap();
         let balances: Vec<_> =
-            (0..days.len()).map(|column| snapshots.subtree(book, column, place).get(book.base)).collect();
+            (0..days.len()).map(|column| balances.subtree(book, column, place).get(book.base)).collect();
         assert_eq!(balances, [Qty(1_000_000), Qty(900_000), Qty(950_000), Qty(980_000)]);
     });
 }
 
 #[test]
-fn snapshots_preserve_stock_splits_and_returned_flow_edges() {
+fn balances_preserve_stock_splits_and_returned_flow_edges() {
     let source = "\
 base USD
 commodity USD
@@ -1762,11 +1762,11 @@ opening 2025-01-01
         let plan = axiom_engine::Plan::new(book);
         let lens = crate::lens::Lens::new(&plan, &whose, run.today);
         let days = [day(2025, 1, 1), day(2025, 1, 2), day(2025, 1, 3), day(2025, 1, 4)];
-        let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
+        let balances = crate::balances::Balances::of(lens, run, &days);
         let broker = book.place("assets/broker").unwrap();
         let checking = book.place("assets/checking").unwrap();
         let fast = book.commodity("FAST").unwrap();
-        let amount = |column, place, unit| snapshots.subtree(book, column, place).get(unit);
+        let amount = |column, place, unit| balances.subtree(book, column, place).get(unit);
         assert_eq!(amount(0, broker, fast), Qty(10));
         assert_eq!(amount(1, broker, fast), Qty(10));
         assert_eq!(amount(2, broker, fast), Qty(20));
@@ -1801,7 +1801,7 @@ opening 2025-01-01
 ";
 
 #[test]
-fn basis_consumption_and_later_replay_preserve_the_native_purchase_economics() {
+fn basis_consumption_and_later_days_preserve_the_native_purchase_economics() {
     with_std(DEPRECIATION, day(2026, 4, 16), |book, run| {
         let asset = book.asset("house").unwrap();
         let state = &run.assets[asset.index()];
@@ -1826,24 +1826,24 @@ fn basis_consumption_and_later_replay_preserve_the_native_purchase_economics() {
         let whose = crate::lens::Whose::default();
         let lens = crate::lens::Lens::new(&plan, &whose, run.today);
         let days = [day(2025, 1, 1), day(2025, 2, 28), day(2026, 4, 16), day(2026, 5, 1)];
-        let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
+        let balances = crate::balances::Balances::of(lens, run, &days);
         let checking = book.place("checking").unwrap();
         let house = book.place("house").unwrap();
         let house_unit = book.assets[asset].unit;
-        assert_eq!(snapshots.subtree(book, 0, checking).get(book.base), Qty(100_000));
-        assert_eq!(snapshots.subtree(book, 1, checking).get(book.base), Qty(100_000));
+        assert_eq!(balances.subtree(book, 0, checking).get(book.base), Qty(100_000));
+        assert_eq!(balances.subtree(book, 1, checking).get(book.base), Qty(100_000));
         assert_eq!(
-            snapshots.subtree(book, 2, checking).get(book.base),
+            balances.subtree(book, 2, checking).get(book.base),
             Qty(100_000),
             "the $1,000 balance stands before the May repair"
         );
         assert_eq!(
-            snapshots.subtree(book, 3, checking).get(book.base),
+            balances.subtree(book, 3, checking).get(book.base),
             Qty(99_900),
             "the May repair lowers cash by exactly $1"
         );
         for column in 0..days.len() {
-            assert_eq!(snapshots.subtree(book, column, house).get(house_unit), Qty(1));
+            assert_eq!(balances.subtree(book, column, house).get(house_unit), Qty(1));
         }
     });
 }

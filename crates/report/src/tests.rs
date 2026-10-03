@@ -11,7 +11,9 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, Days, Facts, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
-use axiom_engine::{Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
+use axiom_engine::{
+    Bound, Cause, Effect, Gain, Headroom, Histories, Holding, Owed, Parcel, Position, Posted, Run, State,
+};
 use axiom_model::Effect as Consequence;
 use axiom_model::builtin;
 use axiom_model::*;
@@ -513,10 +515,45 @@ fn holdings(cast: &Cast, journal: &Journal) -> Vec<Holding> {
         .collect()
 }
 
+/// What each position of a hand-built journal held on each day it moved, by the plainest replay there is: a flow moves its
+/// two ends from the day it stands until it is returned. A run made by hand has no fold to record its histories, so it
+/// gets them this way, which is also the oracle's way (`crates/session/tests/histories.rs` holds the fold's to a replay).
+fn replayed(journal: &Journal, places: usize) -> Histories {
+    let mut moves: BTreeMap<Position, Vec<(Day, Qty)>> = BTreeMap::new();
+    for (flow, posted) in journal.flows.values().zip(&journal.posted) {
+        let standing = match posted.state {
+            State::Actual => Some((flow.day, Day::MAX)),
+            State::Settled(on) => Some((flow.day.max(on), Day::MAX)),
+            State::Returned(on) => Some((flow.day, on)),
+            State::Pending | State::Void | State::Planned => None,
+        };
+        let Some((from, past)) = standing else { continue };
+        for (place, unit, qty) in [(flow.from, flow.out.unit, -posted.out), (flow.to, flow.arrive.unit, posted.arrive)]
+        {
+            let at = moves.entry(Position { place, unit }).or_default();
+            at.push((from, qty));
+            if past != Day::MAX {
+                at.push((past, -qty));
+            }
+        }
+    }
+    let steps = moves.into_iter().map(|(position, mut moves)| {
+        moves.sort_by_key(|&(day, _)| day);
+        let mut held = Qty::ZERO;
+        let steps = moves.into_iter().map(|(day, change)| {
+            held += change;
+            (day, held)
+        });
+        (position, steps.collect())
+    });
+    Histories::from_steps(places, steps)
+}
+
 pub(crate) fn household() -> Household {
     let mut cast = Cast::new();
     let journal = journal(&mut cast);
     let records = records(&mut cast, &journal);
+    let histories = replayed(&journal, cast.places.len());
 
     let food = cast.id("expenses/food");
     let budget_rule = Rule { law: Id::new(0), subject: Subject::Place(food), days: Days::ALWAYS };
@@ -622,7 +659,7 @@ pub(crate) fn household() -> Household {
         horizon: day(2026, 3, 31),
         posted: journal.posted.into(),
         holdings: records.holdings,
-        histories: Default::default(),
+        histories,
         gains: records.gains,
         effects: records.effects,
         violations: Vec::new(),
@@ -799,27 +836,39 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
 #[test]
 fn the_legacy_report_keeps_the_run_its_caller_supplied() {
     let mut house = household();
+    // A balance is read from the histories the run carries: give checking one more step, 1.00 USD richer on the last day.
     let checking = house.place("assets/bank/checking");
-    house.run.holdings.iter_mut().find(|holding| holding.place == checking).unwrap().plain += Qty(100);
+    let steps = house.run.histories.positions().map(|(id, at)| {
+        let mut steps: Vec<_> = house.run.histories.steps(id).iter().collect();
+        if at.place == checking {
+            steps.push((house.run.today, steps.last().map_or(Qty::ZERO, |&(_, held)| held) + Qty(100)));
+        }
+        (at, steps)
+    });
+    house.run.histories = Histories::from_steps(house.book.places.len(), steps.collect::<Vec<_>>());
     let report = crate::report(&house.book, &house.run, &balance(vec!["checking"], None, false, false), None).unwrap();
     assert!(lines(&report.sections[0]).iter().any(|row| row == "    checking | 8,956.80 USD"));
 }
 
 #[test]
-fn today_from_the_run_and_from_the_flows_agree() {
-    // The run's holdings answer for today; two days are one pass over the flows.
+fn the_balances_on_the_last_day_are_what_the_run_holds() {
+    // The run's holdings are the journal's final state; the histories are made from the same flows, a day at a time.
     let house = household();
     let (everyone, today) = (Whose::default(), house.run.today);
     let plan = axiom_engine::Plan::new(&house.book);
     let lens = crate::lens::Lens::new(&plan, &everyone, today);
-    let from_holdings = crate::history::Snapshots::of(lens, &house.run, &[today], false);
-    let from_flows = crate::history::Snapshots::of(lens, &house.run, &[day(2026, 2, 1), today], false);
+    let balances = crate::balances::Balances::of(lens, &house.run, &[today]);
     for place in house.book.places.ids() {
-        let (held, replayed) =
-            (from_holdings.subtree(&house.book, 0, place), from_flows.subtree(&house.book, 1, place));
+        let held: Qty = house
+            .run
+            .holdings
+            .iter()
+            .filter(|holding| holding.unit == house.book.base && house.book.places.covers(place, holding.place))
+            .map(|holding| holding.qty())
+            .sum();
         assert_eq!(
-            held.get(house.book.base),
-            replayed.get(house.book.base),
+            balances.subtree(&house.book, 0, place).get(house.book.base),
+            held,
             "{}",
             house.book.name(house.book.places[place].path)
         );
@@ -827,24 +876,22 @@ fn today_from_the_run_and_from_the_flows_agree() {
 }
 
 #[test]
-fn snapshot_storage_scales_with_occupied_owner_pairs() {
+fn histories_hold_a_position_for_each_place_that_held_something_and_a_scope_sees_only_its_own() {
     let house = household();
-    let days = [day(2026, 1, 31), house.run.today];
-    let everyone = Whose::default();
-    let plan = axiom_engine::Plan::new(&house.book);
-    let lens = crate::lens::Lens::new(&plan, &everyone, house.run.today);
-    let all = crate::history::Snapshots::of(lens, &house.run, &days, false);
-    let (all_pairs, all_cells) = all.storage_shape();
-    let dense_cells = days.len() * house.book.places.len() * house.book.commodities.len();
-    assert_eq!(all_cells, days.len() * all_pairs);
-    assert!(all_cells < dense_cells / 2, "{all_cells} stored cells versus {dense_cells} dense cells");
+    let dense = house.book.places.len() * house.book.commodities.len();
+    let positions = house.run.histories.len();
+    assert!(positions < dense / 2, "{positions} positions against {dense} places and commodities");
 
+    let (everyone, today) = (Whose::default(), house.run.today);
+    let plan = axiom_engine::Plan::new(&house.book);
+    let assets = house.place("assets");
+    let held = |whose: &Whose| {
+        let lens = crate::lens::Lens::new(&plan, whose, today);
+        crate::balances::Balances::of(lens, &house.run, &[today]).subtree(&house.book, 0, assets).get(house.book.base)
+    };
     let jordan = Whose::of(&house.book, house.entity("jordan"));
-    let jordan_lens = crate::lens::Lens::new(&plan, &jordan, house.run.today);
-    let scoped = crate::history::Snapshots::of(jordan_lens, &house.run, &days, false);
-    let (jordan_pairs, jordan_cells) = scoped.storage_shape();
-    assert_eq!(jordan_cells, days.len() * jordan_pairs);
-    assert!(jordan_pairs < all_pairs, "owner scope should omit unowned pairs");
+    assert_eq!(held(&jordan), Qty(430_000), "jordan's checking and nothing else");
+    assert!(held(&everyone) > held(&jordan));
 }
 
 #[test]

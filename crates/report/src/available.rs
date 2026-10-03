@@ -14,11 +14,11 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym};
 use axiom_engine::{Effect, Holding, Ledger, Options, Run, Verdict};
-use axiom_model::{Amount, Class, Entity, Place, RuntimeFlow, RuntimeTxn};
+use axiom_model::{Amount, Entity, Place, RuntimeFlow, RuntimeTxn};
 
 use crate::claims::{self, Claim};
 use crate::closings;
-use crate::history::{Held, postings};
+use crate::history::postings;
 use crate::lens::{Basket, Lens, Liquidity};
 use crate::places::path;
 use crate::synth::hypothetical;
@@ -125,13 +125,13 @@ fn spendable_section<'s>(
     let mut tied: BTreeMap<Id<Entity>, Basket> = BTreeMap::new();
     for scoped in cash {
         let holding = scoped.holding;
-        in_hand.add(holding.unit, Held { qty: scoped.qty, booked: Qty::ZERO });
+        in_hand.add(holding.unit, scoped.qty);
         for (lot, entity) in holding.lots.iter().filter_map(|lot| Some((lot, lot.tied?))) {
             let qty = lens.place_qty(holding.place, lot.qty);
-            tied.entry(entity).or_default().add(holding.unit, Held { qty, booked: Qty::ZERO });
+            tied.entry(entity).or_default().add(holding.unit, qty);
         }
     }
-    let hands = in_hand.value(lens, Class::Asset);
+    let hands = in_hand.value(lens);
     let mut spendable = hands.total;
     line(&mut section, "Money in hand".into(), Some(hands.total), 0);
     for scoped in cash {
@@ -147,7 +147,7 @@ fn spendable_section<'s>(
     // What is spoken for: held for someone else, written but not cashed, due soon.
     let held = tied.iter().map(|(&entity, basket)| {
         let whom = book.name(book.entities[entity].path);
-        (format!("held for {whom}"), basket.value(lens, Class::Asset).total)
+        (format!("held for {whom}"), basket.value(lens).total)
     });
     let pending = postings(book, run)
         .filter(|posting| {
