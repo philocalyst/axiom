@@ -381,6 +381,8 @@ tables! {
     /// The property lines of declarations, contracts and statements:
     /// [`Decl::props`], [`Contract::props`].
     props: Prop<'s>,
+    /// The slots of a contract's kind that its lines fill: [`Contract::fills`].
+    fills: Fill<'s>,
     /// The property lines under a property: [`Prop::lines`].
     nested: Nested<'s>,
     /// The rows of parameters: [`Param::rows`].
@@ -981,11 +983,13 @@ pub struct Opening<'s> {
 
 // ─── Contracts ──────────────────────────────────────────────────────────────
 
-/// `contract NAME [with PARTY]` and its indented lines: a promise of flows with
+/// `contract NAME [: KIND] [with PARTY]` and its indented lines: a promise of flows with
 /// one party. The schedule lines come first; the rest come in any order.
 #[derive(Debug)]
 pub struct Contract<'s> {
     pub name: Name<'s>,
+    /// `contract NAME : KIND`: the kind of contract it is, whose slots its lines fill.
+    pub kind: Option<Name<'s>>,
     /// Who the promise is with: `None` is the entity of the contract's own name.
     pub party: Option<Name<'s>>,
     /// How often and for how much. `None` when the line is missing or did not
@@ -1004,6 +1008,8 @@ pub struct Contract<'s> {
     /// What every occurrence implies: `also -> escrow 410 USD #escrow`.
     /// `&file[contract.alsos]`
     pub alsos: Many<Also<'s>>,
+    /// The slots of its kind that it fills: `employer acme`. `&file[contract.fills]`
+    pub fills: Many<Fill<'s>>,
     /// The other property lines: `from`, `until`, `grace`, `for`, `covers`,
     /// `prorated`, `rising`, `indexed`, `share`, `input`, `deposit`, `area`,
     /// `loan`, which the model reads with the properties of other declarations
@@ -1034,6 +1040,15 @@ pub struct Schedule<'s> {
 pub struct Deadline<'s> {
     pub span: Span,
     pub otherwise: Option<LineItem<'s>>,
+}
+
+/// `employer acme` in a contract of a kind: the slot the kind declares (`has employer org`), and who fills it.
+#[derive(Debug)]
+pub struct Fill<'s> {
+    pub slot: Name<'s>,
+    pub filler: Name<'s>,
+    /// The whole line.
+    pub loc: Loc,
 }
 
 /// `also ITEM | FLOW [when EXPR]`: what always comes with something. A flow

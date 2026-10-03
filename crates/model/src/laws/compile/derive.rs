@@ -12,7 +12,7 @@
 use axiom_core::{Arena, Diagnostic, Dim, Id, Loc, Run};
 use axiom_syntax as ast;
 
-use super::line::{lower_selectors, read_line, tail};
+use super::line::{Positions, lower_selectors, read_line, tail};
 use super::{Compiler, Placement, When};
 use crate::book::{Amount, Derived, Shape, Share};
 use crate::declare::World;
@@ -22,14 +22,16 @@ use crate::scope::Home;
 use crate::split::Sign;
 
 /// A contract's `also LINE [when E]`, compiled as the law it abbreviates.
-pub(crate) fn also<'s>(
+pub(crate) fn also<'a, 's>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
-    site: &Placement<'_, 's>,
+    site: &Placement<'a, 's>,
     also: &ast::Also<'s>,
+    positions: Positions<'a>,
 ) -> Option<Law> {
     let name = world.book.names.intern("also");
     let mut compiler = Compiler::placed(world, diags, site, name, When::of(&ast::Trigger::Flow));
+    compiler.positions = positions;
     // Both are read before either failure stops the line, so both are said.
     let when = also.when.map(|root| compiler.condition(root));
     let effect = compiler.derive(&also.line, also.loc);
@@ -87,7 +89,7 @@ impl<'s> Compiler<'_, '_, 's> {
             self.report(not_a_contracts(loc));
             return None;
         }
-        let said = read_line(self.world, self.home, self.file, line, loc, self.diags);
+        let said = read_line(self.world, self.home, self.file, line, loc, self.positions, self.diags);
         let Some(said) = said else {
             self.failed = true;
             return None;

@@ -1,7 +1,7 @@
 //! Kinds: what things are.
 //!
-//! Kinds form one tree under the built-in roots: the two classes of account, identified things, commodities, measures
-//! and entities. [`taxonomy`](crate::taxonomy) builds it; this module says what is particular to kinds.
+//! Kinds form one tree under the built-in roots: the two classes of account, identified things, commodities, measures,
+//! entities and contracts. [`taxonomy`](crate::taxonomy) builds it; this module says what is particular to kinds.
 
 use axiom_core::{Diagnostic, Id, Interner, Loc, Run, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind};
@@ -29,9 +29,10 @@ const MEASURE: usize = 4;
 const ENTITY: usize = 5;
 const CLAIM: usize = 6;
 const DEBT_CLAIM: usize = 7;
+const CONTRACT: usize = 8;
 
 /// Each root's sort.
-const SORTS: [Sort; 8] = [
+const SORTS: [Sort; 9] = [
     Sort::Place(Class::Asset),
     Sort::Place(Class::Debt),
     Sort::Thing,
@@ -40,6 +41,7 @@ const SORTS: [Sort; 8] = [
     Sort::Entity,
     Sort::Place(Class::Asset),
     Sort::Place(Class::Debt),
+    Sort::Contract,
 ];
 
 impl Node for Kind {
@@ -54,6 +56,7 @@ impl Node for Kind {
         ("entity", None),
         ("claim", Some(ASSET)),
         ("debt-claim", Some(DEBT)),
+        ("contract", None),
     ];
     const ORPHAN: usize = THING;
     const REPEATED_ROOT: Repeated = Repeated::Said;
@@ -113,6 +116,7 @@ pub(crate) fn roots(ids: &[Id<Kind>]) -> KindRoots {
         entity: ids[ENTITY],
         claim: ids[CLAIM],
         debt_claim: ids[DEBT_CLAIM],
+        contract: ids[CONTRACT],
     }
 }
 

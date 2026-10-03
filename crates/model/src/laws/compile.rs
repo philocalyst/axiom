@@ -34,6 +34,7 @@ use crate::scope::Home;
 use crate::values::fits;
 
 pub(crate) use derive::{also, share};
+pub(crate) use line::{Positions, flow_ends};
 
 /// How the arguments of a call and a name in a pattern are read.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -255,6 +256,7 @@ pub(crate) fn compile_template<'s>(
         roles: Vec::new(),
         locals: Vec::new(),
         inputs,
+        positions: Positions::NONE,
         when: When::Template,
         failed: false,
     };
@@ -291,6 +293,7 @@ pub(crate) fn compile_budget_limit<'s>(
         roles: Vec::new(),
         locals: Vec::new(),
         inputs: &[],
+        positions: Positions::NONE,
         when: When::Each,
         failed: false,
     };
@@ -319,6 +322,8 @@ struct Compiler<'w, 'a, 's> {
     /// `let` bindings in scope, and the node holding each value.
     locals: Vec<(&'s str, NodeId)>,
     inputs: &'a [Input],
+    /// Where the roles of a contract's kind stand, for a law that is one of its legs.
+    positions: Positions<'a>,
     when: When,
     failed: bool,
 }
@@ -346,6 +351,7 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
             roles: Vec::new(),
             locals: Vec::new(),
             inputs: &[],
+            positions: Positions::NONE,
             when,
             failed: false,
         }

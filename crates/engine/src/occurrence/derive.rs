@@ -319,6 +319,18 @@ opening 2026-01-01
     }
 
     #[test]
+    fn a_derived_flow_keeps_the_headers_description_unless_it_says_its_own() {
+        let text = format!(
+            "{PRELUDE}contract mortgage with lender\n  1_000.00 USD monthly on 1 from checking #fee \"the payment\"\n  from 2026-01-01\n  law derived\n    on flow\n    derive -> escrow 100.00 USD #match\n    derive -> k401 50.00 USD #match \"its own\"\n2026-01-01 mortgage\n"
+        );
+        with_run(&text, day(2026, 1, 31), |book, run| {
+            let flows = run.promises[0].flows.get(&run.promised_flows).unwrap();
+            let says: Vec<_> = flows.iter().map(|flow| flow.flow.description.map(|text| book.text(text))).collect();
+            assert_eq!(says, [Some("the payment"), Some("the payment"), Some("its own")]);
+        });
+    }
+
+    #[test]
     fn a_share_is_carved_from_the_header_and_borne_by_its_entity() {
         let text = format!(
             "{PRELUDE}contract bill with lender\n  1_000.00 USD monthly on 1 from checking #fee\n  from 2026-01-01\n  share 60% for acme\n2026-01-01 bill\n"

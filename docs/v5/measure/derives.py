@@ -205,7 +205,7 @@ def gen(directory, count, seed=1):
     with open(os.path.join(directory, "forms.txt"), "w") as handle:
         for form, n in sorted(forms.items()):
             handle.write(f"{form} {n}\n")
-    print(f"{count} pairs; forms: " + ", ".join(f"{form} {n}" for form, n in sorted(forms.items())))
+    print(f"{count} triples; forms: " + ", ".join(f"{form} {n}" for form, n in sorted(forms.items())))
 
 
 COMMANDS = [
@@ -270,7 +270,7 @@ def outputs(binary, project):
         args = [binary, *command, "-C", project, "--today", TODAY, "--color", "never"]
         done = subprocess.run(args, capture_output=True, text=True, timeout=120)
         text = done.stdout + done.stderr
-        out[" ".join(command)] = re.sub(r" · \d+ laws? enforced", "", re.sub(r"/[^ ]*/p\d+/(derived|sugar|written)", "<project>", text))
+        out[" ".join(command)] = re.sub(r" · \d+ laws? enforced", "", re.sub(r"/[^ ]*/p\d+/[\w-]+", "<project>", text))
     return out
 
 
@@ -319,8 +319,6 @@ CALC = "crates/engine/src/calc.rs"
 # (file, the text, what replaces it, what the mutant is). Each must be caught by the oracle (a build that makes the
 # two spellings of a contract two books) or by a test that names what it checks.
 MUTANTS = [
-    (ENGINE, "rules.is_empty() || first >= pools.flows.len()", "rules.is_empty()",
-     "an occurrence whose group made no flow is read for a header all the same"),
     (ENGINE, "Occasion { amount: Some(given.out), ..Occasion::flow(&motion) }",
      "Occasion { amount: Some(header.flow.out), ..Occasion::flow(&motion) }",
      "`amount` is the header after the legs and items took from it, not as the template gave it"),
@@ -339,8 +337,8 @@ MUTANTS = [
      "(header.out, header.arrive) = (header.out, header.arrive);\n        }\n        Ok(())",
      "the header keeps what a carved item took"),
     (ENGINE, ".map_or(0, |flow| flow.ordinal + 1);", ".map_or(0, |flow| flow.ordinal);", "a derived flow has the ordinal of the one before it"),
-    (ENGINE, "if matches!(derived.shape, Shape::Item(_)) && derived.purpose.is_none() {", "if false {",
-     "an item with no purpose makes a flow"),
+    (ENGINE, "if !derived.makes_flow() {", "if false {", "an item with nothing to tell it from its header makes a flow"),
+    (ENGINE, "if !derived.makes_flow() {", "if true {", "no derived flow is made"),
     (ENGINE, "Shape::Item(Sign::Less) => (header.to, header.from),", "Shape::Item(Sign::Less) => (header.from, header.to),",
      "a `-` item goes the header's way"),
     (ENGINE, "Shape::Item(Sign::Add | Sign::Carve) => (header.from, header.to),",
@@ -348,13 +346,16 @@ MUTANTS = [
     (ENGINE, "Shape::Flow { from, to } => (from.unwrap_or(header.from), to.unwrap_or(header.to)),",
      "Shape::Flow { from, to } => (from.unwrap_or(header.to), to.unwrap_or(header.from)),",
      "a flow that names one end has the other end of the header backwards"),
-    (ENGINE, "purpose: derived.purpose,", "purpose: header.purpose,", "a derived flow has the header's purpose"),
+    (ENGINE, "purpose: derived.purpose.or(header.purpose),", "purpose: header.purpose,", "a derived flow has the header's purpose"),
+    (ENGINE, "purpose: derived.purpose.or(header.purpose),", "purpose: derived.purpose,", "a derived flow that says no purpose has none"),
+    (ENGINE, "owner: derived.owner.unwrap_or(header.owner),", "owner: header.owner,", "a share's flow is borne by the header's owner"),
+    (ENGINE, "description: derived.description.or(header.description),", "description: derived.description,",
+     "a derived flow does not keep the header's description"),
+    (ENGINE, "waive: derived.waive.or(header.waive),", "waive: derived.waive,", "a derived flow does not keep the header's waiver"),
     (ENGINE, "origin: Origin::Derived(Derivation::Law(made.law)),", "origin: header.origin,",
      "a derived flow does not say which law made it"),
     (ENGINE, "out: made.amount,\n            arrive: made.amount,", "out: made.amount,\n            arrive: header.arrive,",
      "a derived flow arrives as the header did"),
-    (ENGINE, "Role::Outside(Some(entity)) | Role::Tab(entity) => Some(entity),", "Role::Outside(Some(_)) | Role::Tab(_) => None,",
-     "a derived flow has no payee"),
     (ENGINE, "Bear { amount: Cut::Of(Expr::Literal(made.amount)), side, unit, takes }",
      "Bear { amount: Cut::Of(Expr::Literal(made.amount)), side: side.other(), unit, takes }",
      "an item is borne on the other side of the header"),
@@ -378,75 +379,27 @@ MUTANTS = [
 ]
 
 
-def failing_tests(source, work):
-    """The unit and integration tests of the crates a mutant lives in that fail in SOURCE, by name; a build that does not
-    compile is a mutant that does not build."""
-    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
-    run = subprocess.run(
-        ["cargo", "test", "--release", "--offline", "--no-fail-fast", "-p", "axiom-syntax", "-p", "axiom-model",
-         "-p", "axiom-engine", "-p", "axiom-report"],
-        cwd=source, env=env, capture_output=True, text=True)
-    if "could not compile" in run.stderr:
-        raise SystemExit("the tests do not build")
-    return set(re.findall(r"^test (\S+) \.\.\. FAILED$", run.stdout, re.M))
+def detect(source, work):
+    """What the oracle says of a build of SOURCE: the engine's own dump of the flows the three spellings make, on the
+    sample, and nothing when they agree. (The reports are the model's and the engine's flows added up; the dump is the layer
+    the code under test is in.)"""
+    from forecast import build as build_dump
 
-
-def build_cli(source, work):
-    target = os.path.join(work, "cli-target")
-    done = subprocess.run(["cargo", "build", "--release", "-q", "--offline", "-p", "axiom-cli"], cwd=source,
-                          env=dict(os.environ, CARGO_TARGET_DIR=target), capture_output=True, text=True)
-    if done.returncode:
-        raise SystemExit(done.stderr[-2000:])
-    return os.path.join(target, "release", "axiom")
-
-
-def leave_out(tree, directory, names):
-    top = os.path.samefile(directory, tree)
-    return [name for name in names if name in ("target", ".git", ".claude", "docs", "examples") or (top and name == "tests")]
+    binary = build_dump(source, os.path.join(work, "dump"))
+    return "killed by the engine dump" if dump(binary, os.path.join(work, "sample"), 3, quiet=True) else None
 
 
 def mutate(tree, work, directory, only=None):
-    """Each mutant is built and must be caught: by the oracle on the first pairs of DIRECTORY, or by a test that fails
-    only with it. A mutant that is neither is SURVIVED: an equivalent one, or a corpus too weak to tell."""
+    """Each mutant must be caught by the oracle on the first pairs of DIRECTORY, or by a test that fails only with it."""
+    from mutation import mutate as run_mutants
+
     work = os.path.abspath(work)
-    source = os.path.join(work, "tree")
-    if not os.path.isdir(source):
-        os.makedirs(work, exist_ok=True)
-        shutil.copytree(os.path.abspath(tree), source, ignore=lambda at, names: leave_out(tree, at, names))
     sample = os.path.join(work, "sample")
     shutil.rmtree(sample, ignore_errors=True)
     os.makedirs(sample)
     for name in sorted(n for n in os.listdir(directory) if n.startswith("p"))[:150]:
         shutil.copytree(os.path.join(directory, name), os.path.join(sample, name))
-    assert run(build_cli(source, work), sample, 3, quiet=True) == 0, "the baseline fails its own oracle"
-    known = failing_tests(source, work)
-    print(f"the tests fail without a mutant: {sorted(known)}", flush=True)
-    results = []
-    for number, (path, old, replacement, what) in enumerate(MUTANTS):
-        if only is not None and number not in only:
-            continue
-        target = os.path.join(source, path)
-        original = open(target).read()
-        assert original.count(old) == 1, f"mutant {number}: the text occurs {original.count(old)} times in {path}"
-        open(target, "w").write(original.replace(old, replacement))
-        try:
-            outcome = "killed by the oracle" if run(build_cli(source, work), sample, 3, quiet=True) else None
-            if outcome is None:
-                new = failing_tests(source, work) - known
-                outcome = "killed by " + ", ".join(sorted(new)[:2]) + ("" if len(new) < 3 else f" and {len(new) - 2} more") if new else "SURVIVED"
-        except SystemExit:
-            outcome = "does not build"
-        except subprocess.TimeoutExpired:
-            outcome = "killed by a hang"
-        finally:
-            open(target, "w").write(original)
-        results.append((number, outcome, what))
-        print(f"mutant {number:02d} {outcome:<48} {what}", flush=True)
-    summary = Counter(outcome.split(" by ")[0] if outcome.startswith("killed") else outcome for _, outcome, _ in results)
-    print(f"{len(results)} mutants: " + ", ".join(f"{count} {outcome}" for outcome, count in sorted(summary.items())))
-    with open(os.path.join(work, "mutants.txt"), "w") as handle:
-        for number, outcome, what in results:
-            handle.write(f"{number:02d} {outcome} {what}\n")
+    return run_mutants(tree, work, MUTANTS, detect, only)
 
 
 def main(argv):

@@ -16,6 +16,22 @@ use axiom_syntax::{ClauseKind, ItemKind, Name, Subject, Verb};
 
 use crate::sources::Site;
 
+/// The names every kind declares a slot by (`has employer org`).
+fn slot_names<'s>(sites: &[Site<'_, 's>]) -> Set<&'s str> {
+    let mut names = Set::default();
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            if let ItemKind::Decl(id) = item.kind
+                && file[id].what == ast::DeclKind::Kind
+            {
+                names.extend(file[file[id].slots].iter().map(|has| has.name.0));
+            }
+        }
+    }
+    names
+}
+
 /// How a name is written: as a party, which is a claim's debtor or creditor, `for WHOM`, or a contract's `with`; or as
 /// anything else a party can stand for, an end of a flow, a `via`, the object of a purpose.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -30,12 +46,16 @@ pub(super) struct Mentions<'s> {
     pub first: Map<&'s str, Loc>,
     /// The names that are written as a party at least once.
     pub parties: Set<&'s str>,
+    /// The roles of a kind, while its `also` lines are read: a leg of `employment` that starts at `employer` starts at
+    /// whoever fills the slot, and no party is made of the word.
+    roles: Set<&'s str>,
 }
 
 impl<'s> Mentions<'s> {
     /// Every name of every source, in the order the sources were arranged and the items written.
     pub fn of(sites: &[Site<'_, 's>]) -> Mentions<'s> {
         let mut mentions = Mentions::default();
+        let slots = slot_names(sites);
         // A contract with no `with` is with the party its own name says. That is a party only once every end has had
         // its say, so that a name written as an end somewhere is first written there.
         let mut named_for_party = Vec::new();
@@ -53,7 +73,11 @@ impl<'s> Mentions<'s> {
                             named_for_party.push((contract.name, item.loc));
                         }
                     }
-                    ItemKind::Decl(id) => mentions.alsos(file, file[id].alsos),
+                    ItemKind::Decl(id) => {
+                        let decl = &file[id];
+                        mentions.roles = if decl.what == ast::DeclKind::Kind { slots.clone() } else { Set::default() };
+                        mentions.alsos(file, decl.alsos);
+                    }
                     _ => {}
                 }
             }
@@ -65,6 +89,9 @@ impl<'s> Mentions<'s> {
     }
 
     fn see(&mut self, name: Name<'s>, loc: Loc, role: Role) {
+        if self.roles.contains(name.0) {
+            return;
+        }
         self.first.entry(name.0).or_insert(loc);
         if role == Role::Party {
             self.parties.insert(name.0);

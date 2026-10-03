@@ -250,6 +250,8 @@ mod tests {
         };
         let contract = Contract {
             name: house.book.names.intern("rent-promise"),
+            kind: None,
+            fillers: Box::default(),
             party: Id::new(0),
             owner: Id::new(0),
             purpose: None,

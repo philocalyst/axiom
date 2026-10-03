@@ -197,6 +197,9 @@ pub struct KindRoots {
     pub claim: Id<Kind>,
     /// What an owner owes a party: the kind of a `Debt`-class tab, which says `claim` as well.
     pub debt_claim: Id<Kind>,
+    /// The promises between an owner and a party that have a shape of their own (`employment`, `lease`): the kinds a
+    /// contract may be `: KIND` of.
+    pub contract: Id<Kind>,
 }
 
 /// The four disjoint roots of the purpose tree.
@@ -357,6 +360,8 @@ pub enum Sort {
     Thing,
     Commodity,
     Entity,
+    /// A relator: what two or more entities have between them, and what that says of the flows between them.
+    Contract,
 }
 
 /// A declared relationship together with the line that established it.
@@ -458,9 +463,23 @@ pub struct Asset {
     pub loc: Loc,
 }
 
+/// One slot of a contract's kind, filled: `employer acme`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Filler {
+    /// The slot's name, as its kind declares it.
+    pub slot: Sym,
+    pub entity: Id<Entity>,
+    /// The line that fills it.
+    pub loc: Loc,
+}
+
 /// A promise of flows with one party.
 pub struct Contract {
     pub name: Sym,
+    /// `contract NAME : KIND`: what the two sides are to each other, whose legs it writes once.
+    pub kind: Option<Id<Kind>>,
+    /// Who fills the slots of that kind.
+    pub fillers: Box<[Filler]>,
     pub party: Id<Entity>,
     /// Whose promise: the owner of the holding it pays from or into.
     pub owner: Id<Entity>,

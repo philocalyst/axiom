@@ -194,6 +194,8 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
     let mut book = f.book();
     let contract = book.contracts.push(Contract {
         name: book.entities[book.roots.me].path,
+        kind: None,
+        fillers: Box::default(),
         party: book.roots.me,
         owner: book.roots.me,
         purpose: None,

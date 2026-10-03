@@ -239,7 +239,7 @@ fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
                     let governed = book.assets.iter().filter(|(_, asset)| book.kinds.covers(kind, asset.kind));
                     rules.extend(governed.map(|(asset, _)| always(id, Subject::Asset(asset))));
                 }
-                Sort::Commodity => {}
+                Sort::Commodity | Sort::Contract => {}
             },
             Owner::System(_) => {
                 for entity in book.entities.ids() {

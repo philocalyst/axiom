@@ -18,9 +18,9 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id, Set};
 use axiom_syntax::{self as ast, DeclKind, ItemKind, Trigger as Written};
 
-pub(crate) use self::compile::Placement;
 use self::compile::compile;
 pub(crate) use self::compile::compile_template;
+pub(crate) use self::compile::{Placement, Positions, flow_ends};
 pub(crate) use self::order::rank;
 use crate::book::{Kind, Share, Sort, System};
 use crate::declare::World;
@@ -118,6 +118,10 @@ fn governed<'s>(
                 Sort::Thing => Ty::Asset,
                 Sort::Commodity => {
                     misplaced(diags, file, decl.laws, "a commodity kind");
+                    return None;
+                }
+                Sort::Contract => {
+                    misplaced(diags, file, decl.laws, "a contract kind");
                     return None;
                 }
             };
@@ -268,14 +272,16 @@ fn declare_alsos(diags: &mut Vec<Diagnostic>, file: &ast::File, decl: &ast::Decl
     }
 }
 
-/// A contract's `also` as the law it abbreviates, in the book.
-pub(crate) fn compile_also<'s>(
+/// A contract's `also` as the law it abbreviates, in the book. The roles of a contract's kind, if it has one, stand
+/// where `positions` says.
+pub(crate) fn compile_also<'a, 's>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
-    site: &Placement<'_, 's>,
+    site: &Placement<'a, 's>,
     also: &ast::Also<'s>,
+    positions: Positions<'a>,
 ) -> Option<Id<Law>> {
-    let law = compile::also(world, diags, site, also)?;
+    let law = compile::also(world, diags, site, also, positions)?;
     Some(push(world, law))
 }
 

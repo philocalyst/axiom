@@ -496,6 +496,7 @@ impl Fixture {
                 entity: k,
                 claim: k,
                 debt_claim: k,
+                contract: k,
             },
             purposes: PurposeRoots { income, spending, capital, transfer },
         };

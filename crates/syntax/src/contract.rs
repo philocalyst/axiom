@@ -1,11 +1,12 @@
-//! Contracts (LANGUAGE §7): `contract NAME [with PARTY]`, its schedule and the
+//! Contracts (LANGUAGE §7): `contract NAME [: KIND] [with PARTY]`, its schedule and the
 //! template an occurrence overrides.
 //!
 //! A line is a schedule (it starts with `about`, `buy`, a cadence, or an amount
 //! that a word follows), a nested law, an `also`, a `due`, a property (`deposit
 //! 2_350 USD`, `share 120 SQFT for studio`: a declaration's line, which the
 //! model reads with the others), a purpose or a description, an item, or else a
-//! leg. A contract keeps the lines that parse when one does not, so that its
+//! leg. A contract of a kind (`contract alex-pay : employment`) also has the lines that fill the
+//! kind's slots, `employer acme`: two names and nothing else, which no leg is. A contract keeps the lines that parse when one does not, so that its
 //! occurrences in the journal are not errors as well. The terms a schedule
 //! states are the terms a change restates (`07-01 flat now 3_050 USD
 //! monthly`), so both are read here.
@@ -38,9 +39,13 @@ const PROPERTIES: [&str; 13] = [
 ];
 
 impl<'s> Parser<'s> {
-    /// The rest of `contract NAME [with PARTY]`, after the keyword, and its body.
+    /// The rest of `contract NAME [: KIND] [with PARTY]`, after the keyword, and its body.
     pub fn contract(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let name = self.name("expected-name", "a contract name")?;
+        let kind = match self.eat(Punct::Colon) {
+            Some(_) => Some(self.name_like("expected-kind", "the kind of contract it is, such as `employment`")?),
+            None => None,
+        };
         let party = match self.eat_word("with") {
             Some(_) => Some(self.name("expected-name", "the party it is with, such as `lumen`")?),
             None => None,
@@ -53,8 +58,9 @@ impl<'s> Parser<'s> {
         }
         let header = self.keep_header(line);
         let (props, laws, alsos) = (self.mark::<Prop>(), self.mark::<Law>(), self.mark::<Also>());
+        let fills = self.mark::<Fill>();
         let (legs, items) = (self.mark::<Leg>(), self.mark::<LineItem>());
-        let mut found = Found::default();
+        let mut found = Found { kinded: kind.is_some(), ..Found::default() };
         let body = self.block(line, true, |parser, child| parser.contract_line(child, &mut found));
         if found.schedule.is_none() && found.standing.is_none() && body.is_ok() {
             self.report(missing_schedule(header.loc));
@@ -62,6 +68,7 @@ impl<'s> Parser<'s> {
         let template = Body { legs: self.since(legs), items: self.since(items) };
         let contract = Contract {
             name,
+            kind,
             party,
             schedule: found.schedule,
             standing: found.standing,
@@ -69,6 +76,7 @@ impl<'s> Parser<'s> {
             description: found.description.map(|(text, _)| text),
             deadline: found.deadline.map(|(deadline, _)| deadline),
             alsos: self.since(alsos),
+            fills: self.since(fills),
             props: self.since(props),
             body: template,
             laws: self.since(laws),
@@ -94,6 +102,7 @@ impl<'s> Parser<'s> {
                 }
             }
             Tok::Name(word) if PROPERTIES.contains(&word) => self.property(line, scope),
+            Tok::Name(_) if found.kinded && self.at_slot_line() => self.fill(line),
             _ if self.at_schedule() => {
                 let read = self.schedule(line, found)?;
                 let slot = match read.terms.payment {
@@ -112,6 +121,26 @@ impl<'s> Parser<'s> {
             _ if self.at_item() => self.line_item(line, scope).map(drop),
             _ => self.leg(line, scope).map(drop),
         }
+    }
+
+    /// `employer acme`: who fills a slot of the contract's kind.
+    fn fill(&mut self, line: &Line<'s>) -> Parse<()> {
+        let slot = self.name("expected-name", "a slot of the contract's kind")?;
+        let filler = self.name_like("expected-name", "the entity that fills it")?;
+        self.expect_eol()?;
+        self.push(Fill { slot, filler, loc: self.loc_from(line.body) });
+        Ok(())
+    }
+
+    /// Whether the line is two names and nothing else, `employer acme`: a slot of the contract's kind, filled.
+    fn at_slot_line(&self) -> bool {
+        let mut ahead = self.lexer.clone();
+        ahead.bump();
+        if !matches!(ahead.peek().tok, Tok::Name(_)) {
+            return false;
+        }
+        ahead.bump();
+        matches!(ahead.peek().tok, Tok::Eol)
     }
 
     /// Whether the line is a schedule: it starts with `about`, `buy` or a
@@ -309,6 +338,8 @@ impl<'s> Parser<'s> {
 /// What a contract's lines have said so far.
 #[derive(Default)]
 struct Found<'s> {
+    /// The contract names a kind, so a line of two names fills one of its slots.
+    kinded: bool,
     schedule: Option<Schedule<'s>>,
     standing: Option<Schedule<'s>>,
     purpose: Option<(Purpose<'s>, Loc)>,

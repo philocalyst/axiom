@@ -3,7 +3,13 @@
 //! The two spellings are one line (`+ 5% of amount #fee`, `lumen -> retirement 50% of ... #match`), so one reader
 //! turns it into a [`Said`] (its shape against the flow that fires it, its amount as written, its clauses) and one
 //! reader turns the clauses into the metadata a derived flow carries.
+//!
+//! A line a contract's kind writes (`also employer -> irs 7.65% of amount #payroll-tax`) has the kind's roles for
+//! ends. A role is not an entity: it is whoever fills the slot in the contract being lowered, standing where
+//! [`Positions`] says, so the same line reads one way for the household that pays `employer` and another for the
+//! `employer` whose book it is.
 
+use axiom_core::diag::closest;
 use axiom_core::{Days, Diagnostic, Id, Loc, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
@@ -15,6 +21,36 @@ use crate::journal::{Detail, Purposed, Select, Waive};
 use crate::lower::tail::{Reach, written_purpose, written_waive};
 use crate::scope::Home;
 use crate::split::Sign;
+
+/// Where each role of a contract's kind stands in the book the contract is lowered into: the place its filler is at,
+/// which is the owner's holding where the filler is the owner and the filler's outside place where it is anyone else.
+#[derive(Clone, Copy)]
+pub(crate) struct Positions<'a> {
+    pub stands: &'a [(Sym, Id<Place>)],
+    /// The roles the contract leaves empty (an `optional` slot nothing fills).
+    pub empty: &'a [Sym],
+}
+
+/// What a name written as an end is, when a contract's kind has roles.
+enum Standing {
+    Stands(Id<Place>),
+    Empty,
+    NoRole,
+}
+
+impl Positions<'_> {
+    /// The positions of a contract with no kind: it has no roles.
+    pub(crate) const NONE: Positions<'static> = Positions { stands: &[], empty: &[] };
+
+    fn of(self, name: Option<Sym>) -> Standing {
+        let Some(name) = name else { return Standing::NoRole };
+        match self.stands.iter().find(|(slot, _)| *slot == name) {
+            Some(&(_, place)) => Standing::Stands(place),
+            None if self.empty.contains(&name) => Standing::Empty,
+            None => Standing::NoRole,
+        }
+    }
+}
 
 /// What the clauses of a derived line say, pooled in the book.
 #[derive(Clone, Copy)]
@@ -120,12 +156,29 @@ pub(crate) fn read_line<'s>(
     file: &ast::File<'s>,
     line: &ast::AlsoLine<'s>,
     at: Loc,
+    positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Said<'s>> {
     match line {
         ast::AlsoLine::Item(item) => Some(implied_item(item)),
-        ast::AlsoLine::Flow(flow) => implied_flow(world, home, file, flow, at, diags),
+        ast::AlsoLine::Flow(flow) => implied_flow(world, home, file, flow, at, positions, diags),
     }
+}
+
+/// The places a line's two ends stand at (`None` is the end of the flow that fires it), if it is a flow and both ends
+/// are something. Nothing is said of an end that is not: reading the line for real says it once.
+pub(crate) fn flow_ends<'s>(
+    world: &World<'s>,
+    home: Home,
+    file: &ast::File<'s>,
+    line: &ast::AlsoLine<'s>,
+    positions: Positions<'_>,
+) -> Option<(Option<Id<Place>>, Option<Id<Place>>)> {
+    let ast::AlsoLine::Flow(flow) = line else { return None };
+    let mut unsaid = Vec::new();
+    let from = implied_end(world, home, file, flow.from.end, positions, &mut unsaid)?;
+    let to = implied_end(world, home, file, flow.to.end, positions, &mut unsaid)?;
+    Some((from, to))
 }
 
 /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow that implies it.
@@ -145,6 +198,7 @@ fn implied_flow<'s>(
     file: &ast::File<'s>,
     flow: &ast::Flow<'s>,
     also_loc: Loc,
+    positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Said<'s>> {
     if !file[flow.body.legs].is_empty() || !file[flow.body.items].is_empty() {
@@ -165,8 +219,10 @@ fn implied_flow<'s>(
         return None;
     }
     // Both ends are looked up before either failure stops the line, so both are said.
-    let (from, to) =
-        (implied_end(world, home, file, flow.from.end, diags), implied_end(world, home, file, flow.to.end, diags));
+    let (from, to) = (
+        implied_end(world, home, file, flow.from.end, positions, diags),
+        implied_end(world, home, file, flow.to.end, positions, diags),
+    );
     let (from, to) = (from?, to?);
     let from_amount = implied_amount(file, flow.from.amount, also_loc, diags)?;
     let to_amount = implied_amount(file, flow.to.amount, also_loc, diags)?;
@@ -191,21 +247,43 @@ fn implied_flow<'s>(
     Some(Said { shape: Shape::Flow { from, to }, amount, clauses: flow.tail, selectors })
 }
 
-/// The place an end of an implied flow names: none for `self` or no end, and nothing at all, after it is said,
-/// for a name that is none.
+/// The place an end of an implied flow names: none for `self` or no end, the place a role stands at, and nothing at
+/// all, after it is said, for a name that is none.
 fn implied_end<'s>(
     world: &World<'s>,
     home: Home,
     file: &ast::File<'s>,
     end: Option<ast::End<'s>>,
+    positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Id<Place>>> {
-    match end {
-        Some(end) if end.name.0 != "self" => {
-            world.end(home, Word::of(file, end.name.0)).map(|end| Some(end.place)).or_report(diags)
+    let Some(end) = end.filter(|end| end.name.0 != "self") else { return Some(None) };
+    let word = Word::of(file, end.name.0);
+    match positions.of(world.book.names.get(word.text)) {
+        Standing::Stands(place) => Some(Some(place)),
+        Standing::Empty => {
+            diags.push(empty_role(world, word, positions));
+            None
         }
-        _ => Some(None),
+        Standing::NoRole => world.end(home, word).map(|end| Some(end.place)).or_report(diags),
     }
+}
+
+/// A leg of a contract's kind names a role the contract leaves empty.
+fn empty_role(world: &World<'_>, word: Word, positions: Positions<'_>) -> Diagnostic {
+    let filled: Vec<&str> = positions.stands.iter().map(|&(slot, _)| world.book.name(slot)).collect();
+    let near = closest(word.text, filled.iter().copied());
+    let mut diagnostic = Diagnostic::error("relator-role-empty", format!("nothing fills `{}` here", word.text))
+        .label(word.loc, "this contract leaves the role empty, so the leg has no end")
+        .help(format!("fill it in the contract: `{} NAME`", word.text));
+    if let Some(near) = near {
+        diagnostic = diagnostic.note(format!("the roles it fills are {}", crate::errors::list(&filled))).fix(
+            format!("did you mean `{near}`?"),
+            word.loc,
+            near,
+        );
+    }
+    diagnostic
 }
 
 /// The amount one side of an implied flow states: none if it states none, and nothing at all, after it is said,

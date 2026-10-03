@@ -40,6 +40,7 @@ enum Target {
     Commodity,
     Asset,
     Kind,
+    Contract,
 }
 
 impl Target {
@@ -50,6 +51,7 @@ impl Target {
             Target::Commodity => "commodity",
             Target::Asset => "asset",
             Target::Kind => "kind",
+            Target::Contract => "contract",
         }
     }
 
@@ -60,6 +62,7 @@ impl Target {
             Sort::Thing => Target::Asset,
             Sort::Entity => Target::Entity,
             Sort::Commodity => Target::Commodity,
+            Sort::Contract => Target::Contract,
         }
     }
 }

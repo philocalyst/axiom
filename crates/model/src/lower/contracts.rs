@@ -2,6 +2,8 @@
 //! before any template expression compiles, so a template may mention a
 //! contract declared later in the project.
 
+mod relator;
+
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Run, Span, Sym, Timeline};
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
@@ -18,7 +20,7 @@ use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Flow, Infer, Mode, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
-use crate::laws::Placement;
+use crate::laws::{Placement, Positions};
 use crate::problem::{self, Noun};
 use crate::promise::Blame;
 use crate::resolve::End;
@@ -82,8 +84,9 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
         let placement = Placement { file, home: written.home(), owner: Owner::Contract(written.id), subject: Ty::Flow };
         let mut laws = Vec::new();
         for also in &file[written.node.alsos] {
-            laws.extend(crate::laws::compile_also(world, diags, &placement, also));
+            laws.extend(crate::laws::compile_also(world, diags, &placement, also, Positions::NONE));
         }
+        laws.extend(relator::legs(world, collected, written, diags));
         for law in &file[written.node.laws] {
             laws.extend(crate::laws::compile_native(world, diags, &placement, law));
         }
@@ -94,6 +97,8 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
 fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
     Contract {
         name,
+        kind: None,
+        fillers: Box::default(),
         party: me,
         owner: me,
         purpose: None,
@@ -197,7 +202,11 @@ fn lower_contract<'a, 's>(
         .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at)));
     let deposit = contract_deposit(world, written, Keeping { owner, default_holding }, diags).ok()?;
     let loan = contract_loan(world, written, party, owner, diags)?;
+    let relation = relator::relation(world, written, diags);
     let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
+    if let Some((kind, fillers)) = relation {
+        (contract.kind, contract.fillers) = (Some(kind), fillers);
+    }
     contract.party = party;
     contract.owner = owner;
     contract.days = days;
