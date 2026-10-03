@@ -788,6 +788,9 @@ def run(baseline, new, directory, jobs=3):
     with ThreadPoolExecutor(jobs) as pool:
         results = list(pool.map(lambda path: run_project(baseline, new, path), paths))
     failed = [(path, diff) for path, diff, _ in results if diff]
+    if os.environ.get("SPLITS_LIST"):  # every project that differs, one path a line, for a classification
+        with open(os.environ["SPLITS_LIST"], "w") as listing:
+            listing.write("".join(path + "\n" for path, _ in failed))
     for path, diff in failed[:5]:
         args, before, after = diff[0]
         print(f"DIFFERENT {path}: {' '.join(args)}\n--- baseline (exit {before[0]})\n{before[1]}{before[2]}\n"
