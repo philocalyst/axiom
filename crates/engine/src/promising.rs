@@ -167,6 +167,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     due,
                     kept,
                     waived: false,
+                    claimed: false,
                     flows,
                     missing_inputs,
                 });
@@ -218,9 +219,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
 
     /// Tells the monitor the occurrence is kept: it moves past it, and past every earlier one that nothing kept.
     fn settle(&mut self, occurrence: Occurrence) {
-        let (promises, record) = (&self.plan.book.promises, &mut self.record);
         let Occurrence { contract, schedule, ordinal, .. } = occurrence;
-        self.world.monitor.settle(promises, contract, schedule, ordinal, |missed| record.promises.push(missed));
+        let mut missed = Vec::new();
+        let promises = &self.plan.book.promises;
+        let found = (ordinal, self.clock.day);
+        self.world.monitor.settle(promises, contract, schedule, found, |promise, day| missed.push((promise, day)));
+        self.record_missed(missed);
     }
 
     /// Makes the occurrence into flows (`instantiate_occurrence`) and posts them on `day`, the day a line kept it or

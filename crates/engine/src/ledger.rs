@@ -21,6 +21,7 @@ use axiom_model::{
     RuntimeDetail, RuntimeFlow, RuntimeTxn,
 };
 
+use crate::Promise;
 use crate::checkpoint::CheckpointPhase;
 use crate::monitor;
 use crate::motion::{Amounts, Motion};
@@ -432,8 +433,17 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// Records the occurrences that can no longer be kept as of `day`: each comes before the facts of the day it is
     /// missed on, since a line dated that day is out of its reach.
     fn miss_through(&mut self, day: Day) {
-        let (promises, record) = (&self.plan.book.promises, &mut self.record);
-        self.world.monitor.miss_through(promises, day, |missed| record.promises.push(missed));
+        let mut missed = Vec::new();
+        self.world.monitor.miss_through(&self.plan.book.promises, day, |promise, found| missed.push((promise, found)));
+        self.record_missed(missed);
+    }
+
+    /// Records occurrences nothing kept, each with the day it was found missed, and claims what a party owed.
+    pub(crate) fn record_missed(&mut self, missed: Vec<(Promise, Day)>) {
+        for (promise, found) in missed {
+            let claimed = self.claim_missed(promise, found);
+            self.record.promises.push(Promise { claimed, ..promise });
+        }
     }
 
     fn step(&mut self, moment: Moment) {

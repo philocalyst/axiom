@@ -28,7 +28,7 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::{Day, Diagnostic, Id, Map, Qty};
 use axiom_model::promise::{Promises, Residual};
-use axiom_model::{Book, Contract, Flow, ScheduleKind};
+use axiom_model::{Book, Contract, ScheduleKind};
 
 use crate::lots::Holdings;
 use crate::plan::Plan;
@@ -56,6 +56,7 @@ impl Waiting {
             due: self.residual.next()?,
             kept: None,
             waived: false,
+            claimed: false,
             flows: PromisedFlows::of(0..0),
             missing_inputs: OmittedInputs::of(0..0),
         })
@@ -97,25 +98,28 @@ impl Monitor {
                 let reach = promises.schedule_of(stream.schedule).reach();
                 if !residual.is_done() {
                     monitor.waiting.push(Waiting { contract, schedule, residual, reach, miss: None });
-                    monitor.expect(monitor.waiting.len() - 1);
+                    monitor.expect(promises, monitor.waiting.len() - 1);
                 }
             }
         }
         monitor
     }
 
-    /// Notes when the stream at `at` will miss the occurrence it now waits for.
-    fn expect(&mut self, at: usize) {
+    /// Notes when the stream at `at` will miss the occurrence it now waits for: the day after no line can keep it and its
+    /// deadline, if its promise has one, has passed.
+    fn expect(&mut self, promises: &Promises, at: usize) {
         let waiting = &mut self.waiting[at];
-        let miss = waiting.residual.next().and_then(|due| due.0.checked_add(waiting.reach)?.checked_add(1)).map(Day);
+        let out_of_reach = waiting.residual.next().and_then(|due| due.0.checked_add(waiting.reach));
+        let deadline = waiting.residual.deadline(promises).map(|day| day.0);
+        let miss = out_of_reach.into_iter().chain(deadline).max().and_then(|day| day.checked_add(1)).map(Day);
         waiting.miss = miss;
         if let Some(day) = miss {
             self.misses.push(Reverse((day, at as u32)));
         }
     }
 
-    /// Hands over every occurrence missed on or before `day`, in the order they were missed.
-    pub fn miss_through(&mut self, promises: &Promises, day: Day, mut missed: impl FnMut(Promise)) {
+    /// Hands over every occurrence missed on or before `day`, in the order they were missed, with the day each was.
+    pub fn miss_through(&mut self, promises: &Promises, day: Day, mut missed: impl FnMut(Promise, Day)) {
         while let Some(&Reverse((miss, at))) = self.misses.peek().filter(|&&Reverse((miss, _))| miss <= day) {
             self.misses.pop();
             let at = at as usize;
@@ -123,22 +127,22 @@ impl Monitor {
                 continue;
             }
             if let Some(promise) = self.waiting[at].missed() {
-                missed(promise);
+                missed(promise, miss);
             }
             self.waiting[at].residual.advance(promises);
-            self.expect(at);
+            self.expect(promises, at);
         }
     }
 
-    /// A line has kept the occurrence of `ordinal` of a stream: the stream moves past it, and past every earlier one that
-    /// was not kept, which no later line can keep now.
+    /// A line has kept the occurrence of `ordinal` of a stream on `day`: the stream moves past it, and past every earlier
+    /// one that was not kept, which no later line can keep now and which is missed on `day`.
     pub fn settle(
         &mut self,
         promises: &Promises,
         contract: Id<Contract>,
         schedule: ScheduleKind,
-        ordinal: u32,
-        mut missed: impl FnMut(Promise),
+        (ordinal, day): (u32, Day),
+        mut missed: impl FnMut(Promise, Day),
     ) {
         let key = stream_key(contract, schedule);
         let at = self.waiting.partition_point(|waiting| waiting.key() < key);
@@ -146,7 +150,7 @@ impl Monitor {
         let before = waiting.residual;
         while !waiting.residual.is_done() && waiting.residual.ordinal() < ordinal {
             if let Some(promise) = waiting.missed() {
-                missed(promise);
+                missed(promise, day);
             }
             waiting.residual.advance(promises);
         }
@@ -154,7 +158,7 @@ impl Monitor {
             waiting.residual.advance(promises);
         }
         if waiting.residual != before {
-            self.expect(at);
+            self.expect(promises, at);
         }
     }
 }
@@ -162,10 +166,11 @@ impl Monitor {
 /// The days up to which a warning lists every due day it is about.
 const LISTED: usize = 5;
 
-/// One warning for each contract that has due days nothing kept, with the day of the last, and how to write it down.
+/// One warning for each contract that has due days nothing kept, with the day of the last, and how to write it down. What
+/// became a claim is not said here: the claim is what is said of it, as every claim past its due day is.
 pub(crate) fn missed(book: &Book, promises: &[Promise], horizon: Day) -> Vec<Diagnostic> {
     let mut by_contract: Map<Id<Contract>, Vec<Day>> = Map::default();
-    for promise in promises.iter().filter(|promise| promise.kept.is_none()) {
+    for promise in promises.iter().filter(|promise| promise.kept.is_none() && !promise.claimed) {
         by_contract.entry(promise.contract).or_default().push(promise.due);
     }
     let mut contracts: Vec<_> = by_contract.into_iter().collect();
@@ -205,25 +210,22 @@ pub(crate) fn open_claims(plan: &Plan, holdings: &Holdings) -> Box<[OpenClaim]> 
         .collect()
 }
 
-/// The claim a parcel of a claim place is: the flow of the transaction that paid into the place says who owes it,
-/// and when.
+/// The claim a parcel of a claim place is: the transaction that made it says who owes it, and when.
 fn claim(
     book: &Book,
     place: Id<axiom_model::Place>,
     unit: Id<axiom_model::Commodity>,
     lot: &Parcel,
 ) -> Option<OpenClaim> {
-    let txn = lot.txn.source_txn()?;
-    let flows = book.txns.get(txn)?.flows;
-    let (source, made) = flows.ids().map(|id| (id, &book.flows[id])).find(|(_, flow)| flow.to == place)?;
+    let claimed = book.claim_of(lot.txn, place)?;
     Some(OpenClaim {
         origin: lot.txn,
-        source: Some(source),
-        ordinal: (source.index() - flows.start().index()) as u32,
-        due: book.flow_view(made).detail().due,
+        source: claimed.source,
+        ordinal: claimed.ordinal,
+        due: claimed.due,
         claimant: place,
-        counterpart: made.from,
-        debtor: debtor(book, place, made),
+        counterpart: claimed.from,
+        debtor: debtor(book, place, claimed.payee),
         creditor: book.places[place].owner,
         owner: book.places[place].owner,
         unit,
@@ -232,11 +234,15 @@ fn claim(
     })
 }
 
-/// Who owes a claim: the party of the tab it sits in, else the payee of the flow that made it.
-fn debtor(book: &Book, place: Id<axiom_model::Place>, made: &Flow) -> Option<Id<axiom_model::Entity>> {
+/// Who owes a claim: the party of the tab it sits in, else the payee of what made it.
+fn debtor(
+    book: &Book,
+    place: Id<axiom_model::Place>,
+    payee: Option<Id<axiom_model::Entity>>,
+) -> Option<Id<axiom_model::Entity>> {
     match book.places[place].role {
         axiom_model::Role::Tab(party) => Some(party),
-        _ => made.payee,
+        _ => payee,
     }
 }
 

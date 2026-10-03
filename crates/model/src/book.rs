@@ -15,7 +15,7 @@ use axiom_core::{
 use crate::holders::HolderIndex;
 use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
-    RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn, Select, Split, Txn, Waive, WrittenOccurrence,
 };
 use crate::law::{Fault, Law, NodeId, Rules, Value};
 use crate::names::{Names, Scoped};
@@ -554,6 +554,19 @@ pub struct Deadline {
     /// The `else` item, compiled into the enclosing term's shared program;
     /// `None` if the deadline only makes the claim late.
     pub otherwise: Option<Item<Says>>,
+}
+
+/// What a claim says of itself: the counterparty, the day it was due, where it came from and the line it was written on.
+#[derive(Clone, Copy, Debug)]
+pub struct Claim {
+    pub payee: Option<Id<Entity>>,
+    pub due: Option<Day>,
+    /// The place the value came from: the party's.
+    pub from: Id<Place>,
+    pub loc: Loc,
+    /// The flow of a line that made it, if a line did, and its place among the flows of its transaction.
+    pub source: Option<Id<Flow>>,
+    pub ordinal: u32,
 }
 
 /// Which of a contract's independent schedules an occurrence names.
@@ -1409,10 +1422,26 @@ impl<'s> Book<'s> {
         &self.input_values[self.txns[id].inputs]
     }
 
-    /// The flow of `txn` that paid into `place`: what made a parcel there. A
-    /// claim's counterparty is its payee and its due day is its `due`.
-    pub fn paid_into(&self, txn: Id<Txn>, place: Id<Place>) -> Option<&Flow> {
-        self.flows[self.txns.get(txn)?.flows].iter().find(|flow| flow.to == place)
+    /// What the parcel a transaction made in a claim `place` says of its claim: who owes it, when it was due, and the line to
+    /// show for it. A claim a line wrote is the flow of the line that paid into the place; one the monitor made of an
+    /// occurrence nothing kept is its contract's party, the occurrence's due day and the contract's own line.
+    pub fn claim_of(&self, txn: RuntimeTxn, place: Id<Place>) -> Option<Claim> {
+        if let RuntimeTxn::ContractOccurrence { contract, day, source: None, .. } = txn {
+            let contract = self.contracts.get(contract)?;
+            let from = self.entities[contract.party].place?;
+            return Some(Claim {
+                payee: Some(contract.party),
+                due: Some(day),
+                from,
+                loc: contract.loc,
+                source: None,
+                ordinal: 0,
+            });
+        }
+        let flows = self.txns.get(txn.source_txn()?)?.flows;
+        let (id, flow) = flows.ids().map(|id| (id, &self.flows[id])).find(|(_, flow)| flow.to == place)?;
+        let (due, ordinal) = (self.flow_view(flow).detail().due, (id.index() - flows.start().index()) as u32);
+        Some(Claim { payee: flow.payee, due, from: flow.from, loc: flow.loc, source: Some(id), ordinal })
     }
 
     /// `1,234.56 USD`

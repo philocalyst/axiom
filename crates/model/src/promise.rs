@@ -83,6 +83,17 @@ impl Blame {
     }
 }
 
+impl Terms {
+    /// Who is blamed when what the terms promise is not kept: the party when the header leaves the party's place, and the
+    /// owner when it leaves the owner's.
+    pub fn blame(&self) -> Blame {
+        match self.template.first().map(|group| group.side) {
+            Some(FlowSide::Out) => Blame::Party,
+            _ => Blame::Owner,
+        }
+    }
+}
+
 /// One stream of a contract's occurrences: the `Every` that owes them, and the schedule it falls due on. A residual
 /// starts at the `Every`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -203,6 +214,21 @@ impl Promises {
         }
     }
 
+    /// Who a body's deadline blames, if it has one, however a loan wraps it.
+    pub fn blame_of(&self, body: TermId) -> Option<Blame> {
+        match self.term(body) {
+            Term::Due { blame, .. } => Some(blame),
+            Term::Annuity { body, .. } => self.blame_of(body),
+            _ => None,
+        }
+    }
+
+    /// Who is blamed when an occurrence of a contract's stream is missed, if the stream has a deadline.
+    pub fn blame(&self, contract: Id<Contract>, kind: ScheduleKind) -> Option<Blame> {
+        let Term::Every { body, .. } = self.term(self.get(contract)?.stream(kind)?.every) else { return None };
+        self.blame_of(body)
+    }
+
     /// How long after its due day a body is owed, if it has a deadline, however a loan wraps it.
     pub fn deadline_of(&self, body: TermId) -> Option<Span> {
         match self.term(body) {
@@ -269,11 +295,7 @@ impl Promises {
             body = self.terms.push(Term::Annuity { annuity, body });
         }
         if let Some(deadline) = &terms.due {
-            let blame = match terms.template.first().map(|group| group.side) {
-                Some(FlowSide::Out) => Blame::Party,
-                _ => Blame::Owner,
-            };
-            body = self.terms.push(Term::Due { after: deadline.after, blame, body });
+            body = self.terms.push(Term::Due { after: deadline.after, blame: terms.blame(), body });
         }
         body
     }

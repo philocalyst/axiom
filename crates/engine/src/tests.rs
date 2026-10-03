@@ -580,6 +580,7 @@ fn a_promise_is_late_by_the_days_until_it_is_kept_or_the_horizon_if_it_never_is(
         due: Day(100),
         kept: kept.map(|day| (Day(day), Id::new(0))),
         waived: false,
+        claimed: false,
         flows: Default::default(),
         missing_inputs: Default::default(),
     };

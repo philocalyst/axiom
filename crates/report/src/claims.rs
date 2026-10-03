@@ -71,15 +71,15 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
             if left.is_zero() {
                 return None;
             }
-            let made = lot.txn.source_txn().and_then(|txn| book.paid_into(txn, holding.place));
+            let made = book.claim_of(lot.txn, holding.place);
             Some(Claim {
                 mine: true,
                 place: holding.place,
                 txn: lot.txn,
                 left: Amount::new(left, holding.unit),
                 made: lot.acquired,
-                payee: made.and_then(|flow| flow.payee),
-                due: made.and_then(|flow| book.flow_view(flow).detail().due),
+                payee: made.and_then(|claim| claim.payee),
+                due: made.and_then(|claim| claim.due),
             })
         })
     });
@@ -178,9 +178,11 @@ pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Clai
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        // What it is: its codes and doc, or where it was written when it has neither.
+        // What it is: its codes and doc, or where it was written when it has neither (a claim the monitor made says the
+        // contract's line).
         let what = if what.is_empty() {
-            txn.map_or(Cell::Blank, |txn| Cell::Source(txn.loc))
+            let wrote = txn.map(|txn| txn.loc).or_else(|| book.claim_of(claim.txn, claim.place).map(|made| made.loc));
+            wrote.map_or(Cell::Blank, Cell::Source)
         } else {
             Cell::list(" · ", what)
         };

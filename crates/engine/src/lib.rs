@@ -206,6 +206,8 @@ pub struct Promise {
     pub kept: Option<(Day, Id<Txn>)>,
     /// The contract occurrence was explicitly waived by the active terms.
     pub waived: bool,
+    /// The party owed it, nothing kept it, and what it owed was posted as a claim.
+    pub claimed: bool,
     /// Runtime flow and omitted-input ranges in the parent Run's pools.
     pub flows: PromisedFlows,
     pub missing_inputs: OmittedInputs,
