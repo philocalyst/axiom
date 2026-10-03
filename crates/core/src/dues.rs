@@ -28,7 +28,8 @@
 //! * **Walked**: what is left: a longer `on` than the cadence steps by (`weekly on 15`), two days that fall on one in a short
 //!   month (`on 30, last`), days of two kinds (`on 1, monday`), more than [`MAX_LANDINGS`]. They are the set a walk finds, with
 //!   the repeats taken out, and they cost O(n). Nothing in the language gives them a meaning; they are here so that the answer
-//!   is defined for every schedule the parser takes.
+//!   is defined for every schedule the parser takes. A walked schedule with no first day begins in 1970, not at the beginning
+//!   of time: a walk from there collects four billion days.
 
 use crate::calendar::{Cadence, Days, On, cadence_day, due};
 use crate::day::{Day, Span};
@@ -129,6 +130,9 @@ impl<'a> Dues<'a> {
                 Shape::Tiled { step, per_step, head: head as u8 }
             }
         };
+        // A schedule that only a walk can say has no beginning of time to be walked from, which would collect four
+        // billion days: with no first day it begins in 1970. (Nothing in the language gives such a schedule a meaning.)
+        let anchor = if shape == Shape::Walked && anchor == Day::MIN { Day(0) } else { anchor };
         Dues { every, on, anchor, shape }
     }
 
@@ -174,13 +178,17 @@ impl<'a> Dues<'a> {
     /// The due days in `within`, in order.
     pub fn days(&self, within: Days) -> Window<'a> {
         match self.shape {
-            Shape::Walked => Window::Walked {
-                dues: *self,
-                from: Some(within.first()),
-                last: within.last(),
-                reach: 64,
-                found: Vec::new().into_iter(),
-            },
+            Shape::Walked => {
+                // Nothing is due before the anchor, and a walk of a window that begins before it would find days there.
+                let from = Day(within.first().0.max(self.anchor.0));
+                Window::Walked {
+                    dues: *self,
+                    from: (from <= within.last()).then_some(from),
+                    last: within.last(),
+                    reach: 64,
+                    found: Vec::new().into_iter(),
+                }
+            }
             _ => {
                 let first = self.before(within.first());
                 Window::Counted { dues: *self, next: Some(first), last: within.last() }
@@ -400,6 +408,22 @@ mod tests {
 
     fn shape(every: Cadence, on: &[On], anchor: Day) -> Shape {
         Dues::new(every, on, anchor).shape
+    }
+
+    #[test]
+    fn a_walked_schedule_with_no_first_day_begins_in_1970_and_can_be_counted() {
+        let (on, anchor) = ([On::MonthDay(15)], Day::MIN);
+        let dues = Dues::new(every(Span::days(7)), &on, anchor);
+        assert!(!dues.is_counted());
+        assert_eq!(dues.nth(0), Some(day(1970, 1, 15)));
+        assert_eq!(dues.before(day(2026, 2, 15)), 56 * 12 + 1, "the 15th of every month from January 1970");
+        assert_eq!(dues.nth(56 * 12 + 1), Some(day(2026, 2, 15)));
+        assert_eq!(
+            dues.days(Days::new(Day::MIN, day(1970, 3, 1)).unwrap()).collect::<Vec<_>>(),
+            [day(1970, 1, 15), day(1970, 2, 15)]
+        );
+        // A counted schedule with no first day counts from the beginning of time, by arithmetic.
+        assert!(Dues::new(monthly(), &on, anchor).before(day(2026, 2, 15)) > 70_000_000);
     }
 
     /// Every schedule the language means something by, and what each is: the cadences of LANGUAGE §7 with the days

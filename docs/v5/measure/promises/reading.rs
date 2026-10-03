@@ -1,9 +1,9 @@
-//! What a build of the contract machinery says: the questions of the module above, answered by the old code, and,
-//! with the `new` feature, by the compiled promise.
+//! What a build of the fold says: the questions of the module above, answered through the compiled promise and, where
+//! the question is the engine's, through the engine.
 
 use axiom_core::{Day, Days, Id, Ratio};
 use axiom_engine::{Options, Plan};
-use axiom_model::{Amount, Book, Contract, ForecastError, ScheduleKind, nearest_occurrence};
+use axiom_model::{Amount, Book, Contract, ForecastError, ScheduleKind};
 
 use crate::{TODAY, kind, show};
 
@@ -35,7 +35,7 @@ pub enum Payment {
     Other(String),
 }
 
-/// What a build of the machinery says. The old code is one reading; the compiled promise is another.
+/// What a build says: the compiled promise, and the engine where it is the engine that is asked.
 pub trait Reading {
     /// The days due in `window`, both schedules merged, regular before standing on a day.
     fn due(&self, contract: Id<Contract>, window: Days) -> Vec<(Day, ScheduleKind)>;
@@ -56,29 +56,34 @@ pub trait Reading {
     fn payment(&self, contract: Id<Contract>, from: Day) -> Payment;
 }
 
-/// The contract machinery as it is: `Contract::occurrences`, `nearest_occurrence`, `amount_on_schedule`, the engine.
-pub struct Old<'a, 'b, 's> {
+/// The fold: the compiled promise the fold, the lowering and the reports ask, and the engine's own materializer.
+pub struct Fold<'a, 'b, 's> {
     pub book: &'b Book<'s>,
     pub plan: &'a Plan<'b, 's>,
 }
 
-impl Old<'_, '_, '_> {
+impl Fold<'_, '_, '_> {
+    /// The first due day of each schedule on or after `from`, regular first: what the forecast's driver asks.
+    fn first_due(&self, id: Id<Contract>, from: Day) -> Vec<(ScheduleKind, Day)> {
+        let promises = &self.book.promises;
+        let each = [ScheduleKind::Regular, ScheduleKind::Standing].into_iter();
+        each.filter_map(|kind| {
+            let schedule = promises.schedule(id, kind)?;
+            Some((kind, schedule.nth(schedule.before(from))?))
+        })
+        .collect()
+    }
+
     /// What the fold makes of the first due day of each schedule, as the forecast would: its flows, where they go, the
-    /// days each is recognized over. (The compiled promise does not make flows, so this is asked of the old code only.)
+    /// days each is recognized over.
     pub fn first_occurrence(&self, id: Id<Contract>, from: Day) -> Vec<String> {
-        let contract = &self.book.contracts[id];
         let today = Day::from_ymd(TODAY.0, TODAY.1, TODAY.2).expect("a date");
         let mut lines = Vec::new();
-        for schedule in [ScheduleKind::Regular, ScheduleKind::Standing] {
-            if contract.terms_on_schedule(schedule, Day::MIN).is_none() {
-                continue;
-            }
-            let first = contract.occurrences(Days::new(from, Day::MAX).expect("days")).find(|o| o.schedule == schedule);
-            let Some(first) = first else { continue };
+        for (schedule, due) in self.first_due(id, from) {
             let mut ledger = self.plan.start(Options { today, relaxed: false });
             let (mut flows, mut details, mut missing) = (Vec::new(), axiom_core::Arena::new(), Vec::new());
-            let made =
-                ledger.instantiate_occurrence(id, schedule, first.day, 0, None, &mut flows, &mut details, &mut missing);
+            let ordinal = self.book.promises.schedule(id, schedule).and_then(|found| found.ordinal(due)).unwrap_or(0);
+            let made = ledger.instantiate_occurrence(id, schedule, due, ordinal, None, &mut flows, &mut details, &mut missing);
             let said = |flow: &axiom_model::RuntimeFlow| {
                 format!(
                     "{:?} -> {:?} recognized {}",
@@ -91,89 +96,13 @@ impl Old<'_, '_, '_> {
                 Ok(_) => flows.iter().map(said).collect::<Vec<_>>().join("; "),
                 Err(error) => format!("{error:?}"),
             };
-            lines.push(format!("first {} {} : {shown}", kind(schedule), show(first.day)));
+            lines.push(format!("first {} {} : {shown}", kind(schedule), show(due)));
         }
         lines
     }
 }
 
-impl Reading for Old<'_, '_, '_> {
-    fn due(&self, contract: Id<Contract>, window: Days) -> Vec<(Day, ScheduleKind)> {
-        self.book.contracts[contract]
-            .occurrences(window)
-            .map(|occurrence| (occurrence.day, occurrence.schedule))
-            .collect()
-    }
-
-    /// The engine's own count (`post_written_occurrence`), made of the same `Contract::occurrences`.
-    fn ordinal(&self, contract: Id<Contract>, schedule: ScheduleKind, due: Day) -> Option<u32> {
-        let contract = &self.book.contracts[contract];
-        let through = Days::new(contract.days.first(), due).unwrap_or(Days::on(due));
-        let count = contract
-            .occurrences(through)
-            .filter(|occurrence| occurrence.schedule == schedule && occurrence.day <= due)
-            .count();
-        count.checked_sub(1).and_then(|index| u32::try_from(index).ok())
-    }
-
-    fn keep(&self, contract: Id<Contract>, day: Day) -> Keep {
-        match nearest_occurrence(&self.book.contracts[contract], day) {
-            Ok(Some((schedule, due, _))) => Keep::Kept(schedule, due),
-            Ok(None) => Keep::Out,
-            Err((regular, standing)) => Keep::Ambiguous(regular, standing),
-        }
-    }
-
-    fn factor(&self, contract: Id<Contract>, schedule: ScheduleKind, day: Day) -> Result<Ratio, ForecastError> {
-        self.book.contracts[contract].amount_on_schedule(self.book, schedule, day)
-    }
-
-    fn recognized(
-        &self,
-        contract: Id<Contract>,
-        schedule: ScheduleKind,
-        day: Day,
-    ) -> Option<Result<Days, ForecastError>> {
-        let contract = &self.book.contracts[contract];
-        let terms = contract.terms_on_schedule(schedule, day)?;
-        let template = terms.template.first()?;
-        Some(contract.recognition_on_schedule(&template.header.flow, schedule, day))
-    }
-
-    fn payment(&self, id: Id<Contract>, from: Day) -> Payment {
-        let contract = &self.book.contracts[id];
-        let Some(first) = contract.occurrences(Days::new(from, Day::MAX).expect("days")).next() else {
-            return Payment::NoDueDay;
-        };
-        let today = Day::from_ymd(TODAY.0, TODAY.1, TODAY.2).expect("a date");
-        let mut ledger = self.plan.start(Options { today, relaxed: false });
-        let (mut flows, mut details, mut missing) = (Vec::new(), axiom_core::Arena::new(), Vec::new());
-        let made = ledger.instantiate_occurrence(
-            id,
-            first.schedule,
-            first.day,
-            0,
-            None,
-            &mut flows,
-            &mut details,
-            &mut missing,
-        );
-        match (made, flows.first()) {
-            (Ok(_), Some(flow)) => Payment::Pays(first.day, flow.flow.out),
-            (Err(error), _) if format!("{error:?}").contains("UnsupportedLoan") => Payment::Unsupported(first.day),
-            (made, _) => Payment::Other(format!("{} {made:?}", show(first.day))),
-        }
-    }
-}
-
-/// The compiled promise: `Promises`, the arithmetic of `Dues`, the term walker.
-#[cfg(feature = "new")]
-pub struct New<'b, 's> {
-    pub book: &'b Book<'s>,
-}
-
-#[cfg(feature = "new")]
-impl Reading for New<'_, '_> {
+impl Reading for Fold<'_, '_, '_> {
     fn due(&self, contract: Id<Contract>, window: Days) -> Vec<(Day, ScheduleKind)> {
         let days = |kind| {
             let schedule = self.book.promises.schedule(contract, kind);
@@ -208,32 +137,28 @@ impl Reading for New<'_, '_> {
         schedule: ScheduleKind,
         day: Day,
     ) -> Option<Result<Days, ForecastError>> {
+        self.book.contracts[contract].terms_of(schedule)?.template.first()?;
         Some(self.book.promises.schedule(contract, schedule)?.recognized(day))
     }
 
+    /// The engine's own answer: it materializes the first due day, the way the forecast does.
     fn payment(&self, id: Id<Contract>, from: Day) -> Payment {
-        let promises = &self.book.promises;
-        let first = |kind| promises.schedule(id, kind).and_then(|schedule| schedule.nth(schedule.before(from)));
-        let day = match (first(ScheduleKind::Regular), first(ScheduleKind::Standing)) {
-            (Some(regular), Some(standing)) if standing < regular => standing,
-            (Some(regular), _) => regular,
-            (None, Some(standing)) => standing,
-            (None, None) => return Payment::NoDueDay,
-        };
-        let stream = promises.of(id).regular;
-        let body = stream.and_then(|stream| match promises.term(stream.every) {
-            axiom_model::promise::Term::Every { body, .. } => Some(body),
-            _ => None,
-        });
-        match body.and_then(|body| promises.annuity_of(body)) {
-            Some(annuity) => Payment::Pays(day, promises.annuity(annuity).payment()),
-            None => Payment::Unsupported(day),
+        let due = self.first_due(id, from).into_iter().min_by_key(|(kind, day)| (*day, *kind == ScheduleKind::Standing));
+        let Some((schedule, first)) = due else { return Payment::NoDueDay };
+        let today = Day::from_ymd(TODAY.0, TODAY.1, TODAY.2).expect("a date");
+        let mut ledger = self.plan.start(Options { today, relaxed: false });
+        let (mut flows, mut details, mut missing) = (Vec::new(), axiom_core::Arena::new(), Vec::new());
+        let ordinal = self.book.promises.schedule(id, schedule).and_then(|found| found.ordinal(first)).unwrap_or(0);
+        let made = ledger.instantiate_occurrence(id, schedule, first, ordinal, None, &mut flows, &mut details, &mut missing);
+        match (made, flows.first()) {
+            (Ok(_), Some(flow)) => Payment::Pays(first, flow.flow.out),
+            (Err(error), _) if format!("{error:?}").contains("UnsupportedLoan") => Payment::Unsupported(first),
+            (made, _) => Payment::Other(format!("{} {made:?}", show(first))),
         }
     }
 }
 
-/// Two sorted streams of due days as `Contract::occurrences` merges them: a standing day only if it is strictly earlier.
-#[cfg(feature = "new")]
+/// Two sorted streams of due days as the old merge took them: a standing day only if it is strictly earlier.
 fn merged(regular: &[Day], standing: &[Day]) -> Vec<(Day, ScheduleKind)> {
     let (mut regular, mut standing) = (regular.iter().peekable(), standing.iter().peekable());
     let mut days = Vec::new();

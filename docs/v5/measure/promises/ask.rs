@@ -1,7 +1,7 @@
 //! The questions put to a contract, in an order that does not depend on any answer.
 
 use axiom_core::{Day, Days, Id, Ratio, Span};
-use axiom_model::{Contract, ForecastError, ScheduleKind, TermsState};
+use axiom_model::{Contract, ForecastError, ScheduleKind};
 
 use crate::reading::{Keep, Payment, Reading};
 use crate::{kind, show, span};
@@ -40,7 +40,8 @@ impl Facts<'_> {
         schedules
     }
 
-    /// What the contract is, as the book holds it.
+    /// What the contract is, as the book holds it. The lines are the ones the dump of the old code made (one `stretch`
+    /// line for each schedule, and a `terms` line), so that the two dumps can be compared.
     pub fn shape(&self) -> Vec<String> {
         let contract = self.contract;
         let mut lines = vec![format!(
@@ -51,35 +52,24 @@ impl Facts<'_> {
             contract.buys.is_some(),
             contract.deposit.is_some()
         )];
-        for (schedule, timeline) in
-            [(ScheduleKind::Regular, &contract.terms), (ScheduleKind::Standing, &contract.standing)]
-        {
-            let Some(timeline) = timeline else { continue };
-            let mut equal = true;
-            let first = timeline.at(Day::MIN);
-            for (days, terms) in timeline.within(Days::ALWAYS) {
-                let state = match terms.state {
-                    TermsState::Active => "active",
-                    TermsState::Waived => "waived",
-                };
+        for schedule in self.schedules() {
+            let terms = contract.terms_of(schedule).expect("a schedule that exists");
+            for (days, waiver) in contract.waived.within(Days::ALWAYS) {
+                let state = if waiver.is_some() { "waived" } else { "active" };
                 lines.push(format!("stretch {} {} {state}", kind(schedule), span(days)));
-                let mut same = terms.clone();
-                same.state = first.state;
-                same.change = first.change;
-                equal &= same == *first;
             }
             lines.push(format!(
-                "terms {} every {:?} on {:?} anchor {} estimate {} grace {:?} escalation {:?} prorated {} period {:?} covers {:?} equal-stretches {equal}",
+                "terms {} every {:?} on {:?} anchor {} estimate {} grace {:?} escalation {:?} prorated {} period {:?} covers {:?}",
                 kind(schedule),
-                first.every,
-                first.on,
-                show(first.anchor),
-                first.estimate,
-                first.grace,
-                first.escalation,
-                first.prorated,
-                first.period,
-                first.covers,
+                terms.every,
+                terms.on,
+                show(contract.days.first()),
+                terms.estimate,
+                terms.grace,
+                terms.escalation,
+                terms.prorated,
+                terms.period,
+                terms.covers,
             ));
         }
         lines
@@ -94,14 +84,10 @@ impl Facts<'_> {
         (first, last)
     }
 
-    /// The stretches of both timelines, as days.
+    /// The stretches of both schedules, as days: the waivers' stretches, once for each schedule the contract has.
     pub fn stretches(&self) -> Vec<Days> {
-        let timelines = [&self.contract.terms, &self.contract.standing];
-        timelines
-            .into_iter()
-            .flatten()
-            .flat_map(|timeline| timeline.within(Days::ALWAYS).map(|(days, _)| days))
-            .collect()
+        let all: Vec<Days> = self.contract.waived.within(Days::ALWAYS).map(|(days, _)| days).collect();
+        self.schedules().iter().flat_map(|_| all.iter().copied()).collect()
     }
 
     /// Windows to ask the due days of: around the first day, the last, each change, and far from all of them.
@@ -165,12 +151,17 @@ impl Facts<'_> {
     /// The first dozen due days of each schedule, as `reading` says them, a few later ones: the days whose ordinal is
     /// asked. None for a contract with no `from` unless `slow`: its count starts at `Day::MIN`.
     pub fn ordinal_days(&self, reading: &impl Reading) -> Vec<(ScheduleKind, Day)> {
+        self.ordinal_days_by(|window| reading.due(self.id, window))
+    }
+
+    /// As [`ordinal_days`](Facts::ordinal_days), from whatever says the days due in a window.
+    pub fn ordinal_days_by(&self, due_in: impl Fn(Days) -> Vec<(Day, ScheduleKind)>) -> Vec<(ScheduleKind, Day)> {
         let unbounded = self.contract.days.first() == Day::MIN;
         let (first, _) = self.life();
         let mut asked = Vec::new();
         for schedule in self.schedules() {
             let window = Days::new(first, Day(first.0.saturating_add(3000))).expect("days");
-            let due = reading.due(self.id, window).into_iter().filter(|(_, s)| *s == schedule).map(|(day, _)| day);
+            let due = due_in(window).into_iter().filter(|(_, s)| *s == schedule).map(|(day, _)| day);
             let due: Vec<Day> = due.collect();
             let picks = due.iter().copied().take(12).chain(due.iter().copied().skip(12).step_by(37));
             let limit = if unbounded { usize::from(self.slow) } else { 40 };
@@ -183,6 +174,16 @@ impl Facts<'_> {
     pub fn days_to_read(&self) -> Vec<Day> {
         let (first, _) = self.life();
         (-3..2200).map(|offset| Day(first.0.saturating_add(offset))).collect()
+    }
+
+    /// The questions the old walkers were asked, answered by the rebuilt old rule (`Reference::due_old` and the others):
+    /// the due days, the lines kept and the ordinals, over the same windows, probes and days as the fold was asked.
+    pub fn old_rule(&self, reference: &crate::check::Reference<'_>) -> Answers {
+        let ordinals = self.ordinal_days_by(|window| reference.due_old(window));
+        let due = self.windows().into_iter().map(|window| (window, reference.due_old(window))).collect();
+        let keep = self.probes().into_iter().map(|day| (day, reference.keep_old(day))).collect();
+        let ordinal = ordinals.iter().map(|&(schedule, day)| (schedule, day, reference.ordinal_old(schedule, day))).collect();
+        Answers { due, keep, ordinal, factor: Vec::new(), recognized: Vec::new(), payment: None }
     }
 
     /// Every question, put to `reading`. `ordinals` are the days whose ordinal is asked: the same for every reading.

@@ -1,5 +1,5 @@
-//! What the contract machinery says of every contract of a project, as text, so that two builds can be compared, and,
-//! with `--check` and the `new` feature, whether the compiled promise says what the old machinery does.
+//! What the fold says of every contract of a project, as text, so that two builds can be compared, and, with `--check`,
+//! whether what it says is what the reference says.
 //!
 //! The driver is `docs/v5/measure/contracts.py`, which builds this for a tree of the workspace (it is not a member: the
 //! driver writes a Cargo.toml with path dependencies on `core`, `syntax`, `model`, `engine` and `systems` of the tree)
@@ -10,23 +10,23 @@
 //! |-----------|----------------------------------------------------------------------------------------------------|
 //! | `due`     | the days due in a window, both schedules merged, each with its schedule                            |
 //! | `ordinal` | which due day of its own schedule an occurrence is, counted from the contract's first day          |
-//! | `keep`    | which due day a line dated on a day keeps (`nearest_occurrence`), or none, or that it is ambiguous  |
-//! | `factor`  | `amount_on_schedule`: the escalation and the proration of a day, or why there is none              |
-//! | `recog`   | `recognition_on_schedule`: the days an occurrence is recognized over                               |
+//! | `keep`    | which due day a line dated on a day keeps, or none, or that it is ambiguous                        |
+//! | `factor`  | the escalation and the proration of a day, or why there is none                                    |
+//! | `recog`   | the days an occurrence is recognized over                                                          |
 //! | `payment` | what a loan's payment is, as the fold makes it (`instantiate_occurrence`)                          |
 //!
-//! and the engine's own `promise` lines for every occurrence the journal kept. A window or a probe is chosen from the
-//! contract's own days, never from an answer, so that two readings are asked the same. A result of more than forty
-//! days is printed as a count, the first and the last day and a checksum.
+//! and the fold's own `promise` lines for every occurrence the journal kept, and `missed` lines for every one nothing
+//! kept and nothing can. A window or a probe is chosen from the contract's own days, never from an answer, so that two
+//! readings are asked the same. A result of more than forty days is printed as a count, the first and the last day and a
+//! checksum.
 //!
-//! `--slow` also asks the ordinal of a contract with no `from`, which counts its due days from `Day::MIN`: about four
-//! seconds for each.
+//! `--slow` also asks the ordinal of a contract with no `from`, which counts its due days from `Day::MIN` for a schedule
+//! that can only be walked.
 
 mod ask;
-#[cfg(feature = "new")]
 mod check;
+mod monitor;
 mod reading;
-#[cfg(feature = "new")]
 mod walk;
 
 use axiom_core::{Day, Days, FileId};
@@ -35,7 +35,7 @@ use axiom_model::{Book, ScheduleKind, Source};
 use axiom_syntax::Folder;
 
 use ask::Facts;
-use reading::Old;
+use reading::Fold;
 
 const TODAY: (i32, u32, u32) = (2026, 6, 30);
 
@@ -69,63 +69,77 @@ fn main() {
     std::process::exit(i32::from(failed));
 }
 
-/// What the old machinery says of every contract, and of every occurrence the journal kept.
+/// What the fold says of every contract, and of every occurrence the journal kept or missed.
 fn dump(book: &Book<'_>, plan: &Plan<'_, '_>, slow: bool) -> bool {
-    let old = Old { book, plan };
+    let fold = Fold { book, plan };
     for (id, contract) in book.contracts.iter() {
         println!("== contract {} {}", id.index(), book.name(contract.name));
         let facts = Facts { id, contract, slow };
         for line in facts.shape() {
             println!("{line}");
         }
-        let ordinals = facts.ordinal_days(&old);
+        let ordinals = facts.ordinal_days(&fold);
         let skipped: Vec<ScheduleKind> =
             if slow || contract.days.first() != Day::MIN { Vec::new() } else { facts.schedules() };
-        for line in facts.ask(&old, &ordinals).lines(&skipped) {
+        for line in facts.ask(&fold, &ordinals).lines(&skipped) {
             println!("{line}");
         }
-        for line in old.first_occurrence(id, facts.life().0) {
+        for line in fold.first_occurrence(id, facts.life().0) {
             println!("{line}");
+        }
+        // What the old walkers said, rebuilt from `calendar::due` as they asked it, to hold the frozen dump to.
+        let reference = check::Reference { id, contract };
+        for line in facts.old_rule(&reference).lines(&skipped) {
+            let (word, rest) = line.split_once(' ').expect("a line has a word");
+            println!("{word}old {rest}");
         }
     }
     let today = Day::from_ymd(TODAY.0, TODAY.1, TODAY.2).expect("a date");
     let run = plan.run(Options { today, relaxed: false });
-    println!("== promises {}", run.promises.len());
-    for promise in &run.promises {
-        let kept = promise.kept.map(|(day, _)| show(day));
+    let (kept, missed): (Vec<&axiom_engine::Promise>, Vec<_>) = run.promises.iter().partition(|promise| promise.kept.is_some());
+    println!("== promises {}", kept.len());
+    for promise in kept {
+        let day = promise.kept.map(|(day, _)| show(day));
         println!(
             "promise {} {} ordinal {} due {} kept {:?} waived {}",
             book.name(book.contracts[promise.contract].name),
             kind(promise.schedule),
             promise.ordinal,
             show(promise.due),
-            kept,
+            day,
             promise.waived
         );
+    }
+    println!("== missed {}", missed.len());
+    for promise in missed {
+        let name = book.name(book.contracts[promise.contract].name);
+        println!("missed {name} {} ordinal {} due {}", kind(promise.schedule), promise.ordinal, show(promise.due));
     }
     false
 }
 
-/// Holds the compiled promise to the reference and the old machinery to both: whether any answer fails.
-#[cfg(feature = "new")]
+/// Holds the fold to the reference: whether any answer fails.
 fn verdicts(book: &Book<'_>, plan: &Plan<'_, '_>, slow: bool) -> bool {
-    let (old, new) = (Old { book, plan }, reading::New { book });
+    let fold = Fold { book, plan };
     let mut failed = false;
     for (id, contract) in book.contracts.iter() {
         let facts = Facts { id, contract, slow };
-        let ordinals = facts.ordinal_days(&old);
-        let tally = check::check(book, &facts, &old, &facts.ask(&old, &ordinals), &facts.ask(&new, &ordinals));
+        let ordinals = facts.ordinal_days(&fold);
+        let tally = check::check(book, &facts, &facts.ask(&fold, &ordinals));
         failed |= !tally.fails.is_empty();
         for line in tally.lines() {
             println!("{line}");
         }
     }
+    let today = Day::from_ymd(TODAY.0, TODAY.1, TODAY.2).expect("a date");
+    let run = plan.run(Options { today, relaxed: false });
+    let mut tally = check::Tally::default();
+    monitor::check(book, &run, slow, &mut tally);
+    failed |= !tally.fails.is_empty();
+    for line in tally.lines() {
+        println!("{line}");
+    }
     failed
-}
-
-#[cfg(not(feature = "new"))]
-fn verdicts(_: &Book<'_>, _: &Plan<'_, '_>, _: bool) -> bool {
-    panic!("--check needs the `new` feature: build with `contracts.py build TREE OUT --new`")
 }
 
 /// The project's `.ax` files in path order, then the embedded systems: what the CLI reads, without the CLI.

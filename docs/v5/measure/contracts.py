@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-"""A generator of small projects full of contracts, and the oracle that compares what two ways of reading them say.
+"""A generator of small projects full of contracts, and the oracle that holds the fold to a reference.
 
     contracts.py gen DIR N [SEED] [--slow]    write N projects into DIR (p0000/main.ax ...), and DIR/forms.json
-    contracts.py build TREE OUT [--new] [--debug-assertions]
+    contracts.py build TREE OUT [--debug-assertions]
                                               build the dump (promises/) against the crates of TREE into OUT/
-                                              (--new: with the compiled promise, which `check` asks;
-                                              --debug-assertions: with the asserts the compile makes of the book)
+                                              (--debug-assertions: with the asserts the model and the core make)
     contracts.py dump BINARY DIR [JOBS] [TAG] [--slow]
                                               what BINARY says of every project: DIR/pNNNN/dump.TAG.txt (default TAG: old)
     contracts.py compare DIR A B              the projects whose dump.A.txt and dump.B.txt differ
     contracts.py check BINARY DIR [JOBS] [--slow]
-                                              the dump's own verdict (a binary built --new) over every project
+                                              the dump's own verdict over every project
+    contracts.py reproduce DIR A B            whether dump A (the frozen old one) is what dump B rebuilds of the old walkers
+    contracts.py classify DIR A B             how the keep lines of two dumps differ, and whether only in the ways the reach says
     contracts.py cover DIR [TAG]              what the projects hold, and what the dumps asked of them
-    contracts.py mutate TREE WORK DIR [N,M..] [--new]
-                                              the mutants of the oracle: each is built and must be caught by `compare`
-                                              (--new: mutants of the new structure, caught by the verdict)
+    contracts.py mutate TREE WORK DIR [N,M..] the mutants of the code under test: each is built and must make the verdict fail
 
-What it is for. Lane K5a builds, beside the machinery that says when a promise is due (`Contract::occurrences`,
-`nearest_occurrence`, `amount_on_schedule`, the engine's count of an occurrence's ordinal), a structure that says it by
-arithmetic: a schedule whose due days and ordinals are computed, not searched. It changes no behaviour, so the
-proof is a comparison, and a comparison is worth what the corpus it ran over can tell apart. This is the corpus. Each
-project is one to three contracts written by a seeded random generator (deterministic: the same SEED and N write the
+What it is for. Lane K5a built a structure that says by arithmetic when a promise is due (a schedule whose due days and
+ordinals are computed, not searched) and held it to the old walkers. Lane K5b moved the fold, the lowering and the reports to
+it and deleted the walkers, so what judges it now is **a reference**: the plainest reading of the language, `calendar::due`
+walked from the contract's first day with the days taken once, the waived ones left out and the nearest day within the
+reach LANGUAGE section 7 says (the `grace`, else half a cadence of the schedule's own). The verdict (`check`) asks the
+fold the same questions and equals the reference on every one: the days due in a window, an ordinal, the line each day
+keeps, every occurrence a line kept, and every occurrence the monitor says was missed (and no other). What the old
+walkers said of a factor, a recognition window and a loan's payment is a **frozen dump** (`dump.old.txt`, made from
+the tree before K5b), which `compare` holds the new dump to.
+
+Each project is one to three contracts written by a seeded random generator (deterministic: the same SEED and N write the
 same books), each a spec drawn from the forms a promise can take:
 
     cadence   daily, weekly, monthly, quarterly, yearly, twice monthly, every 2w / 6w / 10d / 45d / 3m / 18m / 5y,
@@ -45,9 +50,8 @@ same books), each a spec drawn from the forms a promise can take:
 `gen` counts the projects that hold each form. The oracle's own questions (the dump, `promises/main.rs`) are chosen
 from a contract's days and never from an answer, so every build is asked the same: the due days in thirty windows,
 the occurrence that each of several hundred days keeps, the ordinal of the first dozen due days and a spread of
-later ones, `amount_on_schedule` and the recognition window of each of 2,200 days, a loan's payment, and the
-engine's own promises. `mutate` shows that this is enough: each mutant of the machinery under test is built and
-the dump of the mutant must differ from the dump of the baseline.
+later ones, the factor and the recognition window of each of 2,200 days, a loan's payment, and the fold's own promises.
+`mutate` shows that this is enough: each mutant of the code under test is built and the verdict must fail on it.
 """
 import calendar
 import datetime
@@ -466,10 +470,10 @@ PROFILE = "opt-level = 1\ncodegen-units = 16\nincremental = true"
 DEBUG_PROFILE = PROFILE + "\ndebug-assertions = true"
 
 
-def build(tree, out, new=False, source=None, profile=PROFILE):
+def build(tree, out, source=None, profile=PROFILE, features=()):
     """Builds the dump against the crates of TREE. Its own profile, because a dependency is built with the profile of
-    the workspace that asks for it, and the tree's is `lto = thin`. With NEW it also has the compiled promise to ask
-    (`--check`), which a tree from before the lane does not. SOURCE is where the dump's files are read from."""
+    the workspace that asks for it, and the tree's is `lto = thin`. SOURCE is where the dump's files are read from; with
+    FEATURES, the dump of an earlier lane that has them (`new` for K5a's)."""
     os.makedirs(out, exist_ok=True)
     tree = os.path.abspath(tree)
     source = source or os.path.join(HERE, "promises")
@@ -483,7 +487,7 @@ def build(tree, out, new=False, source=None, profile=PROFILE):
         if name.endswith(".rs"):
             shutil.copy(os.path.join(source, name), os.path.join(out, name))
     shutil.copy(os.path.join(tree, "Cargo.lock"), os.path.join(out, "Cargo.lock"))
-    command = ["cargo", "build", "--release", "--offline"] + (["--features", "new"] if new else [])
+    command = ["cargo", "build", "--release", "--offline"] + (["--features", ",".join(features)] if features else [])
     result = subprocess.run(command, cwd=out, capture_output=True, text=True)
     if result.returncode:
         sys.stderr.write(result.stderr[-4000:])
@@ -551,128 +555,154 @@ def dump(binary, directory, jobs=3, tag="old", extra=(), limit=300, times=None):
     return len(failed)
 
 
-def compare(directory, a, b, show=3):
+def kinds_of(path, tag):
+    """The lines of a dump, by their first word, each kind in the order it was said. What the fold adds to the dump of
+    an earlier tree (`missed`), and what its type makes true and a line used to say (`equal-stretches true`), is left
+    out, so that a dump from before and one from after can be compared."""
+    kinds = {}
+    for line in open(os.path.join(path, f"dump.{tag}.txt")).read().split("\n"):
+        line = line.replace(" equal-stretches true", "")
+        word = line.split(" ", 1)[0]
+        if word != "missed" and line != "== missed" and not line.startswith("== missed "):
+            kinds.setdefault(word, []).append(line)
+    # What the new dump rebuilt of the old walkers (`dueold`, `keepold`, `ordinalold`) is not a question of the old dump.
+    return kinds
+
+
+REBUILT = ("due", "keep", "ordinal")
+
+
+def reproduce(directory, a, b):
+    """Whether what the old walkers said (dump A, the frozen one) is what the new dump B rebuilds of them from
+    `calendar::due` as they asked it: the days due, the lines kept and the ordinals, project by project. Where it is,
+    the ways the fold differs from A are the ways the rebuilt rule and the reference differ, and nothing else."""
     different = []
     for path in projects(directory):
+        old, new = kinds_of(path, a), kinds_of(path, b)
+        for word in REBUILT:
+            said = lambda lines: [line.partition(" ")[2] for line in lines]
+            if said(old.get(word, [])) != said(new.get(word + "old", [])):
+                different.append((path, word))
+    for path, word in different[:5]:
+        print(f"NOT REPRODUCED {os.path.basename(path)}: {word}")
+    print(f"{len(projects(directory))} projects, {len(different)} kinds of line not reproduced")
+    return len(different)
+
+
+def compare(directory, a, b, show=3):
+    """The projects whose dumps differ, and in which kinds of line. A dump that is not there (a mutant that hung) differs."""
+    different, by_kind = [], Counter()
+    for path in projects(directory):
         try:
-            left = open(os.path.join(path, f"dump.{a}.txt")).read().split("\n")
-            right = open(os.path.join(path, f"dump.{b}.txt")).read().split("\n")
+            left, right = kinds_of(path, a), kinds_of(path, b)
         except FileNotFoundError:
-            different.append((path, 0, ["not run"], ["not run"]))  # the mutant hung, and the rest were not asked
+            different.append((path, "not run", [], []))
             continue
-        if left != right:
-            at = next((i for i, (x, y) in enumerate(zip(left, right)) if x != y), min(len(left), len(right)))
-            different.append((path, at, left[at:at + 1], right[at:at + 1]))
-    for path, at, left, right in different[:show]:
-        print(f"DIFFERENT {path} at line {at}:\n  {a}: {left}\n  {b}: {right}")
+        kinds = sorted(
+            word for word in set(left) | set(right) if not word.endswith("old") and left.get(word) != right.get(word)
+        )
+        if kinds:
+            word = kinds[0]
+            before, after = left.get(word, []), right.get(word, [])
+            at = next((i for i, (x, y) in enumerate(zip(before, after)) if x != y), min(len(before), len(after)))
+            different.append((path, ", ".join(kinds), before[at:at + 1], after[at:at + 1]))
+            by_kind.update(kinds)
+    for path, kinds, before, after in different[:show]:
+        print(f"DIFFERENT {path} in {kinds}:\n  {a}: {before}\n  {b}: {after}")
+    for word, count in sorted(by_kind.items()):
+        print(f"  {word:<12} differs in {count} projects")
     print(f"{len(projects(directory))} projects, {len(different)} differ")
     return len(different)
 
 
-# ─── Mutants of the machinery under test ─────────────────────────────────────────────────────────────────────
+def keep_days(lines):
+    """What each probe day keeps, from the `keep A..B : answer` lines of a dump: the days are runs."""
+    answers = {}
+    for line in lines:
+        head, _, answer = line.partition(" : ")
+        first, _, last = head.split(" ")[1].partition("..")
+        for day in range(datetime.date.fromisoformat(first).toordinal(), datetime.date.fromisoformat(last).toordinal() + 1):
+            answers[day] = answer
+    return answers
+
+
+def due_days(lines):
+    """The days, each with the schedule it is a day of, that the `due` lines of a dump list in full (a window of more
+    than forty days is only counted)."""
+    found = set()
+    for line in lines:
+        head, _, days = line.partition(" : ")
+        if days.startswith("n ") or not days.strip():
+            continue
+        for item in days.split():
+            day, _, schedule = item.partition("/")
+            try:
+                found.add((datetime.date.fromisoformat(day).toordinal(), schedule))
+            except ValueError:
+                pass  # a day past year 9999, in a window that runs to the end of the calendar
+    return found
+
+
+def classify(directory, a, b):
+    """Of the keep lines two dumps differ in: whether every day that differs differs only as it may.
+
+    * the reach: with a shorter reach a day that kept a due day keeps none, and a day that was equally near two
+      schedules, one of them within a longer reach than the other's, keeps the one in reach;
+    * a day the nearer schedule keeps no longer, being out of that schedule's own reach, keeps the other schedule's;
+    * a due day the old walk lost (`on last` after a waiver, K5a 7j): the new answer is a due day the old `due` lines
+      never list, and it is one the new ones do.
+
+    Anything else is unexplained."""
+    seen, unexplained = Counter(), []
+    for path in projects(directory):
+        kinds_a, kinds_b = kinds_of(path, a), kinds_of(path, b)
+        before, after = kinds_a.get("keep", []), kinds_b.get("keep", [])
+        if before == after:
+            continue
+        try:
+            old, new = keep_days(before), keep_days(after)
+        except ValueError:
+            unexplained.append((path, "a keep line that does not read"))
+            continue
+        lost = due_days(kinds_b.get("due", [])) - due_days(kinds_a.get("due", []))
+        for day in sorted(set(old) | set(new)):
+            was, is_ = old.get(day, "?"), new.get(day, "?")
+            if was == is_:
+                continue
+            words = is_.split(" ")
+            schedules = {"regular": ["r"], "standing": ["s"], "ambiguous": ["r", "s"]}.get(words[0], [])
+            named = [(datetime.date.fromisoformat(word).toordinal(), schedule) for word, schedule in zip(words[1:], schedules)]
+            if any(day in lost for day in named):
+                seen["the old walk lost the due day"] += 1
+            elif is_ == "none" and was not in ("none", "?") and not was.startswith("ambiguous"):
+                seen["a kept day is out of reach"] += 1
+            elif was.startswith("ambiguous") and not is_.startswith("ambiguous") and is_ != "none":
+                seen["an ambiguous day is in the reach of one schedule"] += 1
+            elif was.startswith("ambiguous") and is_ == "none":
+                seen["an ambiguous day is out of both reaches"] += 1
+            elif was[0] in "rs" and is_[0] in "rs" and was[0] != is_[0]:
+                seen["the nearer schedule's day is out of its own reach"] += 1
+            else:
+                unexplained.append((path, f"{datetime.date.fromordinal(day)}: {was} -> {is_}"))
+    for what, count in sorted(seen.items()):
+        print(f"  {what}: {count} days")
+    for path, line in unexplained[:10]:
+        print(f"UNEXPLAINED {os.path.basename(path)} {line}")
+    print(f"{len(unexplained)} days unexplained")
+    return len(unexplained)
+
+
+# ─── Mutants of the code under test ──────────────────────────────────────────────────────────────────────────
 
 # (file, text, replacement, what it breaks). Each text occurs once in its file. A mutant is built into the dump and the
-# dump must differ from the baseline's: if it does not, the corpus cannot tell the code from a wrong one.
-CAL, BOOK = "crates/core/src/calendar.rs", "crates/model/src/book.rs"
-REC, STM = "crates/model/src/lower/record.rs", "crates/model/src/lower/statements.rs"
-LED = "crates/engine/src/ledger.rs"
-MUTANTS = [
-    (CAL, "On::Last => checked_day(year, month, days_in_month(year, month)),",
-     "On::Last => checked_day(year, month, days_in_month(year, month) - 1),", "`on last` is the day before the last"),
-    (CAL, "On::MonthDay(day) => clamped(month, u32::from(day)),", "On::MonthDay(day) => checked_day(year, month, u32::from(day)),",
-     "a day of the month past the month's end is no day"),
-    (CAL, "((u32::from(weekday) + 7 - base.weekday()) % 7)", "((u32::from(weekday) + 7 - base.weekday()) % 6)",
-     "a weekday lands on the wrong day"),
-    (CAL, "if len == 2 && days[1] < days[0] {", "if len == 2 && days[1] > days[0] {", "two landings of a step in the wrong order"),
-    (CAL, "if len == 2 && days[0] == days[1] {", "if len == 2 && days[0] != days[1] {", "two landings on one day are not one"),
-    (CAL, ".filter(|&day| self.previous.is_none_or(|previous| day > previous))",
-     ".filter(|&day| self.previous.is_none_or(|previous| day >= previous))", "three landings, one repeated"),
-    (CAL, "let base_limit = (i64::from(within.last().0) + backward_landing).min(i64::from(i32::MAX));",
-     "let base_limit = i64::from(within.last().0).min(i64::from(i32::MAX));", "a landing before its step is not looked for"),
-    (CAL, "(i64::from(anchor.max(within.first()).0) - forward_landing)", "(i64::from(anchor.max(within.first()).0) + forward_landing)",
-     "the walk starts too late"),
-    (CAL, "Cadence::TwiceMonthly => Span::months(1),", "Cadence::TwiceMonthly => Span::months(2),", "twice monthly steps by two months"),
-    (CAL, "Some(day) if day < target => {", "Some(day) if day <= target => {", "the first step is one late"),
-    (CAL, "candidate if candidate <= day => Some((candidate, years)),", "candidate if candidate < day => Some((candidate, years)),",
-     "an anniversary is not its own day"),
-    (CAL, ".filter(move |&day| day >= anchor && within.contains(day))", ".filter(move |&day| within.contains(day))",
-     "a landing before the anchor is due"),
-    (CAL, "let clamped = |month: u32, day: u32| checked_day(year, month, day.min(days_in_month(year, month)));",
-     "let clamped = |month: u32, day: u32| checked_day(year, month, day);", "a day past a short month's end is no day"),
-    (CAL, "(On::YearDay { .. }, _) => 365,", "(On::YearDay { .. }, _) => 300,", "the walk starts too late for a day of the year"),
-    (CAL, "let landed = checked_day(year, month, day_of_month.min(days_in_month(year, month)))?;",
-     "let landed = checked_day(year, month, day_of_month)?;", "a step from the 31st has no February"),
-    (BOOK, "(Some(regular), Some(standing)) if standing.day < regular.day => self.standing.next(),",
-     "(Some(regular), Some(standing)) if standing.day <= regular.day => self.standing.next(),", "a standing day before a regular one on a tie"),
-    (BOOK, "let window = within.intersect(self.days);", "let window = Some(within);", "days outside the contract are due"),
-    (BOOK, ".filter(move |(_, terms)| enabled && !terms.is_waived())", ".filter(move |(_, terms)| enabled)",
-     "a waived stretch is due"),
-    (BOOK, "ratio_pow(yearly, u32::try_from(years).map_err(|_| ForecastError::Overflow)?)",
-     "ratio_pow(yearly, u32::try_from(years + 1).map_err(|_| ForecastError::Overflow)?)", "a rise one year early"),
-    (BOOK, "current.checked_div(base).ok_or(ForecastError::Overflow)", "base.checked_div(current).ok_or(ForecastError::Overflow)",
-     "the index moves the wrong way"),
-    (BOOK, "Value::Num(value) if value > Ratio::ZERO => Ok(value),", "Value::Num(value) if value >= Ratio::ZERO => Ok(value),",
-     "an index of zero is an index"),
-    (BOOK, "let part = i64::from(overlap.last().0) - i64::from(overlap.first().0) + 1;",
-     "let part = i64::from(overlap.last().0) - i64::from(overlap.first().0);", "a share is one day short"),
-    (BOOK, "if after <= start {", "if after < start {", "a cover of no days is one"),
-    (BOOK, "(Some(Relative::LastQuarter), None) => Ok(Some(calendar::quarter(day, -1))),",
-     "(Some(Relative::LastQuarter), None) => Ok(Some(calendar::quarter(day, 0))),", "last quarter is this one"),
-    (BOOK, "(None, Some(Coverage::Calendar(period))) => Ok(Some(Window::containing(period, day).days())),",
-     "(None, Some(Coverage::Calendar(period))) => Ok(Some(Window::containing(period, day).previous().days())),",
-     "the month covered is the last"),
-    (BOOK, "if !self.days.contains(day) {\n            return Err(ForecastError::OutsideContract(day));\n        }\n        let terms = self.terms_on_schedule(schedule, day).ok_or(ForecastError::OutsideContract(day))?;",
-     "let terms = self.terms_on_schedule(schedule, day).ok_or(ForecastError::OutsideContract(day))?;",
-     "a day outside the contract has a factor"),
-    (BOOK, "ScheduleKind::Standing => self.standing.as_ref().map(|terms| terms.at(day)),",
-     "ScheduleKind::Standing => self.terms.as_ref().map(|terms| terms.at(day)),", "the standing schedule has the regular terms"),
-    (BOOK, "if exponent & 1 == 1 {", "if exponent & 1 == 0 {", "a power by squaring that squares wrong"),
-    (BOOK, "let (_, years) = calendar::anniversary(self.days.first(), day).ok_or(ForecastError::Overflow)?;",
-     "let (_, years) = calendar::anniversary(day, day).ok_or(ForecastError::Overflow)?;", "years counted from the day itself"),
-    (BOOK, "let yearly = Ratio::ONE.checked_add(rate).ok_or(ForecastError::Overflow)?;", "let yearly = rate;",
-     "a rise of 3% is a factor of 3%"),
-    (BOOK, "let shift = day.0.checked_sub(template.day.0).ok_or(ForecastError::Overflow)?;",
-     "let shift = template.day.0.checked_sub(day.0).ok_or(ForecastError::Overflow)?;", "a recognition moved the wrong way"),
-    (REC, "i64::from(span.months).saturating_mul(31).saturating_add(i64::from(span.days))",
-     "i64::from(span.months).saturating_mul(30).saturating_add(i64::from(span.days))", "the reach of a month is 30 days"),
-    (REC, "if best.is_none_or(|(best_distance, best_future, _, _)| (distance, candidate.1) < (best_distance, best_future))",
-     "if best.is_none_or(|(best_distance, best_future, _, _)| (distance, candidate.1) <= (best_distance, best_future))",
-     "the later of two equally near is kept"),
-    (REC, "let candidate = (distance, occurrence.day > day, occurrence.day, occurrence.terms);",
-     "let candidate = (distance, occurrence.day >= day, occurrence.day, occurrence.terms);", "the day itself counts as later"),
-    (REC, "if r_distance == s_distance {", "if r_distance < s_distance {", "equally near two schedules is not ambiguous"),
-    (REC, "if !contract.days.contains(day) {\n        return Ok(None);\n    }\n    let mut radius = 0i64;",
-     "let mut radius = 0i64;", "a line outside the contract keeps an occurrence"),
-    (REC, "crate::book::Cadence::TwiceMonthly => 31,", "crate::book::Cadence::TwiceMonthly => 15,", "the reach of twice monthly is 15 days"),
-    (REC, "radius = radius.max(cadence);", "radius = radius.min(cadence);", "the reach is the smallest cadence"),
-    (STM, "terms.paint(change.days, waived);", "terms.paint(Days::on(change.days.first()), waived);", "a waiver is one day"),
-    (STM, "Days::new(contract.days.first(), day.min(contract.days.last()))", "Days::new(contract.days.first(), day)",
-     "an end can extend a contract"),
-    ("crates/model/src/lower/contracts.rs", "        anchor: cx.anchor,\n        template: Box::new([template]),",
-     "        anchor: Day::MIN,\n        template: Box::new([template]),", "every schedule counts from Day::MIN"),
-    (LED, ".filter(|occurrence| occurrence.schedule == schedule && occurrence.day <= due)",
-     ".filter(|occurrence| occurrence.schedule == schedule && occurrence.day < due)", "the ordinal of an occurrence is one short"),
-    (LED, "let Some(ordinal) = count.checked_sub(1)", "let Some(ordinal) = count.checked_sub(0)", "the ordinal is one over"),
-    (LED, "let periods = loan.term.months.checked_add(months - 1)?.checked_div(months)?;",
-     "let periods = loan.term.months.checked_add(months)?.checked_div(months)?;", "a loan has a period too many"),
-    (LED, "let rate = annual.checked_mul(Ratio::new(months as i128, 12)?)?;", "let rate = annual.checked_mul(Ratio::new(months as i128, 11)?)?;",
-     "a monthly rate of a twelfth is an eleventh"),
-    (LED, "let periods = loan.term.months.checked_mul(2)?;", "let periods = loan.term.months.checked_mul(3)?;", "twice monthly pays three times"),
-    (LED, "let rate = annual.checked_div(Ratio::int(24))?;", "let rate = annual.checked_div(Ratio::int(12))?;", "twice monthly pays a monthly rate"),
-    (LED, "let periods = loan.term.days.checked_add(days - 1)?.checked_div(days)?;",
-     "let periods = loan.term.days.checked_add(days)?.checked_div(days)?;", "a loan in days has a period too many"),
-    (LED, "Err(axiom_model::ForecastError::Overflow) if template.header.flow.day == Day::MIN => Days::on(due),",
-     "Err(axiom_model::ForecastError::Overflow) if false => Days::on(due),", "no recognition for a contract with no start"),
-    ("crates/core/src/timeline.rs", ".skip_while(move |(days, _)| days.last() < within.first())",
-     ".skip_while(move |(days, _)| days.last() <= within.first())", "a stretch that ends on the first day is skipped"),
-]
-
-
-# The same, of the new structure: each of these must make the verdict fail.
+# verdict must fail on it, or the tests of the crate that holds it: if neither does, the corpus cannot tell the code from
+# a wrong one, or the mutant is equivalent and says why.
 DUES, SCHED = "crates/core/src/dues.rs", "crates/model/src/promise/schedule.rs"
 PROMISE, RECKON = "crates/model/src/promise.rs", "crates/model/src/promise/reckon.rs"
 ANNUITY, RESIDUAL = "crates/model/src/promise/annuity.rs", "crates/model/src/promise/residual.rs"
-MUTANTS_NEW = [
+BOOK, MONITOR = "crates/model/src/book.rs", "crates/engine/src/monitor.rs"
+LEDGER, TIMELINE = "crates/engine/src/ledger.rs", "crates/engine/src/timeline.rs"
+MUTANTS = [
     (DUES, "take_while(|&&day| day < i64::from(anchor.0))", "take_while(|&&day| day <= i64::from(anchor.0))",
      "a day on the anchor is before it"),
     (DUES, "let slot = u64::from(n) + u64::from(head);", "let slot = u64::from(n);", "the days before the anchor are due"),
@@ -706,9 +736,13 @@ MUTANTS_NEW = [
      "a hole swallows the days but its last"),
     (SCHED, "(nearest.apart, nearest.due > day)", "(nearest.apart, nearest.due < day)", "the later of two equally near is kept"),
     (SCHED, "if regular.apart < standing.apart =>", "if regular.apart > standing.apart =>", "the farther schedule is kept"),
-    (PROMISE, "i64::from(months).saturating_mul(31)", "i64::from(months).saturating_mul(30)", "the reach of a month is 30 days"),
-    (PROMISE, ".filter(|(_, terms)| terms.is_waived())", ".filter(|(_, terms)| !terms.is_waived())", "the holes are the active stretches"),
-    (PROMISE, "axiom_core::Cadence::TwiceMonthly => 31,", "axiom_core::Cadence::TwiceMonthly => 15,", "the reach of twice monthly is 15"),
+    (PROMISE, "i64::from(span.months).saturating_mul(31)", "i64::from(span.months).saturating_mul(30)", "the reach of a month is 30 days"),
+    (BOOK, "waiver.is_some().then_some(days)", "waiver.is_none().then_some(days)", "the holes are the active stretches"),
+    (PROMISE, "Cadence::TwiceMonthly => 31,", "Cadence::TwiceMonthly => 15,", "the cadence of twice monthly is 15 days"),
+    (PROMISE, "terms.grace.map_or(cadence / 2, days)", "terms.grace.map_or(cadence, days)", "the reach is a whole cadence"),
+    (PROMISE, "terms.grace.map_or(cadence / 2, days)", "terms.grace.map_or((cadence + 1) / 2, days)", "half a cadence is rounded up"),
+    (PROMISE, "terms.grace.map_or(cadence / 2, days)", "Some(cadence / 2).map_or(0, days)", "a grace is not read"),
+    (SCHED, "schedule.nearest(day, schedule.reach())", "schedule.nearest(day, 1 << 20)", "a line any distance away keeps a due day"),
     (RECKON, "Ratio::ONE.checked_add(rate)", "Ratio::ONE.checked_sub(rate)", "a rise of 3% is a fall"),
     (RECKON, "power(yearly, u32::try_from(years)", "power(yearly, u32::try_from(years + 1)", "a rise a year early"),
     (RECKON, "if years & 1 == 1 {", "if years & 1 == 0 {", "a power by squaring that squares wrong"),
@@ -724,6 +758,29 @@ MUTANTS_NEW = [
     (RESIDUAL, "            self.open == Qty::ZERO\n", "            false\n", "a loan is never done"),
     (RESIDUAL, "paid.map_or(Qty::ZERO, |paid| paid.open)", "paid.map_or(self.open, |paid| paid.open + Qty(1))",
      "a payment leaves a cent more owed"),
+    (RESIDUAL, "let ordinal = schedule.before(day).max(began);", "let ordinal = began;", "a stream starts on its first day, not on the day asked"),
+    (RESIDUAL, "let open = annuity.map_or(Qty::ZERO, |annuity| annuity.owed_after(ordinal - began));",
+     "let open = annuity.map_or(Qty::ZERO, |annuity| annuity.principal().qty);", "a loan started late owes all of it"),
+    (ANNUITY, "if payments >= self.periods { Qty::ZERO } else { open }", "open", "a loan whose payments are all made still owes"),
+    (MONITOR, "self.misses.peek().filter(|&&Reverse((miss, _))| miss <= day)", "self.misses.peek().filter(|&&Reverse((miss, _))| miss < day)",
+     "a miss on the day itself waits for the next fact"),
+    (MONITOR, "due.0.checked_add(waiting.reach)?.checked_add(1)", "due.0.checked_add(waiting.reach)?.checked_add(0)", "a due day is missed on the last day it can be kept"),
+    (MONITOR, "due.0.checked_add(waiting.reach)?.checked_add(1)", "due.0.checked_add(waiting.reach)?.checked_add(2)", "a due day is missed a day late"),
+    (MONITOR, "if self.waiting[at].miss != Some(miss) {\n                continue;\n            }", "if false {\n                continue;\n            }",
+     "a stale entry of the heap misses the day it was made for"),
+    (MONITOR, "while !waiting.residual.is_done() && waiting.residual.ordinal() < ordinal {", "while !waiting.residual.is_done() && waiting.residual.ordinal() <= ordinal {",
+     "the day a line kept is missed"),
+    (MONITOR, "if !waiting.residual.is_done() && waiting.residual.ordinal() == ordinal {", "if false {", "a kept day is waited for again"),
+    (MONITOR, "let at = self.waiting.partition_point(|waiting| waiting.key() < key);", "let at = self.waiting.partition_point(|waiting| waiting.key() <= key);",
+     "a line settles the stream after its own"),
+    (MONITOR, "if !counted.is_counted() && counted.life().first() == Day::MIN {", "if false {", "a schedule that can only be walked is watched from the beginning of time"),
+    (MONITOR, "monitor.expect(monitor.waiting.len() - 1);", "", "a stream is never missed"),
+    (LEDGER, "        self.miss_through(limit.day);\n", "", "what is missed after the last fact is not found"),
+    (LEDGER, "            self.miss_through(moment.day);\n", "", "a miss comes after the facts of the day it is missed on"),
+    (LEDGER, "self.world.monitor.settle(&book.promises, contract_id, schedule, ordinal, |missed| record.promises.push(missed));", "",
+     "a kept line settles nothing"),
+    (TIMELINE, "[first_flow, first_occurrence, first_assert, first_split, first_claim_change].into_iter().flatten().min()",
+     "[first_flow, first_occurrence, first_assert, first_split, first_claim_change].into_iter().flatten().max()", "the book begins on its last day"),
 ]
 
 
@@ -735,11 +792,15 @@ def leave_out(tree, directory, names):
 
 
 def own_tests_fail(source, work):
-    """Whether the tests of `core` and `model` (their units, and `tests/promises.rs`) fail in SOURCE: what a mutant of
-    the new structure that the dump's verdict does not catch has still to get past, because the old code cannot say
-    what a loan has left after a payment, or what the days before a hole's last day are."""
+    """Whether the tests of `core`, `model` and the engine's monitor (their units, and `tests/promises.rs`) fail in
+    SOURCE: what a mutant the dump's verdict does not catch has still to get past, because the corpus cannot say what a
+    loan has left after a payment, what the days before a hole's last day are, or in what order the fold finds a miss."""
     env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
-    for package, targets in (("axiom-core", ["--lib"]), ("axiom-model", ["--lib", "--test", "promises"])):
+    for package, targets in (
+        ("axiom-core", ["--lib"]),
+        ("axiom-model", ["--lib", "--test", "promises"]),
+        ("axiom-engine", ["--lib", "monitor"]),
+    ):
         run = subprocess.run(["cargo", "test", "--release", "--offline", "-p", package, *targets], cwd=source, env=env,
                              capture_output=True, text=True)
         if run.returncode:
@@ -747,11 +808,10 @@ def own_tests_fail(source, work):
     return False
 
 
-def mutate(tree, work, directory, only=None, new=False):
-    """Builds each mutant into the dump. Of the machinery under test (the old code), the dump of the mutant must differ
-    from the baseline's; of the new structure (NEW), its verdict must fail, or its own tests, which say what the old code cannot. Mutants that are not caught are listed:
-    each is either equivalent, and the report says why, or the corpus is too weak."""
-    table = MUTANTS_NEW if new else MUTANTS
+def mutate(tree, work, directory, only=None):
+    """Builds each mutant into the dump. The verdict must fail on it, or the tests of the crate that holds it (which say
+    what the corpus cannot). Mutants that are not caught are listed: each is either equivalent, and the report says why,
+    or the corpus is too weak."""
     work = os.path.abspath(work)
     source = os.path.join(work, "tree")
     if not os.path.isdir(source):
@@ -761,46 +821,29 @@ def mutate(tree, work, directory, only=None, new=False):
     snapshot = os.path.join(work, "promises")
     if not os.path.isdir(snapshot):
         shutil.copytree(os.path.join(HERE, "promises"), snapshot)
-    binary = build(source, out, new=new, source=snapshot)
-    if new:
-        baseline = verdict(binary, directory, 4)[1]
-        assert not baseline, f"the baseline fails its own verdict: {baseline[:2]}"
-        assert not own_tests_fail(source, work), "the baseline fails its own tests"
-        limit = 20
-    else:
-        times = []
-        dump(binary, directory, 4, "base", times=times)
-        # The old code is slow on some projects (a cadence of no days is walked for a minute): a mutant is given three
-        # times what the slowest of them took, or it would be caught by a clock and not by what it says.
-        limit = max(20, int(3 * max(times)) + 1)
+    binary = build(source, out, source=snapshot)
+    baseline = verdict(binary, directory, 4)[1]
+    assert not baseline, f"the baseline fails its own verdict: {baseline[:2]}"
+    assert not own_tests_fail(source, work), "the baseline fails its own tests"
+    limit = 20
     results = []
-    for number, (path, old, replacement, what) in enumerate(table):
+    for number, (path, old, replacement, what) in enumerate(MUTANTS):
         if only is not None and number not in only:
             continue
         target = os.path.join(source, path)
         original = open(target).read()
         assert original.count(old) == 1, f"mutant {number}: the text occurs {original.count(old)} times in {path}"
         open(target, "w").write(original.replace(old, replacement))
-        tag = f"m{number:02d}"
         by_tests = False
         try:
-            binary = build(source, out, new=new, source=snapshot)
-            if new:
-                caught = bool(verdict(binary, directory, 4, limit=limit, enough=3)[1])
-                by_tests = not caught and own_tests_fail(source, work)
-            else:
-                dump(binary, directory, 4, tag, limit=limit)
-                caught = bool(compare(directory, "base", tag, show=0))
+            binary = build(source, out, source=snapshot)
+            caught = bool(verdict(binary, directory, 4, limit=limit, enough=3)[1])
+            by_tests = not caught and own_tests_fail(source, work)
             outcome = "killed" if caught else "killed by the tests" if by_tests else "SURVIVED"
         except SystemExit:
             outcome = "does not build"
         finally:
             open(target, "w").write(original)
-            for project in projects(directory):
-                try:
-                    os.remove(os.path.join(project, f"dump.{tag}.txt"))
-                except FileNotFoundError:
-                    pass
         results.append((number, outcome, what))
         print(f"mutant {number:02d} {outcome:<8} {what}", flush=True)
     summary = Counter(outcome for _, outcome, _ in results)
@@ -894,8 +937,8 @@ def cover(directory, tag="old"):
                 facts["ordinal, a number"] += 1
             if word == "promise":
                 facts["promises kept"] += 1
-            if word == "terms" and "equal-stretches false" in line:
-                facts["stretches that differ in more than state"] += 1
+            if word == "missed":
+                facts["promises missed"] += 1
             if word == "stretch" and line.endswith("waived"):
                 facts["waived stretches"] += 1
         for form in forms[name]:
@@ -924,7 +967,7 @@ def main(argv):
         return 0
     if len(argv) >= 4 and argv[1] == "build":
         profile = DEBUG_PROFILE if "--debug-assertions" in argv else PROFILE
-        print(build(argv[2], argv[3], new="--new" in argv, profile=profile))
+        print(build(argv[2], argv[3], profile=profile))
         return 0
     if len(argv) >= 4 and argv[1] == "check":
         extra = ("--slow",) if "--slow" in argv else ()
@@ -938,11 +981,13 @@ def main(argv):
         return 1 if dump(rest[2], rest[3], jobs, tag, extra) else 0
     if len(argv) >= 5 and argv[1] == "compare":
         return 1 if compare(argv[2], argv[3], argv[4]) else 0
+    if len(argv) >= 5 and argv[1] == "reproduce":
+        return 1 if reproduce(argv[2], argv[3], argv[4]) else 0
+    if len(argv) >= 5 and argv[1] == "classify":
+        return 1 if classify(argv[2], argv[3], argv[4]) else 0
     if len(argv) >= 5 and argv[1] == "mutate":
-        new = "--new" in argv
-        rest = [a for a in argv if a != "--new"]
-        only = {int(n) for n in rest[5].split(",")} if len(rest) > 5 else None
-        mutate(rest[2], rest[3], rest[4], only, new)
+        only = {int(n) for n in argv[5].split(",")} if len(argv) > 5 else None
+        mutate(argv[2], argv[3], argv[4], only)
         return 0
     if len(argv) >= 3 and argv[1] == "cover":
         cover(argv[2], argv[3] if len(argv) > 3 else "old")
