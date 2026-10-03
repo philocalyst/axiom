@@ -192,13 +192,17 @@ impl<'s> World<'s> {
                 Found::Several(places) => Err(self.ambiguous_address(word, &places, None)),
                 Found::Nothing => Ok(None),
             },
-            Found::Several(ids) => {
-                let (places, table) = (&self.book.places, &self.book.lookup.places);
-                let candidates =
-                    problem::shortest(&self.book.names, table, &ids, |id| places[id].path, |id| places[id].loc);
-                Err(problem::ambiguous(Noun::Place, word, &candidates))
-            }
+            Found::Several(ids) => match self.book.address_place(word.text) {
+                Found::One(place) if ids.iter().any(|&place| self.book.is_spelled(place)) => Ok(Some(place)),
+                _ => Err(self.ambiguous_place(word, &ids)),
+            },
         }
+    }
+
+    fn ambiguous_place(&self, word: Word, ids: &[Id<Place>]) -> Diagnostic {
+        let (places, table) = (&self.book.places, &self.book.lookup.places);
+        let candidates = problem::shortest(&self.book.names, table, ids, |id| places[id].path, |id| places[id].loc);
+        problem::ambiguous(Noun::Place, word, &candidates)
     }
 
     pub fn place(&self, word: Word) -> Result<Id<Place>, Diagnostic> {

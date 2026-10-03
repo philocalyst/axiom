@@ -31,13 +31,15 @@ pub(crate) enum Reached {
 }
 
 impl Book<'_> {
-    /// The accounts `text` is an address of, on any day, when it is written as one: two words or more, each before the
-    /// last an entity. For a setting or a report, which have no line and no home to look the words up from.
+    /// The accounts `text` is an address of, on any day, when it is written as one: each word before the last an entity.
+    /// For a setting or a report, which have no line and no home to look the words up from.
     pub(crate) fn address_place(&self, text: &str) -> Found<Place> {
-        let Some((leading, name)) = text.rsplit_once('/').filter(|_| self.lookup.addresses.is_used()) else {
+        if !self.lookup.addresses.is_used() {
             return Found::Nothing;
-        };
-        let fillers: Result<Vec<Id<Entity>>, _> = leading.split('/').map(|word| self.entity(word)).collect();
+        }
+        let (leading, name) = text.rsplit_once('/').unwrap_or(("", text));
+        let words = leading.split('/').filter(|word| !word.is_empty());
+        let fillers: Result<Vec<Id<Entity>>, _> = words.map(|word| self.entity(word)).collect();
         match (fillers, self.names.get(name)) {
             (Ok(fillers), Some(name)) => self.lookup.addresses.resolve(&fillers, name, None),
             _ => Found::Nothing,

@@ -213,6 +213,16 @@ opening 2026-01-01\n  jordan/bluefin/401k 10 USD\n  me/acme/401k 10 USD\n\
 }
 
 #[test]
+fn a_name_two_accounts_share_means_the_one_that_is_ever_open_where_no_line_gives_a_day() {
+    let text = "account jordan/bluefin/401k at fidelity\naccount me/acme/401k at fidelity\n  opened 2026-08-02\n  closed 2026-07-05\n";
+    clean(text, |book| {
+        let (open, never) = (book.place("jordan/bluefin/401k").unwrap(), book.place("me/acme/401k").unwrap());
+        assert_eq!(book.place("401k").unwrap(), open, "the other closes before it opens");
+        assert_ne!(open, never);
+    });
+}
+
+#[test]
 fn a_reference_that_means_several_accounts_says_each_with_the_shortest_address_that_means_only_it() {
     let text = "account jordan/bluefin/401k at fidelity\naccount me/acme/401k at fidelity\n\
 2026-01-02 me/acme/401k -> fidelity/401k 1 USD\n";

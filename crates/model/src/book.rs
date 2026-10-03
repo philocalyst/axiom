@@ -1422,17 +1422,22 @@ impl<'s> Book<'s> {
     /// entity's place. A place wins over an entity of the same name.
     pub fn place(&self, text: &str) -> Result<Id<Place>, Miss<Place>> {
         let miss = match self.lookup.places.resolve(&self.names, text, |_| true) {
-            Err(miss @ Miss::Unknown { .. }) => miss,
-            found => return found,
+            Ok(place) => return Ok(place),
+            Err(miss) => miss,
+        };
+        // The names found nothing, or several and one is written as an address: the index may tell which is meant.
+        let by_address = match &miss {
+            Miss::Unknown { .. } => true,
+            Miss::Ambiguous(places) => places.iter().any(|&place| self.is_spelled(place)),
         };
         match self.address_place(text) {
-            Found::One(place) => return Ok(place),
-            Found::Several(places) => return Err(Miss::Ambiguous(places.into())),
-            Found::Nothing => {}
+            Found::One(place) if by_address => return Ok(place),
+            Found::Several(places) if by_address => return Err(Miss::Ambiguous(places.into())),
+            _ => {}
         }
-        match self.entity(text) {
-            Ok(entity) => self.entities[entity].place.ok_or(miss),
-            Err(_) => Err(miss),
+        match (&miss, self.entity(text)) {
+            (Miss::Unknown { .. }, Ok(entity)) => self.entities[entity].place.ok_or(miss),
+            _ => Err(miss),
         }
     }
 
