@@ -57,6 +57,7 @@ mod owners;
 mod plan;
 mod post;
 mod promising;
+mod recognition;
 mod reconcile;
 mod scope;
 mod settle;
@@ -100,6 +101,7 @@ pub use checkpoint::Checkpoint;
 pub use ledger::Ledger;
 pub use occurrence::{OccurrenceOutput, TemplateError};
 pub use plan::{Known, Plan, run};
+pub use recognition::{AccrualAt, Counting, Counts, Dealing, Piece, Reaches, Settlement, Share};
 pub use sides::Sides;
 
 /// One entity's effective financial share in a place or entity after
@@ -183,6 +185,8 @@ pub struct Run {
     pub adjustments: Vec<Adjustment>,
     /// The claims `waived` statements forgave, one row for each parcel that was still open.
     pub written_off: Vec<WriteOff>,
+    /// What each journal flow settled of claims, by flow: what a reader needs to say what the flow counts for.
+    pub settlements: Box<[(Id<Flow>, Settlement)]>,
     /// Carry losses whose statutory replacement window is still open at the
     /// run horizon. Matched and expired requests are removed from this list.
     pub pending_carries: Vec<PendingCarry>,
@@ -282,6 +286,8 @@ impl OpenClaim {
 #[derive(Clone, Copy, Debug)]
 pub struct WriteOff {
     pub change: u32,
+    /// The line of the claim whose parcel was forgiven: what the claim was made for.
+    pub claim: Id<Flow>,
     pub place: Id<Place>,
     pub unit: Id<Commodity>,
     pub qty: Qty,

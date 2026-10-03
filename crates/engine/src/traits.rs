@@ -7,7 +7,7 @@
 //! entity and one by commodity, which the fold then reads as it reads a place's class.
 
 use axiom_core::Id;
-use axiom_model::{Basis, Book, Class, Commodity, Entity, Place, Policy, Role};
+use axiom_model::{Basis, Book, Books, Class, Commodity, Entity, Place, Policy, Role};
 
 /// What the fold asks of a place.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,6 +33,8 @@ pub(crate) struct EntityTraits {
     pub restricted: bool,
     /// What it counts in.
     pub currency: Id<Commodity>,
+    /// When its claims count as income or spending.
+    pub books: Books,
 }
 
 /// The traits of every place and entity, and how each commodity relieves parcels.
@@ -57,6 +59,7 @@ impl Traits {
             member: book.member(entity),
             restricted: book.is_restricted(entity),
             currency: book.currency(entity),
+            books: book.books(entity),
         });
         let units = book.commodities.ids().map(|unit| book.select(unit));
         let owed = book.places.iter().filter(|(_, tab)| tab.class == Class::Asset);

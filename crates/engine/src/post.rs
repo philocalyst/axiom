@@ -20,9 +20,9 @@
 //! - an opening line is a flow nothing watches, whose parcels carry the basis
 //!   and acquisition day it gives.
 
-use axiom_core::{Diagnostic, Id, Qty};
+use axiom_core::{Day, Diagnostic, Id, Loc, Qty};
 use axiom_model::{
-    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, PurposeRoot, RuntimeTxn, Select, Subject,
+    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot, RuntimeTxn, Select, Subject,
 };
 
 use crate::eval::{Occasion, Realized};
@@ -31,7 +31,9 @@ use crate::ledger::Ledger;
 use crate::lots::{Origin, Request, Selection, Shares, Slice};
 use crate::motion::{Motion, Moves};
 use crate::plan::Plan;
+use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
 use crate::scope::{is_money, stays_with_owner};
+use crate::settle::Claiming;
 use crate::state::Missing;
 use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, show};
 
@@ -71,28 +73,37 @@ impl Ledger<'_, '_, '_> {
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
-        // A payment run backwards opens the claims it settled; one run forwards settles them.
-        self.reopen_claims(m);
-        let settled = self.settle_claims(m);
         // A `!` on an assertion accepts its gap: it is never unused.
         if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), true, Some(waive)) =
             (m.cause, watched, m.waive)
         {
             self.record.waivers.entry(waive.loc).or_insert(false);
         }
+        // What a flow counts as depends on the claims it settled (or, run backwards, opened), which relief of the tab or
+        // of the claim place it came out of decides.
+        let mut claiming = self.settle_claims(m);
+        let from_claims = self.plan.traits.place(m.from).claim && m.source.class.holds_parcels();
+        if from_claims {
+            self.relieve(m, Qty::ZERO);
+            claiming = self.relieved_claims(m);
+        }
+        let paid = claiming.as_ref().map_or(Qty::ZERO, Claiming::paid);
         if watched {
             self.count(m);
+            self.count_purposes(m, claiming.as_ref());
             self.sample_temporal(m.day);
             self.fire(&book.rules.on_out[m.from], &Occasion { amount: Some(m.out), skip_internal: true, ..on });
         }
         if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
-            self.relieve(m, settled);
+            if !from_claims {
+                self.relieve(m, paid);
+            }
             let keeps = self.price(m);
             self.arrive(m, keeps);
         } else {
             // Places that hold only a plain balance have no parcels to move, and nothing was relieved.
             self.scratch.relief.slices.clear();
-            self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
+            self.world.holdings.credit(m.from, m.out.unit, paid - m.out.qty);
             self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
             self.sample_temporal(m.day);
         }
@@ -114,15 +125,24 @@ impl Ledger<'_, '_, '_> {
 
     /// Purpose laws see the event after its value has moved and its window
     /// total has been counted. Their `self` is the flow's owner. When the
-    /// purpose names an asset, laws about that asset also see the flow.
+    /// purpose names an asset, laws about that asset also see the flow. A law
+    /// sees each piece the flow counts in (`recognition`) as the flow, with
+    /// that purpose and that much of it.
     fn fire_purpose(&mut self, m: &Motion, on: &Occasion) {
-        let Some(purpose) = m.purpose else { return };
         let book = self.plan.book;
-        let purpose_on = Occasion { amount: Some(m.out), ..*on };
-        self.fire_as(&book.rules.purposes[purpose.purpose], &purpose_on, Some(Subject::Entity(m.owner)));
-        if let Some(Object::Asset(asset)) = purpose.of {
-            let place = book.assets[asset].place;
-            self.fire(&book.rules.about[place], &purpose_on);
+        for at in 0..self.scratch.pieces.len() {
+            let Piece { purpose, share, recognized, .. } = self.scratch.pieces[at];
+            let Some(purpose) = purpose else { continue };
+            let amount = match share {
+                Share::Whole => m.out,
+                Share::Part(qty) => Amount::new(qty, m.out.unit),
+            };
+            let purpose_on = Occasion { purpose: Some(purpose), amount: Some(amount), over: recognized, ..*on };
+            self.fire_as(&book.rules.purposes[purpose.purpose], &purpose_on, Some(Subject::Entity(m.owner)));
+            if let Some(Object::Asset(asset)) = purpose.of {
+                let place = book.assets[asset].place;
+                self.fire(&book.rules.about[place], &purpose_on);
+            }
         }
     }
 
@@ -158,11 +178,26 @@ impl Ledger<'_, '_, '_> {
                 self.world.totals.record_contract(watch, contract, m.day, m.recognized, dir, amount);
             }
         }
+    }
 
-        if let Some(purpose) = m.purpose.map(|purpose| purpose.purpose).filter(|&purpose| watch.reads_purpose(purpose))
-        {
-            if let Some((dir, amount)) = self.purpose_flow(m, purpose) {
-                self.world.totals.record_purpose(watch, m.owner, purpose, (m.day, m.recognized), dir, amount);
+    /// Counts what the flow is worth to the purposes some law reads, as `recognition` says it counts: in full when it
+    /// moved, nothing when it only made a claim, and the claims' purposes for what it settled. The pieces stay in
+    /// `scratch.pieces` for the laws that fire on them.
+    fn count_purposes(&mut self, m: &Motion, claiming: Option<&Claiming>) {
+        let dealing = match claiming {
+            Some(claiming) => claiming.dealing(m.out.qty),
+            None if self.plan.makes_claim(m.from, m.to) => Dealing::Making,
+            None => Dealing::Ordinary,
+        };
+        Counting::moving(self.plan, m, dealing).pieces(self.plan.book, &mut self.scratch.pieces);
+        let watch = &self.plan.watch;
+        for at in 0..self.scratch.pieces.len() {
+            let piece = self.scratch.pieces[at];
+            let Some(purpose) = piece.purpose.map(|purpose| purpose.purpose).filter(|&p| watch.reads_purpose(p)) else {
+                continue;
+            };
+            if let Some((dir, amount)) = self.purpose_flow(m, piece, purpose) {
+                self.world.totals.record_purpose(watch, m.owner, purpose, (m.day, piece.recognized), dir, amount);
             }
         }
     }
@@ -170,17 +205,27 @@ impl Ledger<'_, '_, '_> {
     /// The sign of a purpose follows value crossing the owner's boundary.
     /// The written flow direction is what matters here: paying an expense from
     /// a card is an outflow, and a refund from that expense into the card is an
-    /// inflow. The debt balance's display sign must not reverse that meaning.
-    fn purpose_flow(&mut self, m: &Motion, purpose: axiom_core::Id<axiom_model::Purpose>) -> Option<(Dir, Qty)> {
-        let (source_owned, target_owned) = (
-            m.source.owner == m.owner && m.source.class != Class::Outside,
-            m.target.owner == m.owner && m.target.class != Class::Outside,
-        );
-        let root = self.plan.book.purposes[purpose].root;
-        let direction = crate::purpose_direction(source_owned, target_owned, root)?;
-        let amount = match direction {
+    /// inflow. The debt balance's display sign must not reverse that meaning. A piece that is a claim settled counts
+    /// the way the claim did, whatever the payment's own ends say.
+    fn purpose_flow(&mut self, m: &Motion, piece: Piece, purpose: Id<Purpose>) -> Option<(Dir, Qty)> {
+        let direction = match piece.counts {
+            Counts::Claim { dir, .. } => dir,
+            Counts::Flow => {
+                let (source_owned, target_owned) = (
+                    m.source.owner == m.owner && m.source.class != Class::Outside,
+                    m.target.owner == m.owner && m.target.class != Class::Outside,
+                );
+                let root = self.plan.book.purposes[purpose].root;
+                crate::purpose_direction(source_owned, target_owned, root)?
+            }
+        };
+        let side = match direction {
             Dir::Out => m.out,
             Dir::In => m.arrive,
+        };
+        let amount = match piece.share {
+            Share::Whole => side,
+            Share::Part(qty) => Amount::new(qty, side.unit),
         };
         self.base_value(m, amount).map(|amount| (direction, amount))
     }
@@ -1033,6 +1078,11 @@ impl Ledger<'_, '_, '_> {
     /// reported once per commodity: the first day it is missing, which is
     /// before the first price, since a price stands until the next.
     pub(crate) fn base_value(&mut self, m: &Motion, amount: Amount) -> Option<Qty> {
+        self.base_value_on((m.day, m.loc), amount)
+    }
+
+    /// `amount` in the base currency on `day`, a price missing then being said at `loc`.
+    pub(crate) fn base_value_on(&mut self, (day, loc): (Day, Loc), amount: Amount) -> Option<Qty> {
         let book = self.plan.book;
         if amount.unit == book.base {
             return Some(amount.qty);
@@ -1040,13 +1090,13 @@ impl Ledger<'_, '_, '_> {
         if let Some(&(_, worth)) = self.scratch.worth.iter().find(|&&(seen, _)| seen == amount) {
             return worth;
         }
-        let value = book.convert(amount, book.base, m.day).map(|priced| priced.qty);
+        let value = book.convert(amount, book.base, day).map(|priced| priced.qty);
         self.scratch.worth.push((amount, value));
         if value.is_none() && self.record.missing.insert(Missing::Price(amount.unit, book.base)) {
             let fault = Fault::NoPrice { unit: amount.unit, quote: book.base };
-            let (what, help) = show::fault(book, fault, m.day);
+            let (what, help) = show::fault(book, fault, day);
             let mut d =
-                Diagnostic::error("no-price", what).label(m.loc, format!("needed to value {}", book.show(amount)));
+                Diagnostic::error("no-price", what).label(loc, format!("needed to value {}", book.show(amount)));
             if let Some(help) = help {
                 d = d.help(help);
             }

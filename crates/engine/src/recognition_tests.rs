@@ -76,7 +76,6 @@ const INVOICE: &str = "2026-01-02 ann owes me 300 USD due 2026-02-01 #design ^i1
 // ─── Cash books: a claim counts when it is settled ──────────────────────────
 
 #[test]
-#[ignore = "K3d phase B: the making of a claim counts its purpose whatever the books say"]
 fn a_claim_made_with_a_purpose_counts_nothing_in_cash_books() {
     with("cash", INVOICE, |book, run| {
         assert_eq!(counted(book, run, "receipts"), []);
@@ -85,7 +84,6 @@ fn a_claim_made_with_a_purpose_counts_nothing_in_cash_books() {
 }
 
 #[test]
-#[ignore = "K3d phase B: a payment counts as the payment says, and the claim's purpose not at all"]
 fn its_payment_counts_the_claims_purpose_on_the_day_it_settles_it() {
     let lines = format!("{INVOICE}2026-01-20 ann -> checking 300 USD ^i1\n");
     with("cash", &lines, |book, run| {
@@ -95,7 +93,6 @@ fn its_payment_counts_the_claims_purpose_on_the_day_it_settles_it() {
 }
 
 #[test]
-#[ignore = "K3d phase B: the payment is counted whole under its own purpose"]
 fn a_payment_that_says_the_claims_purpose_is_counted_once() {
     let lines = format!("{INVOICE}2026-01-20 ann -> checking 300 USD #design ^i1\n");
     with("cash", &lines, |book, run| {
@@ -108,7 +105,6 @@ fn a_payment_that_says_the_claims_purpose_is_counted_once() {
 }
 
 #[test]
-#[ignore = "K3d phase B: the whole payment counts under its own purpose"]
 fn what_a_payment_does_not_settle_counts_as_the_payment_says() {
     let lines = format!("{INVOICE}2026-01-20 ann -> checking 500 USD #retail\n");
     with("cash", &lines, |book, run| {
@@ -118,7 +114,6 @@ fn what_a_payment_does_not_settle_counts_as_the_payment_says() {
 }
 
 #[test]
-#[ignore = "K3d phase B: a settled claim counts nothing of its own purpose"]
 fn each_purpose_of_an_itemized_claim_counts_what_its_line_was() {
     let lines = "\
 2026-01-02 ann owes me due 2026-02-01 ^i1
@@ -133,7 +128,6 @@ fn each_purpose_of_an_itemized_claim_counts_what_its_line_was() {
 }
 
 #[test]
-#[ignore = "K3d phase B: a flow out of a claim place is an internal transfer, which counts nothing"]
 fn a_flow_out_of_a_claim_place_settles_it_too() {
     let lines = "\
 2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
@@ -163,7 +157,6 @@ fn a_claim_with_no_purpose_has_no_recognition_to_wait_for() {
 // ─── Accrual books: a claim counts when it is made ──────────────────────────
 
 #[test]
-#[ignore = "K3d phase B: the payment counts the purpose again"]
 fn a_claim_counts_when_it_is_made_in_accrual_books_and_its_payment_counts_nothing() {
     let lines = format!("{INVOICE}2026-01-20 ann -> checking 300 USD #design ^i1\n");
     with("accrual", &lines, |book, run| {
@@ -173,7 +166,6 @@ fn a_claim_counts_when_it_is_made_in_accrual_books_and_its_payment_counts_nothin
 }
 
 #[test]
-#[ignore = "K3d phase B: a write-off reverses nothing"]
 fn a_write_off_reverses_in_accrual_books_what_the_claim_recognized() {
     let lines = format!(
         "{INVOICE}2026-01-20 ann -> checking 100 USD ^i1\n2026-02-15 ^i1 waived \"not collected\"\n2026-03-01 ann -> checking 50 USD #design\n"
@@ -191,16 +183,18 @@ fn a_write_off_reverses_in_accrual_books_what_the_claim_recognized() {
 // ─── A payment that is returned, and a leg that is the owner's cost ─────────
 
 #[test]
-#[ignore = "K3d phase B: a returned payment does not take back what its claim counted"]
 fn a_payment_that_is_returned_takes_back_what_it_counted_in_cash_books() {
-    let lines = format!("{INVOICE}2026-01-20 ann -> checking 300 USD ^pay-1\n2026-01-25 ^pay-1 returned\n");
+    let lines = format!(
+        "{INVOICE}2026-01-20 ann -> checking 300 USD ^pay-1\n2026-01-25 ^pay-1 returned\n2026-02-01 ann -> checking 50 USD #design\n"
+    );
+    // The purpose's total was 300.00 when the payment settled the claim, and 0.00 when it bounced (a law that counts zero
+    // records nothing), so what the next flow finds is its own 50.00.
     with("cash", &lines, |book, run| {
-        assert_eq!(counted(book, run, "running"), [on("2026-01-20", 300_00), on("2026-01-25", 0)]);
+        assert_eq!(counted(book, run, "running"), [on("2026-01-20", 300_00), on("2026-02-01", 50_00)]);
     });
 }
 
 #[test]
-#[ignore = "K3d phase B: the legs of the payment count their own purposes, and the claim is counted twice over"]
 fn the_fee_leg_counts_its_own_purpose_and_the_claim_its_own() {
     let lines = "\
 2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1

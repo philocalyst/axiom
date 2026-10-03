@@ -1,25 +1,26 @@
 //! Making a claim of what a party owed and nothing kept, and forgiving a claim: `^code waived`.
 //!
 //! A due day that is missed (`monitor`) and that the party owed is a claim on it: the occurrence's header, paid into the
-//! tab the owner keeps with the party, on the day it was found missing, with no purpose, so that nothing is recognized by
-//! it that `books cash|accrual` has not said (nothing reads it yet). A later payment from the party settles it as any
-//! payment does (`settle`: by code, then the exact amount, then the oldest). What the owner owes is not made a claim here:
+//! tab the owner keeps with the party, on the day it was found missing, with no purpose: a claim with no purpose has no
+//! recognition (`recognition`), so what pays it counts as the payment says. A later payment from the party settles it as
+//! any payment does (`settle`: by code, then the exact amount, then the oldest). What the owner owes is not made a claim here:
 //! a debt is a plain balance and a payment to the party does not settle it.
 //!
 //! A claim is a parcel in a claim place, so forgiving it is relief: every parcel the named transaction made is taken out
 //! of the place that holds it, and the value goes back to the place it came from, as if the party had never been paid
 //! into the claim. No money moves and no law watches it (a [`ClaimChange`] is "a source event that changes an
 //! already-open claim without inventing a monetary transaction"); what the owner holds falls by what was forgiven,
-//! and `claims`, `balance` and `overdue` see it because they read the parcels. What the claim recognized when it was
-//! made is not reversed: that depends on whether the books are cash or accrual, which nothing reads yet.
+//! and `claims`, `balance` and `overdue` see it because they read the parcels. In accrual books the claim recognized its
+//! purpose when it was made, and forgiving it takes that back (`take_back`); in cash books it recognized nothing yet.
 
-use axiom_core::{Day, Qty};
-use axiom_model::{Flow, Policy, RuntimeTxn, Select};
+use axiom_core::{Day, Days, Id, Qty};
+use axiom_model::{Amount, ClaimChange, Dir, Flow, Policy, RuntimeTxn, Select};
 
 use crate::explain;
 use crate::ledger::Ledger;
 use crate::lots::Request;
 use crate::motion::{Amounts, Motion};
+use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
 use crate::{Cause, Promise, WriteOff};
 
 impl Ledger<'_, '_, '_> {
@@ -51,18 +52,18 @@ impl Ledger<'_, '_, '_> {
     pub(crate) fn write_off(&mut self, at: u32) {
         let book = self.plan.book;
         let target = book.claim_changes[at as usize].target;
-        let made = book.flows[book.txns[target].flows].iter().filter(|flow| book.makes_claim(flow));
-        let forgiven: usize = made.map(|flow| self.forgive(at, flow)).sum();
+        let made = book.txns[target].flows.ids().filter(|&id| book.makes_claim(&book.flows[id]));
+        let forgiven: usize = made.map(|id| self.forgive(at, id)).sum();
         if forgiven == 0 {
             self.record.report(explain::empty_write_off(book, &book.claim_changes[at as usize]));
         }
     }
 
-    /// Takes the parcels the write-off `at` makes of one flow of the claim out of the place that flow paid into, gives
+    /// Takes the parcels the write-off `at` makes of one line of the claim out of the place that line paid into, gives
     /// their value back to the place it came from, and says how many parcels that was.
-    fn forgive(&mut self, at: u32, flow: &Flow) -> usize {
+    fn forgive(&mut self, at: u32, claim: Id<Flow>) -> usize {
         let book = self.plan.book;
-        let change = book.claim_changes[at as usize];
+        let (change, flow) = (book.claim_changes[at as usize], &book.flows[claim]);
         let (place, unit) = (flow.to, flow.arrive.unit);
         let made = [Select::Txn(change.target)];
         let open =
@@ -77,6 +78,7 @@ impl Ledger<'_, '_, '_> {
         let slices = &self.scratch.relief.slices;
         let rows = slices.iter().map(|s| WriteOff {
             change: at,
+            claim,
             place,
             unit,
             qty: s.qty,
@@ -84,6 +86,33 @@ impl Ledger<'_, '_, '_> {
             acquired: s.acquired,
         });
         self.record.written_off.extend(rows);
-        slices.len()
+        let parcels = slices.len();
+        self.take_back(change, flow, open);
+        parcels
+    }
+
+    /// What the claim recognized when it was made, in accrual books, is taken back by forgiving it: its purpose, the amount
+    /// forgiven, the other way round, on the day of the write-off. In cash books it recognized nothing yet. A law cannot
+    /// subtract what it counted (`count amount as receipts` adds), so no law fires on it and only the totals follow.
+    fn take_back(&mut self, change: ClaimChange, claim: &Flow, forgiven: Qty) {
+        let dealing = Dealing::Forgiving { tab: claim.to, qty: forgiven, dir: Dir::Out };
+        let books = self.plan.traits.entity(claim.owner).books;
+        let (day, recognized) = (change.day, Days::on(change.day));
+        let counting = Counting { books, purpose: claim.purpose, day, recognized, due: None, dealing };
+        counting.pieces(self.plan.book, &mut self.scratch.pieces);
+        self.scratch.worth.clear();
+        for at in 0..self.scratch.pieces.len() {
+            let Piece { purpose, share, counts, .. } = self.scratch.pieces[at];
+            let (Some(purposed), Share::Part(qty), Counts::Claim { dir, .. }) = (purpose, share, counts) else {
+                continue;
+            };
+            let watch = &self.plan.watch;
+            if !watch.reads_purpose(purposed.purpose) {
+                continue;
+            }
+            if let Some(value) = self.base_value_on((day, change.loc), Amount::new(qty, claim.arrive.unit)) {
+                self.world.totals.record_purpose(watch, claim.owner, purposed.purpose, (day, recognized), dir, value);
+            }
+        }
     }
 }

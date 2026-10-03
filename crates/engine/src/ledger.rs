@@ -358,7 +358,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let mut headroom = std::mem::take(&mut self.record.passed);
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading));
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
-        let Ledger { plan, options, horizon, mut world, record, .. } = self;
+        let Ledger { plan, options, horizon, mut world, mut record, .. } = self;
+        record.settlements.sort_unstable_by_key(|&(flow, _)| flow);
         world.assets.expire_carries_through(horizon);
         let (assets, pending_carries) = world.assets.into_run_parts();
         Run {
@@ -370,6 +371,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             effects: record.effects,
             adjustments: record.adjustments,
             written_off: record.written_off,
+            settlements: record.settlements.into(),
             pending_carries,
             violations: record.violations,
             headroom,

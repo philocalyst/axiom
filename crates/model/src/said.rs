@@ -9,7 +9,7 @@ use axiom_core::tagless::Field;
 use axiom_core::{Day, DaySet, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Book, Class, Commodity, Entity, Kind, Place, Purpose, System};
+use crate::book::{Basis, Book, Books, Class, Commodity, Entity, Kind, Place, Purpose, System};
 use crate::builtin::{self, Coded};
 use crate::holders::Holder;
 use crate::journal::Flow;
@@ -146,6 +146,12 @@ impl Book<'_> {
         let own = self.fact(builtin::CURRENCY, entity);
         let residence = || self.residences(entity).find_map(|(_, system)| self.systems[system].currency);
         own.or_else(residence).unwrap_or(self.base)
+    }
+
+    /// When the claims of an entity count as income or spending: what it says (`books accrual`), else what its kinds
+    /// say, else [`Books::default`].
+    pub fn books(&self, entity: Id<Entity>) -> Books {
+        self.fact(builtin::BOOKS, entity).and_then(Books::decode).unwrap_or_default()
     }
 
     /// How a commodity grows, a year at a time, where it says.

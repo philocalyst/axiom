@@ -316,9 +316,9 @@ pub struct Entity {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Books {
     /// When it is settled.
-    #[default]
     Cash,
-    /// When it is due.
+    /// When it is made (LANGUAGE section 7: "when invoiced").
+    #[default]
     Accrual,
 }
 
@@ -1459,6 +1459,12 @@ impl<'s> Book<'s> {
         let (id, flow) = flows.ids().map(|id| (id, &self.flows[id])).find(|(_, flow)| flow.to == place)?;
         let (due, ordinal) = (self.flow_view(flow).detail().due, (id.index() - flows.start().index()) as u32);
         Some(Claim { payee: flow.payee, due, from: flow.from, loc: flow.loc, source: Some(id), ordinal })
+    }
+
+    /// The flow a written transaction made as its `ordinal`th: for a claim, the line that says what it is for.
+    pub fn txn_flow(&self, txn: RuntimeTxn, ordinal: u32) -> Option<&Flow> {
+        let flows = self.txns.get(txn.source_txn()?)?.flows;
+        (ordinal < flows.len()).then(|| &self.flows[Id::new(flows.start().index() as u32 + ordinal)])
     }
 
     /// `1,234.56 USD`

@@ -671,8 +671,13 @@ contract job with lumen
   leg on. A party that pays only someone else settles nothing of the owner's.
 - A claim's purpose is its recognition: an invoice is income when invoiced in
   accrual books, when settled in cash books (the owner's `books cash|accrual`,
-  default cash). A claim `waived` is forgiven; in accrual books what was recognized
-  is reversed.
+  default cash). In cash books a claim counts nothing when it is made, and what
+  settles it counts as the claim's purpose, each line of an invoice as its own,
+  and what remains of the payment as the payment says; in accrual books the claim
+  counts when it is made and what settles it counts nothing. A claim with no
+  purpose has no recognition to wait for. A claim `waived` is forgiven; in accrual
+  books what was recognized is reversed, in the totals a purpose keeps (a law that
+  counted it keeps what it counted).
 - `claims` lists what is open, with age, due day and whom it blames; `check` warns
   on what is past due; `available` counts claims as coming in, never as money to
   spend.
