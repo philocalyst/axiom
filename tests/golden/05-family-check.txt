@@ -540,6 +540,28 @@ error[assertion]: joint-checking holds 44,715.14 USD, not 36,838.99 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 84 + 2025-12-31 joint-checking = 36_838.99 USD !
 
+warning[missed-occurrence]: `mortgage-payment` was due 3 times and no occurrence was written (the last on 2026-03-01)
+  ╭─[contracts.ax:5:1]
+  │
+5 │ contract mortgage-payment with lender
+  │ ──────────────────┬──────────────────
+  │                   ╰── last due 46 days ago, on 2026-03-01
+  │
+  = note: not kept: 2026-01-01, 2026-02-01, 2026-03-01
+  = help: write what happened: `2026-03-01 mortgage-payment`, with its own amount if it was another
+  = help: or say it was not owed: `2026-03-01 mortgage-payment waived`
+
+warning[missed-occurrence]: `car-payment` was due 3 times and no occurrence was written (the last on 2026-03-05)
+   ╭─[contracts.ax:12:1]
+   │
+12 │ contract car-payment with honda-finance
+   │ ───────────────────┬───────────────────
+   │                    ╰── last due 42 days ago, on 2026-03-05
+   │
+   = note: not kept: 2026-01-05, 2026-02-05, 2026-03-05
+   = help: write what happened: `2026-03-05 car-payment`, with its own amount if it was another
+   = help: or say it was not owed: `2026-03-05 car-payment waived`
+
 note[nonqualified-529-penalty]: 20.67 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
    ╭─[journal/2025/10.ax:42:1]
    │
@@ -603,4 +625,4 @@ note[nonqualified-hsa-penalty]: waived: 124.00 USD would be owed to irs as nonqu
            somewhere other than a place of kind `medical`, so it is priced at that 20%.
    = note: waived: reimburses 2025-05-09 dentist, receipt kept
 
-✗ 141 errors · 2 priced · 1 waived
+✗ 141 errors · 2 warnings · 2 priced · 1 waived

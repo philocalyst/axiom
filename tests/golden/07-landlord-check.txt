@@ -29,7 +29,7 @@ error[contract-occurrence-date]: this day is outside every contract schedule's g
    │          ╰── no active scheduled occurrence is close enough to this date
    │
    = note: also at journal/2025/02.ax:16, journal/2025/03.ax:17, journal/2025/04.ax:14,
-           journal/2025/05.ax:11, … (7 more)
+           journal/2025/05.ax:11, … (8 more)
 
 error[assertion]: checking holds 17,309.20 USD, not 23,482.20 USD
    ╭─[journal/2025/01.ax:18:1]
@@ -628,6 +628,45 @@ error[assertion]: lender holds 2,717.95 USD, not 0.00 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 36 + 2025-12-31 home-loan = empty !
 
+error[assertion]: rental-bank holds 354.60 USD, not 0.00 USD
+   ╭─[journal/2025/12.ax:38:1]
+   │
+21 │ 2025-12-29 buyer -> rental-bank 431_500 USD #sale of house
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── +431,500.00 USD from buyer
+22 │   - 26_968.75 USD #selling-cost of house
+   │   ───────────────────┬──────────────────
+   │                      ╰── -26,968.75 USD to buyer
+23 │ 2025-12-29 rental-bank -> home-loan 276_282.05 USD ^loan
+   │ ────────────────────────────┬───────────────────────────
+   │                             ╰── -276,282.05 USD to lender
+24 │ 2025-12-29 rental-bank -> buyer 2_500 USD #deposit of house
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── -2,500.00 USD to buyer
+   ⋮
+29 │ 2025-12-29 rental-bank -> lender 1_450.48 USD #interest of house
+   │ ────────────────────────────────┬───────────────────────────────
+   │                                 ╰── -1,450.48 USD to lender
+   ⋮
+32 │ 2025-12-29 deposit-bank -> rental-bank 2_500 USD #transfer
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── +2,500.00 USD from deposit-bank
+   ⋮
+35 │ 2025-12-29 rental-bank -> checking 129_981.33 USD #transfer
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── -129,981.33 USD to checking
+   ⋮
+38 │ 2025-12-31 rental-bank = 0.00 USD
+   │ ────────────────┬────────────────
+   │                 ╰── another 200.00 USD less than the ledger holds
+   │
+   = note: the 154.60 USD gap reported at an earlier assertion is carried; only what is new is
+           explained here
+   = note: 200.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+38 + 2025-12-31 rental-bank = 0.00 USD !
+
 error[assertion]: checking holds 99,790.60 USD, not 173,866.60 USD
    ╭─[journal/2025/12.ax:39:1]
    │
@@ -663,4 +702,26 @@ error[assertion]: checking holds 99,790.60 USD, not 173,866.60 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 39 + 2025-12-31 checking = 173_866.60 USD !
 
-✗ 44 errors
+warning[missed-occurrence]: `home-loan` was due 3 times and no occurrence was written (the last on 2026-03-01)
+   ╭─[contracts.ax:24:1]
+   │
+24 │ contract home-loan with lender
+   │ ───────────────┬──────────────
+   │                ╰── last due 46 days ago, on 2026-03-01
+   │
+   = note: not kept: 2026-01-01, 2026-02-01, 2026-03-01
+   = help: write what happened: `2026-03-01 home-loan`, with its own amount if it was another
+   = help: or say it was not owed: `2026-03-01 home-loan waived`
+
+warning[missed-occurrence]: `manager-fee` was due on 2025-10-05 and no occurrence was written
+   ╭─[contracts.ax:31:1]
+   │
+31 │ contract manager-fee with hartwell-pm
+   │ ──────────────────┬──────────────────
+   │                   ╰── last due 193 days ago, on 2025-10-05
+   │
+   = note: not kept: 2025-10-05
+   = help: write what happened: `2025-10-05 manager-fee`, with its own amount if it was another
+   = help: or say it was not owed: `2025-10-05 manager-fee waived`
+
+✗ 46 errors · 2 warnings
