@@ -11,8 +11,8 @@
     claims.py verdict DIR TAG old|new   what a build says of the claims, against the reference for the old or the new rules
     claims.py cover DIR                 what the projects hold
     claims.py mutate TREE WORK DIR [N,M..]
-                                        the mutants of lane K3c's code: each is built and must be caught by the verdict
-                                        or by `compare` against the baseline
+                                        the mutants of lanes K3c's and K3d's code: each is built and must be caught by the
+                                        verdict or by `compare` against the baseline
 
 What it is for. Lane K3c changes how a claim is settled and ends: `exact` is a relief policy and a claim place relieves by
 it, the codes of a flow name the claims it settles, `waived` forgives a claim, a tab is a claim by its kind. Everything else
@@ -25,7 +25,9 @@ with a little noise (ordinary flows) between its lines:
 
     tab      claims on parties (`ann owes me 300 USD due ... ^i1`, some itemized), paid by the party (`ann -> checking 300
              USD ^p1`, with a claim's code or `[^code]` or neither, of the claim's size, half of it, or more than all of
-             them), some payments returned, and written off on later days, some twice
+             them), some of the payments written as a split with a leg to a third party (`ann -> 300 USD` with the legs
+             `checking 280 USD` and `stripe 20 USD`, in either order), some payments to a third party and splits that
+             reach no owner, some payments returned, and claims written off on later days, some twice
     place    claims in a declared claim place (`ann -> owed 300 USD due ... #design ^i1`), settled by flows out of it: plain,
              with a code of its own that names a claim or none, with a written `[^code]` or `[day]`, equal amounts, larger
              than any claim, more than all of them; and written off
@@ -36,13 +38,16 @@ with a little noise (ordinary flows) between its lines:
     mixed    a claim family with a lots family beside it
 
 The reference simulates the book it wrote: the claims it made, in the order the fold reaches them (a day's movements in the
-order written, then its write-offs), and what each rule leaves open. It has two sets of rules. `old` is the engine at 36ead82:
+order written, then its write-offs), and what each rule leaves open. It has three sets of rules. `old` is the engine at 36ead82:
 a written `[^code]` or `[day]` filters, then the commodity's policy (FIFO for a currency, FIFO in effect for any other), a
 flow's own codes are labels, a payment from a party settles nothing, `waived` does nothing, and a write-off in a declared
-place is refused. `new` is LANGUAGE §7:
-a written selector filters, else the codes of the flow that some claim carries name the claims it may settle, then the exact
-amount, then the oldest, for a flow out of a claim place and for a payment from a party alike, and a returned payment
-opens what it settled; `waived` forgives what is open; and warns when nothing is.
+place is refused. `k3c` is lane K3c's (the engine at 368e5e8): a written selector filters, else the codes of the flow that some
+claim carries name the claims it may settle, then the exact amount, then the oldest, for a flow out of a claim place and for a
+payment from a party alike, a returned payment opens what it settled, and `waived` forgives what is open and warns when nothing
+is; of a payment written as a split, only the legs that reach the owner settle, each by its own amount. `new` is lane K3d's
+(LANGUAGE §7 for a payment in all): the legs of a statement that pay the owner, and those that pay a third party beside them, are
+one payment, each settling in its turn, "exactly the flow's" being what the party still pays from that leg on; a statement that
+pays no owner settles nothing.
 """
 import calendar
 import datetime
@@ -65,12 +70,19 @@ PROFILE = "opt-level = 1\ncodegen-units = 16\nincremental = true"
 TODAY = "2026-06-30"
 REPORTS = ["check", "balance", "lots", "claims", "gains", "available"]
 
+# What a book that does not say means by `books`: the build under test says (K3d's first commit, accrual; its flip, cash).
+DEFAULT_BOOKS = os.environ.get("CLAIMS_DEFAULT_BOOKS", "accrual")
+
+# What each purpose's law counts, by tally.
+TALLIES = {"design": "receipts", "retail": "retail-receipts"}
+
 PRELUDE = """use std
 base USD
 entity me : person
-entity ann : org
+{books}entity ann : org
 entity bob : org
 entity cy : org
+entity stripe : org
 entity pge : org
 entity bank : org
 entity seller : org
@@ -83,6 +95,13 @@ kind fifo-claim : asset
   claim
   select fifo
 purpose design : income
+  law receipts
+    on flow
+    count amount as receipts
+purpose retail : income
+  law retail-receipts
+    on flow
+    count amount as retail-receipts
 purpose shopping : spending
 account checking : bank
 account owed : receivable
@@ -125,19 +144,42 @@ def amount(n):
 
 
 class Parcel:
-    def __init__(self, code, qty, when, order):
-        self.code, self.qty, self.when, self.order = code, qty, when, order
+    """A claim: its lines (an itemized invoice has several), each with what it was made for, taken in order."""
+
+    def __init__(self, code, lines, when, order):
+        self.code, self.lines, self.when, self.order = code, [list(line) for line in lines], when, order
+
+    @property
+    def qty(self):
+        return sum(qty for qty, _ in self.lines)
+
+    def take(self, wanted):
+        """Takes `wanted` from the first lines that have it: (line, purpose, quantity) for each."""
+        taken = []
+        for at, line in enumerate(self.lines):
+            part = min(line[0], wanted)
+            if part > 0:
+                line[0] -= part
+                wanted -= part
+                taken.append((at, line[1], part))
+        return taken
+
+    def restore(self, taken):
+        for at, _, part in taken:
+            self.lines[at][0] += part
 
 
 class Sim:
     """The claims a book makes and what each set of rules leaves open of them.
 
-    `rules` is `old` or `new`. A place is `fifo` when its kind says so (`queue`), else it is `exact` under the new rules and
-    the commodity's FIFO under the old ones. `plain` is what a place holds beyond its parcels: negative where a flow took
+    `rules` is `old`, `k3c` or `new`; the last two differ only in what a split payment settles. A place is `fifo` when its
+    kind says so (`queue`), else it is `exact` under the later rules and the commodity's FIFO under the old ones. `plain` is what a place holds beyond its parcels: negative where a flow took
     more than the claims held."""
 
-    def __init__(self, rules):
+    def __init__(self, rules, books="accrual"):
         self.rules = rules
+        self.books = books
+        self.modern = rules != "old"
         self.places = {}
         self.plain = Counter()
         self.empty = 0
@@ -146,67 +188,86 @@ class Sim:
         self.unit = {}
         self.forgiven = Counter()
         self.paid = {}
+        self.fired = {}
+        self.counted = []
 
-    def make(self, place, code, qty, when, order, unit="USD"):
-        self.places.setdefault(place, []).append(Parcel(code, qty, when, order))
+    def make(self, place, code, lines, when, order, unit="USD"):
+        self.places.setdefault(place, []).append(Parcel(code, lines, when, order))
         self.unit[place] = unit
 
     def live(self, place):
         return sorted((p for p in self.places.get(place, []) if p.qty > 0), key=lambda p: (p.when, p.order))
 
     def settle(self, place, need, select=None, tail=()):
+        """A flow out of a claim place; says what it took, by the purpose of each line: [(purpose, quantity)]."""
         live = self.live(place)
         candidates, filtered = live, select is not None
         if select is not None:
             kind, value = select
             candidates = [p for p in live if (p.code == value if kind == "code" else p.when == value)]
-        elif self.rules == "new" and tail:
+        elif self.modern and tail:
             named = [p for p in live if p.code in tail]
             candidates, filtered = (named, True) if named else (live, False)
-        exact = self.rules == "new" and place != "queue"
+        exact = self.modern and place != "queue"
         ordered = sorted(candidates, key=lambda p: (p.qty != need, p.when, p.order)) if exact else candidates
         if self.rules == "old" and self.unit.get(place) == "BOX" and not filtered:
             total = sum(p.qty for p in live)
             self.ambiguous |= len(live) > 1 and need < total and len({p.qty for p in live}) > 0
-        left = need
+        left, taken = need, []
         for parcel in ordered:
-            take = min(parcel.qty, left)
-            parcel.qty -= take
-            left -= take
+            took = parcel.take(min(parcel.qty, left))
+            left -= sum(part for _, _, part in took)
+            taken += [(purpose, part) for _, purpose, part in took]
             if not left:
                 break
         self.plain[place] -= left
+        return taken
 
-    def pay(self, party, need, select, tail, label):
-        """A payment from `party`: under the new rules it settles the claims on the party, as far as they go, and what
-        remains is an ordinary flow; under the old a payment from a party settled nothing."""
+    def pay(self, party, legs, select, tail, label):
+        """A payment from `party`, written as `legs` ((`owner` | `third`, quantity, purpose) in the order written): under the
+        later rules it settles the claims on the party, as far as they go, and what remains is an ordinary flow; under the old a
+        payment from a party settled nothing. Under `k3c` the legs that reach the owner each settle by their own amount;
+        under `new` the legs that reach the owner and those that pay someone else beside them are one payment, each leg
+        settling in its turn and "exactly the flow's" being what the party still pays from it on. Says what each leg took
+        of the claims, by the purpose of each line."""
         if self.rules == "old":
-            return
+            return [(kind, qty, purpose, []) for kind, qty, purpose in legs]
         place = "tab:" + party
-        live = self.live(place)
-        candidates = live
-        if select is not None:
-            kind, value = select
-            candidates = [p for p in live if (p.code == value if kind == "code" else p.when == value)]
-        elif tail:
-            named = [p for p in live if p.code in tail]
-            candidates = named or live
-        need = min(need, sum(p.qty for p in candidates))
-        ordered = sorted(candidates, key=lambda p: (p.qty != need, p.when, p.order))
-        taken, left = [], need
-        for parcel in ordered:
-            take = min(parcel.qty, left)
-            if take:
-                parcel.qty -= take
-                left -= take
-                taken.append((parcel, take))
-            if not left:
-                break
+        in_all = self.rules == "new" and any(kind == "owner" for kind, _, _ in legs)
+        rest = sum(qty for kind, qty, _ in legs if kind == "owner" or in_all)
+        taken, settled = [], []
+        for kind, qty, purpose in legs:
+            if kind != "owner" and not in_all:
+                settled.append((kind, qty, purpose, []))
+                continue
+            live = self.live(place)
+            candidates = live
+            if select is not None:
+                how, value = select
+                candidates = [p for p in live if (p.code == value if how == "code" else p.when == value)]
+            elif tail:
+                named = [p for p in live if p.code in tail]
+                candidates = named or live
+            open_ = sum(p.qty for p in candidates)
+            need = min(qty, open_)
+            exact = min(open_, rest) if self.rules == "new" else need
+            ordered = sorted(candidates, key=lambda p: (p.qty != exact, p.when, p.order))
+            left, leg = need, []
+            for parcel in ordered:
+                took = parcel.take(min(parcel.qty, left))
+                left -= sum(part for _, _, part in took)
+                leg += [(purpose, part) for _, purpose, part in took]
+                taken.append((parcel, took))
+                if not left:
+                    break
+            rest -= qty
+            settled.append((kind, qty, purpose, leg))
         self.paid[label] = taken
+        return settled
 
     def give_back(self, label):
-        for parcel, qty in self.paid.pop(label, []):
-            parcel.qty += qty
+        for parcel, took in self.paid.pop(label, []):
+            parcel.restore(took)
 
     def write_off(self, code, declared):
         if declared and self.rules == "old":
@@ -219,7 +280,7 @@ class Sim:
             self.empty += 1
         for p in found:
             self.forgiven[code] += p.qty
-            p.qty = 0
+            p.take(p.qty)
 
     def open(self):
         left = Counter()
@@ -229,27 +290,68 @@ class Sim:
                     left[p.code] += p.qty
         return left
 
+    # What the purposes' laws counted: the recognition of LANGUAGE §7. Each count is (tally, day, quantity).
 
-def run_events(events, rules):
+    def count(self, day, purpose, qty):
+        if purpose in TALLIES and qty > 0:
+            self.counted.append((TALLIES[purpose], str(day), qty))
+
+    def recognizes(self, day, claims):
+        """The claims a flow settled, counted as their purposes in cash books: one piece for each purpose."""
+        if self.rules == "new" and self.books == "cash":
+            for purpose in dict.fromkeys(purpose for purpose, _ in claims):
+                self.count(day, purpose, sum(part for found, part in claims if found == purpose))
+
+    def made(self, day, lines):
+        """A claim made: counted when it is made, but in cash books after the later rules."""
+        if self.rules != "new" or self.books == "accrual":
+            for qty, purpose in lines:
+                self.count(day, purpose, qty)
+
+    def paid_by(self, day, legs):
+        """What a payment counted, leg by leg: its own purpose for what it moved, less what the claims it settled were when
+        it reached the owner, and the claims' purposes in cash books. Says the pieces, for its return."""
+        pieces = []
+        for kind, qty, purpose, claims in legs:
+            before = len(self.counted)
+            replaced = kind == "owner" and self.rules == "new"
+            replaced = sum(part for found, part in claims if found in TALLIES) if replaced else 0
+            self.count(day, purpose, qty - replaced)
+            self.recognizes(day, claims)
+            pieces += self.counted[before:]
+        return pieces
+
+    def returned(self, label):
+        """A payment that is returned runs backwards, and what its laws count is counted again: on the days the payment
+        was recognized, which a return does not change."""
+        self.counted += self.fired.pop(label, [])
+
+
+def run_events(events, rules, books="accrual"):
     """The events of a claims project as the fold reaches them: by day, a day's movements in the order written, then its
     write-offs."""
-    sim = Sim(rules)
+    sim = Sim(rules, books)
     days = sorted({e["day"] for e in events})
     for d in days:
         today = [e for e in events if e["day"] == d]
         for e in (e for e in today if e["kind"] == "return"):
-            if rules == "new":
+            if rules != "old":
                 sim.give_back(e["label"])
+                sim.returned(e["label"])
         for e in (e for e in today if e["kind"] not in ("writeoff", "return")):
+            scale = 100 if e.get("unit", "USD") == "USD" else 1
             if e["kind"] == "make":
-                sim.make(e["place"], e["code"], e["qty"] * 100 if e["unit"] == "USD" else e["qty"], d, e["order"], e["unit"])
+                lines = [(qty * scale, purpose) for qty, purpose in e["lines"]]
+                sim.make(e["place"], e["code"], lines, d, e["order"], e["unit"])
+                sim.made(d, lines)
             elif e["kind"] == "pay":
                 select = tuple(e["select"]) if e.get("select") else None
-                sim.pay(e["party"], e["qty"] * 100, select, e.get("tail", ()), e["label"])
+                legs = [(kind, qty * 100, purpose) for kind, qty, purpose in e["legs"]]
+                settled = sim.pay(e["party"], legs, select, e.get("tail", ()), e["label"])
+                sim.fired[e["label"]] = sim.paid_by(d, settled)
             elif e["kind"] == "settle":
-                scale = 100 if e["unit"] == "USD" else 1
                 select = tuple(e["select"]) if e.get("select") else None
-                sim.settle(e["place"], e["qty"] * scale, select, e.get("tail", ()))
+                sim.recognizes(d, sim.settle(e["place"], e["qty"] * scale, select, e.get("tail", ())))
         for e in (e for e in today if e["kind"] == "writeoff"):
             sim.write_off(e["code"], e["declared"])
     return sim
@@ -267,6 +369,7 @@ class Book:
         self.rng, self.lines, self.events, self.forms = rng, [], [], Counter()
         self.order = 0
         self.codes = 0
+        self.books = rng.choice(["cash", "accrual", "cash", "accrual", None])
 
     def code(self, prefix="i"):
         self.codes += 1
@@ -285,7 +388,7 @@ class Book:
             self.add(day(self.rng), f"checking -> cy {n} USD #shopping")
 
     def render(self, extra=""):
-        out = PRELUDE + extra
+        out = PRELUDE.format(books=f"  books {self.books}\n" if self.books else "") + extra
         for d, _, line in sorted(self.lines, key=lambda l: (l[0], l[1])):
             out += f"{text(d)} {line}\n"
         return out
@@ -298,14 +401,21 @@ def tab_family(book):
         d, code, party = day(rng, 2, 100), book.code(), rng.choice(["ann", "bob", "cy"])
         due = d + datetime.timedelta(days=rng.choice([10, 30, 45]))
         qty = rng.choice(AMOUNTS)
+        purposes = ["design", "design", "retail", None]
         if rng.random() < 0.25:
-            first = rng.choice(AMOUNTS)
-            line = f"{party} owes me due {text(due)} ^{code}\n  {amount(first)} USD #design\n  {amount(qty)} USD #design"
+            first, kinds = rng.choice(AMOUNTS), [rng.choice(purposes), rng.choice(purposes)]
+            lines = [[first, kinds[0]], [qty, kinds[1]]]
+            tag = lambda purpose: f" #{purpose}" if purpose else ""
+            line = (f"{party} owes me due {text(due)} ^{code}\n  {amount(first)} USD{tag(kinds[0])}\n"
+                    f"  {amount(qty)} USD{tag(kinds[1])}")
             qty += first
             book.forms["itemized"] += 1
         else:
-            line = f"{party} owes me {amount(qty)} USD due {text(due)} ^{code}"
-        book.add(d, line, dict(kind="make", place="tab:" + party, code=code, qty=qty, unit="USD"))
+            kind = rng.choice(purposes)
+            lines = [[qty, kind]]
+            line = f"{party} owes me {amount(qty)} USD due {text(due)}{f' #{kind}' if kind else ''} ^{code}"
+            book.forms["claim with a purpose" if kind else "claim with no purpose"] += 1
+        book.add(d, line, dict(kind="make", place="tab:" + party, code=code, qty=qty, lines=lines, unit="USD"))
         claims.append((d, code, party, qty))
     for _ in range(rng.choice([0, 1, 1, 2, 3])):
         d0, code0, party, qty0 = rng.choice(claims)
@@ -327,12 +437,33 @@ def tab_family(book):
             book.forms["payment selects a claim"] += 1
         else:
             book.forms["payment from a party"] += 1
-        book.add(when, f"{party}{line_select} -> checking {amount(need)} USD{line_tail}",
-                 dict(kind="pay", party=party, qty=need, select=select, tail=tail, label=label))
+        own = rng.choice([None, None, "design", "retail"])
+        ptag = f" #{own}" if own else ""
+        legs, body = [["owner", need, own]], f" -> checking {amount(need)} USD{ptag}{line_tail}"
+        if rng.random() < 0.35 and need > 40:
+            fee = rng.choice([10, 20, 30])
+            legs = [["owner", need - fee, own], ["third", fee, "shopping"]]
+            if rng.random() < 0.3:
+                legs.reverse()
+            to = {"owner": lambda q: f"checking {amount(q)} USD", "third": lambda q: f"stripe {amount(q)} USD #shopping"}
+            body = f" -> {amount(need)} USD{ptag}{line_tail}" + "".join(f"\n  {to[kind](q)}" for kind, q, _ in legs)
+            book.forms["payment written as a split"] += 1
+        book.forms["payment with a purpose" if own else "payment with no purpose"] += 1
+        book.add(when, f"{party}{line_select}{body}",
+                 dict(kind="pay", party=party, legs=legs, select=select, tail=tail, label=label))
         if rng.random() < 0.25:
             book.add(when + datetime.timedelta(days=rng.randint(1, 10)), f"^{label} returned",
                      dict(kind="return", label=label))
             book.forms["payment returned"] += 1
+    if rng.random() < 0.25:
+        party, when, qty = rng.choice(["ann", "bob", "cy"]), day(rng, 60, 150), rng.choice([50, 200, 300])
+        elsewhere = "bob" if party != "bob" else "cy"
+        if rng.random() < 0.5:
+            book.add(when, f"{party} -> {elsewhere} {amount(qty)} USD #shopping")
+            book.forms["payment to a third party"] += 1
+        else:
+            book.add(when, f"{party} -> {amount(qty)} USD\n  {elsewhere} {amount(qty - 20)} USD #shopping\n  stripe 20 USD #shopping")
+            book.forms["split that reaches no owner"] += 1
     for d, code, _, _ in claims:
         if rng.random() < 0.45:
             when = d + datetime.timedelta(days=rng.choice([0, 0, 5, 20, 40]))
@@ -351,7 +482,7 @@ def place_family(book, place="owed", unit="USD", boxes=False):
         qty = rng.choice([5, 12, 12, 7] if boxes else AMOUNTS)
         tag = "" if boxes else " #design"
         book.add(d, f"{party} -> {place} {amount(qty)} {unit} due {text(due)}{tag} ^{code}",
-                 dict(kind="make", place=place, code=code, qty=qty, unit=unit))
+                 dict(kind="make", place=place, code=code, qty=qty, lines=[[qty, None if boxes else "design"]], unit=unit))
         made.append((d, code, qty))
     sink = "stockroom" if boxes else "checking"
     held = remaining = sum(q for _, _, q in made)
@@ -490,7 +621,7 @@ def project(seed, index):
         (tab_family if rng.random() < 0.5 else place_family)(book)
         lots_family(book)
     book.noise()
-    spec = dict(family=family, events=book.events)
+    spec = dict(family=family, events=book.events, books=book.books)
     return book.render(extra), spec, book.forms
 
 
@@ -633,6 +764,15 @@ def held(output):
     return open_, plain, forgiven, diagnostics, dump
 
 
+def effects_of(dump):
+    """What the purposes' laws counted: (tally, day, quantity) for each, as the dump says."""
+    found = Counter()
+    for tally, when, qty in re.findall(r"^effect (\S+) (\S+) (-?\d+)$", dump, re.M):
+        if tally in TALLIES.values():
+            found[(tally, when, int(qty))] += 1
+    return found
+
+
 def claims_view(output):
     """What `claims` lists as owed to you: the open quantity by code, as a reader of the report sees it."""
     said = section(output, "claims")
@@ -646,7 +786,7 @@ def claims_view(output):
 
 
 def expected(spec, rules):
-    sim = run_events(spec["events"], rules)
+    sim = run_events(spec["events"], rules, spec.get("books") or DEFAULT_BOOKS)
     open_ = sim.open()
     plain = Counter({place: v for place, v in sim.plain.items() if v})
     return sim, open_, plain
@@ -686,7 +826,7 @@ def check_one(path, output, rules, reports=True):
     claim_plain = Counter({p: v for p, v in plain.items() if v})
     if claim_plain != want_plain:
         failures.append(f"plain {dict(claim_plain)} wanted {dict(want_plain)}")
-    if rules == "new":
+    if rules != "old":
         if reports and +claims_view(output) != +want_open:
             failures.append(f"claims view {dict(+claims_view(output))} wanted {dict(+want_open)}")
         if diagnostics.get("claim-writeoff-empty", 0) != sim.empty:
@@ -697,6 +837,10 @@ def check_one(path, output, rules, reports=True):
             failures.append(f"forgiven basis {forgiven['basis']} wanted {forgiven['total']}")
         if diagnostics.get("ambiguous-lots", 0) and spec["family"] != "mixed":
             failures.append("a claim place is ambiguous")
+        if effects_of(dump) != Counter(sim.counted):
+            counted, wanted = effects_of(dump), Counter(sim.counted)
+            failures.append(f"counted {sorted((counted - wanted).items())} too much, "
+                            f"{sorted((wanted - counted).items())} too little ({spec.get('books')})")
     else:
         if (diagnostics.get("ambiguous-lots", 0) > 0) != sim.ambiguous and spec["family"] == "boxes":
             failures.append(f"ambiguity {diagnostics.get('ambiguous-lots', 0)} wanted {sim.ambiguous}")
@@ -719,7 +863,7 @@ def verdict(directory, tag, rules, show=5):
     return failed
 
 
-MOVES_WITH_CLAIMS = CLAIM_PLACES | {"ann", "bob", "cy", "market", "stockroom"}
+MOVES_WITH_CLAIMS = CLAIM_PLACES | {"ann", "bob", "cy", "stripe", "market", "stockroom"}
 
 
 def holding_blocks(dump):
@@ -756,9 +900,11 @@ def predicted_to_differ(spec):
     """Whether the two sets of rules leave a project in different states (so that the two builds should differ)."""
     if spec["family"] not in ("tab", "place", "boxes", "mixed"):
         return False
-    old, new = expected(spec, "old"), expected(spec, "new")
+    old, new = expected(spec, "k3c"), expected(spec, "new")
     differ = +old[1] != +new[1] or {p: v for p, v in old[2].items() if v} != {p: v for p, v in new[2].items() if v}
-    return differ or new[0].empty > 0 or old[0].refused > 0 or old[0].ambiguous
+    forgave = sum(old[0].forgiven.values()) != sum(new[0].forgiven.values())
+    counted = Counter(old[0].counted) != Counter(new[0].counted)
+    return differ or forgave or counted or old[0].empty != new[0].empty
 
 
 def may_differ(spec):
@@ -817,11 +963,11 @@ def cover(directory):
 # dump of the mutated tree fails the verdict for the new rules, or moves what no claim rule may move, or differs from the
 # baseline on a project that the references say is the same; or, failing that, when the tests of the crates fail.
 MUTANTS = [
-    ("crates/engine/src/lots.rs", "if held == req.need {", "if held >= req.need {", "exact takes a claim of at least the need"),
-    ("crates/engine/src/lots.rs", "(b.claim == need).cmp(&(a.claim == need)).then(a.source.cmp(&b.source))",
-     "(a.claim == need).cmp(&(b.claim == need)).then(a.source.cmp(&b.source))", "scanning puts the exact claims last"),
-    ("crates/engine/src/lots.rs", "(b.claim == need).cmp(&(a.claim == need)).then(a.source.cmp(&b.source))",
-     "(b.claim == need).cmp(&(a.claim == need)).then(b.source.cmp(&a.source))", "of equal claims the newest, when scanning"),
+    ("crates/engine/src/lots.rs", "if held == req.exact {", "if held >= req.exact {", "exact takes a claim of at least the need"),
+    ("crates/engine/src/lots.rs", "(b.claim == exact).cmp(&(a.claim == exact)).then(a.source.cmp(&b.source))",
+     "(a.claim == exact).cmp(&(b.claim == exact)).then(a.source.cmp(&b.source))", "scanning puts the exact claims last"),
+    ("crates/engine/src/lots.rs", "(b.claim == exact).cmp(&(a.claim == exact)).then(a.source.cmp(&b.source))",
+     "(b.claim == exact).cmp(&(a.claim == exact)).then(b.source.cmp(&a.source))", "of equal claims the newest, when scanning"),
     ("crates/engine/src/lots.rs", "            if policy == Some(Policy::Exact) {\n                self.take_exact(&mut left, of_colour, req, out);\n            }\n",
      "", "the ordered path never takes the exact lot"),
     ("crates/engine/src/lots.rs", "let held: Qty = self.holding.lots[at..end].iter().filter(|&lot| keep(lot)).map(|lot| lot.qty).sum();",
@@ -860,8 +1006,8 @@ MUTANTS = [
     ("crates/model/src/declare.rs", "        self.say(kinds.claim, builtin::CLAIM, true);\n", "", "the kind of a tab does not say `claim`"),
     ("crates/report/src/history.rs", "        && by(book.claim_changes.last().map(|change| change.day))\n", "",
      "a view dated before a write-off is the run's final state"),
-    ("crates/engine/src/settle.rs", "let money = m.target.class == Class::Asset && !self.plan.traits.place(m.to).claim;",
-     "let money = m.target.class == Class::Asset;", "a flow that makes a claim settles the claims before it"),
+    ("crates/engine/src/settle.rs", "if m.target.class == Class::Asset && !self.plan.traits.place(m.to).claim {",
+     "if m.target.class == Class::Asset {", "a flow that makes a claim settles the claims before it"),
     ("crates/engine/src/settle.rs", "let need = open.min(m.out.qty);", "let need = open;", "a payment settles more than it paid"),
     ("crates/engine/src/settle.rs", "let named = self.name_claims(m, tab);", "let named = false;",
      "the codes of a payment from a party name no claim"),
@@ -869,8 +1015,24 @@ MUTANTS = [
      "a returned payment does not open its claims"),
     ("crates/engine/src/settle.rs", "        self.world.holdings.credit(m.to, unit, -reopened);\n", "",
      "a returned payment makes value when it opens its claims"),
-    ("crates/engine/src/post.rs", "self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);",
-     "self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);", "a payment that settles claims makes value"),
+    ("crates/engine/src/post.rs", "        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);\n        let fresh",
+     "        self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n        let fresh", "a payment that settles claims makes value"),
+    ("crates/engine/src/post.rs", "            self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);\n            self.world.holdings.credit(m.to,",
+     "            self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n            self.world.holdings.credit(m.to,", "a leg to a third party that settles claims makes value"),
+    ("crates/engine/src/post.rs", "        self.reopen_claims(m);\n", "", "a payment that is returned opens nothing"),
+    ("crates/engine/src/settle.rs", "exact: open.min(rest),", "exact: need,", "exactly the flow's amount is judged on the leg and not on what the party pays in all"),
+    ("crates/engine/src/settle.rs", "            Class::Outside => Some(Leg::Elsewhere),\n", "            Class::Outside => None,\n",
+     "a leg to a third party is no payment"),
+    ("crates/engine/src/settle.rs", "filter(move |&id| id >= this)", "filter(move |&id| id > this)", "what the party still pays leaves out the leg being paid"),
+    ("crates/engine/src/settle.rs", "filter(move |&id| id >= this)", "filter(move |&id| id == this)", "what the party still pays is this leg alone"),
+    ("crates/engine/src/settle.rs", "same && self.plan.events.state(*id, flow).is_real_on(day)", "same",
+     "a leg that is not real yet is paid"),
+    ("crates/engine/src/settle.rs", "let same = flow.from == source.from && flow.out.unit == source.out.unit && !flow.is_exchange();",
+     "let same = flow.out.unit == source.out.unit && !flow.is_exchange();", "a payment of another party is this payment's"),
+    ("crates/engine/src/settle.rs", "let toward = self.leg(flow).is_some_and(|leg| leg == Leg::Owner(owner) || leg == Leg::Elsewhere);",
+     "let toward = self.leg(flow).is_some_and(|leg| leg == Leg::Owner(owner));", "a leg to a third party is not what the party pays in all"),
+    ("crates/engine/src/settle.rs", "paid.filter(|_| m.target.class == Class::Outside)", "None::<Id<Entity>>",
+     "a leg to a third party is never paid on the owner's behalf"),
     ("crates/engine/src/traits.rs", "partition_point(|&(found, by, _)| (found, by) < (party, owner))",
      "partition_point(|&(found, by, _)| (found, by) <= (party, owner))", "the tab of a party is not found"),
     ("crates/engine/src/lots.rs", "lots.iter().take_while(|lot| lot.txn == lots[0].txn).count()", "1",
