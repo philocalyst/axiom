@@ -400,18 +400,19 @@ MUTANTS = [
 ]
 
 
-def own_tests_fail(source, work):
-    """Whether the unit tests of the crate that holds a mutant fail in SOURCE: what the corpus cannot say (the horizon a step
-    stops at, whose contracts a forecast takes, what the report sees of each occurrence)."""
+def failing_tests(source, work):
+    """The unit tests of the engine and the report that fail in SOURCE, by name. The book has two that fail without any
+    mutant (the prorata test, which is the user's, and the year-end test, which the K5c map explains), so a mutant is
+    killed by the tests only if it makes another fail."""
     env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
-    for package, targets in (("axiom-engine", ["--lib"]), ("axiom-report", ["--lib"])):
-        run = subprocess.run(["cargo", "test", "--release", "--offline", "-p", package, *targets], cwd=source, env=env,
+    failing = set()
+    for package in ("axiom-engine", "axiom-report"):
+        run = subprocess.run(["cargo", "test", "--release", "--offline", "-p", package, "--lib"], cwd=source, env=env,
                              capture_output=True, text=True)
         if "could not compile" in run.stderr:
             raise SystemExit("the tests do not build")
-        if run.returncode:
-            return True
-    return False
+        failing |= set(re.findall(r"^test (\S+) \.\.\. FAILED$", run.stdout, re.M))
+    return failing
 
 
 def build_cli(source, work):
@@ -437,6 +438,8 @@ def mutate(tree, work, directory, only=None):
     cli_binary = build_cli(source, work)
     assert dump_all(binary, directory, 4, quiet=True) == 0, "the baseline fails its own comparison"
     assert cli(cli_binary, directory, 4, quiet=True) == 0, "the baseline's CLI fails its own comparison"
+    known = failing_tests(source, work)
+    print(f"the tests fail without a mutant: {sorted(known)}", flush=True)
     reference = listed(cli_binary, directory)
     results = []
     for number, (path, old, replacement, what, layer) in enumerate(MUTANTS):
@@ -456,7 +459,7 @@ def mutate(tree, work, directory, only=None):
                 elif listed(mutant, directory) != reference:
                     outcome = "killed by the occurrences it lists"
             if outcome is None:
-                outcome = "killed by the tests" if own_tests_fail(source, work) else "SURVIVED"
+                outcome = "killed by the tests" if failing_tests(source, work) - known else "SURVIVED"
         except SystemExit:
             outcome = "does not build"
         except subprocess.TimeoutExpired:
