@@ -1106,6 +1106,12 @@ MUTANTS = [
     ("crates/engine/src/post.rs", "Counts::Claim { dir, .. } => dir,", "Counts::Claim { .. } => Dir::Out,", "a claim settled counts the way the payment goes"),
     ("crates/engine/src/recognition.rs", "Dealing::Settling { settlement, dir: Dir::In, moved: posted.out }", "Dealing::Settling { settlement, dir: Dir::In, moved: Qty::ZERO }",
      "the readers count a payment that settled claims without what it moved", "cli"),
+    ("crates/report/src/flow.rs", "Some(Qty(if piece.takes_back() { -volume } else { volume }))", "Some(Qty(volume))",
+     "a claim taken back is more of a purpose that passes through"),
+    ("crates/engine/src/explain.rs", "let of_other_days = KEEPS_FLOW_DAYS && !flow.recognized.overlaps(read_days);",
+     "let of_other_days = KEEPS_FLOW_DAYS && flow.recognized.overlaps(read_days);", "a limit's explanation names the flows of other days"),
+    ("crates/engine/src/plan.rs", "let made = traits.place(to).claim && outside(from);", "let made = traits.place(to).claim;",
+     "a flow from a place of the owner into a claim place makes a claim"),
 ]
 
 
