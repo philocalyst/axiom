@@ -260,10 +260,12 @@ fn a_payment_that_carries_the_code_of_a_claim_settles_that_claim() {
 }
 
 /// A code written on a line item of the payment is the code of that item's flow, and names its claim as the header's does.
+/// The item is carved from the header (LANGUAGE §3): the 300 the header keeps settles the oldest claim, and the item's 100
+/// settles the claim it names.
 #[test]
 fn a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles() {
     with_run(&paid("2026-01-20 ann -> checking 400 USD\n  100 USD ^i3"), |book, run| {
-        assert_eq!(tab(book, run, "ann"), claims(&[("i2", 100_00), ("i3", 200_00)]));
+        assert_eq!(tab(book, run, "ann"), claims(&[("i2", 200_00), ("i3", 200_00)]));
     });
 }
 
