@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """A generator of small books full of splits, and a differential run of two builds of the CLI over them.
 
-    splits.py gen DIR N [SEED]                  write N projects into DIR (p0000/main.ax ...), and DIR/forms.json
+    splits.py gen DIR N [SEED [KIND]]           write N projects into DIR (p0000/main.ax ...), and DIR/forms.json
+                                                KIND: all (default), promises (contracts only), statements (no
+                                                contracts), or recipe:NAME (one block of one recipe, so that a
+                                                difference between two builds is that recipe's)
     splits.py run BASELINE NEW DIR [JOBS]       run the commands below over every project through both binaries
     splits.py all BASELINE NEW DIR N [SEED]     gen, then run
     splits.py internals BASELINE NEW DIR [JOBS] compare what two builds of `internals/main.rs` print for each project
@@ -676,20 +679,36 @@ RECIPES = [(transfer, 10), (unknown, 2), (items_under_header, 8), (split, 14), (
            (basis, 2), (contract, 16)]
 
 
-def project(seed, index):
+def recipes_of(kind):
+    """The recipes a KIND of project draws from, with their weights."""
+    if kind == "promises":
+        return [(recipe, weight) for recipe, weight in RECIPES if recipe is contract]
+    if kind == "statements":
+        return [(recipe, weight) for recipe, weight in RECIPES if recipe is not contract]
+    if kind.startswith("recipe:"):
+        named = [(recipe, weight) for recipe, weight in RECIPES if recipe.__name__ == kind[len("recipe:"):]]
+        if not named:
+            raise SystemExit(f"no recipe {kind[len('recipe:'):]}: {', '.join(r.__name__ for r, _ in RECIPES)}")
+        return named
+    return RECIPES
+
+
+def project(seed, index, kind="all"):
     rng = random.Random(seed * 1_000_003 + index)
     book = Book(rng)
-    for _ in range(rng.choices([1, 2, 3, 4], [3, 4, 3, 1])[0]):
-        recipe = rng.choices([r for r, _ in RECIPES], [w for _, w in RECIPES])[0]
+    drawn = recipes_of(kind)
+    blocks = 1 if kind.startswith("recipe:") else rng.choices([1, 2, 3, 4], [3, 4, 3, 1])[0]
+    for _ in range(blocks):
+        recipe = rng.choices([r for r, _ in drawn], [w for _, w in drawn])[0]
         recipe(book)
     return book
 
 
-def gen(directory, count, seed):
+def gen(directory, count, seed, kind="all"):
     os.makedirs(directory, exist_ok=True)
     all_forms = {}
     for index in range(count):
-        book = project(seed, index)
+        book = project(seed, index, kind)
         path = os.path.join(directory, f"p{index:04d}")
         os.makedirs(path, exist_ok=True)
         with open(os.path.join(path, "main.ax"), "w") as out:
@@ -867,7 +886,7 @@ def main(argv):
         survey(argv[2], argv[3])
         return 0
     if len(argv) >= 4 and argv[1] == "gen":
-        forms = gen(argv[2], int(argv[3]), int(argv[4]) if len(argv) > 4 else 1)
+        forms = gen(argv[2], int(argv[3]), int(argv[4]) if len(argv) > 4 else 1, argv[5] if len(argv) > 5 else "all")
         total = Counter()
         for one in forms.values():
             total.update(one.keys())
@@ -878,7 +897,7 @@ def main(argv):
     if len(argv) >= 5 and argv[1] == "run":
         return 1 if run(argv[2], argv[3], argv[4], int(argv[5]) if len(argv) > 5 else 3) else 0
     if len(argv) >= 6 and argv[1] == "all":
-        gen(argv[4], int(argv[5]), int(argv[6]) if len(argv) > 6 else 1)
+        gen(argv[4], int(argv[5]), int(argv[6]) if len(argv) > 6 else 1, argv[7] if len(argv) > 7 else "all")
         return 1 if run(argv[2], argv[3], argv[4]) else 0
     print(__doc__)
     return 2
