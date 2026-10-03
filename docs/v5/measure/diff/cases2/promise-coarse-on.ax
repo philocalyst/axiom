@@ -1,0 +1,22 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+// An `on` that names a longer period than the cadence steps by is landed once for every step of that period:
+// `weekly on 15` is due on the 15th four or five times, `daily on monday` seven times each Monday.
+// `axiom forecast --until 2026-02-20 --paths 1 --today 2026-01-01` lists the duplicates.
+contract a with greystar
+  10 USD weekly on 15 from checking
+  from 2026-01-01
+contract b with greystar
+  10 USD monthly on 04-15 from checking
+  from 2026-01-01
+contract c with greystar
+  10 USD every 3d on monday from checking
+  from 2026-01-01
+contract d with greystar
+  10 USD daily on monday from checking
+  from 2026-01-01

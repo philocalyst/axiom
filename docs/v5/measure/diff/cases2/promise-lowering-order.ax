@@ -1,0 +1,14 @@
+use std
+base USD
+entity me : person
+entity greystar : org
+account checking : bank
+opening 2026-01-01
+  checking 20_000 USD
+// Lines are lowered in day order. The first keeps the due day 03-01 against a schedule that is not yet waived;
+// the waiver, dated the next day, then waives that due day, and the fold cannot apply the occurrence.
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  from 2026-01-01
+2026-02-27 flat
+2026-02-28 flat waived until 2026-03-31
