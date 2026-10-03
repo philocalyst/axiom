@@ -27,10 +27,20 @@ const THING: usize = 2;
 const COMMODITY: usize = 3;
 const MEASURE: usize = 4;
 const ENTITY: usize = 5;
+const CLAIM: usize = 6;
+const DEBT_CLAIM: usize = 7;
 
 /// Each root's sort.
-const SORTS: [Sort; 6] =
-    [Sort::Place(Class::Asset), Sort::Place(Class::Debt), Sort::Thing, Sort::Commodity, Sort::Commodity, Sort::Entity];
+const SORTS: [Sort; 8] = [
+    Sort::Place(Class::Asset),
+    Sort::Place(Class::Debt),
+    Sort::Thing,
+    Sort::Commodity,
+    Sort::Commodity,
+    Sort::Entity,
+    Sort::Place(Class::Asset),
+    Sort::Place(Class::Debt),
+];
 
 impl Node for Kind {
     const NOUN: Noun = Noun::Kind;
@@ -42,6 +52,8 @@ impl Node for Kind {
         ("commodity", None),
         ("measure", Some(COMMODITY)),
         ("entity", None),
+        ("claim", Some(ASSET)),
+        ("debt-claim", Some(DEBT)),
     ];
     const ORPHAN: usize = THING;
     const REPEATED_ROOT: Repeated = Repeated::Said;
@@ -99,6 +111,8 @@ pub(crate) fn roots(ids: &[Id<Kind>]) -> KindRoots {
         commodity: ids[COMMODITY],
         measure: ids[MEASURE],
         entity: ids[ENTITY],
+        claim: ids[CLAIM],
+        debt_claim: ids[DEBT_CLAIM],
     }
 }
 

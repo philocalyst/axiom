@@ -549,6 +549,8 @@ pub(crate) fn household() -> Household {
             commodity: Id::new(0),
             measure: Id::new(0),
             entity: Id::new(0),
+            claim: Id::new(0),
+            debt_claim: Id::new(0),
         },
         purposes: PurposeRoots { income, spending, capital, transfer },
     };

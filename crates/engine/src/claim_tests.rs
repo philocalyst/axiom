@@ -341,7 +341,6 @@ fn a_write_off_of_a_claim_that_is_settled_says_it_forgave_nothing() {
 /// What the owner owes is a plain balance, not parcels: there is nothing for a write-off to relieve, so it is refused
 /// where it is written.
 #[test]
-#[ignore = "K3c: a write-off of a debt of the owner's is accepted and does nothing"]
 fn a_debt_of_the_owners_cannot_be_written_off() {
     let diagnostics = built("2026-01-05 me owes bob 100 USD due 2026-02-01 ^b1\n2026-02-15 ^b1 waived\n");
     let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).map(|d| &*d.code).collect();
