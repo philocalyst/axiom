@@ -2,13 +2,17 @@
 """A generator of small projects full of contracts, and the oracle that compares what two ways of reading them say.
 
     contracts.py gen DIR N [SEED] [--slow]    write N projects into DIR (p0000/main.ax ...), and DIR/forms.json
-    contracts.py build TREE OUT               build the dump (promises/main.rs) against the crates of TREE into OUT/
+    contracts.py build TREE OUT [--new]       build the dump (promises/) against the crates of TREE into OUT/
+                                              (--new: with the compiled promise, which `check` asks)
     contracts.py dump BINARY DIR [JOBS] [TAG] [--slow]
                                               what BINARY says of every project: DIR/pNNNN/dump.TAG.txt (default TAG: old)
     contracts.py compare DIR A B              the projects whose dump.A.txt and dump.B.txt differ
-    contracts.py check BINARY DIR [JOBS]      the dump's own comparison of the old machinery and the new, over every project
+    contracts.py check BINARY DIR [JOBS] [--slow]
+                                              the dump's own verdict (a binary built --new) over every project
     contracts.py cover DIR [TAG]              what the projects hold, and what the dumps asked of them
-    contracts.py mutate TREE WORK [DIR]       the mutants of the oracle: each is built and must be caught by `compare`
+    contracts.py mutate TREE WORK DIR [N,M..] [--new]
+                                              the mutants of the oracle: each is built and must be caught by `compare`
+                                              (--new: mutants of the new structure, caught by the verdict)
 
 What it is for. Lane K5a builds, beside the machinery that says when a promise is due (`Contract::occurrences`,
 `nearest_occurrence`, `amount_on_schedule`, the engine's count of an occurrence's ordinal), a structure that says it by
@@ -74,6 +78,9 @@ param cpi
 param sofr
   2024 4%
   2025 5%
+param lull
+  2021 0
+  2022 5
 entity me : person
 entity acme : org
 entity shop : org
@@ -297,7 +304,10 @@ def escalation(rng, lines, forms, start_text):
         if start_text is None:
             forms["amount:escalation-no-from"] += 1
     elif roll < 0.22:
-        lines.append("  indexed to cpi yearly")
+        index = "lull" if rng.random() < 0.12 else "cpi"
+        lines.append(f"  indexed to {index} yearly")
+        if index == "lull":
+            forms["amount:index-zero"] += 1
         forms["amount:indexed"] += 1
         if start_text is None:
             forms["amount:escalation-no-from"] += 1
@@ -441,19 +451,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CRATES = ["core", "syntax", "model", "engine", "systems"]
 
 
-def build(tree, out, profile="opt-level = 1\ncodegen-units = 16\nincremental = true"):
+def build(tree, out, new=False, source=None, profile="opt-level = 1\ncodegen-units = 16\nincremental = true"):
     """Builds the dump against the crates of TREE. Its own profile, because a dependency is built with the profile of
-    the workspace that asks for it, and the tree's is `lto = thin`."""
+    the workspace that asks for it, and the tree's is `lto = thin`. With NEW it also has the compiled promise to ask
+    (`--check`), which a tree from before the lane does not. SOURCE is where the dump's files are read from."""
     os.makedirs(out, exist_ok=True)
     tree = os.path.abspath(tree)
+    source = source or os.path.join(HERE, "promises")
     deps = "\n".join(f'axiom-{c} = {{ path = "{tree}/crates/{c}" }}' for c in CRATES)
     manifest = f'[package]\nname = "promises-dump"\nversion = "0.0.0"\nedition = "2024"\n\n[workspace]\n\n' \
-               f'[[bin]]\nname = "dump"\npath = "main.rs"\n\n[dependencies]\n{deps}\n\n[profile.release]\n{profile}\n'
+               f'[features]\nnew = []\n\n[[bin]]\nname = "dump"\npath = "main.rs"\n\n[dependencies]\n{deps}\n\n' \
+               f'[profile.release]\n{profile}\n'
     with open(os.path.join(out, "Cargo.toml"), "w") as handle:
         handle.write(manifest)
-    shutil.copy(os.path.join(HERE, "promises", "main.rs"), os.path.join(out, "main.rs"))
+    for name in os.listdir(source):
+        if name.endswith(".rs"):
+            shutil.copy(os.path.join(source, name), os.path.join(out, name))
     shutil.copy(os.path.join(tree, "Cargo.lock"), os.path.join(out, "Cargo.lock"))
-    result = subprocess.run(["cargo", "build", "--release", "--offline"], cwd=out, capture_output=True, text=True)
+    command = ["cargo", "build", "--release", "--offline"] + (["--features", "new"] if new else [])
+    result = subprocess.run(command, cwd=out, capture_output=True, text=True)
     if result.returncode:
         sys.stderr.write(result.stderr[-4000:])
         raise SystemExit("the dump did not build")
@@ -616,9 +632,14 @@ MUTANTS = [
 ]
 
 
-def mutate(tree, work, directory, only=None):
-    """Builds each mutant of the machinery into the dump, and compares what it says with the baseline's. Mutants
-    that say the same are listed: each is either equivalent, and the report says why, or the corpus is too weak."""
+MUTANTS_NEW = []
+
+
+def mutate(tree, work, directory, only=None, new=False):
+    """Builds each mutant into the dump. Of the machinery under test (the old code), the dump of the mutant must differ
+    from the baseline's; of the new structure (NEW), its verdict must fail. Mutants that are not caught are listed:
+    each is either equivalent, and the report says why, or the corpus is too weak."""
+    table = MUTANTS_NEW if new else MUTANTS
     work = os.path.abspath(work)
     source = os.path.join(work, "tree")
     if not os.path.isdir(source):
@@ -626,34 +647,87 @@ def mutate(tree, work, directory, only=None):
         skip = shutil.ignore_patterns("target", ".git", ".claude", "docs", "examples", "tests")
         shutil.copytree(os.path.abspath(tree), source, ignore=skip)
     out = os.path.join(work, "build")
-    binary = build(source, out)
-    dump(binary, directory, 4, "base")
+    snapshot = os.path.join(work, "promises")
+    if not os.path.isdir(snapshot):
+        shutil.copytree(os.path.join(HERE, "promises"), snapshot)
+    binary = build(source, out, new=new, source=snapshot)
+    if new:
+        baseline = verdict(binary, directory, 4)[1]
+        assert not baseline, f"the baseline fails its own verdict: {baseline[:2]}"
+    else:
+        dump(binary, directory, 4, "base")
     results = []
-    for number, (path, old, new, what) in enumerate(MUTANTS):
+    for number, (path, old, replacement, what) in enumerate(table):
         if only is not None and number not in only:
             continue
         target = os.path.join(source, path)
         original = open(target).read()
         assert original.count(old) == 1, f"mutant {number}: the text occurs {original.count(old)} times in {path}"
-        open(target, "w").write(original.replace(old, new))
+        open(target, "w").write(original.replace(old, replacement))
+        tag = f"m{number:02d}"
         try:
-            binary = build(source, out)
-            tag = f"m{number:02d}"
-            dump(binary, directory, 4, tag, limit=20)
-            different = compare(directory, "base", tag, show=0)
-            verdict = "killed" if different else "SURVIVED"
+            binary = build(source, out, new=new, source=snapshot)
+            if new:
+                caught = bool(verdict(binary, directory, 4, limit=20)[1])
+            else:
+                dump(binary, directory, 4, tag, limit=20)
+                caught = bool(compare(directory, "base", tag, show=0))
+            outcome = "killed" if caught else "SURVIVED"
         except SystemExit:
-            verdict = "does not build"
+            outcome = "does not build"
         finally:
             open(target, "w").write(original)
-        results.append((number, verdict, what))
-        print(f"mutant {number:02d} {verdict:<8} {what}", flush=True)
-    killed = sum(1 for _, verdict, _ in results if verdict == "killed")
-    print(f"{len(results)} mutants: {killed} killed, {sum(1 for _, v, _ in results if v == 'SURVIVED')} survived, "
-          f"{sum(1 for _, v, _ in results if v == 'does not build')} did not build")
+            for project in projects(directory):
+                try:
+                    os.remove(os.path.join(project, f"dump.{tag}.txt"))
+                except FileNotFoundError:
+                    pass
+        results.append((number, outcome, what))
+        print(f"mutant {number:02d} {outcome:<8} {what}", flush=True)
+    summary = Counter(outcome for _, outcome, _ in results)
+    print(f"{len(results)} mutants: {summary['killed']} killed, {summary['SURVIVED']} survived, "
+          f"{summary['does not build']} did not build")
     with open(os.path.join(work, "mutants.txt"), "w") as handle:
-        for number, verdict, what in results:
-            handle.write(f"{number:02d} {verdict} {what}\n")
+        for number, outcome, what in results:
+            handle.write(f"{number:02d} {outcome} {what}\n")
+
+
+# ─── The verdict ─────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def verdict(binary, directory, jobs=3, extra=(), limit=120):
+    """Runs the dump's own comparison (`--check`) over every project: what it says, summed, and what failed."""
+    tallies, failures = Counter(), []
+
+    def one(path):
+        code, out, err = run_dump(binary, path, ("--check", *extra), limit)
+        return path, code, out, err
+
+    with ThreadPoolExecutor(jobs) as pool:
+        results = list(pool.map(one, projects(directory)))
+    for path, code, out, err in results:
+        for line in out.split("\n"):
+            if line.startswith("check "):
+                *key, count = line.split()
+                tallies[" ".join(key)] += int(count)
+            elif line.startswith("FAIL "):
+                failures.append((path, line))
+        if code not in (0, 1):
+            failures.append((path, f"FAIL the dump stopped: exit {code} {err[-300:]}"))
+    return tallies, failures, len(results)
+
+
+def check(binary, directory, jobs=3, extra=()):
+    """The verdict, printed: for each question how often the new structure agreed with the reference, how often the old
+    code did, and the ways it did not."""
+    tallies, failures, projects_run = verdict(binary, directory, jobs, extra)
+    width = max((len(key) for key in tallies), default=0)
+    for key in sorted(tallies):
+        print(f"  {key:<{width}} {tallies[key]:>10}")
+    for path, line in failures[:10]:
+        print(f"{os.path.basename(path)}: {line[:600]}")
+    print(f"{projects_run} projects, {len(failures)} failures")
+    return len(failures)
 
 
 # ─── What the corpus holds ───────────────────────────────────────────────────────────────────────────────────
@@ -721,8 +795,12 @@ def main(argv):
             print(f"  {form:<34} {count}")
         return 0
     if len(argv) >= 4 and argv[1] == "build":
-        print(build(argv[2], argv[3]))
+        print(build(argv[2], argv[3], new="--new" in argv))
         return 0
+    if len(argv) >= 4 and argv[1] == "check":
+        extra = ("--slow",) if "--slow" in argv else ()
+        rest = [a for a in argv if a != "--slow"]
+        return 1 if check(rest[2], rest[3], int(rest[4]) if len(rest) > 4 else 3, extra) else 0
     if len(argv) >= 4 and argv[1] == "dump":
         extra = ("--slow",) if "--slow" in argv else ()
         rest = [a for a in argv if a != "--slow"]
@@ -732,8 +810,101 @@ def main(argv):
     if len(argv) >= 5 and argv[1] == "compare":
         return 1 if compare(argv[2], argv[3], argv[4]) else 0
     if len(argv) >= 5 and argv[1] == "mutate":
-        only = {int(n) for n in argv[5].split(",")} if len(argv) > 5 else None
-        mutate(argv[2], argv[3], argv[4], only)
+        new = "--new" in argv
+        rest = [a for a in argv if a != "--new"]
+        only = {int(n) for n in rest[5].split(",")} if len(rest) > 5 else None
+        mutate(rest[2], rest[3], rest[4], only, new)
+        return 0
+    if len(argv) >= 3 and argv[1] == "cover":
+        cover(argv[2], argv[3] if len(argv) > 3 else "old")
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+def cover(directory, tag="old"):
+    forms = json.load(open(os.path.join(directory, "forms.json")))
+    held, facts = Counter(), Counter()
+    clean = Counter()
+    for path in projects(directory):
+        name = os.path.basename(path)
+        for form in forms[name]:
+            held[form] += 1
+        try:
+            text = open(os.path.join(path, f"dump.{tag}.txt")).read()
+        except FileNotFoundError:
+            continue
+        codes = text.split("\n", 1)[0].split()[1:]
+        ok = not any(code for code in codes)
+        clean["projects"] += 1
+        clean["without a diagnostic"] += ok
+        for line in text.split("\n"):
+            word = line.split(" ", 1)[0]
+            facts[word] += 1
+            if word == "due" and not line.endswith(": "):
+                facts["due, not empty"] += 1
+            if word == "keep" and not line.endswith("none"):
+                facts["keep, a due day"] += 1
+            if word == "keep" and line.endswith("none"):
+                facts["keep, none"] += 1
+            if word == "keep" and "ambiguous" in line:
+                facts["keep, ambiguous"] += 1
+            if word in ("factor", "recog"):
+                facts[f"{word}, {'error' if 'Err(' in line else 'ok'}"] += 1
+            if word == "ordinal" and "Some" in line:
+                facts["ordinal, a number"] += 1
+            if word == "promise":
+                facts["promises kept"] += 1
+            if word == "terms" and "equal-stretches false" in line:
+                facts["stretches that differ in more than state"] += 1
+            if word == "stretch" and line.endswith("waived"):
+                facts["waived stretches"] += 1
+        for form in forms[name]:
+            if ok:
+                held[form + " (clean)"] += 1
+    width = max((len(form) for form in held), default=0)
+    print(f"{len(forms)} projects; {clean['projects']} dumped, {clean['without a diagnostic']} with no diagnostic at all")
+    for form in sorted(f for f in held if not f.endswith("(clean)")):
+        print(f"  {form:<{width}} {held[form]:>5} {held[form + ' (clean)']:>5}")
+    print("what the dumps asked:")
+    for word, count in sorted(facts.items()):
+        print(f"  {word:<{width}} {count:>8}")
+
+
+def main(argv):
+    if len(argv) >= 4 and argv[1] == "gen":
+        slow = "--slow" in argv
+        rest = [a for a in argv[2:] if a != "--slow"]
+        forms = gen(rest[0], int(rest[1]), int(rest[2]) if len(rest) > 2 else 1, slow)
+        total = Counter()
+        for one in forms.values():
+            total.update(one.keys())
+        print(f"wrote {len(forms)} projects to {rest[0]}; projects holding each form:")
+        for form, count in sorted(total.items()):
+            print(f"  {form:<34} {count}")
+        return 0
+    if len(argv) >= 4 and argv[1] == "build":
+        print(build(argv[2], argv[3], new="--new" in argv))
+        return 0
+    if len(argv) >= 4 and argv[1] == "check":
+        extra = ("--slow",) if "--slow" in argv else ()
+        rest = [a for a in argv if a != "--slow"]
+        return 1 if check(rest[2], rest[3], int(rest[4]) if len(rest) > 4 else 3, extra) else 0
+    if len(argv) >= 4 and argv[1] == "dump":
+        extra = ("--slow",) if "--slow" in argv else ()
+        rest = [a for a in argv if a != "--slow"]
+        jobs = int(rest[4]) if len(rest) > 4 else 3
+        tag = rest[5] if len(rest) > 5 else "old"
+        return 1 if dump(rest[2], rest[3], jobs, tag, extra) else 0
+    if len(argv) >= 5 and argv[1] == "compare":
+        return 1 if compare(argv[2], argv[3], argv[4]) else 0
+    if len(argv) >= 5 and argv[1] == "mutate":
+        new = "--new" in argv
+        rest = [a for a in argv if a != "--new"]
+        only = {int(n) for n in rest[5].split(",")} if len(rest) > 5 else None
+        mutate(rest[2], rest[3], rest[4], only, new)
         return 0
     if len(argv) >= 3 and argv[1] == "cover":
         cover(argv[2], argv[3] if len(argv) > 3 else "old")
