@@ -654,9 +654,9 @@ contract rent with landlord
 ";
 
     #[test]
-    fn forecast_materializes_contracts_even_when_the_run_monitor_is_incomplete() {
+    fn forecast_materializes_contracts_beside_a_run_whose_monitor_is_complete() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
-            assert!(!run.monitor_complete);
+            assert!(run.monitor_complete);
             let report =
                 crate::report(book, run, &crate::Query::Forecast { until: Some(day(2026, 2, 28)), paths: 0 }, None)
                     .unwrap();

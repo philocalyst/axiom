@@ -73,6 +73,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             phase,
             applied,
             temporal_through,
+            &world.monitor,
             &world.holdings,
             &world.totals,
             &world.tallies,
