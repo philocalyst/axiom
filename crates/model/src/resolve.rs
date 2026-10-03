@@ -194,6 +194,7 @@ impl<'s> World<'s> {
             },
             Found::Several(ids) => match self.book.address_place(word.text) {
                 Found::One(place) if ids.iter().any(|&place| self.book.is_spelled(place)) => Ok(Some(place)),
+                Found::Nothing if ids.iter().any(|&place| self.book.is_spelled(place)) => Ok(None),
                 _ => Err(self.ambiguous_place(word, &ids)),
             },
         }

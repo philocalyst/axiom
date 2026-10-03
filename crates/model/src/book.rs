@@ -1433,6 +1433,10 @@ impl<'s> Book<'s> {
         match self.address_place(text) {
             Found::One(place) if by_address => return Ok(place),
             Found::Several(places) if by_address => return Err(Miss::Ambiguous(places.into())),
+            // Every account the names found is never open: there is none to mean, as for a line on any day.
+            Found::Nothing if by_address && matches!(miss, Miss::Ambiguous(_)) => {
+                return Err(Miss::Unknown { suggestion: None });
+            }
             _ => {}
         }
         match (&miss, self.entity(text)) {
