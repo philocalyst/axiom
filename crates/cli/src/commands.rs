@@ -12,10 +12,11 @@ use axiom_engine::{Options, Run};
 use axiom_model::{Book, sync::Fetch};
 use axiom_report::json::{JsonRenderer, string as json_string};
 use axiom_report::{Context, Query, ReportRenderer, Summary};
+use axiom_session::{Sources, Texts};
 use axiom_sync::{Change, PlanOutcome, SourceFailure, SourceResult};
 
 use crate::args::{Command, Invocation};
-use crate::project::{Project, SourceFile, Sources};
+use crate::project::Project;
 use crate::render::{Limit, Renderer, Tally};
 use crate::style::{Ink, Line};
 use crate::text::plural;
@@ -31,11 +32,12 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         _ => {}
     }
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
-    let mut sources = project.load()?;
+    let texts = Texts::default();
+    let mut sources = project.load(&texts)?;
     if let Command::Fmt { files, check } = command {
         return Ok(crate::fmt::execute(&sources, &project.root, files, *check, terminals.out));
     }
-    let (parsed, mut diagnostics) = Sources::parse_files(&sources.files);
+    let (parsed, mut diagnostics) = sources.parse();
     let (book, built) = axiom_model::build(&parsed);
     // The syntax trees are done with; the book borrows only the source text.
     drop(parsed);
@@ -50,8 +52,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     match command {
         Command::Sync { names, dry } => {
             let run = axiom_engine::run(&book, options);
-            let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
-            let planned = sync::plan(&book, &run, &project, options.today, names, files, auxiliary)?;
+            let planned = sync::plan(&book, &run, &project, options.today, names, &mut sources)?;
             diagnostics.extend(run.diagnostics);
             let fate = if *dry { Fate::Shown } else { Fate::apply(&diagnostics, &project.root, &planned.changes) };
             Ok(render_sync(planned, fate, &sources, terminals, &diagnostics))
@@ -71,7 +72,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
             // would also retain the pre-close checkpoint that no check view uses.
             let run = axiom_engine::run(&book, options);
             let (reader_diagnostics, suggestions) = if matches!(command, Command::Check) {
-                check_memos(&book, &project, &sources.files, &mut sources.auxiliary)
+                check_memos(&book, &project, &mut sources)
             } else {
                 (Vec::new(), Vec::new())
             };
@@ -87,10 +88,9 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
 fn check_memos(
     book: &Book<'_>,
     project: &Project,
-    parsed_files: &[SourceFile],
-    auxiliary: &mut Vec<SourceFile>,
+    sources: &mut Sources<'_>,
 ) -> (Vec<Diagnostic>, Vec<MemoSuggestion>) {
-    let mut files = LocalFiles::new(project, parsed_files.len(), auxiliary);
+    let mut files = LocalFiles::new(project, sources);
     let mut inputs = Vec::new();
     for (source_index, source) in book.sources.iter().enumerate() {
         let Fetch::Read(pattern) = source.fetch else {
@@ -103,13 +103,13 @@ fn check_memos(
             Err(problem) => files.diagnostics.push(problem),
         }
     }
-    let LocalFiles { auxiliary, mut diagnostics, .. } = files;
+    let LocalFiles { sources, mut diagnostics, .. } = files;
 
-    // Appending is finished before any memo borrows begin. Auxiliary strings
-    // live in a disjoint vector, so the parsed Book keeps borrowing `files`.
+    // Every file is registered before any memo borrows begin, and a text kept in the arena stays where it is
+    // while more are added, so the book keeps borrowing the Axiom files all the while.
     let mut memos = Vec::new();
     for (source_index, file_id) in inputs {
-        let Some(file) = source_by_id(parsed_files, auxiliary, file_id) else {
+        let Some(file) = sources.get(file_id) else {
             continue;
         };
         match axiom_sync::read_memos(book, &book.sources[source_index], &file.text, file_id) {
@@ -121,20 +121,18 @@ fn check_memos(
 }
 
 /// The local files that `read` sources name, each registered once so that its text can be borrowed.
-struct LocalFiles<'p, 'a> {
+struct LocalFiles<'p, 'a, 't> {
     project: &'p Project,
-    /// How many files the book was parsed from: the id of the first one registered here.
-    parsed: usize,
-    auxiliary: &'a mut Vec<SourceFile>,
+    sources: &'a mut Sources<'t>,
     registered: HashMap<String, FileId>,
     /// Why a file could not be registered.
     diagnostics: Vec<Diagnostic>,
 }
 
-impl<'p, 'a> LocalFiles<'p, 'a> {
-    fn new(project: &'p Project, parsed: usize, auxiliary: &'a mut Vec<SourceFile>) -> LocalFiles<'p, 'a> {
-        let registered = auxiliary.iter().map(|file| (file.path.to_string(), file.id)).collect();
-        LocalFiles { project, parsed, auxiliary, registered, diagnostics: Vec::new() }
+impl<'p, 'a, 't> LocalFiles<'p, 'a, 't> {
+    fn new(project: &'p Project, sources: &'a mut Sources<'t>) -> LocalFiles<'p, 'a, 't> {
+        let registered = sources.auxiliary().map(|file| (file.path.to_string(), file.id)).collect();
+        LocalFiles { project, sources, registered, diagnostics: Vec::new() }
     }
 
     /// The id of the file at `path`, which is read and registered the first time. A file that cannot be is a
@@ -150,7 +148,7 @@ impl<'p, 'a> LocalFiles<'p, 'a> {
                 return None;
             }
         };
-        match Sources::append_auxiliary_to(self.auxiliary, self.parsed, path.clone(), text) {
+        match self.sources.append_auxiliary(path.clone(), text) {
             Ok(id) => {
                 self.registered.insert(path, id);
                 Some(id)
@@ -161,11 +159,6 @@ impl<'p, 'a> LocalFiles<'p, 'a> {
             }
         }
     }
-}
-
-fn source_by_id<'a>(files: &'a [SourceFile], auxiliary: &'a [SourceFile], id: FileId) -> Option<&'a SourceFile> {
-    let index = usize::from(id.0);
-    files.get(index).or_else(|| auxiliary.get(index.checked_sub(files.len())?))
 }
 
 #[derive(Clone, Debug)]
@@ -263,7 +256,7 @@ impl Fate {
 fn render_sync(
     planned: PlanOutcome,
     fate: Fate,
-    sources: &Sources,
+    sources: &Sources<'_>,
     terminals: Terminals,
     prior: &[Diagnostic],
 ) -> Outcome {
@@ -405,7 +398,7 @@ enum Form {
 struct Session<'a, 's> {
     book: &'a Book<'s>,
     run: &'a Run,
-    sources: &'a Sources,
+    sources: &'a Sources<'a>,
     /// From parsing, building, and running.
     diagnostics: Vec<&'a Diagnostic>,
     shown: Shown,
@@ -416,7 +409,7 @@ impl<'a, 's> Session<'a, 's> {
     fn new(
         book: &'a Book<'s>,
         run: &'a Run,
-        sources: &'a Sources,
+        sources: &'a Sources<'a>,
         before: &'a [Diagnostic],
         shown: Shown,
     ) -> Session<'a, 's> {
@@ -558,14 +551,15 @@ mod tests {
         );
 
         let project = Project::find(dir.path()).unwrap();
-        let mut sources = project.load().unwrap();
-        let (parsed, mut diagnostics) = Sources::parse_files(&sources.files);
+        let texts = Texts::default();
+        let mut sources = project.load(&texts).unwrap();
+        let (parsed, mut diagnostics) = sources.parse();
         let (book, built) = axiom_model::build(&parsed);
         drop(parsed);
         diagnostics.extend(built);
         assert!(diagnostics.iter().all(|problem| !problem.is_error()), "fixture has no model errors: {diagnostics:?}");
 
-        let (read_problems, suggestions) = check_memos(&book, &project, &sources.files, &mut sources.auxiliary);
+        let (read_problems, suggestions) = check_memos(&book, &project, &mut sources);
         assert!(read_problems.is_empty(), "{read_problems:?}");
         assert!(suggestions.iter().any(|group| group.count == 2));
         assert!(suggestions.iter().any(|group| group.known_as == "known-as \"TRADER JOE'S\""));
@@ -578,7 +572,8 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         dir.write("prices.ax", "old\n");
         let project = Project::find(dir.path()).unwrap();
-        let sources = project.load().unwrap();
+        let texts = Texts::default();
+        let sources = project.load(&texts).unwrap();
         let changes =
             vec![Change { path: "prices.ax".to_owned(), before: Some("old\n".to_owned()), after: "new\n".to_owned() }];
         let fate = Fate::Shown;
@@ -602,7 +597,8 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         symlink(outside.path(), dir.path().join("link")).unwrap();
         let project = Project::find(dir.path()).unwrap();
-        let sources = project.load().unwrap();
+        let texts = Texts::default();
+        let sources = project.load(&texts).unwrap();
         let changes =
             vec![Change { path: "link/new-folder/prices.ax".to_owned(), before: None, after: "new\n".to_owned() }];
         let fate = Fate::apply(&[], &project.root, &changes);
@@ -620,7 +616,8 @@ mod tests {
         dir.write("axiom.ax", "base USD\n");
         dir.write("prices.ax", "old\n");
         let project = Project::find(dir.path()).unwrap();
-        let sources = project.load().unwrap();
+        let texts = Texts::default();
+        let sources = project.load(&texts).unwrap();
         let invalid_book = [Diagnostic::error("invalid-book", "the project has a model error")];
         let changes =
             vec![Change { path: "prices.ax".to_owned(), before: Some("old\n".to_owned()), after: "new\n".to_owned() }];

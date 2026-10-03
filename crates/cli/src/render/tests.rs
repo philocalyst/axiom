@@ -1,8 +1,8 @@
 use axiom_core::{Diagnostic, Disposition, FileId, Loc};
 
 use super::*;
-use crate::project::Sources;
 use crate::style::Terminal;
+use axiom_session::{Sources, Texts};
 
 /// The range of the `nth` (from 0) occurrence of `needle` in file `file`.
 fn find(sources: &Sources, file: u16, needle: &str, nth: usize) -> Loc {
@@ -41,7 +41,8 @@ law deferral-limit
 
 #[test]
 fn one_label_with_a_note() {
-    let sources = Sources::in_memory(&[("journal/2026/01.ax", "2026-01-18 chekcing -> food 84.20 USD\n")], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("journal/2026/01.ax", "2026-01-18 chekcing -> food 84.20 USD\n")], &[]);
     let diagnostic = Diagnostic::error("unknown-place", "no place called `chekcing`")
         .label(find(&sources, 0, "chekcing", 0), "not declared")
         .note("A place is declared with `account`, or opened by writing its full path under a root such as `assets`.");
@@ -63,7 +64,8 @@ error[unknown-place]: no place called `chekcing`
 
 #[test]
 fn several_labels_on_one_line_hang_right_to_left() {
-    let sources = Sources::in_memory(&[("journal/2026/11.ax", JOURNAL)], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("journal/2026/11.ax", JOURNAL)], &[]);
     let diagnostic = Diagnostic::warning("budget", "over budget")
         .label(find(&sources, 0, "2_600 USD", 0), "this contribution")
         .context(find(&sources, 0, "retirement", 0), "a 401k")
@@ -88,7 +90,8 @@ warning[budget]: over budget
 #[test]
 fn the_readers_file_comes_first_and_a_built_in_source_says_so() {
     static SYSTEMS: [(&str, &str); 1] = [("us/401k.ax", LAW)];
-    let sources = Sources::in_memory(&[("journal/2026/11.ax", JOURNAL)], &SYSTEMS);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("journal/2026/11.ax", JOURNAL)], &SYSTEMS);
     // The law is what failed, so it anchors the diagnostic; the reader edits the journal.
     let diagnostic = Diagnostic::error("deferral-limit", "401k contributions would exceed the 2026 limit")
         .label(find(&sources, 1, "total(in, year)", 0), "25,300.00 USD")
@@ -124,7 +127,9 @@ error[deferral-limit]: 401k contributions would exceed the 2026 limit
 
 #[test]
 fn a_fix_is_a_diff() {
-    let sources = Sources::in_memory(&[("journal.ax", "// prices\n2026-01-18 chekcing -> food 84.20 USD\n")], &[]);
+    let texts = Texts::default();
+    let sources =
+        Sources::in_memory(&texts, &[("journal.ax", "// prices\n2026-01-18 chekcing -> food 84.20 USD\n")], &[]);
     let place = find(&sources, 0, "chekcing", 0);
     let diagnostic = Diagnostic::error("unknown-place", "no place called `chekcing`").label(place, "not declared").fix(
         "did you mean `checking`?",
@@ -150,7 +155,9 @@ error[unknown-place]: no place called `chekcing`
 
 #[test]
 fn an_insertion_shows_only_what_it_adds_and_a_deletion_only_what_it_takes() {
+    let texts = Texts::default();
     let sources = Sources::in_memory(
+        &texts,
         &[("a.ax", "account assets/checking\n  opened 2026-03-01\n  closed 2026-01-31\n\nbase USD\n")],
         &[],
     );
@@ -181,7 +188,8 @@ error[edit]: edits
 
 #[test]
 fn a_label_spanning_lines_is_marked_on_each_with_its_text_under_the_last() {
-    let sources = Sources::in_memory(&[("journal.ax", JOURNAL)], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("journal.ax", JOURNAL)], &[]);
     let whole = find(&sources, 0, "2026-11-14 acme -> 5_200 USD\n  retirement   2_600 USD\n  checking     ...", 0);
     let diagnostic =
         Diagnostic::error("split", "the legs do not add up").label(whole, "the legs come to 2_600 USD, not 5_200 USD");
@@ -204,7 +212,8 @@ error[split]: the legs do not add up
 
 #[test]
 fn a_span_is_trimmed_of_the_whitespace_around_it() {
-    let sources = Sources::in_memory(&[("journal.ax", JOURNAL)], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("journal.ax", JOURNAL)], &[]);
     let leg = find(&sources, 0, "  retirement   2_600 USD\n", 0);
     let diagnostic =
         Diagnostic::error("leg", "the whole line, with its indentation and line ending").label(leg, "a leg");
@@ -239,7 +248,8 @@ const TABBED: &str = "\
 
 #[test]
 fn distant_lines_are_separated_by_a_gap_and_a_tab_shows() {
-    let sources = Sources::in_memory(&[("journal/2026/01.ax", TABBED)], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("journal/2026/01.ax", TABBED)], &[]);
     let diagnostic = Diagnostic::error("assert", "assertion failed")
         .label(find(&sources, 0, "1_000 USD", 0), "expected here")
         .context(find(&sources, 0, "2_600 USD", 0), "past a tab");
@@ -264,7 +274,8 @@ error[assert]: assertion failed
 #[test]
 fn a_wide_line_is_cut_around_the_label() {
     let line = format!("{}(needle){}", "a".repeat(2_000_000), "b".repeat(2_000_000));
-    let sources = Sources::in_memory(&[("wide.ax", &format!("{line}\n"))], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("wide.ax", &format!("{line}\n"))], &[]);
     let diagnostic = Diagnostic::error("wide", "wide").label(find(&sources, 0, "(needle)", 0), "here");
     let drawn = Renderer::new(&sources, Terminal::plain(60)).diagnostic(&diagnostic);
     assert!(drawn.len() < 500, "{} bytes", drawn.len());
@@ -274,7 +285,9 @@ fn a_wide_line_is_cut_around_the_label() {
 
 #[test]
 fn diagnostics_come_in_reading_order_one_report_per_cause_and_are_counted() {
-    let sources = Sources::in_memory(&[("a.ax", "one\ntwo\nthree\nfour\nfive\nsix\n"), ("b.ax", "seven\n")], &[]);
+    let texts = Texts::default();
+    let sources =
+        Sources::in_memory(&texts, &[("a.ax", "one\ntwo\nthree\nfour\nfive\nsix\n"), ("b.ax", "seven\n")], &[]);
     let at = |diagnostic: Diagnostic, file: u16, word: &str| diagnostic.label(find(&sources, file, word, 0), "");
     let all = [
         at(Diagnostic::error("f", "in b"), 1, "seven"),
@@ -321,7 +334,8 @@ fn diagnostics_come_in_reading_order_one_report_per_cause_and_are_counted() {
 #[test]
 fn a_flood_is_counted_not_drawn_unless_asked_for() {
     let text = "x\n".repeat(60);
-    let sources = Sources::in_memory(&[("a.ax", &text)], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("a.ax", &text)], &[]);
     let all: Vec<Diagnostic> = (0..60)
         .map(|line| {
             let start = 2 * line;
@@ -339,7 +353,8 @@ fn a_flood_is_counted_not_drawn_unless_asked_for() {
 
 #[test]
 fn colour_follows_severity() {
-    let sources = Sources::in_memory(&[("a.ax", "abc\n")], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("a.ax", "abc\n")], &[]);
     let diagnostic = Diagnostic::warning("w", "careful").label(Loc::new(FileId(0), 0, 3), "here");
     let drawn = Renderer::new(&sources, Terminal::colored(100)).diagnostic(&diagnostic);
     assert!(drawn.starts_with("\x1b[1;33mwarning[w]\x1b[0m\x1b[1m: careful\x1b[0m\n"), "{drawn:?}");
@@ -349,7 +364,8 @@ fn colour_follows_severity() {
 
 #[test]
 fn odd_labels_never_panic() {
-    let sources = Sources::in_memory(&[("a.ax", "one\ntwo\tthree\nlast"), ("empty.ax", "")], &[]);
+    let texts = Texts::default();
+    let sources = Sources::in_memory(&texts, &[("a.ax", "one\ntwo\tthree\nlast"), ("empty.ax", "")], &[]);
     let text_len = sources.get(FileId(0)).expect("file").text.len() as u32;
     let diagnostic = Diagnostic::error("odd", "odd labels")
         .label(Loc::new(FileId(0), text_len, text_len), "at the very end")

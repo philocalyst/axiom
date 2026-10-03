@@ -447,7 +447,7 @@ mod tests {
     use axiom_core::{Day, Qty, Ratio};
 
     use super::*;
-    use crate::project::Sources;
+    use axiom_session::{Sources, Texts};
 
     fn column(title: &'static str, align: Align) -> Column<'static> {
         Column { title: Cell::Word(title), align }
@@ -491,7 +491,7 @@ mod tests {
         };
         let report = Report { title: Cell::Word("Balances at 2026-03-31"), sections: vec![section] };
         assert_eq!(
-            render(&report, Terminal::plain(80), &Sources::default()),
+            render(&report, Terminal::plain(80), &Sources::empty(&Texts::default())),
             "\
 Balances at 2026-03-31
 
@@ -526,7 +526,10 @@ Assets
         );
         let report = Report { title: sentence, sections: Vec::new() };
 
-        assert_eq!(render(&report, Terminal::plain(80), &Sources::default()), "Income 12.00 USD, today\n");
+        assert_eq!(
+            render(&report, Terminal::plain(80), &Sources::empty(&Texts::default())),
+            "Income 12.00 USD, today\n"
+        );
     }
 
     #[test]

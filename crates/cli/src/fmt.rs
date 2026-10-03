@@ -7,14 +7,14 @@ use std::fs;
 use std::path::Path;
 
 use axiom_core::Diagnostic;
+use axiom_session::Sources;
 
 use crate::Outcome;
-use crate::project::Sources;
 use crate::style::{Ink, Line, Terminal};
 
 /// Formats every project source, or only the named sources. `--check` reports
 /// differences and never writes them.
-pub fn execute(sources: &Sources, root: &Path, wanted: &[&str], check: bool, terminal: Terminal) -> Outcome {
+pub fn execute(sources: &Sources<'_>, root: &Path, wanted: &[&str], check: bool, terminal: Terminal) -> Outcome {
     match plan(sources, wanted) {
         Ok(changes) => apply(sources, root, changes, check, terminal),
         Err(problem) => Outcome {
@@ -30,7 +30,7 @@ struct Change<'a> {
     output: String,
 }
 
-fn plan<'a>(sources: &'a Sources, wanted: &[&str]) -> Result<Vec<Change<'a>>, Diagnostic> {
+fn plan<'a>(sources: &'a Sources<'_>, wanted: &[&str]) -> Result<Vec<Change<'a>>, Diagnostic> {
     let paths: Vec<&str> = sources.project_paths().collect();
     fn normalize(path: &str) -> &str {
         path.strip_prefix("./").unwrap_or(path)
@@ -72,7 +72,7 @@ fn plan<'a>(sources: &'a Sources, wanted: &[&str]) -> Result<Vec<Change<'a>>, Di
         .collect()
 }
 
-fn apply(sources: &Sources, root: &Path, changes: Vec<Change<'_>>, check: bool, terminal: Terminal) -> Outcome {
+fn apply(sources: &Sources<'_>, root: &Path, changes: Vec<Change<'_>>, check: bool, terminal: Terminal) -> Outcome {
     let mut changed = Vec::new();
     for change in changes {
         let Some(source) = sources.find(change.path) else {
@@ -134,6 +134,8 @@ fn ensure_inside(root: &Path, target: &Path) -> Result<(), Diagnostic> {
 
 #[cfg(test)]
 mod tests {
+    use axiom_session::Texts;
+
     use super::*;
     use crate::project::Project;
     use crate::style::Terminal;
@@ -151,7 +153,8 @@ mod tests {
         assert_eq!(file.format(), "2026-01-05 checking 12.5 USD -> food\n");
         dir.write("journal/2026.ax", source);
         let project = Project::find(dir.path()).unwrap();
-        let sources = project.load().unwrap();
+        let texts = Texts::default();
+        let sources = project.load(&texts).unwrap();
         let checked = execute(&sources, &project.root, &["journal/2026.ax"], true, Terminal::plain(80));
         assert!(checked.failed, "unformatted selected file is reported");
         assert_eq!(fs::read_to_string(dir.path().join("axiom.ax")).unwrap(), "base USD\n");
@@ -161,7 +164,7 @@ mod tests {
         assert!(!formatted.failed);
         let first = fs::read_to_string(dir.path().join("journal/2026.ax")).unwrap();
         assert_eq!(first, "2026-01-05 checking 12.5 USD -> food\n");
-        let sources = project.load().unwrap();
+        let sources = project.load(&texts).unwrap();
         let checked = execute(&sources, &project.root, &["journal/2026.ax"], true, Terminal::plain(80));
         assert!(!checked.failed);
         assert_eq!(fs::read_to_string(dir.path().join("journal/2026.ax")).unwrap(), first);
@@ -173,7 +176,8 @@ mod tests {
         let dir = TempDir::new("fmt-path");
         dir.write("axiom.ax", "base USD\n");
         let project = Project::find(dir.path()).unwrap();
-        let sources = project.load().unwrap();
+        let texts = Texts::default();
+        let sources = project.load(&texts).unwrap();
         assert!(plan(&sources, &["missing.ax"]).is_err());
         let outside = dir.path().parent().unwrap().join("elsewhere.ax");
         fs::write(&outside, "base USD\n").unwrap();
