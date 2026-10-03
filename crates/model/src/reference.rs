@@ -10,7 +10,7 @@
 //! every thread.
 
 use axiom_core::diag::closest;
-use axiom_core::{Day, Diagnostic, Id};
+use axiom_core::{Day, Diagnostic, Id, Sym};
 
 use crate::addresses::Part;
 use crate::book::{Book, Entity, Place};
@@ -90,6 +90,27 @@ impl World<'_> {
         Ok(attempt.then_some(fillers))
     }
 
+    /// Whether the reference of `fillers` and `name` is read as this account on `day`: by the names every account has if
+    /// they find it alone, else by the index. A word of digits alone is a number, and cannot be written as a name.
+    fn means(&self, place: Id<Place>, fillers: &[Id<Entity>], name: Sym, day: Option<Day>) -> bool {
+        let book = &self.book;
+        let text = self.spell_reference(fillers, name);
+        let numeric = |text: &str| text.bytes().all(|byte| byte.is_ascii_digit() || matches!(byte, b'_' | b'.'));
+        if !text.contains('/') && numeric(&text) {
+            return false;
+        }
+        match book.lookup.places.candidates(&book.names, &text) {
+            [only] => *only == place,
+            several if several.len() > 1 && !several.iter().any(|&place| book.is_spelled(place)) => false,
+            _ => matches!(book.lookup.addresses.resolve(fillers, name, day), Found::One(only) if only == place),
+        }
+    }
+
+    fn spell_reference(&self, fillers: &[Id<Entity>], name: Sym) -> String {
+        let parts: Vec<Part> = fillers.iter().map(|&entity| Part::Filler(entity)).chain([Part::Name(name)]).collect();
+        self.spell(&parts)
+    }
+
     /// An account's address, or a reference, written out.
     pub(crate) fn spell(&self, parts: &[Part]) -> String {
         let book = &self.book;
@@ -106,7 +127,9 @@ impl World<'_> {
         let describe = |&place: &Id<Place>| Candidate {
             is: format!("`{}`", self.spell(addresses.address(place))),
             declared: self.book.places[place].loc,
-            write: Some(self.spell(&addresses.shortest(place, day))),
+            write: Some(
+                self.spell(&addresses.shortest_that(place, |fillers, name| self.means(place, fillers, name, day))),
+            ),
         };
         let candidates: Vec<Candidate> = places.iter().map(describe).collect();
         let diagnostic = problem::ambiguous(Noun::Address, word, &candidates);

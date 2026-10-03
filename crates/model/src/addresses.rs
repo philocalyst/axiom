@@ -50,6 +50,7 @@ pub(crate) struct Account<'a> {
     pub open: Option<Days>,
 }
 
+#[derive(Default)]
 pub(crate) struct Addresses {
     /// For each entity, the accounts it fills a slot of, by place number.
     fills: Groups<Entity, u32>,
@@ -61,18 +62,6 @@ pub(crate) struct Addresses {
     address: Groups<Place, Part>,
     /// By place number: the days the account is open.
     open: Vec<Option<Days>>,
-}
-
-impl Default for Addresses {
-    fn default() -> Addresses {
-        Addresses {
-            fills: Groups::default(),
-            stands: Groups::default(),
-            called: Groups::default(),
-            address: Groups::default(),
-            open: Vec::new(),
-        }
-    }
 }
 
 impl Addresses {
@@ -188,9 +177,9 @@ impl Addresses {
         !self.fills[entity].is_empty()
     }
 
-    /// The shortest reference that means only `place` on `day`: the fewest of its fillers, the leftmost among equals,
-    /// then its name. The whole address, if nothing shorter is the one account.
-    pub fn shortest(&self, place: Id<Place>, day: Option<Day>) -> Vec<Part> {
+    /// The shortest reference that `means_it` says is this account and no other: the fewest of its fillers, the leftmost
+    /// among equals, then its name. The whole address, if nothing shorter does.
+    pub fn shortest_that(&self, place: Id<Place>, means_it: impl Fn(&[Id<Entity>], Sym) -> bool) -> Vec<Part> {
         let address = self.address(place);
         let Some((&Part::Name(name), fillers)) = address.split_last() else { return Vec::new() };
         let entities: Vec<Id<Entity>> = fillers
@@ -203,13 +192,20 @@ impl Addresses {
         // Fewest fillers first, and among as many, the leftmost: the owner before the custodian.
         let mut subsets: Vec<u16> = (0..1u32 << entities.len()).map(|set| set as u16).collect();
         subsets.sort_by_key(|set| (set.count_ones(), !set.reverse_bits()));
-        let means_only_this = |set: &u16| {
-            let chosen: Vec<Id<Entity>> =
-                (0..entities.len()).filter(|&at| set >> at & 1 == 1).map(|at| entities[at]).collect();
-            matches!(self.resolve(&chosen, name, day), Found::One(only) if only == place).then_some(chosen)
+        let chosen_by = |set: &u16| -> Vec<Id<Entity>> {
+            (0..entities.len()).filter(|&at| set >> at & 1 == 1).map(|at| entities[at]).collect()
         };
-        let chosen = subsets.iter().find_map(means_only_this).unwrap_or(entities);
+        let chosen = subsets.iter().map(chosen_by).find(|chosen| means_it(chosen, name)).unwrap_or(entities);
         chosen.into_iter().map(Part::Filler).chain([Part::Name(name)]).collect()
+    }
+
+    /// The shortest reference that the index alone takes to `place` among the accounts open on `day`.
+    #[cfg(test)]
+    fn shortest(&self, place: Id<Place>, day: Option<Day>) -> Vec<Part> {
+        self.shortest_that(
+            place,
+            |fillers, name| matches!(self.resolve(fillers, name, day), Found::One(only) if only == place),
+        )
     }
 
     /// How many accounts have an address.

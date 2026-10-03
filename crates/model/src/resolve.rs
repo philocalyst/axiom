@@ -281,8 +281,9 @@ impl<'s> World<'s> {
         let several = visible_entities.next().is_some();
         if places.len() > 1 && entity.is_none() {
             // The line's day may tell apart accounts that are written as addresses; others are ambiguous as ever.
-            if places.iter().any(|&place| self.book.is_spelled(place)) {
-                return self.address_end(home, word, day, Reached::Several);
+            let spelled = places.iter().any(|&place| self.book.is_spelled(place));
+            if let Some(end) = spelled.then(|| self.address_end(home, word, day, Reached::Several)).flatten() {
+                return Some(end);
             }
             return Some(Err(self.seek_place(word).expect_err("multiple visible places must be ambiguous")));
         }

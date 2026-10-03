@@ -1,0 +1,15 @@
+error[unknown-address]: there is no address `jordan/40lk`
+   ╭─[100-unknown-address.ax:20:12]
+   │
+20 │ 2026-01-31 jordan/40lk = 5_000 USD
+   │            ─────┬─────
+   │                 ╰── not a known address
+   │
+   = help: did you mean `jordan/401k`?
+20 - 2026-01-31 jordan/40lk = 5_000 USD
+20 + 2026-01-31 jordan/401k = 5_000 USD
+   = help: an address is the entities that fill an account's slots, in order, then its name:
+           `jordan/bluefin/401k`
+
+✗ 1 error
+[exit status 1]

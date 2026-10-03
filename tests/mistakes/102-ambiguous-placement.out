@@ -1,0 +1,38 @@
+error[ambiguous-placement]: `bluefin` could fill `owner` or `employer` of `bluefin/acme/401k`
+   ╭─[102-ambiguous-placement.ax:11:9]
+   │
+11 │ account bluefin/acme/401k at fidelity
+   │         ───┬───
+   │            ╰── fits more than one slot
+   │
+   = note: a word before the name is placed only where every way of placing all the words puts it,
+           so a word that could go in two slots needs a role line
+   = help: write that `bluefin` is the `owner`
+11 - account bluefin/acme/401k at fidelity
+11 + account acme/401k at fidelity
+12 +   owner bluefin
+   = help: write that `bluefin` is the `employer`
+11 - account bluefin/acme/401k at fidelity
+11 + account acme/401k at fidelity
+12 +   employer bluefin
+
+error[ambiguous-placement]: `acme` could fill `owner` or `employer` of `bluefin/acme/401k`
+   ╭─[102-ambiguous-placement.ax:11:17]
+   │
+11 │ account bluefin/acme/401k at fidelity
+   │                 ──┬─
+   │                   ╰── fits more than one slot
+   │
+   = note: a word before the name is placed only where every way of placing all the words puts it,
+           so a word that could go in two slots needs a role line
+   = help: write that `acme` is the `owner`
+11 - account bluefin/acme/401k at fidelity
+11 + account bluefin/401k at fidelity
+12 +   owner acme
+   = help: write that `acme` is the `employer`
+11 - account bluefin/acme/401k at fidelity
+11 + account bluefin/401k at fidelity
+12 +   employer acme
+
+✗ 2 errors
+[exit status 1]

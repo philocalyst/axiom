@@ -118,11 +118,82 @@ impl Free {
     }
 }
 
-/// Everything about one account that the placement reads and writes.
+/// Everything about one account that the placement reads: where it is written, the words before its name, and the
+/// slots they may still take.
 struct Spelling<'w, 'a, 's> {
     written: &'w Written<'a, 's, Decl<'s>>,
     place: Id<Place>,
     words: Vec<Leading<'s>>,
+    free: Vec<Free>,
+}
+
+impl<'s> Spelling<'_, '_, 's> {
+    /// The slots each word fits, as a set, and the slots that take one word.
+    fn candidates(&self, book: &Book) -> (Vec<u16>, u16) {
+        let fitting = |word: &Leading| self.slots_where(|free| free.fits(book, word.entity));
+        (self.words.iter().map(fitting).collect(), self.slots_where(|free| free.takes_one()))
+    }
+
+    /// The set of free slots that `holds` of.
+    fn slots_where(&self, holds: impl Fn(&Free) -> bool) -> u16 {
+        self.free.iter().enumerate().filter(|(_, free)| holds(free)).fold(0, |set, (at, _)| set | 1 << at)
+    }
+
+    /// The names of the free slots in a set.
+    fn names<'b>(&self, book: &'b Book, set: u16) -> Vec<&'b str> {
+        let free = self.free.iter().enumerate();
+        free.filter(|(at, _)| set >> at & 1 == 1).map(|(_, free)| free.name(book)).collect()
+    }
+
+    /// Where the word is written: a slice of the path, which is a slice of the source.
+    fn loc(&self, word: usize) -> Loc {
+        self.written.file().loc(self.words[word].text)
+    }
+
+    /// What a diagnostic says of the word, the account and its kind.
+    fn placing<'b>(&self, book: &'b Book, word: usize) -> Placing<'b>
+    where
+        's: 'b,
+    {
+        Placing {
+            word: Word { text: self.words[word].text, loc: self.loc(word) },
+            path: self.written.node.name.0,
+            kind: book.name(book.kinds[book.places[self.place].kind].name),
+        }
+    }
+
+    /// The edit that writes the word as a role: the path without it, and a line under the header that says it.
+    fn role_edit(&self, word: usize, slot: &str) -> (Loc, String) {
+        let (file, written) = (self.written.file(), self.written);
+        let (path, header) = (file.loc(written.node.name.0), written.item.loc);
+        let words = written.node.name.0.split('/').enumerate();
+        let kept: Vec<&str> = words.filter(|&(at, _)| at != word).map(|(_, text)| text).collect();
+        let after = &file.src[path.end as usize..header.end as usize];
+        let line = format!("{}{after}\n  {slot} {}", kept.join("/"), self.words[word].text);
+        (Loc::new(path.file, path.start, header.end), line)
+    }
+
+    fn ambiguous(&self, book: &Book, word: usize, set: u16) -> Diagnostic {
+        let slots = self.names(book, set);
+        let roles = slots.iter().map(|&slot| Way { slot, edit: self.role_edit(word, slot) }).collect();
+        problem::ambiguous_placement(&self.placing(book, word), &slots, roles)
+    }
+
+    fn fits_no_slot(&self, book: &Book, word: usize) -> Diagnostic {
+        let left: Vec<(&str, String)> = self.free.iter().map(|free| (free.name(book), free.takes(book))).collect();
+        problem::word_fits_no_slot(&self.placing(book, word), &left)
+    }
+
+    fn too_many_words(&self, book: &Book) -> Diagnostic {
+        let mut placing = self.placing(book, 0);
+        placing.word.loc = placing.word.loc.to(self.loc(self.words.len() - 1));
+        let fits = |word: &Leading<'s>| {
+            let fitting = self.slots_where(|free| free.fits(book, word.entity));
+            (word.text, self.names(book, fitting))
+        };
+        let fits: Vec<(&str, Vec<&str>)> = self.words.iter().map(fits).collect();
+        problem::words_that_do_not_fit_together(&placing, &fits)
+    }
 }
 
 /// Places the words before the name of every spelled account into the slots they fill, and says them as a role line
@@ -144,7 +215,8 @@ pub(crate) fn place_words<'a, 's>(
         let book = &world.book;
         let scope = world.scopes.of(written.home());
         let Some(words) = leading(&book.lookup.entities, &book.entities, &book.names, scope, path) else { continue };
-        place_one(world, &Spelling { written, place, words }, filled, diags);
+        let free = free_slots(world, written, place, filled);
+        place_one(world, &Spelling { written, place, words, free }, filled, diags);
     }
 }
 
@@ -154,64 +226,59 @@ fn place_one<'s>(
     filled: &mut Filled,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let free = free_slots(world, spelling, filled);
-    let book = &world.book;
-    let candidates: Vec<u16> = spelling
-        .words
-        .iter()
-        .map(|word| {
-            free.iter()
-                .enumerate()
-                .filter(|(_, free)| free.fits(book, word.entity))
-                .fold(0, |set, (at, _)| set | 1 << at)
-        })
-        .collect();
-    let single = free.iter().enumerate().filter(|(_, free)| free.takes_one()).fold(0, |set, (at, _)| set | 1 << at);
-    // A word that is wrong is still an attempt to fill a slot: it is said once, and the slots are not said missing too.
-    let holder = Holder::Place(spelling.place);
-    let attempted = |filled: &mut Filled, set: u16| {
-        for (at, free) in free.iter().enumerate() {
-            if let Free::Slot { number, .. } = free
-                && set >> at & 1 == 1
-            {
-                filled.insert((holder, *number));
-            }
-        }
-    };
+    let (candidates, single) = spelling.candidates(&world.book);
     match placement::place(&candidates, single) {
-        Ok(placement) => {
-            let mut fills: Vec<Vec<usize>> = vec![Vec::new(); free.len()];
-            for (word, placed) in placement.as_slice().iter().enumerate() {
-                match *placed {
-                    Placed::Forced(slot) => fills[usize::from(slot)].push(word),
-                    Placed::Ambiguous(set) => {
-                        diags.push(ambiguous(world, spelling, word, &free, set));
-                        attempted(filled, set);
-                    }
-                }
-            }
-            for (free, words) in free.iter().zip(fills).filter(|(_, words)| !words.is_empty()) {
-                fill_slot(world, spelling, *free, &words, filled);
-            }
-        }
+        Ok(placement) => fill_placed(world, spelling, placement.as_slice(), filled, diags),
         Err(Unplaceable::NoCandidate(word)) => {
-            diags.push(fits_no_slot(world, spelling, usize::from(word), &free));
-            attempted(filled, u16::MAX);
+            diags.push(spelling.fits_no_slot(&world.book, usize::from(word)));
+            attempt(filled, spelling, u16::MAX);
         }
         Err(Unplaceable::NoPlacement) => {
-            diags.push(too_many_words(world, spelling, &free));
-            attempted(filled, u16::MAX);
+            diags.push(spelling.too_many_words(&world.book));
+            attempt(filled, spelling, u16::MAX);
+        }
+    }
+}
+
+/// Says what the words that were placed fill, and what the words that could go two ways are.
+fn fill_placed<'s>(
+    world: &mut World<'s>,
+    spelling: &Spelling<'_, '_, 's>,
+    placed: &[Placed],
+    filled: &mut Filled,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut fills: Vec<Vec<usize>> = vec![Vec::new(); spelling.free.len()];
+    for (word, placed) in placed.iter().enumerate() {
+        match *placed {
+            Placed::Forced(slot) => fills[usize::from(slot)].push(word),
+            Placed::Ambiguous(set) => {
+                diags.push(spelling.ambiguous(&world.book, word, set));
+                attempt(filled, spelling, set);
+            }
+        }
+    }
+    for (free, words) in spelling.free.iter().zip(fills).filter(|(_, words)| !words.is_empty()) {
+        fill_slot(world, spelling, *free, &words, filled);
+    }
+}
+
+/// A word that is wrong is still an attempt to fill a slot: it is said once, and the slots are not said missing too.
+fn attempt(filled: &mut Filled, spelling: &Spelling<'_, '_, '_>, set: u16) {
+    for free in spelling.free.iter().enumerate().filter(|(at, _)| set >> at & 1 == 1).map(|(_, free)| free) {
+        if let Free::Slot { number, .. } = free {
+            filled.insert((Holder::Place(spelling.place), *number));
         }
     }
 }
 
 /// The slots the words may take: the owner, if no line gave one, and each slot of the kind that takes entities and that
 /// no line of the account or of its kind fills.
-fn free_slots(world: &World<'_>, spelling: &Spelling<'_, '_, '_>, filled: &Filled) -> Vec<Free> {
+fn free_slots(world: &World<'_>, written: &Written<'_, '_, Decl<'_>>, place: Id<Place>, filled: &Filled) -> Vec<Free> {
     let book = &world.book;
-    let (file, decl) = (spelling.written.file(), spelling.written.node);
-    let holder = Holder::Place(spelling.place);
-    let kind = book.places[spelling.place].kind;
+    let (file, decl) = (written.file(), written.node);
+    let holder = Holder::Place(place);
+    let kind = book.places[place].kind;
     let owner = (!file[decl.props].iter().any(|line| line.name.0 == "owner")).then_some(Free::Owner);
     let is_filled = |number| {
         filled.contains(&(holder, number))
@@ -234,13 +301,13 @@ fn fill_slot<'s>(
     match free {
         Free::Owner => own(&mut world.book, spelling.place, entities[0]),
         Free::Slot { number, slot } => {
-            let loc = word_loc(spelling, words[0]);
-            let data = entities.iter().map(|&entity| Datum::of(entity));
             match holds_one(slot.mult) {
                 true => world.paint(holder, number, Days::ALWAYS, Datum::of(entities[0])),
-                false => world.paint_set(holder, number, Days::ALWAYS, data.collect()),
+                false => {
+                    world.paint_set(holder, number, Days::ALWAYS, entities.iter().map(|&e| Datum::of(e)).collect())
+                }
             }
-            world.say_site(holder, number, 0, loc);
+            world.say_site(holder, number, 0, spelling.loc(words[0]));
             filled.insert((holder, number));
         }
     }
@@ -256,60 +323,4 @@ fn own(book: &mut Book<'_>, place: Id<Place>, owner: Id<Entity>) {
         let held = &mut book.places[own];
         (held.class, held.role, held.kind, held.owner) = (Class::Asset, Role::Holding(owner), asset, owner);
     }
-}
-
-/// Where the word is written: a slice of the path, which is a slice of the source.
-fn word_loc(spelling: &Spelling<'_, '_, '_>, word: usize) -> Loc {
-    spelling.written.file().loc(spelling.words[word].text)
-}
-
-fn placing<'w>(world: &'w World<'_>, spelling: &Spelling<'w, '_, '_>, word: usize) -> Placing<'w> {
-    let book = &world.book;
-    let text = spelling.words[word].text;
-    Placing {
-        word: Word { text, loc: word_loc(spelling, word) },
-        path: spelling.written.node.name.0,
-        kind: book.name(book.kinds[book.places[spelling.place].kind].name),
-    }
-}
-
-fn ambiguous(world: &World<'_>, spelling: &Spelling<'_, '_, '_>, word: usize, free: &[Free], set: u16) -> Diagnostic {
-    let book = &world.book;
-    let slots: Vec<&str> =
-        free.iter().enumerate().filter(|(at, _)| set >> at & 1 == 1).map(|(_, free)| free.name(book)).collect();
-    let roles = slots.iter().map(|&slot| Way { slot, edit: role_edit(spelling, word, slot) }).collect();
-    problem::ambiguous_placement(&placing(world, spelling, word), &slots, roles)
-}
-
-/// The edit that writes the word as a role: the path without it, and a line under the header that says it.
-fn role_edit(spelling: &Spelling<'_, '_, '_>, word: usize, slot: &str) -> (Loc, String) {
-    let (file, written) = (spelling.written.file(), spelling.written);
-    let (path, header) = (file.loc(written.node.name.0), written.item.loc);
-    let kept: Vec<&str> =
-        written.node.name.0.split('/').enumerate().filter(|&(at, _)| at != word).map(|(_, w)| w).collect();
-    let after = &file.src[path.end as usize..header.end as usize];
-    (
-        Loc::new(path.file, path.start, header.end),
-        format!("{}{after}\n  {slot} {}", kept.join("/"), spelling.words[word].text),
-    )
-}
-
-fn fits_no_slot(world: &World<'_>, spelling: &Spelling<'_, '_, '_>, word: usize, free: &[Free]) -> Diagnostic {
-    let book = &world.book;
-    let left: Vec<(&str, String)> = free.iter().map(|free| (free.name(book), free.takes(book))).collect();
-    problem::word_fits_no_slot(&placing(world, spelling, word), &left)
-}
-
-fn too_many_words(world: &World<'_>, spelling: &Spelling<'_, '_, '_>, free: &[Free]) -> Diagnostic {
-    let book = &world.book;
-    let mut placing = placing(world, spelling, 0);
-    placing.word.loc = placing.word.loc.to(word_loc(spelling, spelling.words.len() - 1));
-    let fits: Vec<(&str, Vec<&str>)> = spelling
-        .words
-        .iter()
-        .map(|word| {
-            (word.text, free.iter().filter(|free| free.fits(book, word.entity)).map(|free| free.name(book)).collect())
-        })
-        .collect();
-    problem::words_that_do_not_fit_together(&placing, &fits)
 }

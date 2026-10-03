@@ -1,0 +1,13 @@
+// MISTAKE: two people before the name of a 401(k), which takes one of them as its owner and has no slot for the other.
+base USD
+use std
+use us/401k
+
+entity fidelity : org
+entity jordan : person
+entity riley : person
+
+account jordan/riley/401k at fidelity
+
+opening 2026-01-01
+  jordan/riley/401k 5_000 USD

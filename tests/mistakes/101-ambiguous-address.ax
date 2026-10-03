@@ -1,0 +1,20 @@
+// MISTAKE: an address that two accounts have. Both 401(k)s are held at fidelity, so `fidelity/401k` could be either;
+// the diagnostic offers the shortest address that means only each, and a longer one is only needed
+// once a second account has the words.
+base USD
+use std
+use us/401k
+
+entity fidelity : org
+entity bluefin : employer
+entity acme : employer
+entity jordan : person
+
+account jordan/bluefin/401k at fidelity
+account me/acme/401k at fidelity
+
+opening 2026-01-01
+  jordan/bluefin/401k 5_000 USD
+  me/acme/401k 8_000 USD
+
+2026-01-31 fidelity/401k = 5_000 USD

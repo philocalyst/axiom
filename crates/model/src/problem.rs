@@ -571,13 +571,13 @@ pub(crate) struct Role<'a> {
 /// A word before an account's name that could fill several slots, and every way of placing all the words agrees on
 /// none of them. `roles` write each: the word comes out of the path and goes on a line of its own.
 pub(crate) fn ambiguous_placement(placing: &Placing, slots: &[&str], roles: Vec<Role>) -> Diagnostic {
-    let Placing { word, path, kind } = placing;
+    let Placing { word, path, .. } = placing;
     let diagnostic = Diagnostic::error(
         "ambiguous-placement",
         format!("`{}` could fill {} of `{path}`", word.text, list_names(slots)),
     )
     .label(word.loc, "fits more than one slot")
-    .note(format!("a word before the name is placed only where every way of placing all the words puts it, and a {kind} leaves this one open"));
+    .note("a word before the name is placed only where every way of placing all the words puts it, so a word that could go in two slots needs a role line");
     roles.into_iter().fold(diagnostic, |diagnostic, Role { slot, edit: (loc, text) }| {
         diagnostic.fix(format!("write that `{}` is the `{slot}`", word.text), loc, text)
     })
