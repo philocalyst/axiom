@@ -402,8 +402,9 @@ Numbers are of the tree after the last commit unless said otherwise.
   - *a word alone that no name answers to is an address attempt* (the guard in `address_end`). The oracle's books have no
     end that is a commodity, which is what the guard keeps from being `unknown-address`; a unit test with a commodity that
     has an issuer would kill it, and none was written.
-  Three more were killed once and then deleted with the code they mutated, which the lane simplified when they would
-  not die: the party pass decides which mentions are addresses, so the resolver's own test of the same was redundant.
+  Three more survived the first sweep and were deleted with the code they mutated, which the lane simplified instead
+  of drawing books for them: the party pass decides which mentions are addresses, so the resolver's own test of the
+  same, and a condition of `settled` that the settling already ensured, were redundant.
   The first sweep ran on the code of two commits before the last, and the two that were then not built (the machine ran
   out of memory) or skipped (the text moved) were run alone on the last.
 - **Acceptance**: `family_addresses.py prove target/release/axiom` runs the eleven commands of the goldens over
