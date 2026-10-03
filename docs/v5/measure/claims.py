@@ -858,6 +858,21 @@ MUTANTS = [
     ("crates/model/src/declare.rs", "    world.say(kinds.claim, builtin::CLAIM, true);\n", "", "the kind of a tab does not say `claim`"),
     ("crates/report/src/history.rs", "        && by(book.claim_changes.last().map(|change| change.day))\n", "",
      "a view dated before a write-off is the run's final state"),
+    ("crates/engine/src/settle.rs", "let money = m.target.class == Class::Asset && !self.plan.traits.place(m.to).claim;",
+     "let money = m.target.class == Class::Asset;", "a flow that makes a claim settles the claims before it"),
+    ("crates/engine/src/settle.rs", "let need = open.min(m.out.qty);", "let need = open;", "a payment settles more than it paid"),
+    ("crates/engine/src/settle.rs", "let named = self.name_claims(m, tab);", "let named = false;",
+     "the codes of a payment from a party name no claim"),
+    ("crates/engine/src/settle.rs", "        parcels.iter().for_each(|&parcel| slot.land_with_codes(parcel, false, codes));\n", "",
+     "a returned payment does not open its claims"),
+    ("crates/engine/src/settle.rs", "        self.world.holdings.credit(m.to, unit, -reopened);\n", "",
+     "a returned payment makes value when it opens its claims"),
+    ("crates/engine/src/post.rs", "self.world.holdings.credit(m.from, unit, settled - m.out.qty);",
+     "self.world.holdings.credit(m.from, unit, -m.out.qty);", "a payment that settles claims makes value"),
+    ("crates/engine/src/traits.rs", "partition_point(|&(found, by, _)| (found, by) < (party, owner))",
+     "partition_point(|&(found, by, _)| (found, by) <= (party, owner))", "the tab of a party is not found"),
+    ("crates/engine/src/lots.rs", "lots.iter().take_while(|lot| lot.txn == lots[0].txn).count()", "1",
+     "the lines of an invoice are claims of their own"),
 ]
 
 

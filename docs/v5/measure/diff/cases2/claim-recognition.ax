@@ -1,0 +1,12 @@
+use std
+base USD
+entity me : person
+entity ann : org
+account checking : bank
+purpose design : income
+  law seen
+    on flow
+    warn amount <= empty "recognized"
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 ann owes me 300 USD due 2026-02-01 #design ^i1
+2026-01-20 ann -> checking 300 USD #design ^i1
