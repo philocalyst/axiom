@@ -659,10 +659,13 @@ impl Contract {
     /// Whether the contract's terms cover a typed flow on `day`, independently of its own due date. This lets an
     /// explicit contract cadence replace a learned or v3 schedule for the same movement throughout its term, and keeps a
     /// suspension from reviving a fallback schedule for the promise those terms identify.
+    #[inline]
     pub fn covers(&self, template: &Flow, day: Day) -> ContractCoverage {
-        let covered =
-            [&self.terms, &self.standing].into_iter().flatten().any(|terms| template_covers_flow(terms, template));
-        match (self.days.contains(day) && covered, self.waiver_on(day)) {
+        if !self.days.contains(day) {
+            return ContractCoverage::None;
+        }
+        let terms = [&self.terms, &self.standing].into_iter().flatten();
+        match (terms.into_iter().any(|terms| template_covers_flow(terms, template)), self.waiver_on(day)) {
             (false, _) => ContractCoverage::None,
             (true, None) => ContractCoverage::Active,
             (true, Some(_)) => ContractCoverage::Waived,

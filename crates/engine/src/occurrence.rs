@@ -63,14 +63,13 @@ enum OccurrenceAmount {
     Value(Amount),
 }
 
-/// What the quantities of one occurrence are read against: the promise and the terms in force, the day it is due
+/// What the quantities of one occurrence are read against: the promise, the day it is due
 /// and who it is, the inputs it binds, and the program its expressions are nodes of, with the scale its terms'
 /// escalation puts on what they compute. A promise's quantities are read against the terms' own program and the
 /// day's escalation; a written occurrence's against its own program, and unscaled: it said what it said.
 #[derive(Clone, Copy)]
 struct Reading<'a> {
     contract: Id<Contract>,
-    terms: &'a Terms,
     program: &'a Program,
     scale: Ratio,
     due: Day,
@@ -542,7 +541,6 @@ fn find<'b>(
 fn template_at<'a>(making: &Making<'a>) -> Reading<'a> {
     Reading {
         contract: making.contract,
-        terms: making.terms,
         program: &making.terms.program,
         scale: making.ratio,
         due: making.due,

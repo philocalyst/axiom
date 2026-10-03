@@ -2,13 +2,12 @@
 //!
 //! `loan 320_000 USD on 2024-02-20 at 5.875% over 30y` is an annuity (ACTUS ANN): one payment, the same every period,
 //! that pays the interest of the period and what is left of it off the principal, so that the principal is paid after
-//! the last. Today's fold knows the payment and nothing else (`loan_payment` in the engine), so a forecast pays it for as
-//! long as it is asked to. An [`Annuity`] knows how many payments there are and what is owed after each, so the
-//! promise it belongs to is done after the last.
+//! the last. The fold makes each occurrence of a loan pay the level payment ([`Annuity::payment`]); an [`Annuity`] knows
+//! how many payments there are and what is owed after each, so the promise it belongs to is done after the last.
 //!
-//! The payment is worked out once, when the book is built, with the arithmetic the engine uses: 18 decimal places of
-//! fixed point, rounded half to even at every step, because the cents of a payment must be the ones the fold has. (A
-//! power by squaring would be quicker, and would round differently.)
+//! The payment is worked out once, when the book is built: 18 decimal places of fixed point, rounded half to even at
+//! every step, because the cents of a payment must be the ones the books have always had. (A power by squaring would be
+//! quicker, and would round differently.)
 
 use axiom_core::{Cadence, Day, Qty, Ratio, Span};
 

@@ -10,7 +10,7 @@
 //!   count of the days before a day is the count of the cadence's less the holes before it, and the `n`th owed day is
 //!   the cadence's `n + (days swallowed by the holes before it)`th;
 //! * **keeping** is the matching of a line to its due day: the nearest owed day on either side, the earlier when they
-//!   are equally near, if it is within the contract's reach.
+//!   are equally near, if it is within the schedule's reach (`grace`, else half a cadence).
 
 use axiom_core::{Cadence, Day, Days, Dues, Id, On, Ratio, Run};
 
