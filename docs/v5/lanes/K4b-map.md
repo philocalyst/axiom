@@ -460,8 +460,9 @@ differ and every one has an `=` leg; 2,000 books on the whole CLI, 448 differ an
   baseline, which gets plain transfers right: balance, flow and net worth the same, 5,000 of 5,000 and none with an error. Mutants of
   the code it checks (`/tmp/k4b/mutants.txt`) are each killed by it; the 8 mutants of the exchange leg, the `all` header and the
   lost-leg guard are each killed by `split_tests.rs`, one survives that is a word of a message.
-- **The acceptance tests** are `crates/engine/src/split_tests.rs`: 26, from §3's worked examples and from 1-11 above; each fails on
-  the baseline.
+- **The acceptance tests** are `crates/engine/src/split_tests.rs`: 25, from §3's worked examples and from 1-11 above. The first 19
+  were written before the code and failed on the baseline; the six after it (an `all` header, a leg in another commodity three ways,
+  and a leg that failed to read) were written with it, and a mutant of each is killed by them.
 - **The statement-path oracle, per recipe** (600 books each, `splits.py gen ... recipe:NAME`, new against baseline on `check`,
   `balance` and `flow`): transfer 0 differ, claims 0, basis 0 (the recipes with no split); `unknown` 105 differ (0 without a `?` leg),
   `items_under_header` 355 (0 without a carved or computed item), `exchange` 61 (0 without a computed cost item), `split` 588 (the
@@ -487,8 +488,10 @@ differ and every one has an `=` leg; 2,000 books on the whole CLI, 448 differ an
 
 ### 11.5 Lines
 
-Non-test Rust lines, `briefs/loc.py`: 49,943 before and 50,781 after (+838): model +631 (`solve.rs` 285, `balance.rs` 166, the
-group in `lower/record.rs`, `problem.rs`), engine +207 (`occurrence.rs` 815, `statement.rs` 306, `evaluate.rs` 70, `ledger.rs` -1,001).
+Non-test Rust lines, `briefs/loc.py`: 49,943 before and 50,801 after (+858): model +651 (`solve.rs` 285, `balance.rs` 191,
+`lower/record.rs` +70, `problem.rs` +53, `split.rs` +27, `flow.rs` +16, `journal.rs` +11), engine +206 (`occurrence.rs` 815,
+`statement.rs` 309, `evaluate.rs` 70, `ledger.rs` -1,004). Functions over 80 lines: 16 before, 12 after (`post_journal` 249 to 29, with `post_computed` of 60 beside it;
+`materialize_group` 324 to 65; `instantiate_occurrence` 135 to 47; `lower_owes` 140 to 75).
 The brief's -1,500 was out of reach: the three copies were not three copies of one algorithm (section 0), the promise path
 (`materialize_group`) moved to `occurrence.rs` whole with its tests, the statement path did not exist in the fold and had to be built,
 and the static check and the acceptance tests are the lane's too.
