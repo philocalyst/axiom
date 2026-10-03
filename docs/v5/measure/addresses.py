@@ -663,6 +663,12 @@ def mutate(repo, directory, count, seed):
     """Each mutant of the model, built in a copy of the repository, run through the oracle: killed if anything differs."""
     work = directory + "-mutant"
     gen(directory, count, seed)
+    built = subprocess.run(["cargo", "build", "--release", "-q"], cwd=repo, capture_output=True, text=True)
+    shutil.copy(os.path.join(repo, "target", "release", "axiom"), work)
+    # A mutant is killed only by a difference from the model as it is: the books must be clean for it first.
+    if built.returncode or run(work, directory, 2) + placement(work, directory + "-placement", count, seed):
+        print("the model without a mutation is not clean on these books: no mutant can be said to be killed")
+        return 1
     killed, survived = [], []
     only = os.environ.get("MUTANTS")
     for name, file, old, new in MUTANTS:
