@@ -14,7 +14,7 @@
 //! the place's owner, and a member who lives somewhere of their own is governed
 //! there as themselves.
 
-use axiom_core::{Days, Groups, Id, Set};
+use axiom_core::{Days, Groups, Id};
 
 use crate::book::{Book, Contract, Entity, Place, Role, Sort, System};
 use crate::law::{Keys, Law, Owner, Rule, Rules, Subject, Trigger, Watch};
@@ -83,8 +83,7 @@ impl Residents {
 
 impl Rules {
     fn of(book: &Book, rank: &[u32]) -> Rules {
-        let auxiliary: Set<Id<Law>> = book.also.iter().map(|(_, also)| also.law).collect();
-        let written = WrittenIn::of(book, &auxiliary);
+        let written = WrittenIn::of(book);
         let residents = Residents::of(book);
         let mut entries = Vec::new();
         let mut watching = Vec::new();
@@ -94,9 +93,9 @@ impl Rules {
             entries.extend(watching.iter().filter_map(|&rule| Some((place_watch(book, rule, place)?, rule))));
         }
         entries.extend(spending(book, &written));
-        entries.extend(purpose_flows(book, &written, &auxiliary));
-        entries.extend(asset_flows(book, &written, &auxiliary));
-        entries.extend(contract_flows(book, &written, &auxiliary));
+        entries.extend(purpose_flows(book, &written));
+        entries.extend(asset_flows(book, &written));
+        entries.extend(contract_flows(book, &written));
         entries.extend(timed(book, &residents).into_iter().map(|rule| (Watch::Timed, rule)));
         // One stable sort puts every row in dependency order, and keeps the order a row was filled in among equals.
         entries.sort_by_key(|(_, rule)| rank[rule.law.index()]);
@@ -127,25 +126,25 @@ struct WrittenIn {
 }
 
 impl WrittenIn {
-    fn of(book: &Book, auxiliary: &Set<Id<Law>>) -> WrittenIn {
+    fn of(book: &Book) -> WrittenIn {
         let in_place = book.laws.iter().filter_map(|(id, law)| match law.owner {
-            Owner::Place(place) if !auxiliary.contains(&id) => Some((place, id)),
+            Owner::Place(place) => Some((place, id)),
             _ => None,
         });
         let in_entity = book.laws.iter().filter_map(|(id, law)| match law.owner {
-            Owner::Entity(entity) if !auxiliary.contains(&id) => Some((entity, id)),
+            Owner::Entity(entity) => Some((entity, id)),
             _ => None,
         });
         let in_contract = book.laws.iter().filter_map(|(id, law)| match law.owner {
-            Owner::Contract(contract) if !auxiliary.contains(&id) => Some((contract, id)),
+            Owner::Contract(contract) => Some((contract, id)),
             _ => None,
         });
         let in_purpose = book.laws.iter().filter_map(|(id, law)| match law.owner {
-            Owner::Purpose(purpose) if !auxiliary.contains(&id) => Some((purpose, id)),
+            Owner::Purpose(purpose) => Some((purpose, id)),
             _ => None,
         });
         let in_asset = book.laws.iter().filter_map(|(id, law)| match law.owner {
-            Owner::Asset(asset) if !auxiliary.contains(&id) => Some((asset, id)),
+            Owner::Asset(asset) => Some((asset, id)),
             _ => None,
         });
         let assets_by_place = book.assets.iter().map(|(id, asset)| (asset.place, id));
@@ -156,12 +155,7 @@ impl WrittenIn {
             contracts: Groups::build(book.contracts.len(), in_contract),
             assets: Groups::build(book.places.len(), assets_by_place),
             asset_laws: Groups::build(book.assets.len(), in_asset),
-            project: book
-                .laws
-                .iter()
-                .filter(|(id, law)| law.owner == Owner::Book && !auxiliary.contains(id))
-                .map(|(id, _)| id)
-                .collect(),
+            project: book.laws.iter().filter(|(_, law)| law.owner == Owner::Book).map(|(id, _)| id).collect(),
         }
     }
 }
@@ -262,12 +256,12 @@ fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
 
 /// Purpose laws are inherited by every descendant purpose. The placeholder
 /// subject is replaced with the moving flow's owner when the engine fires it.
-fn purpose_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Watch, Rule)> {
+fn purpose_flows(book: &Book, written: &WrittenIn) -> Vec<(Watch, Rule)> {
     let mut rules = Vec::new();
     for actual in book.purposes.ids() {
         for ancestor in book.purposes.lineage(actual) {
             for &law in written.purposes[ancestor].iter() {
-                if book.laws[law].trigger == Trigger::Flow && !auxiliary.contains(&law) {
+                if book.laws[law].trigger == Trigger::Flow {
                     rules.push((Watch::Purpose(actual), always(law, Subject::Entity(book.roots.me))));
                 }
             }
@@ -278,7 +272,7 @@ fn purpose_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> 
 
 /// An asset's kind laws and its own laws run when a flow is for that asset.
 /// The flow site is the asset's place; the rule subject is the identified asset.
-fn asset_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Watch, Rule)> {
+fn asset_flows(book: &Book, written: &WrittenIn) -> Vec<(Watch, Rule)> {
     let mut rules = Vec::new();
     for (asset, data) in book.assets.iter() {
         let place = data.place;
@@ -288,7 +282,7 @@ fn asset_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Ve
                     .laws
                     .iter()
                     .copied()
-                    .filter(|&law| book.laws[law].trigger == Trigger::Flow && !auxiliary.contains(&law))
+                    .filter(|&law| book.laws[law].trigger == Trigger::Flow)
                     .map(|law| (Watch::About(place), always(law, Subject::Asset(asset)))),
             );
         }
@@ -296,7 +290,7 @@ fn asset_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Ve
             written.asset_laws[asset]
                 .iter()
                 .copied()
-                .filter(|&law| book.laws[law].trigger == Trigger::Flow && !auxiliary.contains(&law))
+                .filter(|&law| book.laws[law].trigger == Trigger::Flow)
                 .map(|law| (Watch::About(place), always(law, Subject::Asset(asset)))),
         );
     }
@@ -305,12 +299,12 @@ fn asset_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Ve
 
 /// Contract laws are kept keyed by promise identity, never by the party shared by two different contracts. The laws
 /// that judge a flow are read as it posts, and the laws that derive one when an occurrence is made.
-fn contract_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Watch, Rule)> {
+fn contract_flows(book: &Book, written: &WrittenIn) -> Vec<(Watch, Rule)> {
     let mut rules = Vec::new();
     for contract in book.contracts.ids() {
-        let flow_laws = written.contracts[contract].iter().filter(|&&law| {
-            !auxiliary.contains(&law) && !matches!(book.laws[law].trigger, Trigger::Each(..) | Trigger::By(_))
-        });
+        let flow_laws = written.contracts[contract]
+            .iter()
+            .filter(|&&law| !matches!(book.laws[law].trigger, Trigger::Each(..) | Trigger::By(_)));
         for &law in flow_laws {
             let watch = if book.laws[law].derives() { Watch::Occurrence(contract) } else { Watch::Contract(contract) };
             rules.push((watch, always(law, Subject::Contract(contract))));

@@ -545,7 +545,6 @@ impl Fixture {
             assets: Arena::new(),
             contracts: Arena::new(),
             promises: Default::default(),
-            also: Arena::new(),
             derived: Arena::new(),
             laws: self.laws,
             rules,

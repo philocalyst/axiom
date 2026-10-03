@@ -510,7 +510,6 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
         assets: assets.arena,
         contracts: Arena::new(),
         promises: Default::default(),
-        also: Arena::new(),
         derived: Arena::new(),
         laws: Arena::new(),
         rules: Default::default(),

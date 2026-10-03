@@ -14,7 +14,7 @@
 use axiom_core::{Arena, Day, Id};
 use axiom_model::{
     Amount, Bear, Book, Commodity, Cut, Derivation, Derived, Expr, Failed, Flow, FlowSide, Infer, Law, LiteralEnv,
-    Origin, Remainder, Remaining, Role, RuntimeDetail, RuntimeFlow, Shape, Sign, Watch, solve,
+    Origin, Remainder, Remaining, RuntimeDetail, RuntimeFlow, Shape, Sign, Watch, solve,
 };
 
 use super::{Cx, Pools, TemplateError};
@@ -43,12 +43,12 @@ impl Ledger<'_, '_, '_> {
         pools: &mut Pools<'_>,
     ) -> Result<(), TemplateError> {
         let rules = self.plan.book.rules.at(Watch::Occurrence(cx.making.contract));
-        if rules.is_empty() || first >= pools.flows.len() {
+        if rules.is_empty() {
             return Ok(());
         }
         let mut made = Vec::new();
         for rule in rules {
-            made.extend(self.fire_derive(rule.law, cx, given, &pools.flows[first..], &pools.details)?);
+            made.extend(self.fire_derive(rule.law, cx, given, &pools.flows[first..], pools.details)?);
         }
         self.join(cx, &made, first, pools)
     }
@@ -95,7 +95,7 @@ impl Ledger<'_, '_, '_> {
         let mut ordinal = pools.flows.last().map_or(0, |flow| flow.ordinal + 1);
         for made in made {
             let derived = &book.derived[made.template];
-            if matches!(derived.shape, Shape::Item(_)) && derived.purpose.is_none() {
+            if !derived.makes_flow() {
                 continue;
             }
             let flow = self.derived_flow(&pools.flows[first].flow, derived, *made);
@@ -142,17 +142,13 @@ impl Ledger<'_, '_, '_> {
     }
 
     /// The flow a `derive` makes: along the header's ends (reversed for a `-` item) or the ends it names, the amount
-    /// the law came to, and what the line says of it.
+    /// the law came to, and what the line says of it. What it does not say is the header's, as for a leg or an item the
+    /// template writes (the contract's party is its payee, whatever end it is paid to).
     fn derived_flow(&self, header: &Flow, derived: &Derived, made: Made) -> Flow {
-        let book = self.plan.book;
         let (from, to) = match derived.shape {
             Shape::Flow { from, to } => (from.unwrap_or(header.from), to.unwrap_or(header.to)),
             Shape::Item(Sign::Less) => (header.to, header.from),
             Shape::Item(Sign::Add | Sign::Carve) => (header.from, header.to),
-        };
-        let payee = match book.places[to].role {
-            Role::Outside(Some(entity)) | Role::Tab(entity) => Some(entity),
-            _ => None,
         };
         Flow {
             from,
@@ -160,13 +156,13 @@ impl Ledger<'_, '_, '_> {
             out: made.amount,
             arrive: made.amount,
             infer: Infer::Known,
-            payee,
-            purpose: derived.purpose,
-            description: derived.description,
+            owner: derived.owner.unwrap_or(header.owner),
+            purpose: derived.purpose.or(header.purpose),
+            description: derived.description.or(header.description),
             codes: derived.codes,
             select: derived.select,
             detail: derived.detail,
-            waive: derived.waive,
+            waive: derived.waive.or(header.waive),
             loc: derived.loc,
             origin: Origin::Derived(Derivation::Law(made.law)),
             ..header.clone()
@@ -300,6 +296,46 @@ opening 2026-01-01
                 1,
                 "an item with no purpose makes no flow"
             );
+        });
+    }
+
+    #[test]
+    fn a_derived_flow_that_says_no_purpose_is_for_what_its_header_is_and_has_its_payee() {
+        let text = format!(
+            "{PRELUDE}contract mortgage with lender\n  1_000.00 USD monthly on 1 from checking #fee\n  from 2026-01-01\n  law derived\n    on flow\n    derive -> escrow 100.00 USD\n    derive -> k401 50.00 USD #match\n2026-01-01 mortgage\n"
+        );
+        with_run(&text, day(2026, 1, 31), |book, run| {
+            let flows = run.promises[0].flows.get(&run.promised_flows).unwrap();
+            let purposes: Vec<_> = flows.iter().map(|flow| flow.flow.purpose.unwrap().purpose).collect();
+            let (fee, matched) = (book.purpose("fee").unwrap(), book.purpose("match").unwrap());
+            assert_eq!(purposes, [fee, fee, matched], "the first says none, so it is the payment's");
+            let payees: Vec<_> = flows.iter().map(|flow| flow.flow.payee).collect();
+            assert_eq!(
+                payees,
+                [Some(book.entity("lender").unwrap()); 3],
+                "the contract's party, whatever it is paid to"
+            );
+        });
+    }
+
+    #[test]
+    fn a_share_is_carved_from_the_header_and_borne_by_its_entity() {
+        let text = format!(
+            "{PRELUDE}contract bill with lender\n  1_000.00 USD monthly on 1 from checking #fee\n  from 2026-01-01\n  share 60% for acme\n2026-01-01 bill\n"
+        );
+        with_run(&text, day(2026, 1, 31), |book, run| {
+            let flows = run.promises[0].flows.get(&run.promised_flows).unwrap();
+            let (owners, amounts): (Vec<_>, Vec<_>) =
+                flows.iter().map(|flow| (flow.flow.owner, flow.flow.out.qty)).unzip();
+            let (me, acme) = (book.roots.me, book.entity("acme").unwrap());
+            assert_eq!(
+                (owners, amounts),
+                (vec![me, acme], vec![Qty(400_00), Qty(600_00)]),
+                "60% of the 1,000.00 is acme's"
+            );
+            let fee = book.purpose("fee").unwrap();
+            assert_eq!(flows[1].flow.purpose.unwrap().purpose, fee, "of the same purpose");
+            assert_eq!(held(book, run, "checking"), Qty(9_000_00), "and nothing more leaves the account");
         });
     }
 

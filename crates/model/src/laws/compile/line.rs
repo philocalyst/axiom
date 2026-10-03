@@ -1,21 +1,24 @@
-//! `also` lines, which declaration and contract lowering share: what every matching flow implies, declared once.
+//! What a line that derives says: the `FLOW` or `ITEM` after an `also` or a `derive`, read.
+//!
+//! The two spellings are one line (`+ 5% of amount #fee`, `lumen -> retirement 50% of ... #match`), so one reader
+//! turns it into a [`Said`] (its shape against the flow that fires it, its amount as written, its clauses) and one
+//! reader turns the clauses into the metadata a derived flow carries.
 
 use axiom_core::{Days, Diagnostic, Id, Loc, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
-use super::tail::{Reach, written_purpose, written_waive};
-use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Shape, Text};
+use crate::book::{Place, Shape, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
-use crate::law::{Law, NodeId, Owner, Rank, Trigger, Ty};
+use crate::lower::tail::{Reach, written_purpose, written_waive};
 use crate::scope::Home;
-use crate::split::{Expr, Sign};
+use crate::split::Sign;
 
-/// Pooled metadata shared by contract and declaration `also` clauses.
+/// What the clauses of a derived line say, pooled in the book.
 #[derive(Clone, Copy)]
-pub(crate) struct AlsoMetadata {
+pub(crate) struct Metadata {
     pub codes: Run<Sym>,
     pub select: Run<Select>,
     pub detail: Option<Id<Detail>>,
@@ -24,16 +27,15 @@ pub(crate) struct AlsoMetadata {
     pub description: Option<Text>,
 }
 
-/// Resolves exactly the metadata retained by `book::Also`. Endpoints belong to
-/// the caller because an implied flow may inherit either endpoint from the
-/// flow that caused it.
+/// Resolves exactly the metadata a [`crate::book::Derived`] keeps. Its ends belong to the line, because a derived flow
+/// may take either end from the flow that fired it.
 pub(crate) fn tail<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     clauses: ast::Many<ast::Clause<'s>>,
     diags: &mut Vec<Diagnostic>,
-) -> AlsoMetadata {
+) -> Metadata {
     let code_start = world.book.codes.len();
     let select = Run::new(Id::new(world.book.selectors.len() as u32), 0);
     let mut detail = Detail::NONE;
@@ -99,26 +101,7 @@ pub(crate) fn tail<'s>(
 
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
     let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
-    AlsoMetadata { codes, select, detail, waive, purpose, description }
-}
-
-/// What the `also` lines of one declaration are lowered against. `inputs` are the caller's template inputs, and
-/// `currency` is the unit of an amount written without one. The caller chooses the owner and the `AlsoOn` it
-/// matches, and owns any fallback endpoint semantics.
-pub(crate) struct AlsoCx<'a, 's> {
-    pub file: &'a ast::File<'s>,
-    pub home: Home,
-    pub owner: Owner,
-    pub on: AlsoOn,
-    pub inputs: &'a [Input],
-    pub currency: Id<Commodity>,
-}
-
-/// An implied amount: a literal is resolved now, and an expression is compiled with the rest of its `also`.
-#[derive(Clone, Copy)]
-enum PendingAmount {
-    Literal(Amount),
-    Computed(usize),
+    Metadata { codes, select, detail, waive, purpose, description }
 }
 
 /// What a line that derives, an `also` or a `derive`, says, read: how it lies against the flow that fires it, its
@@ -128,69 +111,6 @@ pub(crate) struct Said<'s> {
     pub amount: ast::Amount<'s>,
     pub clauses: ast::Many<ast::Clause<'s>>,
     pub selectors: Option<ast::Many<ast::Select<'s>>>,
-}
-
-/// Lowers `also` clauses shared by declaration and contract lowering.
-pub(crate) fn lower_alsos<'s>(
-    world: &mut World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    alsos: ast::Many<ast::Also<'s>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Box<[Id<Also>]> {
-    cx.file[alsos].iter().filter_map(|also| lower_also(world, cx, also, diags)).collect()
-}
-
-/// One `also`, or nothing after what is wrong with it has been said.
-fn lower_also<'s>(
-    world: &mut World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    also: &ast::Also<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Also>> {
-    let (file, home) = (cx.file, cx.home);
-    let mut roots = Vec::new();
-    let when_index = also.when.map(|when| {
-        roots.push((when, Ty::Bool));
-        roots.len() - 1
-    });
-    let Said { shape, amount, clauses, selectors } = read_line(world, cx.home, cx.file, &also.line, also.loc, diags)?;
-    let amount = pending_amount(world, cx.file, amount, cx.currency, &mut roots, diags)?;
-    let zero = Expr::Literal(Amount::zero(cx.currency));
-    let mut what = match shape {
-        Shape::Item(sign) => Implied::Item { sign, amount: zero },
-        Shape::Flow { from, to } => Implied::Flow { from, to, amount: zero },
-    };
-    let metadata_errors = diags.len();
-    let metadata = tail(world, home, file, clauses, diags);
-    if diags.len() != metadata_errors {
-        return None;
-    }
-    let selector_errors = diags.len();
-    let select = selectors.map_or(metadata.select, |selectors| lower_selectors(world, home, file, selectors, diags));
-    if diags.len() != selector_errors {
-        return None;
-    }
-    let (law, compiled_roots) = compile_also(world, cx, &roots, also.loc, diags)?;
-    let amount = match amount {
-        PendingAmount::Literal(amount) => Expr::Literal(amount),
-        PendingAmount::Computed(index) => Expr::Computed(compiled_roots[index]),
-    };
-    match &mut what {
-        Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => *slot = amount,
-    }
-    Some(world.book.also.push(Also {
-        on: cx.on,
-        what,
-        when: when_index.map(|index| compiled_roots[index]),
-        law,
-        purpose: metadata.purpose,
-        description: metadata.description,
-        codes: metadata.codes,
-        select,
-        detail: metadata.detail,
-        waive: metadata.waive,
-        loc: also.loc,
-    }))
 }
 
 /// What `line` says, or nothing after what is wrong with it has been said.
@@ -307,55 +227,6 @@ fn implied_amount<'s>(
         }
         None => Some(None),
     }
-}
-
-/// An implied amount: a literal is resolved now, and an expression is compiled with the rest of its `also`.
-fn pending_amount<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    amount: ast::Amount<'s>,
-    currency: Id<Commodity>,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<PendingAmount> {
-    match amount {
-        ast::Amount::Literal(literal) => {
-            world.literal_amount(file, literal, Some(currency)).or_report(diags).map(PendingAmount::Literal)
-        }
-        ast::Amount::Computed(root) => {
-            roots.push((root, Ty::AMOUNT));
-            Some(PendingAmount::Computed(roots.len() - 1))
-        }
-    }
-}
-
-/// Compiles the expression roots of an `also` into a law arena of its own. The caller stores the law in its
-/// `Also`; roots are ordered as written (`when`, then amounts).
-fn compile_also<'s>(
-    world: &mut World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    roots: &[(ast::ExprId, Ty)],
-    loc: Loc,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<(Id<Law>, Box<[NodeId]>)> {
-    let name = world.book.names.intern("also");
-    let compiled = crate::laws::compile_template(world, diags, cx.file, cx.home, Ty::Flow, name, cx.inputs, roots)?;
-    let (program, roots) = compiled;
-    let law = Law {
-        name,
-        doc: None,
-        owner: cx.owner,
-        system: if let Home::System(system) = cx.home { Some(system) } else { None },
-        trigger: Trigger::Flow,
-        budget: None,
-        overrides: None,
-        override_name: None,
-        rank: Rank::ZERO,
-        steps: Box::default(),
-        nodes: program.nodes,
-        loc,
-    };
-    Some((world.book.laws.push(law), roots))
 }
 
 pub(crate) fn lower_selectors<'s>(

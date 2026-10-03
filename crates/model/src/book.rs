@@ -18,10 +18,10 @@ use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
     RuntimeDetail, RuntimeFlow, RuntimeTxn, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, NodeId, Rules, Value};
+use crate::law::{Fault, Law, Rules, Value};
 use crate::names::{Found, Names, Scoped};
 use crate::slots::{Schema, Slot};
-use crate::split::{Expr, Item, Promised, Says, Sign};
+use crate::split::{Item, Promised, Says, Sign};
 use crate::sync::{Format, Pattern, Source};
 
 pub use axiom_core::{Cadence, On, Period};
@@ -65,8 +65,6 @@ pub struct Book<'s> {
     pub contracts: Arena<Contract>,
     /// What each contract promises, compiled once when the book is built: its terms and the schedules they fall due on.
     pub promises: crate::promise::Promises,
-    /// `also ITEM | FLOW`: what every matching flow implies, declared once.
-    pub also: Arena<Also>,
     /// What each `derive` step makes, apart from how much: one per step of a law.
     pub derived: Arena<Derived>,
 
@@ -388,8 +386,6 @@ pub struct Purpose {
     pub system: Option<Id<System>>,
     /// `of KIND`: it takes an object of this kind (`improvement of thing`).
     pub of: Option<At<Id<Kind>>>,
-    /// `business 12% for studio`: every flow of this purpose is shared.
-    pub shares: Box<[Share]>,
     /// Only this purpose's own laws; ancestors' laws are found through the tree.
     pub laws: Box<[Id<Law>]>,
     pub doc: Option<Sym>,
@@ -410,7 +406,6 @@ impl Purpose {
             root,
             system: None,
             of: None,
-            shares: Box::default(),
             laws: Box::default(),
             doc: None,
             loc: None,
@@ -497,8 +492,6 @@ pub struct Contract {
     /// The holding account named by `deposit ... into HOLDING`.
     pub deposit_holding: Option<Id<Place>>,
     pub loan: Option<Loan>,
-    /// `match 50% of retirement up to 6%`.
-    pub matching: Option<Match>,
     /// `DATE NAME ends`: the statement that cut `days` short.
     pub ended: Option<Loc>,
     pub laws: Box<[Id<Law>]>,
@@ -537,9 +530,6 @@ pub struct Terms {
     pub prorated: bool,
     /// `rising 3% yearly`, `indexed to cpi yearly`.
     pub escalation: Option<Escalation>,
-    pub shares: Box<[Share]>,
-    /// `also …` lines of this contract.
-    pub also: Box<[Id<Also>]>,
     /// A loan's yearly rate.
     pub rate: Option<Ratio>,
 }
@@ -751,51 +741,15 @@ pub enum Prepay {
     Recasts,
 }
 
-/// `also ITEM | FLOW [when EXPR]` (LANGUAGE §10): what every matching flow
-/// implies, declared once. Escrow and an employer's match are `also` lines.
-pub struct Also {
-    pub on: AlsoOn,
-    pub what: Implied,
-    /// Compiled like a law's `when`: a node of `law`.
-    pub when: Option<NodeId>,
-    /// The expressions (amounts, `when`) live in this law's node arena, with no
-    /// steps: one expression language for laws and declarations.
-    pub law: Id<Law>,
-    pub purpose: Option<Purposed>,
-    pub description: Option<Text>,
-    /// Pooled metadata written on the implied item or flow.
-    pub codes: Run<Sym>,
-    pub select: Run<Select>,
-    pub detail: Option<Id<Detail>>,
-    pub waive: Option<Waive>,
-    pub loc: Loc,
-}
-
-/// What an `also` was written under.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AlsoOn {
-    Contract(Id<Contract>),
-    Entity(Id<Entity>),
-    Kind(Id<Kind>),
-    Purpose(Id<Purpose>),
-}
-
-/// What an `also` implies.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Implied {
-    /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
-    Item { sign: Sign, amount: Expr },
-    /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
-    /// `None` ends mean the implying flow's own ends (`issuer -> self`).
-    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: Expr },
-}
-
 /// What a `derive` step makes when its law fires (LANGUAGE §10): an item of the flow that fired it, or a flow of its own.
-/// How much is the step's own, an expression of the law; this is everything else, and what `also` lowers to.
+/// How much is the step's own, an expression of the law; this is everything else, and what `also` and `share` lower to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Derived {
     pub shape: Shape,
+    /// What it is for; where it says none, a flow it makes is for what its header is.
     pub purpose: Option<Purposed>,
+    /// Who bears it where that is not the header's owner: the entity a `share` is for.
+    pub owner: Option<Id<Entity>>,
     pub description: Option<Text>,
     /// Pooled metadata written on the derived flow.
     pub codes: Run<Sym>,
@@ -803,6 +757,14 @@ pub struct Derived {
     pub detail: Option<Id<Detail>>,
     pub waive: Option<Waive>,
     pub loc: Loc,
+}
+
+impl Derived {
+    /// Whether it makes a flow. A flow of its own does, and an item does when it has something to tell it from its
+    /// header (a purpose, another owner); any other item only changes what the header comes to.
+    pub fn makes_flow(&self) -> bool {
+        matches!(self.shape, Shape::Flow { .. }) || self.purpose.is_some() || self.owner.is_some()
+    }
 }
 
 /// How a derived flow lies against the flow that fired its law.
@@ -813,15 +775,6 @@ pub enum Shape {
     /// `-> escrow 410 USD`, `lumen -> retirement 50% of …`: a flow of its own. An end that is `None` is the firing
     /// flow's own (`self`).
     Flow { from: Option<Id<Place>>, to: Option<Id<Place>> },
-}
-
-/// `match 50% of retirement up to 6%`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Match {
-    pub rate: Ratio,
-    pub into: Id<Place>,
-    /// Of the gross.
-    pub up_to: Ratio,
 }
 
 /// `budget food 900 USD monthly [carries]` (LANGUAGE §4): a warning when the

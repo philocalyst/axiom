@@ -22,11 +22,10 @@ pub(crate) use self::compile::Placement;
 use self::compile::compile;
 pub(crate) use self::compile::compile_template;
 pub(crate) use self::order::rank;
-use crate::book::{AlsoOn, Kind, Sort, System};
+use crate::book::{Kind, Share, Sort, System};
 use crate::declare::World;
 use crate::errors::{Candidate, Reported, Word};
 use crate::law::{Law, Owner, Rank, RankClass, Ty};
-use crate::lower::also::{AlsoCx, lower_alsos};
 use crate::names::Rank as NameRank;
 use crate::problem::{self, Noun};
 use crate::scope::Home;
@@ -98,7 +97,7 @@ fn declare_in<'s>(
             compile_native(world, diags, &placement, law);
         }
     }
-    declare_alsos(world, diags, site, decl, owner);
+    declare_alsos(diags, file, decl, owner);
 }
 
 /// What a declaration's laws govern, or None after saying why they govern nothing.
@@ -250,46 +249,40 @@ fn set_specificity(world: &mut World<'_>) {
     }
 }
 
-/// Lower every declaration `also` while the complete declaration namespace is
-/// available. Its law is auxiliary: `register` deliberately leaves it out of
-/// the owner's ordinary law list, and the native group builder applies it to
-/// the matching flow.
-fn declare_alsos<'s>(
-    world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
-    site: &Site<'_, 's>,
-    decl: &ast::Decl<'s>,
-    owner: Owner,
-) {
-    let (file, home, what) = (&site.source.file, site.home, decl.what);
-    if file[decl.alsos].is_empty() {
-        return;
-    }
-    let on = match owner {
-        Owner::Entity(id) => AlsoOn::Entity(id),
-        Owner::Kind(id) => AlsoOn::Kind(id),
-        Owner::Purpose(id) => AlsoOn::Purpose(id),
-        _ => {
-            for also in &file[decl.alsos] {
-                diags.push(
-                    Diagnostic::error("also-owner", "declaration-level `also` needs an entity, kind, or purpose")
-                        .label(also.loc, format!("`also` is not supported on this {what:?}")),
-                );
+/// What a declaration's `also` lines come to today: nothing. Only a contract's `also` derives (it is a law the
+/// contract writes, made with each occurrence), so the line of a kind, an entity or a purpose is not read, and the book
+/// is told so rather than left to think it is enforced. A place or an asset cannot have one at all.
+fn declare_alsos(diags: &mut Vec<Diagnostic>, file: &ast::File, decl: &ast::Decl, owner: Owner) {
+    let what = decl.what;
+    for also in &file[decl.alsos] {
+        diags.push(match owner {
+            Owner::Entity(_) | Owner::Kind(_) | Owner::Purpose(_) => {
+                Diagnostic::warning("also-inert", "this `also` is not read: only a contract's `also` derives a flow")
+                    .label(also.loc, format!("a {}'s `also` makes nothing yet", format!("{what:?}").to_lowercase()))
+                    .note("a contract's `also` is made with each occurrence the contract promises, before it posts; a flow that has posted cannot be added to")
+                    .help("write it under the contract whose occurrences should carry it, or write the flow it implies")
             }
-            return;
-        }
-    };
-
-    let currency = fallback_currency(world, owner);
-    let cx = AlsoCx { file, home, owner, on, inputs: &[], currency };
-    lower_alsos(world, &cx, decl.alsos, diags);
+            _ => Diagnostic::error("also-owner", "declaration-level `also` needs an entity, kind, or purpose")
+                .label(also.loc, format!("`also` is not supported on this {what:?}")),
+        });
+    }
 }
 
-fn fallback_currency(world: &World<'_>, owner: Owner) -> Id<crate::book::Commodity> {
-    match owner {
-        Owner::Entity(entity) => world.book.currency(entity),
-        _ => world.book.base,
-    }
+/// A contract's `also` as the law it abbreviates, in the book.
+pub(crate) fn compile_also<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    site: &Placement<'_, 's>,
+    also: &ast::Also<'s>,
+) -> Option<Id<Law>> {
+    let law = compile::also(world, diags, site, also)?;
+    Some(push(world, law))
+}
+
+/// A contract's `share` as the law it abbreviates, in the book.
+pub(crate) fn push_share(world: &mut World<'_>, owner: Owner, home: Home, share: &Share) -> Id<Law> {
+    let law = compile::share(world, owner, home, share);
+    push(world, law)
 }
 
 /// The names some law counts into.
@@ -403,11 +396,7 @@ fn register(world: &mut World) {
     let mut of_system: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.systems.len()];
     let mut of_purpose: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.purposes.len()];
     let mut of_contract: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.contracts.len()];
-    let auxiliary: Set<Id<Law>> = book.also.iter().map(|(_, also)| also.law).collect();
     for (id, law) in book.laws.iter() {
-        if auxiliary.contains(&id) {
-            continue;
-        }
         match law.owner {
             Owner::Kind(kind) => of_kind[kind.index()].push(id),
             Owner::System(system) => of_system[system.index()].push(id),

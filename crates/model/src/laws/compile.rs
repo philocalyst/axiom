@@ -10,6 +10,9 @@
 //! typo is reported once and not again at every operator above it. A law with
 //! any error is dropped whole.
 
+mod derive;
+mod line;
+
 use axiom_core::glob::is_pattern;
 use axiom_core::{Arena, Days, Diagnostic, Dim, Id, Loc, Period, Ratio, Severity, Sym};
 use axiom_syntax::{
@@ -17,8 +20,6 @@ use axiom_syntax::{
 };
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
-mod derive;
-
 use super::vars::When;
 use crate::book::{Entity, Input, Param};
 use crate::declare::World;
@@ -31,6 +32,8 @@ use crate::law::{
 use crate::params::Shape;
 use crate::scope::Home;
 use crate::values::fits;
+
+pub(crate) use derive::{also, share};
 
 /// How the arguments of a call and a name in a pattern are read.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -222,24 +225,7 @@ pub(crate) fn compile<'s>(
     law: &ast::Law<'s>,
 ) -> Option<Law> {
     let law_name = world.book.names.intern(law.name.0);
-    let mut compiler = Compiler {
-        world,
-        diags,
-        file: site.file,
-        home: site.home,
-        owner: Some(site.owner),
-        subject: site.subject,
-        law_name,
-        first: None,
-        base: 0,
-        nodes: Arena::new(),
-        roles: Vec::new(),
-        locals: Vec::new(),
-        inputs: &[],
-        when: When::of(&law.trigger),
-        failed: false,
-    };
-    compiler.law(site, law)
+    Compiler::placed(world, diags, site, law_name, When::of(&law.trigger)).law(site, law)
 }
 
 /// Compiles the expressions used by a contract term's flow templates into one
@@ -337,7 +323,34 @@ struct Compiler<'w, 'a, 's> {
     failed: bool,
 }
 
-impl<'s> Compiler<'_, '_, 's> {
+impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
+    /// A compiler for the expressions of a law written at `site`.
+    fn placed(
+        world: &'w mut World<'s>,
+        diags: &'w mut Vec<Diagnostic>,
+        site: &Placement<'a, 's>,
+        law_name: Sym,
+        when: When,
+    ) -> Self {
+        Compiler {
+            world,
+            diags,
+            file: site.file,
+            home: site.home,
+            owner: Some(site.owner),
+            subject: site.subject,
+            law_name,
+            first: None,
+            base: 0,
+            nodes: Arena::new(),
+            roles: Vec::new(),
+            locals: Vec::new(),
+            inputs: &[],
+            when,
+            failed: false,
+        }
+    }
+
     fn law(&mut self, site: &Placement<'_, 's>, law: &ast::Law<'s>) -> Option<Law> {
         let trigger = self.trigger(&law.trigger);
         self.when = When::of(&law.trigger);
@@ -350,20 +363,27 @@ impl<'s> Compiler<'_, '_, 's> {
         if self.failed {
             return None;
         }
-        Some(Law {
+        let doc = law.doc.map(|doc| self.world.book.names.intern(doc.0));
+        let override_name = law.overrides.map(|name| self.world.book.names.intern(name.0));
+        Some(Law { doc, override_name, ..self.finished(site, trigger?, steps, law.loc) })
+    }
+
+    /// The law the compiler has read the steps and nodes of.
+    fn finished(&mut self, site: &Placement<'_, 's>, trigger: Trigger, steps: Vec<Step>, loc: Loc) -> Law {
+        Law {
             name: self.law_name,
-            doc: law.doc.map(|doc| self.world.book.names.intern(doc.0)),
+            doc: None,
             owner: site.owner,
             system: if let Home::System(system) = site.home { Some(system) } else { None },
-            trigger: trigger?,
+            trigger,
             budget: None,
             overrides: None,
-            override_name: law.overrides.map(|name| self.world.book.names.intern(name.0)),
+            override_name: None,
             rank: Rank::ZERO,
             steps: steps.into(),
             nodes: std::mem::take(&mut self.nodes),
-            loc: law.loc,
-        })
+            loc,
+        }
     }
 
     fn trigger(&mut self, trigger: &ast::Trigger) -> Option<Trigger> {

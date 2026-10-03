@@ -79,7 +79,7 @@ impl Tail {
 
 /// What the object of a purpose (`#improvement of condo`) may be.
 #[derive(Clone, Copy)]
-pub(super) enum Reach {
+pub(crate) enum Reach {
     /// An asset or a party, as a contract's lines have it.
     Parties,
     /// An asset, a party or a place, as a flow has it.
@@ -114,7 +114,7 @@ pub(super) fn resolve_object<'s>(
 
 /// A written `#purpose [of OBJECT]`: the purpose with its object, which is none when it was written and names
 /// nothing (said, and the purpose is kept), or no purpose at all when the purpose itself names nothing.
-pub(super) fn written_purpose<'s>(
+pub(crate) fn written_purpose<'s>(
     world: &World<'s>,
     home: Home,
     file: &ast::File<'s>,
@@ -129,7 +129,7 @@ pub(super) fn written_purpose<'s>(
 }
 
 /// A written `!` and the reason after it.
-pub(super) fn written_waive<'s>(world: &mut World<'s>, waive: ast::Waive<'s>) -> Waive {
+pub(crate) fn written_waive<'s>(world: &mut World<'s>, waive: ast::Waive<'s>) -> Waive {
     Waive { loc: waive.at, reason: waive.reason.map(|text| world.book.quoted_text(text.0)) }
 }
 

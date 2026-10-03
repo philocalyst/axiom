@@ -6,13 +6,12 @@ use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Run, Span, Sym
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
-use super::also::{AlsoCx, lower_alsos};
 use super::infer::classify;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
-    Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
-    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
+    Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation, Input, Loan, Param,
+    Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
@@ -82,6 +81,9 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
         let file = written.file();
         let placement = Placement { file, home: written.home(), owner: Owner::Contract(written.id), subject: Ty::Flow };
         let mut laws = Vec::new();
+        for also in &file[written.node.alsos] {
+            laws.extend(crate::laws::compile_also(world, diags, &placement, also));
+        }
         for law in &file[written.node.laws] {
             laws.extend(crate::laws::compile_native(world, diags, &placement, law));
         }
@@ -105,7 +107,6 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
         deposit: None,
         deposit_holding: None,
         loan: None,
-        matching: None,
         ended: None,
         laws: Box::default(),
         doc: None,
@@ -195,15 +196,6 @@ fn lower_contract<'a, 's>(
         .or(node.standing)
         .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at)));
     let deposit = contract_deposit(world, written, Keeping { owner, default_holding }, diags).ok()?;
-    let also_cx = AlsoCx {
-        file,
-        home,
-        owner: Owner::Contract(written.id),
-        on: AlsoOn::Contract(written.id),
-        inputs: &contract_inputs,
-        currency: world.book.currency(owner),
-    };
-    let also = lower_alsos(world, &also_cx, node.alsos, diags);
     let loan = contract_loan(world, written, party, owner, diags)?;
     let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
     contract.party = party;
@@ -234,13 +226,15 @@ fn lower_contract<'a, 's>(
         description,
         area,
         loan_rate: loan.map(|(_, rate)| rate),
-        also: &also,
     };
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
         contract.terms = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
     if let (Some(schedule), Some((program, ids))) = (node.standing, standing) {
         contract.standing = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
+    }
+    for share in shares(world, &cx, diags) {
+        crate::laws::push_share(world, Owner::Contract(written.id), home, &share);
     }
     owed_by_party(world, &contract);
     Some(contract)
@@ -666,7 +660,6 @@ struct TermsCx<'a, 's> {
     description: Option<Text>,
     area: Option<Amount>,
     loan_rate: Option<Ratio>,
-    also: &'a [Id<Also>],
 }
 
 /// The header flow of a schedule, with what the legs and the items under it are made against.
@@ -725,8 +718,6 @@ fn lower_terms<'a, 's>(
         covers: coverage_property(file, node.props, diags),
         prorated: has_property(file, node.props, "prorated"),
         escalation: escalation_property(world, home, file, node.props, diags),
-        shares: shares(world, cx, diags).into_boxed_slice(),
-        also: cx.also.to_vec().into_boxed_slice(),
         rate: cx.loan_rate,
     })
 }

@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """What a `derive` makes, against the contract that would have said it.
 
-    derives.py gen DIR N [SEED]                 write N pairs of projects into DIR (p0000/derived, p0000/written ...)
-    derives.py run BINARY DIR [JOBS]            run both books of every pair through BINARY: they must print the same
-    derives.py compare BASELINE NEW DIR [JOBS]  both builds on both books: the written book must print what it printed
+    derives.py gen DIR N [SEED]                 write N triples of projects into DIR (p0000/derived, /sugar, /written)
+    derives.py run BINARY DIR [JOBS]            run the three books of every triple through BINARY: they must print the same
+    derives.py dump DUMP DIR [JOBS]             the same three books through the engine's own dump of every flow it made
+    derives.py compare BASELINE NEW DIR [JOBS]  both builds on the written book: it must print what it printed
     derives.py mutate TREE WORK DIR [N,M..]     the mutants of the code under test: each must be caught
 
 What it is for. Lane K6 gives a law one more effect, `derive`: when a promise's occurrence is made, the laws written in
-its contract make flows and items that join it (`engine/src/occurrence/derive.rs`). A derived flow is nothing a
-contract cannot already say, so the strongest check is the contract that says it: every book is written twice, and the
-two must be the same book to every command.
+its contract make flows and items that join it (`engine/src/occurrence/derive.rs`). A contract's `also` and `share` are
+laws it abbreviates. A derived flow is nothing a contract cannot already say, so the strongest check is the contract
+that says it: every book is written three times, and the three must be the same book to every command.
 
     derived   a contract whose body has `law derived` / `on flow` / `derive ...`
+    sugar     the same contract with each law written as the line that abbreviates it: `also LINE [when E]`, or
+              `share 12% for me` for a carved item of the header's own purpose
     written   the same contract with what the law derives written in its body: a flow of its own is a header that is
               larger by it and a leg that takes it (`ACC N USD #p`), an added, taken-off or carved item is the item
-              line the template already has (`+ 5% of amount #fee`, `- 2% of amount #refund`, `40.00 USD #fee`)
+              line the template already has (`+ 3.35 USD #fee`, `- 2.00 USD #refund`, `40.00 USD #fee`)
 
 A form is one of those, with the amount it is written with (a literal, or a share of the header, which the writer works
 out as the fold rounds it), and a `when` that is true for every occurrence or false for every one (the guard the law
@@ -25,7 +28,10 @@ flows inside one occurrence (a derived flow follows the group's own, a written l
 sees only in the balance an overdraft is first reported at; the account holds enough that it never is.
 
 The commands: `check` (the footer without the count of laws, which only the derived book has), `balance`, `flow`,
-`claims`, `tax 2026` and `forecast`, each on the same day.
+`claims`, `tax 2026` and `forecast`, each on the same day. The reports say little of what an occurrence's flows are
+for (`flow` and `register` leave a kept occurrence out), so the engine layer is read as well: `forecasts/main.rs` dumps
+every flow of every kept and forecast occurrence, with its ends, amounts, purpose, owner and payee, and the three
+books must make the same flows, whatever order the fold made them in.
 """
 import os
 import random
@@ -74,18 +80,18 @@ class Form:
     """One thing a law derives, and how a contract says it."""
 
     def __init__(self, rng, header, direction):
-        self.kind = rng.choice(["flow", "flow-share", "add", "add", "less", "less-nothing", "carve"])
+        self.kind = rng.choice(["flow", "flow-share", "add", "add", "less", "less-nothing", "carve", "share"])
         self.share = Decimal(rng.choice([1, 2, 3, 5, 8, 10, 15, 20])) / 100
         self.fixed = rng.randrange(500, 9_000)
         self.account = rng.choice(ACCOUNTS)
         self.purpose = rng.choice(PURPOSES)
         self.header, self.direction = header, direction
-        self.guard = rng.choice(["", "", "true", "false"])
+        self.guard = "" if self.kind == "share" else rng.choice(["", "", "true", "false"])
         self.threshold = rng.randrange(1, 10_000)
 
     def amount(self):
         """What the form comes to for one occurrence, in cents, as the fold rounds it."""
-        if self.kind in ("flow-share", "add", "less", "less-nothing"):
+        if self.kind in ("flow-share", "add", "less", "less-nothing", "share"):
             return cents(Decimal(self.header) * self.share)
         return self.fixed
 
@@ -111,7 +117,16 @@ class Form:
             "less": f"    derive - {percent} of amount #refund\n",
             "less-nothing": f"    derive - {percent} of amount\n",
             "carve": f"    derive {money(self.fixed)} #fee\n",
+            "share": f"    derive {percent} of amount #fee\n",
         }[self.kind]
+
+    def sugared(self):
+        """The line that abbreviates the law: an `also` with the law's guard, or a `share` that is the owner's own."""
+        if self.kind == "share":
+            return f"  share {int(self.share * 100)}% for me\n"
+        condition = {"true": f" when value(amount, USD) > {money(max(1, self.header // 2))}",
+                     "false": f" when value(amount, USD) > {money(self.header * 2)}"}.get(self.guard, "")
+        return "  also" + self.derived().strip().removeprefix("derive") + condition + "\n"
 
     def written(self):
         """What the contract says in the law's place: a leg, or an item. A share is written as the amount the fold makes
@@ -123,6 +138,7 @@ class Form:
             "less": f"  - {money(self.amount())} #refund\n",
             "less-nothing": f"  - {money(self.amount())}\n",
             "carve": f"  {money(self.fixed)} #fee\n",
+            "share": f"  {money(self.amount())} #fee\n",
         }[self.kind]
 
     def widens(self):
@@ -152,6 +168,9 @@ class Contract:
             text += f"  law {self.name}-{self.forms.index(form)}\n    on flow\n{form.when()}{form.derived()}"
         return text
 
+    def sugar(self):
+        return self.head(self.header) + "".join(form.sugared() for form in self.forms)
+
     def written(self):
         text = self.head(self.header + sum(form.widens() for form in self.forms))
         for form in self.forms:
@@ -178,7 +197,7 @@ def gen(directory, count, seed=1):
         for contract in contracts:
             forms.update(f"{form.kind}{'' if form.guard == '' else ':' + form.guard}" for form in contract.forms)
         lines = sorted(line for contract in contracts for line in contract.lines())
-        for sort, write in (("derived", Contract.derived), ("written", Contract.written)):
+        for sort, write in (("derived", Contract.derived), ("sugar", Contract.sugar), ("written", Contract.written)):
             path = os.path.join(directory, f"p{number:04d}", sort)
             os.makedirs(path)
             with open(os.path.join(path, "axiom.ax"), "w") as handle:
@@ -199,20 +218,66 @@ COMMANDS = [
 ]
 
 
+SORTS = ("derived", "sugar", "written")
+FLOW_ORDINAL = re.compile(r" ord=\d+")
+PURPOSE_SOURCE = re.compile(r"purpose: (\w+#\d+), of: (None|Some\([^)]*\)), source: [^}]*\}")
+
+
+def same_flow(flow):
+    """A flow as the engine dumps it, less its place in the occurrence and where its purpose was read."""
+    return PURPOSE_SOURCE.sub(r"purpose: \1, of: \2 }", FLOW_ORDINAL.sub("", flow))
+
+
+def flows_made(binary, project):
+    """The flows the engine made for the project's occurrences, kept and forecast, one row each, in no order: what a
+    flow is and is for, and nothing of which line or law made it or the place it had in its occurrence."""
+    path = os.path.join(project, "axiom.ax")
+    rows = []
+    for mode, today in (("history", "2025-12-31"), ("forecast", TODAY)):
+        done = subprocess.run([binary, mode, path, today, UNTIL], capture_output=True, text=True, timeout=300)
+        for line in (done.stdout + done.stderr).splitlines():
+            if line.startswith(("kept ", "planned ")):
+                head, _, flows = line.partition(" [")
+                rows += [head + " " + same_flow(flow) for flow in flows.rstrip("]").split(" | ")]
+            elif line.startswith("holding "):
+                # What a place holds, not which parcels: money moved by a leg and by a header is relieved in the order the
+                # fold posts them, which the two spellings do not share.
+                rows.append(" ".join(line.split()[:5]))
+            elif line.startswith(("error ", "diagnostic ")):
+                rows.append(line)
+    return sorted(rows)
+
+
+def dumped(binary, directory, name):
+    """Whether the three books make the same flows, and how many flows the derived one made."""
+    made = [flows_made(binary, os.path.join(directory, name, sort)) for sort in SORTS]
+    return made[0] == made[1] == made[2], len(made[0])
+
+
+def dump(binary, directory, jobs=4, quiet=False):
+    names = sorted(name for name in os.listdir(directory) if name.startswith("p"))
+    with ThreadPoolExecutor(jobs) as pool:
+        results = list(pool.map(lambda name: dumped(binary, directory, name), names))
+    differs = [name for name, (same, _) in zip(names, results) if not same]
+    if not quiet:
+        print(f"{len(names)} triples, {len(differs)} differ in the flows they make: {differs[:10]}; {sum(n for _, n in results)} rows")
+    return len(differs)
+
+
 def outputs(binary, project):
     out = {}
     for command in COMMANDS:
         args = [binary, *command, "-C", project, "--today", TODAY, "--color", "never"]
         done = subprocess.run(args, capture_output=True, text=True, timeout=120)
         text = done.stdout + done.stderr
-        out[" ".join(command)] = re.sub(r" · \d+ laws? enforced", "", re.sub(r"/[^ ]*/p\d+/(derived|written)", "<project>", text))
+        out[" ".join(command)] = re.sub(r" · \d+ laws? enforced", "", re.sub(r"/[^ ]*/p\d+/(derived|sugar|written)", "<project>", text))
     return out
 
 
 def pair(binary, directory, name):
-    derived = outputs(binary, os.path.join(directory, name, "derived"))
-    written = outputs(binary, os.path.join(directory, name, "written"))
-    return [command for command in derived if derived[command] != written[command]], derived
+    """The commands on which the derived book differs from the written one or from the sugared one."""
+    derived, sugar, written = (outputs(binary, os.path.join(directory, name, sort)) for sort in SORTS)
+    return [command for command in derived if derived[command] != written[command] or derived[command] != sugar[command]], derived
 
 
 def run(binary, directory, jobs=4, quiet=False):
@@ -389,6 +454,8 @@ def main(argv):
         return gen(argv[2], int(argv[3]), int(argv[4]) if len(argv) > 4 else 1)
     if argv[1] == "run":
         return run(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 4) and 1
+    if argv[1] == "dump":
+        return dump(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 4) and 1
     if argv[1] == "compare":
         return compare(argv[2], argv[3], argv[4]) and 1
     if argv[1] == "mutate":

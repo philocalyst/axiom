@@ -246,8 +246,6 @@ mod tests {
             covers: None,
             prorated: false,
             escalation: None,
-            shares: Box::default(),
-            also: Box::default(),
             rate: None,
         };
         let contract = Contract {
@@ -265,7 +263,6 @@ mod tests {
             deposit: None,
             deposit_holding: None,
             loan: None,
-            matching: None,
             ended: None,
             laws: Box::default(),
             doc: None,

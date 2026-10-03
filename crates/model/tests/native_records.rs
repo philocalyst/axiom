@@ -1,5 +1,5 @@
 use axiom_core::{Day, FileId, Id};
-use axiom_model::{Source, build};
+use axiom_model::{BinOp, Effect, Law, NodeId, Op, Owner, Shape, Source, StepKind, Trigger, Value, Var, build};
 use axiom_syntax::{Folder, parse};
 
 #[test]
@@ -723,8 +723,21 @@ contract c with p
     assert!(!contract.standing.as_ref().unwrap().program.nodes.is_empty());
 }
 
+/// The laws a contract's own lines abbreviate: `also` and `share` are named for what they abbreviate.
+fn laws_named<'b>(book: &'b axiom_model::Book<'_>, contract: Id<axiom_model::Contract>, name: &str) -> Vec<&'b Law> {
+    let owner = Owner::Contract(contract);
+    book.laws.iter().map(|(_, law)| law).filter(|law| law.owner == owner && book.name(law.name) == name).collect()
+}
+
+/// What the one `derive` step of a law makes, and the node that says how much.
+fn derive_of(law: &Law) -> (Id<axiom_model::Derived>, NodeId) {
+    let [step] = &law.steps[..] else { panic!("one step: {:?}", law.steps) };
+    let StepKind::Effect(Effect::Derive { template, amount }) = step.kind else { panic!("a derive step") };
+    (template, amount)
+}
+
 #[test]
-fn contract_also_is_shared_by_regular_and_standing_terms() {
+fn a_contracts_also_is_the_law_that_derives_for_its_occurrences() {
     let path = "contracts.ax";
     let text = "\
 base USD
@@ -744,22 +757,40 @@ contract c with p
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract_id = book.contract("c").unwrap();
     let contract = &book.contracts[contract_id];
-    let regular = contract.terms.as_ref().unwrap();
-    let standing = contract.standing.as_ref().unwrap();
-    assert_eq!(regular.grace, None);
-    assert_eq!(standing.grace, None);
-    assert_eq!(regular.also, standing.also);
-    assert_eq!(regular.also.len(), 1);
+    assert_eq!(contract.terms.as_ref().unwrap().grace, None);
+    assert_eq!(contract.standing.as_ref().unwrap().grace, None);
 
-    let also = &book.also[regular.also[0]];
-    assert_eq!(also.on, axiom_model::AlsoOn::Contract(contract_id));
-    assert_eq!(book.name(book.codes[also.codes.start()]), "match");
-    let axiom_model::Implied::Flow { to: Some(to), amount: axiom_model::Expr::Computed(root), .. } = also.what else {
-        panic!("contract also should retain the typed implied flow")
-    };
-    assert_eq!(to, book.place("assets/savings").unwrap());
-    assert!(!book.laws[also.law].nodes.is_empty());
-    assert!(book.laws[also.law].nodes.len() > root.index() as usize);
+    let laws = laws_named(&book, contract_id, "also");
+    let [law] = laws[..] else { panic!("one law for the one line: {}", laws.len()) };
+    assert_eq!(law.trigger, Trigger::Flow, "an `also` is `on flow`");
+    assert_eq!(contract.laws.len(), 1, "the contract knows it");
+    assert!(law.derives());
+    let (template, amount) = derive_of(law);
+    let derived = &book.derived[template];
+    assert_eq!(derived.shape, Shape::Flow { from: None, to: Some(book.place("assets/savings").unwrap()) });
+    assert_eq!(book.name(book.codes[derived.codes.start()]), "match");
+    assert!(law.nodes.len() > amount.index(), "the amount is a node of the law");
+}
+
+#[test]
+fn an_also_with_a_when_is_a_law_that_derives_only_where_it_holds() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+account assets/checking
+contract c with p
+  500 USD monthly from checking
+  also + 5% of amount when value(amount, USD) > 100 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let laws = laws_named(&book, book.contract("c").unwrap(), "also");
+    let [law] = laws[..] else { panic!("one law") };
+    let [when, derive] = &law.steps[..] else { panic!("a `when`, then the derive: {:?}", law.steps) };
+    assert!(matches!(when.kind, StepKind::When(_)) && matches!(derive.kind, StepKind::Effect(Effect::Derive { .. })));
 }
 
 #[test]
@@ -784,14 +815,17 @@ contract flat with greystar
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
-    let area = contract.area.expect("contract retains its typed area");
-    let terms = contract.terms.as_ref().unwrap();
-    let share = &terms.shares[0];
-    assert_eq!(share.rate, axiom_core::Ratio::new(3, 25).unwrap());
-    assert_eq!(
-        share.measure,
-        Some((axiom_model::Amount::new(axiom_core::Qty(120), book.commodity("SQFT").unwrap()), area,))
-    );
+    assert!(contract.area.is_some(), "contract retains its typed area");
+    let laws = laws_named(&book, Id::new(0), "share");
+    let [law] = laws[..] else { panic!("one law for the one share: {}", laws.len()) };
+    let (template, amount) = derive_of(law);
+    let derived = &book.derived[template];
+    assert_eq!(derived.shape, Shape::Item(axiom_model::Sign::Carve), "a share is carved out of the header");
+    assert_eq!(derived.owner, book.entity("studio").ok(), "and borne by the studio");
+    assert!(derived.makes_flow(), "so it is a flow of its own, for what the header is");
+    let Op::Bin(BinOp::Mul, rate, of) = law.nodes[amount].op else { panic!("a rate of the amount") };
+    assert_eq!(law.nodes[rate].op, Op::Const(Value::Num(axiom_core::Ratio::new(3, 25).unwrap())), "120 of 1,000");
+    assert_eq!(law.nodes[of].op, Op::Var(Var::Amount));
 }
 
 #[test]
@@ -916,8 +950,8 @@ fn measured_shares_reject_missing_and_mismatched_denominators() {
         let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-share-measure"), "{diagnostics:?}");
         let contract = &book.contracts[Id::new(0)];
-        let terms = contract.terms.as_ref().unwrap();
-        assert!(terms.shares.is_empty(), "an invalid measured share must not be retained");
+        assert!(laws_named(&book, Id::new(0), "share").is_empty(), "an invalid measured share must not be retained");
+        assert!(contract.terms.is_some(), "and the contract is still lowered");
     }
 }
 

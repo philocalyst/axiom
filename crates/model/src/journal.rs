@@ -5,8 +5,7 @@ use axiom_core::{Arena, Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System,
-    Text,
+    Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System, Text,
 };
 use crate::law::{Law, Node, NodeId, Subject};
 use crate::split::{Expr, Made};
@@ -455,20 +454,14 @@ pub enum Derivation {
     /// A loan payment's interest, or its principal.
     Interest(Id<Contract>),
     Principal(Id<Contract>),
-    /// An owner's share of a flow: `business 60% for studio`, declared on
-    /// a contract, a party kind or a purpose.
-    Share(Sharer),
-    /// The tax inside a price paid to a party with `sales-tax`.
-    SalesTax(Id<Kind>),
     /// What an exchange rate cost: what was given less what was got.
     ExchangeCost,
     /// A leg between two parties, split into its two halves through the owner.
     PassThrough,
     /// A contract deposit or a missing occurrence: a claim.
     Claim(Id<Contract>),
-    /// An `also` line: escrow, an employer's match, a card's cash back.
-    Also(Id<Also>),
-    /// A `derive` step of a law, made with a promise's occurrence: escrow, an employer's match.
+    /// A `derive` step of a law, made with a promise's occurrence: escrow, an employer's match, a share. A
+    /// contract's `also` and `share` lines are such laws.
     Law(Id<Law>),
     /// A deadline's `else`, when it passed (a late fee).
     Otherwise(Id<Contract>),
@@ -483,14 +476,6 @@ pub enum Derivation {
     WriteOff,
     /// `DATE ASSET ends`: the asset leaves the owners for nothing.
     Disposal(Id<Asset>),
-}
-
-/// What declared a share, so `why` can point at its line.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Sharer {
-    Contract(Id<Contract>),
-    Kind(Id<Kind>),
-    Purpose(Id<Purpose>),
 }
 
 /// What a flow says about the parcels it moves, beyond how many.
