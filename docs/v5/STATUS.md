@@ -24,13 +24,13 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
 | **K3d** claims, recognition | a split payment settles by what the party pays in all; `books cash\|accrual` read once and one rule (`engine/recognition.rs`) says when a claim counts, asked by the fold and every reader; the default is cash; a write-off takes back each line for its own purpose. **Debts as parcels: not built** (design in K3d-map §6) | **merged** (`3f17468`) |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
-| K6b the post host | a law of a kind, purpose, entity or account derives a flow from a posted one (cash back, a processor's fee), with a cause, a record, a cycle guard and returns that reverse | brief written (after K6) |
-| K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | running (map first) |
+| K6b the post host | a law of a kind, purpose, entity or account derives a flow from a posted one (cash back, a processor's fee), with a cause, a record, a cycle guard and returns that reverse | brief written |
+| **K6** norms and relators | one purpose ranking (`classify`); the nine tables of laws are one `Rules` index keyed by `Watch`; a law may `derive` a flow or an item and a contract's laws fire with its occurrences; a contract's `also` and `share` are the laws they abbreviate; `kind X : contract` and `contract NAME : KIND` write a relator's legs once, true from both books (Layer 3 stops at the map) | **merged** (`17da806`) |
 | **K7a** the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | **merged** (`368e5e8`) |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | running (map first) |
 | K3f debts as parcels | a bill you owe is a parcel on a Debt tab, a payment to the party settles it; `owed_by_you`, the `payable` gate and `makes_debt` go | brief written (after K6, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
-| K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | brief written (after K5c) |
+| K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | running (map first) |
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | brief written (after the kernels) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written) |
 
@@ -55,7 +55,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 53,700 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 54,500 non-test lines: the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -66,11 +66,18 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    - *A promise's `= AMOUNT` leg.* Built as: it moves the gap to the balance and the header's remainder is what is left
      (a 100.00 promise to `savings = 5_030 USD` at 5,000 moves 30.00, the remainder is 70.00). The other reading: the
      leg is not carved from the header at all (the header pays its end in full and the leg moves its gap on top).
-5. **The examples' numbers moved.** K4b made the statement path mean what LANGUAGE §3 says (it created or dropped money
-   before: see its table). 17 of 60 goldens change, all in `04`, `08`, `09`, `10`, which hold split statements. Every
-   example still carries 36 to 461 errors (v3 syntax) and drops the statements that fail, so neither build matches the
-   READMEs' hand-verified figures; K4b's own numbers are validated by 5,000 generated splits equal to the plain
-   transfers they say they are. The examples themselves need migrating (lane L).
+5. **The examples' numbers moved, and most of their errors were one bug (K6).** K4b made the statement path mean what LANGUAGE §3
+   says. I had put the examples' 36 to 461 `check` errors down to v3 syntax; **most were `purpose-disagreement`**: where a
+   party's kind, a party, an account kind and a written purpose named different purposes the code dropped the flow with an
+   error instead of taking the best ranked (LANGUAGE §2: first match wins), and the dropped flows made the assertions fail. K6's
+   one ranking brings back 306 of the 308 such flows: **`04-freelancer` and `05-family` now `check` with zero errors** (449
+   and 864 flows; net worth 70,222.47 and 46,463.25 USD), `06-investor` 36 to 3, `07-landlord` 46 to 18, `02-household` 12 to 1.
+   **`08-expat`, `09-shared` and `10-budgeter` (454, 419, 281 errors) are v3 books** no ranking reaches: they declare chart
+   accounts (`account income/salary-us : wages`, refused as `chart-account`), reach them with `via income/salary`
+   (`unknown-place`) and write `/ party` the old way round (`v3-party`); lane L's `fmt --upgrade` ports them.
+   `03-violations` line 60 pays a grocer `#rent` on purpose: the written purpose now outranks the grocer's, the flow posts, and
+   the example's "expect: purpose conflict" comment is stale (the book is not edited). `11-sam` has 11 errors (it uses
+   purposes `match` and `escrow` that nothing declares).
 
 6. **K5b's grace change moves `07-landlord`.** LANGUAGE §7 says a due day is kept by the nearest occurrence within its
    `grace`, default **half the schedule's own cadence**; the code used the longest cadence of the contract (a month).
@@ -135,6 +142,17 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K6, in numbers
+
+| | |
+|---|---|
+| what it is | **the ranking**: `classify` (`lower/infer.rs`): the written purpose, then each end's (the party's own, its kind's, the commodity issuer's), then an account kind's `takes` as a rewrite; the best rank wins; two sources of one rank naming unrelated purposes are still `purpose-disagreement`. **the index**: eight tables and a list become one `Groups<u32, Rule>` read through `Rules::at(Watch)`. **`derive`**: a law step that derives a flow or an item, typed in the law compiler and hosted by the occurrence (`engine/occurrence/derive.rs`: items are solved with the group by `solve`, flows join the occurrence), so a forecast sees them with no second path; a contract's laws fire with its occurrences (they never did). **the sugars**: `also` and `share` on a contract are the laws they abbreviate; `lower/also.rs`, `Also`/`AlsoOn`/`Implied`, `Match`, `Terms.shares` and the dead `Derivation` variants are gone. **relators**: `kind employment : contract` with slots and `also` legs whose ends are roles, `contract alex-pay : employment` with slot lines; each book that owns a contract of the kind has the legs it touches, decided at lowering (the owners are known then): `explore-v5/07-relators/` shows the paycheck, lease and manager of `05-family`/`07-landlord` printing what the originals print and the employer's book printing the employer's half from the same kind (payroll tax 7.65% of 46,500.00 = 3,557.28) |
+| the finding | **four of the five "derive" mechanisms had no run-time path**: `also`, `share`, `match`, `sales-tax` were lowered, validated and read by nothing (the cutover dropped their engine half), and a contract's own laws never fired |
+| lines | **+773 non-test** (core +6, engine +196, model +532, syntax +37) against a brief that hoped for -1,200 for layer 1: layer 1 +332 (step 4 -129, ranking +12, dispatch +104, derive +345), layer 2 +429 (`relator.rs` 329). The sugars were not copies of anything, `budget` was already a law, and the dispatch grew where it was planned to shrink by 60 |
+| behaviour | the ranking regraded 41 goldens (`04`/`05` clean, see Waiting on you 5); the sugars move only `05-family`'s `forecast` (`alex-pay` 5,750.00 to 5,980.00, `mortgage-payment` 2,487.48 to 3,192.48: no golden command reads it, `outputs/forecast.txt` is a stale snapshot); a contract's law now fires (`contract-law-never-fires.ax` warns once); new warnings `also-inert` (a kind's, entity's, purpose's or account's `also` derives nothing yet) and `contract-share-party` |
+| proof | `derives.py`: 400 triples of a law, the `also`/`share` lines that abbreviate it and the same by hand, 48,137 engine rows, 0 differ; `relators.py`: 500 cases each seen in two books, 41,329 flows, 0 differ; fuzz, K4b `splits.py` (300 projects, 8,269 commands) and K0a compare differ only in the listed notes; mutants: 29 of the derive code (one equivalent deleted, three survivors each given a test) and 20 of the relators (**1 not killed**: `Positions::of` taking the last of two fillers, equivalent until `as with`); the sweep was stopped, survivors verified by hand |
+| left | `share` is smaller than LANGUAGE says (the header's share of each occurrence, not "12% of every flow"; a share for a party is the flow it bears, with a warning and no claim); `sales-tax` not built (a claim, not a flow); `relator.rs` re-reads the kind's AST per contract and resolves each leg's ends twice, `Positions` rides beside `Placement` as a second input; **the "sugars on" commit is not last** (`4bec164`; Layer 2 is built on it, so reverting it alone does not apply and separating them is about an hour of history surgery: not done); `+ N% of amount` as a template item under a contract header fails at the baseline (`InvalidProgram`); `flow` and `register` do not list what a kept occurrence made; Layer 3 (`on start`/`on end`, `part`, `joins`) and `as with` are for K6b and lane L |
 
 ## K3d, in numbers
 
