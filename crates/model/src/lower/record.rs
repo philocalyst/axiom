@@ -1288,49 +1288,48 @@ fn nearest_occurrence<'a>(
     }
 }
 
-fn lower_owes<'a, 's>(
+/// The ends of a claim and whose it is: the party it is with on one end, and on the other the tab the owners keep it in.
+/// None after the problem is said.
+fn claim_ends<'a, 's>(
     world: &mut World<'s>,
     site: &Site<'a, 's>,
     loc: Loc,
     statement: &ast::Statement<'s>,
     creditor_name: ast::Name<'s>,
-    amount: Option<ast::Amount<'s>>,
-    code_index: &CodeIndex,
-    opening: bool,
     diags: &mut Vec<Diagnostic>,
-) {
+) -> Option<(Ends, Id<crate::book::Entity>)> {
     let file = &site.source.file;
     if let Some(leg) = file[statement.body.legs].first() {
         diags.push(
             Diagnostic::error("claim-split", "a claim cannot contain split flow legs")
                 .label(leg.loc, "write claim line items here, not a transfer between endpoints"),
         );
-        return;
+        return None;
     }
     let Subject::Name(debtor_name) = statement.subject else {
         unsupported_statement(loc, "a claim needs a named debtor", diags);
-        return;
+        return None;
     };
     let entity = |world: &World<'s>, name: ast::Name<'s>| world.entity(site.home, Word::of(file, name.0));
     let debtor = match entity(world, debtor_name) {
         Ok(entity) => entity,
         Err(problem) => {
             diags.push(problem);
-            return;
+            return None;
         }
     };
     let creditor = match entity(world, creditor_name) {
         Ok(entity) => entity,
         Err(problem) => {
             diags.push(problem);
-            return;
+            return None;
         }
     };
     if debtor == creditor {
         diags.push(
             Diagnostic::error("self-claim", "an entity cannot owe itself").label(loc, "name a different creditor"),
         );
-        return;
+        return None;
     }
     let debtor_is_owner = world.book.entities[debtor].place.is_some_and(
         |place| matches!(world.book.places[place].role, crate::book::Role::Holding(owner) if owner == debtor),
@@ -1352,19 +1351,31 @@ fn lower_owes<'a, 's>(
             Diagnostic::error("claim-party-place", "the claim party has no flow endpoint")
                 .label(loc, "this claim cannot be attached to a party"),
         );
-        return;
+        return None;
     };
     let empty = Run::new(Id::new(0), 0);
     let outside = ResolvedEnd { place: party_place, entity: Some(party_end), select: empty };
     let tab = ResolvedEnd { place: tab, entity: None, select: empty };
     let (from, to) = if class == crate::book::Class::Asset { (outside, tab) } else { (tab, outside) };
+    Some((Ends { from, to }, owner))
+}
 
+/// The expressions of a claim (its amount, its items' and its tail's), compiled; a claim says what is owed by one or the
+/// other. None after the problem is said.
+fn claim_program<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    (loc, statement): (Loc, &ast::Statement<'s>),
+    amount: Option<ast::Amount<'s>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Program, Map<ast::ExprId, NodeId>)> {
+    let file = &site.source.file;
     if amount.is_none() && statement.body.items.is_empty() {
         diags.push(
             Diagnostic::error("claim-amount", "a claim needs an amount or line items")
                 .label(loc, "nothing states what is owed"),
         );
-        return;
+        return None;
     }
     let mut exprs = Vec::new();
     if let Some(amount) = amount {
@@ -1376,8 +1387,25 @@ fn lower_owes<'a, 's>(
     }
     push_tail_roots(file, statement.tail, &mut exprs);
     let name = world.book.names.intern("journal");
-    let Some((program, roots)) = super::compile_roots(world, file, site.home, Ty::Flow, name, &[], &exprs, diags)
-    else {
+    super::compile_roots(world, file, site.home, Ty::Flow, name, &[], &exprs, diags)
+}
+
+fn lower_owes<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    creditor_name: ast::Name<'s>,
+    amount: Option<ast::Amount<'s>>,
+    code_index: &CodeIndex,
+    opening: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Some((Ends { from, to }, owner)) = claim_ends(world, site, loc, statement, creditor_name, diags) else {
+        return;
+    };
+    let Some((program, roots)) = claim_program(world, site, (loc, statement), amount, diags) else {
         return;
     };
     let mut staged = Staged::open(world);
@@ -1389,15 +1417,7 @@ fn lower_owes<'a, 's>(
         return;
     }
     let mode = if opening { Mode::Opening } else { Mode::Actual };
-    let mut flow_roots = Vec::new();
-    let mut group = None;
-    let mut keep = |staged: &mut Staged<'_, 's>, made: Made, total: Total, diags: &mut Vec<Diagnostic>| {
-        let flows = staged.flows();
-        match balance::settle(&mut staged.book, &made, flows, total, loc) {
-            Ok(settled) => group = Some((made, settled)),
-            Err(problem) => diags.push(problem),
-        }
-    };
+    let mut built = Built { flow_roots: Vec::new(), group: None, successful: true };
     if let Some(written_amount) = amount {
         let base = staged.book.base;
         let Some(expr) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
@@ -1409,28 +1429,33 @@ fn lower_owes<'a, 's>(
         if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, header_tail.clone(), loc, diags) {
             flow.owner = owner;
             staged.book.flows.push(flow);
-            push_flow_expressions(&mut flow_roots, 0, root, root, header_tail.basis_root);
+            push_flow_expressions(&mut built.flow_roots, 0, root, root, header_tail.basis_root);
             if !statement.body.items.is_empty() {
                 let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
-                let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
+                let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut built.flow_roots, diags);
                 let made = Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items };
                 let total = match expr {
                     Expr::Literal(_) => Total::Is(Remaining { out: amount, arrive: amount }),
                     Expr::Computed(_) => Total::Later,
                 };
-                keep(&mut staged, made, total, diags);
+                let flows = staged.flows();
+                let settled = balance::settle(&mut staged.book, &made, flows, total, loc);
+                built.keep(made, settled, diags);
             }
         }
     } else {
         let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
-        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
+        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut built.flow_roots, diags);
         let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
-        keep(&mut staged, Made { header, side: FlowSide::Out, legs: Box::default(), items }, Total::Nothing, diags);
+        let made = Made { header, side: FlowSide::Out, legs: Box::default(), items };
+        let flows = staged.flows();
+        let settled = balance::settle(&mut staged.book, &made, flows, Total::Nothing, loc);
+        built.keep(made, settled, diags);
     }
     if diags.len() != diagnostic_start {
         return;
     }
-    let program_id = keep_program(&mut staged, program, flow_roots, group);
+    let program_id = keep_program(&mut staged, program, built.flow_roots, built.group);
     let txn = Txn {
         program: program_id,
         codes: header_codes,
