@@ -18,10 +18,12 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K3a** positions that need no prediction | tabs created lazily; delete the survey, `find_tabs`, `contract_endpoints`, `unregistered-tab` | **merged** |
 | **K4b** one `solve` | `solve` over an `Env` makes a split for the model (constant folding, static conservation check), the promise fold and, new, the statement fold | **merged** (`456b2dd`) |
 | **K5a** a promise is a term | `core::Dues` (due days counted by arithmetic), `model::promise` (`Term`, `Schedule`, `Residual`, `Annuity`), compiled once beside the old code, proven equal to an independent reference | **merged** (`92e80c1`) |
-| **K3c** claims and parts | write-off is relief, one relief policy order, readers ask the place; asset parts as parcels if the map says they can be | running |
-| **K5b** the fold reads the promise | the old schedule code goes; `Terms` stored once; the monitor; `grace` as LANGUAGE §7 says | running |
-| K3b addresses | `Addresses`, declaration words fill slots by forced placement | brief written |
-| K5c forecast | the forecast is the fold past today; a missed `Due` is a claim | brief written |
+| **K3c** claims and parts | `exact` is a relief policy, a flow's codes name claims, write-off is relief, a payment from a party settles its claims, a tab is a claim by its kind. Asset parts: **no**, with evidence | **merged** (`0089678`) |
+| **K5b** the fold reads the promise | a contract's terms stored once, the old schedule walkers and sync's dead `dues` deleted, the monitor (`missed-occurrence`), `grace` as LANGUAGE §7 says | **merged** (`c8c1695`) |
+| K3b addresses | `Addresses`, declaration words fill slots by forced placement | running (map first; stops at the map if a grammar change is needed) |
+| K5c forecast | the forecast is the fold past today; a missed `Due` is a claim | running |
+| K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | brief written |
+| K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | brief written |
 | K7a the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | brief written |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | after K5c |
@@ -66,6 +68,19 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    READMEs' hand-verified figures; K4b's own numbers are validated by 5,000 generated splits equal to the plain
    transfers they say they are. The examples themselves need migrating (lane L).
 
+6. **K5b's grace change moves `07-landlord`.** LANGUAGE §7 says a due day is kept by the nearest occurrence within its
+   `grace`, default **half the schedule's own cadence**; the code used the longest cadence of the contract (a month).
+   `2025-12-29 manager-fee 200.00 USD` is 24 days after its due day, on a contract that ends 2025-12-31, so it now keeps
+   nothing (`contract-occurrence-date`), does not post, and the 12-31 assertion on `rental-bank` fails by 200.00 USD
+   (an extra error: 44 to 46). Options: write `grace 30d` on the contract, move the line, or accept. The book is not edited.
+7. **The monitor's start.** It starts a stream at the book's first fact, so a contract with no `until` that outlives its
+   subject (a loan on a house sold in 2025) warns `missed-occurrence` for every due day after; the monitor cannot tell a
+   missing `until` from a forgotten payment. Writing `until` is the fix; whether the warning is too eager is a call.
+8. **Claim recognition and two reserved words.** `books cash|accrual` is read by nothing; LANGUAGE §7 says default cash and
+   income "when invoiced" in accrual books while `Books::Accrual` and §6 say "when it is due". K3d takes §7's (when
+   invoiced) as one enum variant so the other is a line. And `claim` and `debt-claim` are now built-in kind words (a book
+   that declared `kind claim` gets `duplicate-kind`): keep them or choose less common names.
+
 ## What the grammar accepts and the engine does nothing with
 
 Found by K5a's map (`K5a-map.md` §0, §1, §6) and K4b's: **written, checked, and read by nothing.** None of this is a
@@ -82,6 +97,30 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K3c, in numbers
+
+| | |
+|---|---|
+| what it is | `Policy::Exact` (a claim place relieves by the claim whose open amount is the flow's, the parcels of one transaction adding up); a flow's own codes name the claims it settles; `^code waived` is relief, recorded in `Run.written_off`; a tab has a built-in `claim` / `debt-claim` kind, so readers ask the place and not its role; **a payment from a party settles the claims on it** and a returned payment reopens them |
+| a hole it found | **paying a claim did not settle it** (LANGUAGE §7, as written, was unimplemented): `ann owes me` 300, 200, 300 and `ann -> checking 300 ^i1` left all three claims open and the money counted twice. `04-freelancer`: 61,300.00 of paid invoices counted twice, one write-off ignored; Coming in 108,000.00 to 42,900.00 before K4b's statements landed |
+| asset parts | **not parcels**: an improvement adds basis and no quantity, so a parcel per part is a zero-quantity lot and `lots.rs` would branch on "is this a part"; `PendingCarry` and `part_slots` also serve securities. The smaller cut for a later lane: a part's basis is `cost + carried - consumed` from `Run.adjustments` (the three guards go), `PendingCarry` and `part_slots` move to the lots, `Disposal` is a derivation of the position history (K7) |
+| prorata | the failing test is **not about the sale**: `post.rs:278` gives no basis to money arriving in a `basis zero` place from a source that is not `deferred`. Two readings (map §5): **R1** keep it and write a basis on the test's flow; **R2** delete it, following LANGUAGE §9's text: the failing test passes, the HSA test fails, four goldens move (penalties and taxable income of `04` and `05`). Your decision; the line is untouched |
+| lines | claims +312, assets 0 (`assets.rs` 871 lines stay: the verdict). 38 tests added, none deleted |
+| proof | a claims oracle (1,500 books in 7 families, a Python reference of §7, 33 mutants: 27 killed by the oracle, 5 by unit tests, 1 by a test added for it); `verdict` 1,500 held |
+| left | recognition (K3d); a debt is still a plain balance (K3d); a payment written as a split settles only what reaches the owner, so seven `04-freelancer` invoices keep the processor's fee as a remainder and `overdue` says `fernhill still owes 130.80 USD` of an invoice that was paid (K3d); a payment in another commodity is an exchange and settles nothing |
+
+## K5b, in numbers
+
+| | |
+|---|---|
+| what it is | `Contract` holds its `Terms` once and a `waived` timeline: K5a's invariant is the type. The fold, the lowering and the reports read `Promises`; `engine/monitor.rs` walks a `Residual` per stream beside the journal with a min-heap of miss days. A due day no line kept is a `missed-occurrence` warning (one per contract); `monitor_complete` is true; `open_claims` is filled |
+| deleted | `Contract::{occurrences, due_days, amount_on*, recognition*, terms_on*}`, `nearest_occurrence`, `loan_payment`, the ordinal count, `sync/promise.rs`, `World.dues`, the dead `ForecastError` variants and `ForecastFeature`, `sync-monitor-incomplete`, `TermsState` |
+| lines | **−209 against a target of −900**: the monitor is +177 and the type change touched every reader. The three long functions stay (`lower_occurrence` 403, `post_written_occurrence` 121) |
+| speed | `check promise-no-from.ax`: **8.9 s to 0.008 s**; 100k `check` and `forecast` unchanged, 1m within noise (an out-of-line `covers` cost 18% mid-lane and was inlined) |
+| behaviour | the native loan forecast test passes (a loan expects its payments and no more); `grace` read (07-landlord moves: see Waiting on you 6); 05-family and 07-landlord gain `missed-occurrence` warnings; a walked schedule with no `from` counts from 1970 |
+| proof | the promise oracle against an independent reference: 0 failures over 45,181 windows, 30,926 ordinals, 339,756 probe days; every difference from the old rule has a cause (none unexplained); 55 mutants, 0 survived |
+| left | lowering still matches a line on a one-contract compile at statement time (the fold validates the match); `Term::Due.after` is read by nothing (K5c uses it or deletes it); the `Late` cell and `why contract` late rows have no unit test of their own |
 
 ## K4b, in numbers
 
