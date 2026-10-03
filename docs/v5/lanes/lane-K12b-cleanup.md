@@ -43,6 +43,19 @@ K12's own leftovers (STATUS "What K12 left"):
 - The facts are frozen twice because `end` statements say `closed` after lowering: freeze once, after the last
   statement, if the order allows it; if not, say why in the module doc.
 
+K3b's own leftovers (its map §11, and my reading of the merged code; **the three places its author is least proud of are
+yours**): the reference is read in **three entry points** that each fall back differently (`Book::place`, `World::seek_place`,
+`World::end_on`/`address_end`): one function says "what does this word mean, on this day, from this home" and the three call
+it; `declare/parties.rs::Addressed` decides **by source text, before the entities exist**, which mentions are addresses and
+must agree with the real gate `Book::is_spelled` (derived from tree shape: root, `Account` role, has a `loc`, a `/` in the
+path): make the party pass ask one definition of "spelled", stored once and read by both, or say why that cannot be; the
+settled-reference memo (`settle_addresses`, `Addresses::once`) is a second cache of meaning that relies on call order, and
+`special_end`/`found_end` carry `#[inline(always)]` to pay for it (+0.5% Ir): measure what the memo buys now and delete it if
+the index is cheap enough without; `own()` turns an owner's place into a holding after declaration, and the oracle does not
+model it. Also: `shortest_that` enumerates `2^n` subsets of an address's fillers (n up to 15): a bound or a smarter order;
+`owner` has no range (`acme/529` places `acme` as owner without a `wrong-kind`); `unknown-address` suggests the closest name,
+not the closest address. **Do not grow the model: this lane deletes.**
+
 K3c's and K4b's own notes: `name_claims` returns a `bool` and writes `scratch.selectors`, the caller then chooses
 `if named { &scratch.selectors } else { m.select() }`, twice; `Request` is built by hand in three places with mostly
 default fields (give it a constructor per use). And the K4b list belongs to K4c, not to you.

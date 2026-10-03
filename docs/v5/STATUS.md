@@ -20,12 +20,12 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5a** a promise is a term | `core::Dues` (due days counted by arithmetic), `model::promise` (`Term`, `Schedule`, `Residual`, `Annuity`), compiled once beside the old code, proven equal to an independent reference | **merged** (`92e80c1`) |
 | **K3c** claims and parts | `exact` is a relief policy, a flow's codes name claims, write-off is relief, a payment from a party settles its claims, a tab is a claim by its kind. Asset parts: **no**, with evidence | **merged** (`0089678`) |
 | **K5b** the fold reads the promise | a contract's terms stored once, the old schedule walkers and sync's dead `dues` deleted, the monitor (`missed-occurrence`), `grace` as LANGUAGE §7 says | **merged** (`c8c1695`) |
-| K3b addresses | `Addresses`, declaration words fill slots by forced placement | running (map first; stops at the map if a grammar change is needed) |
+| **K3b** addresses | an account is written with the entities that fill its slots (`jordan/bluefin/401k`); `Addresses` is an inverted index resolved by posting-list intersection on the line's day; forced placement fills the slots; three new diagnostics | **merged** (`8e33a9d`) |
 | **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
 | K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | brief written |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
-| K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | brief written |
-| K7a the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | brief written |
+| K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | running (map first) |
+| K7a the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | running (new `crates/session`) |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | brief written (after K7a, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | brief written (after K5c) |
@@ -53,7 +53,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 51,970 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 52,940 non-test lines: the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -118,6 +118,17 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K3b, in numbers
+
+| | |
+|---|---|
+| what it is | `jordan/bluefin/401k` is one token the model already read as a path; K3b reads it as an **address**: the entities that fill an account's slots in order, then its name. `model/addresses.rs` is an inverted index (posting lists by entity and by name, intersected by galloping from the shortest list with `core::postings`, then checked for order and for being open on the line's day); `spelled.rs` is the gate and the placement pass (`core::placement`: a word is placed only where every way of placing all the words puts it); `reference.rs` reads a reference and says `unknown-address` / `ambiguous-address` with the shortest address for each candidate; `ambiguous-placement`, `wrong-kind`, `too-many` for the words before a name. No grammar change. A book that writes no account that way reads exactly as before (a gate: `Addresses::is_used`) |
+| lines | **+859 non-test (model +845), nothing deleted**, against a design that asked for about +250. The new spelling does not pay for itself in lines yet: lane L's deletions are about 100 lines of model code (`institution`, `unknown-institution`, half of `missing_roles`) and 33 `owner`/`employer`/`beneficiary` lines in six examples (the acceptance copy of `05-family` drops 13 of its 15 relation lines and the names that carried a relation). What it buys is a relation said once that the name cannot contradict, which is what the `jordan-401k` complaint was |
+| speed | callgrind `check`: old spelling +0.15% (100k), +0.13% (1m); the same flows written as addresses +1.7% / +1.9% (a first version was +12.6% before the settled-reference memo) |
+| behaviour | no golden or mistake changed (5 new mistake books, 100 to 104); one semantic change in an old shape: an old account whose path **begins with an entity's name** used to be owned by `me`, and is now owned by that entity (no corpus holds one) |
+| proof | an address oracle: 400 generated books, 7,533 references read, 0 wrong (5,463 one account, 378 ambiguous, 1,563 unknown, 129 parties); a separate placement oracle against brute force, 400 cases, 0 wrong; 33 mutants, 31 killed, **2 not killed** (a suggestion that is no number; a commodity end that is not an address attempt) and 3 more deleted as redundant code rather than killed; a copy of `05-family` in the new spelling checks to the same 141 diagnostics, balances, claims, tallies, limits and tax |
+| left | nesting (`entity fidelity` with `alex/401k` under it) and `as with` are not built (map §7: lane L); the custodian is still `at`; the three places its author is least proud of are in K12b's brief (the party pass decides by source text; the settled memo and `inline(always)`; `is_spelled` and `own()`) |
 
 ## K5c, in numbers
 
