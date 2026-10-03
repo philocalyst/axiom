@@ -337,3 +337,103 @@ so not removed by the filter, in the count of "N more diagnostics not shown").
 ### 11.4 Written and read by nothing after the lane
 
 Section 8's list, plus: `Term::Due`'s `after` and `blame` and `Residual::deadline` (K5c); `Promise.waived` (always `false`, section 0.8).
+
+## 12. How it was checked
+
+Every number here is from the code at the tip of the lane. The scratch files are not in the repository; the commands are.
+
+**The oracle** (`docs/v5/measure/contracts.py`, `promises/`): `contracts.py gen DIR 1500 7` writes 1,500 projects, 2,329
+contracts of 77 forms (`contracts.py cover`).
+
+* `check` (the fold against the reference, `calendar::due` walked from the first day, days taken once, waived ones out, the nearest
+  within the reach LANGUAGE §7 says): **0 failures**. It asked 45,181 due windows, 30,926 ordinals, 339,756 probe days, every one of
+  the 1,855 occurrences the journals kept (line and ordinal) and the missed set of 2,492 streams (a missed day is owed, after the book
+  began, kept by no line, and past its reach at the horizon or before a day that was kept; no other is missed), a residual walked
+  against the schedule at 85,858 points (728 ends, 2,467 loan, 3,213 open, 121 repaid), 5,551,560 factors of a day that is not owed
+  and 3,210,975 factors of one.
+* The old rule is rebuilt from `calendar::due` as the old walkers asked it, and `reproduce` holds the rebuild to the frozen dump of the
+  tree before the lane: **1,500 projects, 0 kinds of line not reproduced**. The verdict then gives every answer the fold gives
+  otherwise a cause, and fails on one with none: probe days that keep a different line than the old rule did: the reach 35,287, a due
+  day the old walk lost 880, no first day 4,048 (not compared), the same 299,541; due windows: found twice or out of order 904, lost 404,
+  no first day 621, the same 43,252; ordinals: twice or out of order 1,398, lost 183, the same 29,345. **0 unexplained.** (An earlier
+  python `classify` read only the windows the dump asked and left 637 days unexplained; it is deleted.)
+* The frozen dump against the new one (`compare`): **factor** and **payment** lines differ in **no** project; `recog` in 156 (359
+  answers, all `Err(Overflow)` for a contract with no first day, now `Ok`); `first` in 6 (the walked schedule with no first day, 11.2);
+  `due`, `keep`, `ordinal` as above; `diagnostics` in 151 (`contract-occurrence-date` +199, `ambiguous-contract-occurrence` -6).
+
+**Mutation** (`contracts.py mutate`, 55 mutants of `core/dues.rs`, `model/promise.rs` and `promise/*`, `model/book.rs`,
+`engine/monitor.rs`, `ledger.rs`, `timeline.rs`; each built into the dump and caught by the verdict, by a factor, recognition window
+or payment that is not the fold's (the pinned lines of `dump.new.txt`) or by the crate's own tests):
+**55 mutants: 48 killed by the verdict, 5 by the pinned lines, 2 by the tests, 0 survived.** The 12 of the monitor (a miss a day early or
+late, a stale heap entry, a kept day missed or waited for again, a line that settles the stream after its own or nothing, a stream
+never missed, nothing missed after the last fact, a book that begins on its last day): 11 by the verdict and one, the order in which
+misses are recorded (a miss found after the facts of the day it falls on instead of before them), by `a_miss_is_recorded_before_the_facts_of_a_later_day_and_not_after_them`:
+the corpus cannot tell the order of two records, and the first sweep said so. The five by the pinned lines are the escalation
+(a rise of 3% a fall, a year early), the squaring of a power, a proration share a day too long and `for last month` as the day: the
+factors and windows no second implementation judges any more. The other test-killed mutant is the day after a hole (`the day after a hole is inside it`):
+a boundary the 1,500 projects do not reach (it is the count of due days up to the last day of a hole, which is a day nothing is owed on), caught by `tests/promises.rs`. The sweep also found one **equivalent** mutant, which is
+now deleted code: `Annuity::owed_after` ended with `if payments >= periods { 0 } else { open }`, and the last payment of a loan
+is what is left, so the loop already ends at zero. Two mutants named code that has since changed shape and were rewritten; one's
+replacement did not build and was fixed (`a grace is not read`, `a kept line settles nothing`).
+
+**Other differential runs**, against the baseline binary built from `456b2dd`:
+
+| run | result |
+|---|---|
+| `fuzz.py OLD NEW examples SEED 1000 diff missed-occurrence`, seeds 2 and 3 | no panic in either build; 153 and 149 mutants differ: 151 and 148 from `07-landlord` (its grace line, mutated around), 2 and 1 from `04-freelancer` (one more `missed-occurrence`, hidden behind "N more diagnostics not shown", which the filter cannot see) |
+| `splits.py run`, 800 projects of statements, 21,147 commands | 0 differ |
+| `splits.py run`, 600 projects of promises, 18,852 commands | `balance`, `flow`, `register`, `lots`, `gains`, `claims` and `forecast` identical in all; `check`, `contracts` (and `--json`) and `why contract` differ only by the monitor's output (the warning, the `Late` cell, the late rows) |
+| `splits.py equiv`, 300 splits | 0 not the plain transfers they say |
+| `diff/compare.sh` (K0a, 384 outputs) | 68 differ, all as listed in 11.3 |
+| `sh tests/golden.sh` | the seven files of 11.3 and no other; `sh tests/mistakes/run.sh` exit 0, `git diff tests/mistakes` empty |
+| `cargo test --workspace --release --no-fail-fast` | 993 pass, 2 fail (the two of 11.3, not mine), 19 ignored; the baseline was 981 pass, 3 fail, 19 ignored |
+
+**Size** (`python3 briefs/loc.py .`, non-blank non-comment lines outside test modules), before to after: `cli` 2,507 to 2,507,
+`core` 3,461 to 3,465, `engine` 10,846 to 10,994, `model` 17,916 to 17,637, `report` 7,066 to 7,075, `sync` 4,368 to 4,277,
+`syntax` 5,589, `systems` 14; **total 51,767 to 51,558 (-209)**, against the brief's target of about -900. `git diff --shortstat`
+over `crates/`: 1,036 insertions and 1,042 deletions, of which `monitor.rs` is 177 lines of code (238 with its comments) and 185 of tests.
+The deletions are `book.rs` (324 lines of the walkers, the helpers and the three types), `promise.rs` and `schedule.rs` (the `Payment`,
+the clone, `alike`), `sync/promise.rs` (107, the whole module), `occurrence.rs` (87), `record.rs` (74: `nearest_occurrence`), `world.rs`,
+`planner.rs`, `commands.rs`. The function-length histogram (`hist.py crates`) before to after: 1-10 lines 1,895 to 1,906, 11-20
+663 to 662, 21-40 481 to 480, 41-80 137 to 135, 81-160 11 to 11, over 320: 1 (`lower_occurrence`, 426 lines) to 1 (403).
+
+**Time** (`axiom check` and `forecast`, baseline binary against new, the fastest of three alternated runs on an otherwise quiet
+machine; instructions from callgrind, which do not move with the machine's load):
+
+| | baseline | new |
+|---|---|---|
+| `check diff/cases2/promise-no-from.ax` | 8.911 s, 79,147M instructions | **0.008 s, 6.8M instructions** |
+| `check` bench 100k | 0.416 s, 1,837.5M | 0.416 s, 1,842.0M (+0.25%) |
+| `forecast` bench 100k | 0.466 s, 2,090.5M | 0.467 s, 2,089.3M |
+| `check` bench 1m | 4.638 s, 16,951.8M | 4.450 s, 17,011.9M (+0.35%) |
+| `forecast` bench 1m | 5.389 s, 22,070.6M | 5.490 s, 21,697.0M |
+
+The first forecast of the lane cost 18% more instructions at 100k: `Contract::covers`, asked 4.6M times, was out of line. It is inlined.
+
+## 13. What is not finished, and the three places I am least proud of
+
+**Not finished, said plainly.**
+
+* The matching is still done at lowering time on a one-contract compile (11.2, 6). `lower_occurrence` is 403 lines and `post_written_occurrence`
+  121; both are older than the lane and I did not take them apart. `finish` (45) and `Plan::new` (41) are over the 40 lines by what
+  the lane added.
+* The monitor records a miss and warns; it posts no claim (K5c) and reads no deadline: `Term::Due`'s `after` and `Residual::deadline` are read by
+  a test and the oracle only.
+* Loans: no interest or principal as flows, no resets, no prepay (K5d). The forecast of a loan stops after its payments.
+* The old rule is not rebuilt for a walked schedule with no first day (4,048 probe days, 621 windows): a walk from the beginning of time is four
+  billion days. What they do now is compared to the reference only.
+* The `Late` cell of `contracts` and the `why contract` rows are the monitor's records read by code written for a monitor that did not exist;
+  they work and are tested by the golden and the splits runs, not by a unit test of their own.
+
+**The three places I am least proud of.**
+
+1. **The grace changes two examples and I did not decide it.** `07-landlord` loses a line (`2025-12-29 manager-fee 200.00 USD`) and gains an
+   assertion error, and `07-landlord` and `05-family` gain warnings. LANGUAGE §7 says half a cadence, the old code said a whole one; I read the
+   language and listed the books, and left them alone as told. The right fix is a decision about the example (`grace 30d`, or another date), not about the code.
+2. **The 1970 anchor.** A walked schedule with no `from` counts from day zero because counting from `Day::MIN` collects four billion days. The
+   phase changes (six of 1,500 projects), the old one meant nothing and the new one means nothing too; it is a number picked to make a
+   walk finite, written down in `Dues::new` and in 11.2, and the oracle does not compare it.
+3. **The monitor starts at the book's first fact.** A due day before it is not the book's to miss, which is right for a contract with no `from`
+   and a heuristic for one that began before the journal did: it could say nothing about a due day the book never saw. It is also why
+   `home-loan` of `07-landlord` warns three times for 2026 after the house was sold: the contract has no end. That is a book that needs an
+   `until`, and a monitor that cannot tell it from a book that forgot a payment.
