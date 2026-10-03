@@ -1430,14 +1430,14 @@ impl<'s> Book<'s> {
             Miss::Unknown { .. } => true,
             Miss::Ambiguous(places) => places.iter().any(|&place| self.is_spelled(place)),
         };
-        match self.address_place(text) {
-            Found::One(place) if by_address => return Ok(place),
-            Found::Several(places) if by_address => return Err(Miss::Ambiguous(places.into())),
+        match by_address.then(|| self.address_place(text)).unwrap_or(Found::Nothing) {
+            Found::One(place) => return Ok(place),
+            Found::Several(places) => return Err(Miss::Ambiguous(places.into())),
             // Every account the names found is never open: there is none to mean, as for a line on any day.
             Found::Nothing if by_address && matches!(miss, Miss::Ambiguous(_)) => {
                 return Err(Miss::Unknown { suggestion: None });
             }
-            _ => {}
+            Found::Nothing => {}
         }
         match (&miss, self.entity(text)) {
             (Miss::Unknown { .. }, Ok(entity)) => self.entities[entity].place.ok_or(miss),
