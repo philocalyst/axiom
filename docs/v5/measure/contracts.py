@@ -632,7 +632,58 @@ MUTANTS = [
 ]
 
 
-MUTANTS_NEW = []
+# The same, of the new structure: each of these must make the verdict fail.
+DUES, SCHED = "crates/core/src/dues.rs", "crates/model/src/promise/schedule.rs"
+PROMISE, RECKON = "crates/model/src/promise.rs", "crates/model/src/promise/reckon.rs"
+ANNUITY, RESIDUAL = "crates/model/src/promise/annuity.rs", "crates/model/src/promise/residual.rs"
+MUTANTS_NEW = [
+    (DUES, "take_while(|&&day| day < i64::from(anchor.0))", "take_while(|&&day| day <= i64::from(anchor.0))",
+     "a day on the anchor is before it"),
+    (DUES, "let slot = u64::from(n) + u64::from(head);", "let slot = u64::from(n);", "the days before the anchor are due"),
+    (DUES, ".is_some_and(|&last| last < x)", ".is_some_and(|&last| last <= x)", "a step that ends on the day is before it"),
+    (DUES, ".saturating_sub(u64::from(head))", ".saturating_sub(u64::from(head) + 1)", "one day too few before"),
+    (DUES, "let early = Day(within.first().0.saturating_sub(35).max(self.anchor.0));",
+     "let early = Day(within.first().0.saturating_sub(0).max(self.anchor.0));", "a walked window loses the last of a month"),
+    (DUES, "if kept == 0 || block.days[kept - 1] != block.days[at] {", "if kept == 0 || block.days[kept - 1] == block.days[at] {",
+     "a day two landings share is not one, or the others are lost"),
+    (DUES, "if count == 0 || named[count - 1] != named[at] {", "if count == 0 || named[count - 1] == named[at] {",
+     "the days of an on are counted with their repeats"),
+    (DUES, "Within::Month => (step.days == 0 && step.months >= 1) || (step.months == 0 && step.days >= 31),",
+     "Within::Month => step.months >= 1 || step.days >= 31,", "a mixed span lands each step in a month of its own"),
+    (DUES, "Within::Year => (step.days == 0 && step.months >= 12)", "Within::Year => (step.days == 0 && step.months >= 6)",
+     "a half-yearly step lands each in a year of its own"),
+    (DUES, "Within::Week => step.months >= 1 || step.days >= 7,", "Within::Week => step.months >= 1 || step.days >= 1,",
+     "a step shorter than a week lands each in a week of its own"),
+    (DUES, "On::MonthDay(day) => *day >= 28,", "On::MonthDay(day) => *day >= 29,", "the 28th does not clamp"),
+    (DUES, "        2 => 28,\n", "        2 => 29,\n", "February is 29 days at the shortest"),
+    (DUES, "        if holds(middle) {", "        if !holds(middle) {", "the search goes the wrong way"),
+    (DUES, "let advances = step.months >= 0 && step.days >= 0 && step > Span::default();",
+     "let advances = step.months >= 0 && step.days >= 0;", "a cadence of no days has due days"),
+    (SCHED, "Some(hole) if hole.days.contains(day) => Err(ForecastError::Waived(day)),",
+     "Some(hole) if false && hole.days.contains(day) => Err(ForecastError::Waived(day)),", "a waived day has a factor"),
+    (SCHED, "hole.owed_before() <= n", "hole.owed_before() < n", "the day after a hole is one early"),
+    (SCHED, "self.schedule.life.last().0.saturating_add(1)", "self.schedule.life.last().0", "the last day is not owed"),
+    (SCHED, "Some(hole) if hole.days.last() < limit => hole.before + hole.gone,",
+     "Some(hole) if hole.days.last() <= limit => hole.before + hole.gone,", "the day after a hole is inside it"),
+    (SCHED, "=> hole.before + hole.gone,", "=> hole.before,", "a hole swallows nothing"),
+    (SCHED, "gone: through(dues, days.last()) - from", "gone: through(dues, Day(days.last().0.saturating_sub(1))) - from",
+     "a hole swallows the days but its last"),
+    (SCHED, "(nearest.apart, nearest.due > day)", "(nearest.apart, nearest.due < day)", "the later of two equally near is kept"),
+    (SCHED, "if regular.apart < standing.apart =>", "if regular.apart > standing.apart =>", "the farther schedule is kept"),
+    (PROMISE, "i64::from(months).saturating_mul(31)", "i64::from(months).saturating_mul(30)", "the reach of a month is 30 days"),
+    (PROMISE, ".filter(|(_, terms)| terms.is_waived())", ".filter(|(_, terms)| !terms.is_waived())", "the holes are the active stretches"),
+    (PROMISE, "axiom_core::Cadence::TwiceMonthly => 31,", "axiom_core::Cadence::TwiceMonthly => 15,", "the reach of twice monthly is 15"),
+    (RECKON, "Ratio::ONE.checked_add(rate)", "Ratio::ONE.checked_sub(rate)", "a rise of 3% is a fall"),
+    (RECKON, "power(yearly, u32::try_from(years)", "power(yearly, u32::try_from(years + 1)", "a rise a year early"),
+    (RECKON, "if years & 1 == 1 {", "if years & 1 == 0 {", "a power by squaring that squares wrong"),
+    (RECKON, "Ratio::new(count(alive), count(period))", "Ratio::new(count(alive) + 1, count(period))", "a share one day too many"),
+    (RECKON, "if terms.prorated { Proration::Prorated } else { Proration::Whole }",
+     "if terms.prorated { Proration::Whole } else { Proration::Prorated }", "prorated is whole"),
+    (RECKON, "(Some(relative), None) => Recognition::Last(relative),", "(Some(_), None) => Recognition::OnTheDay,", "for last month is the day"),
+    (ANNUITY, "loan.term.months.checked_add(months - 1)?", "loan.term.months.checked_add(months)?", "a loan has a payment too many"),
+    (ANNUITY, "if index + 1 >= self.periods {", "if index + 1 > self.periods {", "the last payment is the level payment"),
+    (RESIDUAL, "payment + 1 >= annuity.periods()", "payment + 1 > annuity.periods()", "a loan is done a payment late"),
+]
 
 
 def mutate(tree, work, directory, only=None, new=False):
