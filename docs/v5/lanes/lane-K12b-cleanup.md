@@ -56,6 +56,15 @@ model it. Also: `shortest_that` enumerates `2^n` subsets of an address's fillers
 `owner` has no range (`acme/529` places `acme` as owner without a `wrong-kind`); `unknown-address` suggests the closest name,
 not the closest address. **Do not grow the model: this lane deletes.**
 
+K3d's own leftovers (its map §12 and report): **three records of what a flow settled** (`Record::settled`, `Record::settlements`,
+`Frame::settled`) that disagree on exactly one kind of flow (a flow out of a claim place): record a settlement once on the flow
+(`Posted` can carry it) and let a return read it back; **a write-off's reversal is written twice** (`claims.rs::take_back` in the
+fold, `flow.rs::forgiven_by` in the reader, through `Counting::forgiving`; only the oracle makes them agree): `Run` carries what
+was taken back and the reader reads it; `Counting::pieces`/`makes_claim` and a non-inlined `record_purpose` cost every
+purposed flow 1.3% on a book with no claims: a flow with no claim place at either end should skip the rule at the call site.
+K5c's: `Monitor` and `Promising` each keep a heap of streams (a generic `Streams<R>` if it deletes more than it adds),
+`Ledger::promise_through` is an API for one reader.
+
 K3c's and K4b's own notes: `name_claims` returns a `bool` and writes `scratch.selectors`, the caller then chooses
 `if named { &scratch.selectors } else { m.select() }`, twice; `Request` is built by hand in three places with mostly
 default fields (give it a constructor per use). And the K4b list belongs to K4c, not to you.

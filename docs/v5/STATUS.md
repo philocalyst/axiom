@@ -28,6 +28,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | running (map first) |
 | **K7a** the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | **merged** (`368e5e8`) |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | running (map first) |
+| K3f debts as parcels | a bill you owe is a parcel on a Debt tab, a payment to the party settles it; `owed_by_you`, the `payable` gate and `makes_debt` go | brief written (after K6, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | brief written (after K5c) |
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | brief written (after the kernels) |
