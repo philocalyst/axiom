@@ -234,7 +234,9 @@ impl<'s> World<'s> {
 
     /// The names that are none of an account or a party: the unknown party, a contract and an asset. None for
     /// any other. A contract's name stands for its debt tab when it is a loan, and for its party otherwise.
-    fn special_end(&self, home: Home, word: Word) -> Option<Result<End, Diagnostic>> {
+    // Always inlined: it is half of `end_on`, which `settle_addresses` asks too; a call apiece costs 0.5% of a 100k check.
+    #[inline(always)]
+    pub(crate) fn special_end(&self, home: Home, word: Word) -> Option<Result<End, Diagnostic>> {
         if word.text == "?" {
             let place = self.book.entities[self.book.roots.unknown].place.expect("unknown has an endpoint");
             return Some(Ok(End { place, entity: None }));
@@ -267,7 +269,9 @@ impl<'s> World<'s> {
     }
 
     /// What the places and parties a name answers to say it is, if it answers to any.
-    fn found_end(&self, home: Home, word: Word, day: Option<Day>) -> Option<Result<End, Diagnostic>> {
+    // Always inlined, for the same reason as `special_end`.
+    #[inline(always)]
+    pub(crate) fn found_end(&self, home: Home, word: Word, day: Option<Day>) -> Option<Result<End, Diagnostic>> {
         let places = self.book.lookup.places.candidates(&self.book.names, word.text);
         let entity_candidates = self.book.lookup.entities.names.candidates(&self.book.names, word.text);
         let visible = || {

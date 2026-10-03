@@ -40,6 +40,9 @@ pub(crate) struct World<'s> {
     /// A loan contract's name stands for its debt tab, before the contract's terms have been compiled as well as after:
     /// a template may name a loan declared after it.
     pub(crate) contract_endpoints: Map<Sym, End>,
+    /// The names of two words or more that the sources write as an end, until `settle_addresses` has worked out what
+    /// each means.
+    pub(crate) references: Vec<&'s str>,
 }
 
 impl World<'_> {
@@ -426,7 +429,8 @@ pub(crate) fn declare<'a, 's>(
     let resolving = Resolving { seeing, kinds: &native_kinds, kind_roots, purposes: &native_purposes };
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
-    let parties = parties::find(said, &resolving, &commodities, &mut names, diags);
+    let mut parties = parties::find(said, &resolving, &commodities, &mut names, diags);
+    let references = std::mem::take(&mut parties.references);
     let mut entities = parties::declare(collected, parties, &resolving, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
@@ -438,7 +442,8 @@ pub(crate) fn declare<'a, 's>(
     let book = book(made, names, systems_tree, settings);
     let painter = Facts::builder(book.holders.len());
     let (tabs, contract_endpoints) = (Tabs::default(), Map::default());
-    let mut world = World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints };
+    let mut world =
+        World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints, references };
     world.say_tabs_are_claims();
     // What an entity's own declaration says its purpose is, said as a line under it would.
     for (entity, purpose) in entity_purposes {

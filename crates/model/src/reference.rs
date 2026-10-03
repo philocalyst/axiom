@@ -53,6 +53,9 @@ impl World<'_> {
         day: Option<Day>,
         reached: Reached,
     ) -> Option<Result<End, Diagnostic>> {
+        if let Some(place) = self.settled(home, word, reached) {
+            return Some(Ok(End { place, entity: None }));
+        }
         let (leading, name) = word.text.rsplit_once('/').map_or(("", word.text), |(leading, name)| (leading, name));
         let fillers = match self.fillers(home, word, leading, reached) {
             Ok(fillers) => fillers?,
@@ -64,6 +67,37 @@ impl World<'_> {
             Found::Several(places) => Err(self.ambiguous_address(word, &places, day)),
             Found::Nothing => Err(self.unknown_address(word, &fillers, day)),
         })
+    }
+
+    /// The account the text means on every day, if it was worked out once.
+    fn settled(&self, home: Home, word: Word, reached: Reached) -> Option<Id<Place>> {
+        let settled = home == Home::Project && reached == Reached::Nothing;
+        settled
+            .then(|| self.book.names.get(word.text))
+            .flatten()
+            .and_then(|text| self.book.lookup.addresses.settled(text))
+    }
+
+    /// Works out, once, what each reference of two words or more that the sources write means, wherever no line's day and
+    /// no home can change it: no name answers to it, and the one account the index finds is open on every day. The names
+    /// of the accounts, the entities and the contracts are all declared when this is called, so what it finds is what
+    /// each of them would find again, and a hit costs one lookup of the text.
+    pub(crate) fn settle_addresses(&mut self) {
+        let mut once = axiom_core::Map::default();
+        for text in std::mem::take(&mut self.references) {
+            let word = Word { text, loc: axiom_core::Loc::default() };
+            let named =
+                self.special_end(Home::Project, word).is_some() || self.found_end(Home::Project, word, None).is_some();
+            let Some(Ok(End { place, .. })) =
+                (!named).then(|| self.address_end(Home::Project, word, None, Reached::Nothing)).flatten()
+            else {
+                continue;
+            };
+            if self.book.lookup.addresses.is_always_open(place) {
+                once.insert(self.book.names.intern(text), place);
+            }
+        }
+        self.book.lookup.addresses.settle(once);
     }
 
     /// The entities the words before the name are. None if the reference is not an attempt at an address.

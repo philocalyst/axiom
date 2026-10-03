@@ -17,7 +17,7 @@
 //! the order check reads. Each account's own address is a third table, for the diagnostics and for the shortest unique
 //! address: the words that write only this account.
 
-use axiom_core::{Day, Days, Groups, Id, Many, Sym};
+use axiom_core::{Day, Days, Groups, Id, Many, Map, Sym};
 
 use crate::book::{Book, Entity, Place, Role};
 use crate::builtin;
@@ -50,6 +50,7 @@ pub(crate) struct Account<'a> {
     pub open: Option<Days>,
 }
 
+/// Every account's address as a set of posting lists, and what a journal's references mean.
 #[derive(Default)]
 pub(crate) struct Addresses {
     /// For each entity, the accounts it fills a slot of, by place number.
@@ -62,6 +63,9 @@ pub(crate) struct Addresses {
     address: Groups<Place, Part>,
     /// By place number: the days the account is open.
     open: Vec<Option<Days>>,
+    /// The references a journal writes whose meaning no day or home can change, each worked out once, by the text as
+    /// written: the account it means. See `World::settle_addresses`.
+    once: Map<Sym, Id<Place>>,
 }
 
 impl Addresses {
@@ -70,9 +74,14 @@ impl Addresses {
         let mut written = Vec::new();
         let mut starts = Vec::new();
         for (place, account) in book.places.iter() {
-            let named = account.loc.is_some() && matches!(account.role, Role::Account { .. });
-            let Some(name) = named.then(|| book.name(account.path).rsplit('/').next()).flatten() else { continue };
-            let Some(name) = book.names.get(name) else { continue };
+            // An account is declared, with a line to point at; the places a path makes for its prefixes are not.
+            if account.loc.is_none() || !matches!(account.role, Role::Account { .. }) {
+                continue;
+            }
+            // Its name was interned with every suffix of its path, when the places were made.
+            let Some(name) = book.name(account.path).rsplit('/').next().and_then(|name| book.names.get(name)) else {
+                continue;
+            };
             starts.push((place, written.len()));
             written.extend(fillers(book, place).map(Part::Filler));
             written.push(Part::Name(name));
@@ -120,16 +129,24 @@ impl Addresses {
             called: Groups::build(names, called.into_iter()),
             address: Groups::build(places, written.into_iter()),
             open,
+            once: Map::default(),
         }
     }
 
     /// The accounts a reference means: the fillers it names, in order, and the name it ends in, among the accounts
     /// open on `day`, or among all of them with no day.
     pub fn resolve(&self, fillers: &[Id<Entity>], name: Sym, day: Option<Day>) -> Found<Place> {
-        let mut lists: Vec<&[u32]> = fillers.iter().map(|&entity| &self.fills[entity]).collect();
-        lists.push(&self.called[Id::new(name.index() as u32)]);
+        let called = &self.called[Id::new(name.index() as u32)];
         let mut found = Vec::new();
-        axiom_core::postings::intersect_all(&mut lists, &mut found);
+        match fillers {
+            [] => found.extend_from_slice(called),
+            &[only] => axiom_core::postings::intersect(&self.fills[only], called, &mut found),
+            many => {
+                let mut lists: Vec<&[u32]> = many.iter().map(|&entity| &self.fills[entity]).collect();
+                lists.push(called);
+                axiom_core::postings::intersect_all(&mut lists, &mut found);
+            }
+        }
         found.retain(|&place| self.stands_in_order(place, fillers) && self.is_open(Id::new(place), day));
         match found.as_slice() {
             [] => Found::Nothing,
@@ -151,6 +168,21 @@ impl Addresses {
             from = later.trailing_zeros() + 1;
         }
         true
+    }
+
+    /// Whether the account is open on every day there is, so that no line's day can rule it out.
+    pub fn is_always_open(&self, place: Id<Place>) -> bool {
+        self.open[place.index()] == Some(Days::ALWAYS)
+    }
+
+    /// What the text of a reference means, if it was worked out once for every day.
+    pub fn settled(&self, text: Sym) -> Option<Id<Place>> {
+        self.once.get(&text).copied()
+    }
+
+    /// Keeps what each text means, worked out once.
+    pub fn settle(&mut self, once: Map<Sym, Id<Place>>) {
+        self.once = once;
     }
 
     /// Whether the account is open on `day`; with no day, whether it is ever open.

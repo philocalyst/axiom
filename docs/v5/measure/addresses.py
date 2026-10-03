@@ -10,6 +10,7 @@
     addresses.py mutate REPO DIR N [SEED]    build each mutant of the model (MUTANTS below) into a copy of REPO, run the
                                              oracle with it, and say which the oracle kills
     addresses.py accept BINARY               the family's accounts written as addresses against the book written as names
+    addresses.py bench SOURCE DESTINATION    a project of bench/gen.py with its accounts written as addresses
 
 What an address is (docs/v5/lanes/K3b-map.md section 8). An account's address is the entities that fill its slots, owner
 first and custodian last, and then its name. A reference is the entities it names, in order, and the name it ends in.
@@ -127,7 +128,9 @@ class Account:
         return [w for w in fillers if w] + [self.name]
 
     def is_open(self, day):
-        """Whether it is open on `day`; on no day (None), whether it is ever open: always, in the oracle's books."""
+        """Whether it is open on `day`; on no day (None), whether it is ever open."""
+        if self.opened and self.closed and self.closed < self.opened:
+            return False
         return day is None or (self.opened is None or self.opened <= day) and (self.closed is None or day <= self.closed)
 
     @property
@@ -194,8 +197,8 @@ def draw_account(rng, index, style, taken):
         custodian = rng.choice(BANKS) if rng.random() < 0.6 else None
         opened = day_at(rng.randrange(0, 200)) if rng.random() < 0.35 else None
         closed = day_at(rng.randrange(150, 336)) if rng.random() < 0.25 else None
-        if opened and closed and closed < opened:
-            continue
+        if opened and closed and closed < opened and rng.random() < 0.8:
+            continue  # now and then an account that is never open: it closes before it opens
         account = Account(index, kind, name, owner, sponsor, beneficiary, custodian, opened, closed, co_owner)
         key = (account.owner, account.co_owner, account.sponsor, account.beneficiary, account.custodian, name)
         if key not in taken:
@@ -364,10 +367,19 @@ def project(seed, index):
         if entry["answer"] == "one":
             balances[accounts[entry["source"]].path] -= entry["amount"]
             balances[accounts[entry["target"]].path] += entry["amount"]
+    targets = {}
+    for _ in range(6):
+        pool = [rng.choice(accounts)] if accounts else []
+        words = rng.choice(list(runs(pool[0].address))) if pool else []
+        words = typo(rng, words) if words and len(words) >= 2 and rng.random() < 0.2 else words
+        if not words:
+            continue
+        answer = resolve(accounts, words, None)  # a report's target has no line, and so no day
+        targets["/".join(words)] = [answer[0] if answer[0] != "party" else "unknown", answer[1].path if answer[0] == "one" else None]
     rungs = Counter(len(a.path.split("/")) - 1 for a in accounts)
     tally.update({f"words in the path: {n}": count for n, count in rungs.items()})
     facts = {"style": style, "accounts": [a.path for a in accounts], "journal": expect, "balances": balances,
-             "tally": dict(tally)}
+             "tally": dict(tally), "targets": targets}
     return book, facts, accounts
 
 
@@ -428,11 +440,23 @@ def check(binary, path, facts, name="main.ax"):
                 wrong.append(f"line {entry['line']} `{entry['text']}`: expected the addresses {entry['fixes']}, said {fixes}")
     for line, say in by_line.items():
         wrong.append(f"line {line}: said {[d['code'] for d in say]}, expected nothing")
+    for text, (answer, account) in facts.get("targets", {}).items():
+        wrong += check_target(binary, path, name, text, answer, account)
     got = balances(binary, path, name)
     for account, expected in facts["balances"].items():
         if abs(got.get(account, 0.0) - expected) > 0.001:
             wrong.append(f"balance of {account}: expected {expected}, said {got.get(account)}")
     return wrong
+
+
+def check_target(binary, path, name, text, answer, account):
+    """What `register TEXT` says: a report's target has no line, so the accounts it may mean are those ever open."""
+    _, out, err = sh(binary, ["register", text, "-C", name], path)
+    said = out + err
+    if answer == "one":
+        return [] if f"Register: {account}\n" in said else [f"register {text}: expected {account}, said {said[:80]!r}"]
+    code = {"ambiguous": "error[ambiguous-place]", "unknown": "error[unknown-place]"}[answer]
+    return [] if code in said else [f"register {text}: expected {code}, said {said[:80]!r}"]
 
 
 def apply_fixes(path, facts, to):
@@ -563,7 +587,10 @@ def mutate(repo, directory, count, seed):
     work = directory + "-mutant"
     gen(directory, count, seed)
     killed, survived = [], []
+    only = os.environ.get("MUTANTS")
     for name, file, old, new in MUTANTS:
+        if only and name not in only.split(","):
+            continue
         path = os.path.join(repo, "crates", "model", "src", file)
         text = open(path).read()
         if old not in text:
@@ -586,33 +613,48 @@ def mutate(repo, directory, count, seed):
     return len(survived)
 
 
+# ─── The bench ───────────────────────────────────────────────────────────────────────────────────────────
+
+
+def spell_bench(source, destination):
+    """A project of `bench/gen.py` with its accounts written as addresses and its journal saying them by the custodian
+    (`p1-bank/checking`), which no name of the account spells, so that every such flow end is read by the index. The
+    accounts that have no custodian (cash, the 529) keep their names."""
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+    accounts = open(os.path.join(destination, "accounts.ax")).read()
+    renamed = {}
+
+    def account(match):
+        name, kind, custodian, rest = match.group(1), match.group(2), match.group(3), match.group(4)
+        person, leaf = name.split("-", 1)
+        if not custodian:
+            return match.group(0)
+        employer = re.search(r"  employer (\S+)\n", rest)
+        if "beneficiary" in rest:
+            return match.group(0)
+        words = f"{person}/{employer.group(1)}/{leaf}" if employer else f"{person}/{leaf}"
+        renamed[name] = f"{person}/{leaf}" if employer else f"{custodian}/{leaf}"
+        kept = re.sub(r"  (owner|employer) \S+\n", "", rest)
+        header = f"account {words}" + ("" if leaf == kind else f" : {kind}") + f" at {custodian}\n"
+        return header + kept
+
+    accounts = re.sub(r"account (p\d+-[\w-]+) : ([\w-]+) at (\S+)\n((?:  .*\n)*)", account, accounts)
+    open(os.path.join(destination, "accounts.ax"), "w").write(accounts)
+    pattern = re.compile(r"(?<![\w/#^.:-])(" + "|".join(sorted(map(re.escape, renamed), key=len, reverse=True)) + r")(?![\w/:-])")
+    for folder, _, files in os.walk(destination):
+        for name in files:
+            if name.endswith(".ax") and name != "accounts.ax":
+                path = os.path.join(folder, name)
+                text = open(path).read()
+                open(path, "w").write(pattern.sub(lambda m: renamed[m.group(1)], text))
+    print(f"wrote {destination}: {len(renamed)} accounts written as addresses")
+
+
 # ─── The family ──────────────────────────────────────────────────────────────────────────────────────────
 
-# What each account of examples/05-family is called by names, and how the copy writes it.
-FAMILY = [
-    # (old name, new path, kind written, custodian, role lines)
-    ("joint-checking", "family/checking", "deposit", "chase", []),
-    ("joint-savings", "family/savings", "deposit", "chase", []),
-    ("escrow", "family/escrow", None, "lender", []),
-    ("alex-401k", "me/acme/401k", None, "fidelity", []),
-    ("jordan-401k", "jordan/bluefin/401k", None, "fidelity", []),
-    ("hsa", "me/hsa", None, "fidelity", ["coverage family"]),
-    ("dcfsa", "family/dcfsa", "dependent-care-fsa", "acme", []),
-    ("riley-529", "family/riley/529", "529-plan", "fidelity", []),
-    ("mortgage", "family/mortgage", None, "lender", []),
-    ("car-loan", "family/car-loan", "loan", "honda-finance", []),
-    ("card", "family/card", "credit-card", "chase", []),
-]
-
-
-def shortest_stable(old, text_of):
-    """The shortest reference of an account that is unique among all accounts ever declared."""
-    raise NotImplementedError
-
-
 def accept(binary):
-    from family_addresses import main  # the acceptance copy is written by its own script; see there
-    return main(binary)
+    return subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                          "family_addresses.py"), "prove", binary]).returncode
 
 
 def main(argv):
@@ -638,6 +680,9 @@ def main(argv):
         return 1 if mutate(argv[2], argv[3], int(argv[4]), int(argv[5]) if len(argv) > 5 else 1) else 0
     if len(argv) >= 3 and argv[1] == "accept":
         return accept(argv[2])
+    if len(argv) >= 4 and argv[1] == "bench":
+        spell_bench(argv[2], argv[3])
+        return 0
     print(__doc__)
     return 2
 

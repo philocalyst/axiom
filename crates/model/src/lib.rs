@@ -115,6 +115,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     laws::declare(&mut world, &sites, &mut diags);
     lower::contracts(&mut world, &collected, &mut diags);
     let order = laws::register_native(&mut world, &mut diags);
+    world.settle_addresses();
     lower::record(&mut world, &collected, &mut diags);
     // What watches a place is worked out when the last claim tab has been made: a claim makes its tab while the
     // journal is lowered.

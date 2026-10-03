@@ -220,18 +220,37 @@ fn nothing_with_the_address_is_unknown_with_the_closest_name_and_never_a_party()
 
 #[test]
 fn a_sibling_that_opens_later_does_not_make_the_earlier_lines_ambiguous() {
-    let text = "account jordan/401k\n  employer bluefin\naccount me/401k\n  opened 2026-06-01\n\
-opening 2026-01-01\n  jordan/401k 10 USD\n2026-01-02 jordan/401k -> 401k 1 USD\n";
-    // On 01-02 only jordan's is open: the bare name means it. A flow from it to itself is a different error, so write another end.
-    built(&text.replace("jordan/401k -> 401k 1 USD", "jordan/401k -> 401k 1 USD\n"), |_, diagnostics| {
-        assert!(!codes(diagnostics).contains(&"ambiguous-address"), "{diagnostics:#?}");
+    let accounts = "account family/checking : deposit\naccount jordan/401k\n  employer bluefin\n\
+account me/401k\n  opened 2026-06-01\nopening 2026-01-01\n  family/checking 100 USD\n";
+    // On 01-02 only jordan's 401(k) is open, so the bare name means it: nothing is said.
+    built(&format!("{accounts}2026-01-02 family/checking -> 401k 1 USD\n"), |_, diagnostics| {
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     });
-    let later = format!("{text}2026-07-01 jordan/401k -> 401k 1 USD\n");
+    // From 06-01 there are two, and the name is ambiguous that day and on no day before.
+    let later =
+        format!("{accounts}2026-01-02 family/checking -> 401k 1 USD\n2026-07-01 family/checking -> 401k 1 USD\n");
     built(&later, |_, diagnostics| {
         let ambiguous: Vec<_> =
             diagnostics.iter().filter(|diagnostic| diagnostic.code == "ambiguous-address").collect();
-        assert_eq!(ambiguous.len(), 1, "from the day the second opens, and not before: {diagnostics:#?}");
+        assert_eq!(ambiguous.len(), 1, "{diagnostics:#?}");
+        assert!(ambiguous[0].notes[0].contains("2026-07-01"), "{:?}", ambiguous[0].notes);
     });
+}
+
+#[test]
+fn an_account_is_not_found_before_it_opens_or_after_it_closes_and_the_diagnostic_says_so() {
+    let accounts = "account family/checking : deposit\naccount jordan/401k\n  employer bluefin\n  opened 2026-06-01\n  closed 2026-08-31\n";
+    for (day, found) in [("2026-05-31", false), ("2026-06-01", true), ("2026-08-31", true), ("2026-09-01", false)] {
+        built(&format!("{accounts}{day} family/checking -> bluefin/401k 1 USD\n"), |_, diagnostics| {
+            let said: Vec<&str> = codes(diagnostics).into_iter().filter(|&code| code != "flow-shape").collect();
+            assert_eq!(said.is_empty(), found, "{day}: {diagnostics:#?}");
+            if !found {
+                assert_eq!(said, ["unknown-address"]);
+                let note = diagnostics.iter().find(|d| d.code == "unknown-address").unwrap().notes[0].clone();
+                assert_eq!(note, format!("`jordan/bluefin/401k` is not open on {day}"));
+            }
+        });
+    }
 }
 
 #[test]

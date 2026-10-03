@@ -33,6 +33,9 @@ pub(super) struct Parties<'a, 's> {
     implied: Map<&'s str, Loc>,
     /// The names some account, entity or asset is owned by.
     pub owner_names: Set<&'s str>,
+    /// The names of two words or more that a journal or a contract writes as an end, in the order they sort: what a
+    /// reference may be an address of.
+    pub references: Vec<&'s str>,
 }
 
 /// The entities, in the tree they are in for good, and how a name finds one.
@@ -60,7 +63,7 @@ pub(super) fn find<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Parties<'a, 's> {
     let (written, first_paths, owner_names) = written_entities(said.collected, names, diags);
-    let implied = implied_parties(said, resolving, commodities, names, &written);
+    let (implied, references) = implied_parties(said, resolving, commodities, names, &written);
     // A written suffix such as `acme` can resolve to one implied path such as `vendors/acme`; a second `acme`
     // entity would make that reference ambiguous. All full paths are kept, so genuinely ambiguous suffixes are
     // diagnosed by the scoped entity resolver.
@@ -80,7 +83,7 @@ pub(super) fn find<'a, 's>(
             drafts.push(EntityDraft { path, home: Home::Builtin });
         }
     }
-    Parties { drafts, written, implied, owner_names }
+    Parties { drafts, written, implied, owner_names, references }
 }
 
 /// The entities written, each once (a repeat is said), in the order written, and the names things are owned by.
@@ -114,16 +117,19 @@ fn written_entities<'a, 's>(
 }
 
 /// The parties that endpoint names and claims, contracts and `for` clauses mention and nothing declares, each with
-/// where it is first mentioned: a name that is an account, an asset, a kind or any such thing is not a party.
+/// where it is first mentioned: a name that is an account, an asset, a kind or any such thing is not a party. And
+/// every name of two words or more that is mentioned, whatever it is.
 fn implied_parties<'a, 's>(
     said: Said<'_, 'a, 's>,
     resolving: &Resolving<'_>,
     commodities: &Commodities<'s>,
     names: &Interner<'s>,
     written: &Map<&'s str, Written_<'a, 's>>,
-) -> Map<&'s str, Loc> {
+) -> (Map<&'s str, Loc>, Vec<&'s str>) {
     let collected = said.collected;
     let Mentions { first: mentioned, parties } = Mentions::of(said.sites);
+    let mut references: Vec<&'s str> = mentioned.keys().copied().filter(|name| name.contains('/')).collect();
+    references.sort_unstable();
     let mut places = Set::default();
     for decl in collected.decls.iter().filter(|decl| matches!(decl.node.what, DeclKind::Account | DeclKind::Asset)) {
         add_path_spellings(&mut places, decl.node.name.0);
@@ -167,7 +173,7 @@ fn implied_parties<'a, 's>(
         }
         implied.insert(path, loc);
     }
-    implied
+    (implied, references)
 }
 
 /// The written entities that some account's words name: before its name, after `at`, or as an argument of one of its
@@ -196,7 +202,7 @@ pub(super) fn declare<'a, 's>(
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Entities<'s> {
-    let Parties { drafts, written, implied, owner_names } = parties;
+    let Parties { drafts, written, implied, owner_names, .. } = parties;
     let home_of: Map<&str, Home> = drafts.iter().map(|draft| (draft.path, draft.home)).collect();
     let mut purposes: Vec<(&str, At<Id<Purpose>>)> = Vec::new();
     let (mut tree, ids) = crate::paths::build(drafts.iter().map(|draft| draft.path), |path| {

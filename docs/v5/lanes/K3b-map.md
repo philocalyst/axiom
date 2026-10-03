@@ -259,7 +259,8 @@ pub(crate) struct Addresses {
     ids: Groups<Word, u32>,        // the accounts whose address holds the word, by place number
     at: Groups<Word, u16>,         // beside each id: one bit per position of the word in that address
     words: Groups<Place, Sym>,     // each account's address in order, the name last: for a diagnostic and a shortest unique
-    open: Vec<Days>,               // by place number: the days it is open; not an account: empty
+    open: Vec<Option<Days>>,       // by place number: the days it is open; none if it closes before it opens
+    once: Map<Sym, Id<Place>>,     // the references a journal writes that no day or home can change, worked out once
 }
 ```
 
@@ -273,8 +274,8 @@ keep flat names", DESIGN §2.4); a nested entity can fill a slot by a role line 
 
 ## 9. What this lets L delete
 
-The `owner` line of every account whose owner is a path word (12 of the 16 lines under accounts in `05-family`, 12 in
-`09-shared`, 2 in `04-freelancer`), the
+The `owner` line of every account whose owner is a path word (12 of the 16 relation lines under accounts in
+`05-family`, 12 in `09-shared`, 2 in `04-freelancer`), the
 `employer X` and `beneficiary X` lines that a word places, and every account name that carries a relation (`jordan-401k`,
 `riley-529`, `joint-checking`). It does not delete `at`, until the `as with` marker and nesting exist.
 

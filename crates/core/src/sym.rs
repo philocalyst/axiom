@@ -48,3 +48,20 @@ impl<'s> Interner<'s> {
         self.names.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbols_are_numbered_in_the_order_names_are_first_interned() {
+        let mut names = Interner::default();
+        assert!(names.is_empty());
+        let (a, b, again) = (names.intern("jordan"), names.intern("401k"), names.intern("jordan"));
+        assert_eq!((a.index(), b.index()), (0, 1));
+        assert_eq!(again, a, "a name is interned once");
+        assert_eq!(names.len(), 2, "one more than the greatest index");
+        assert_eq!((names.get("401k"), names.get("riley")), (Some(b), None));
+        assert_eq!(names.name(b), "401k");
+    }
+}
