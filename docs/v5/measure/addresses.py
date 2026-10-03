@@ -188,10 +188,15 @@ def declare(account, style, rng):
     return out
 
 
+def flat_name(base, index):
+    """A flat book's account is called by one word, and a word of digits alone is a number, not a name."""
+    return f"{base}{index}" if not base.isdigit() else f"n{base}-{index}"
+
+
 def draw_account(rng, index, style, taken):
     for _ in range(50):
         kind = rng.choice(list(SLOTS))
-        name = rng.choice(NAMES) if style == "spelled" else f"{rng.choice(NAMES)}{index}"
+        name = rng.choice(NAMES) if style == "spelled" else flat_name(rng.choice(NAMES), index)
         owner = rng.choice(SAVERS + KIDS + HOUSEHOLDS + FIRMS[:1])
         sponsor = rng.choice(FIRMS) if "sponsor" in SLOTS[kind] and rng.random() < 0.6 else None
         beneficiary = rng.choice(SAVERS + KIDS) if "beneficiary" in SLOTS[kind] and rng.random() < 0.5 else None
