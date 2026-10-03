@@ -17,8 +17,8 @@
 
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, par};
 use axiom_model::{
-    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Place, RuntimeDetail,
-    RuntimeFlow, RuntimeTxn,
+    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Made, Place,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -547,78 +547,72 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             self.post(&if reversed { motion.reversed() } else { motion });
             return;
         }
+        if let Err(problem) = self.post_computed(id, day, reversed, roots, cost_header) {
+            self.record.report(problem);
+        }
+    }
+
+    /// A journal flow some expression gives an amount, a basis or an exchange cost, posted with them read; the
+    /// first landing's amounts and basis are remembered, as `all` and `=` are, so that a return undoes exactly them.
+    fn post_computed(
+        &mut self,
+        id: Id<Flow>,
+        day: Day,
+        reversed: bool,
+        roots: Option<FlowExpressions>,
+        cost_header: Option<&'b Made>,
+    ) -> Result<(), Diagnostic> {
+        let book = self.plan.book;
+        let source = &book.flows[id];
+        let transaction = &book.txns[source.txn];
+        let offset = transaction.offset(id);
         let roots =
             roots.unwrap_or(FlowExpressions { flow: offset.unwrap_or_default(), out: None, arrive: None, basis: None });
-        let program_id = transaction.program.expect("flow roots belong to a journal program");
-        let program = &book.journal_programs[program_id];
+        let program = &book.journal_programs[transaction.program.expect("flow roots belong to a journal program")];
         let mut flow = source.clone();
         flow.day = day;
         let mut detail = *book.flow_view(source).detail();
         let quantity_roots = roots.out.is_some() || roots.arrive.is_some();
-        let cached_amounts = quantity_roots.then(|| self.record.resolved.get(&id).copied()).flatten();
-        if let Some(amounts) = cached_amounts {
-            flow.out.qty = amounts.out;
-            flow.arrive.qty = amounts.arrive;
-        }
-        let mut computed_quantity = cached_amounts.is_some();
-
-        if cached_amounts.is_none() {
-            match self.read_quantities(id, &mut flow, roots, program, day) {
-                Ok(read) => computed_quantity |= read,
-                Err(problem) => {
-                    self.record.report(problem);
-                    return;
-                }
+        let cached = quantity_roots.then(|| self.record.resolved.get(&id).copied()).flatten();
+        let mut computed_quantity = cached.is_some();
+        match cached {
+            Some(amounts) => {
+                flow.out.qty = amounts.out;
+                flow.arrive.qty = amounts.arrive;
             }
+            None => computed_quantity |= self.read_quantities(id, &mut flow, roots, program, day)?,
         }
         let mut computed_basis = None;
         if let Some(root) = roots.basis {
             if let Some(basis) = self.record.computed_basis.get(&id).copied() {
                 detail.basis = Some(basis);
             } else {
-                let amount = match self.amount_of(id, &flow, program, root, day) {
-                    Ok(amount) if amount.unit == book.base => amount,
-                    Ok(amount) => {
-                        let fault = Fault::UnitMismatch { found: amount.unit, expected: book.base };
-                        self.record.report(explain::journal_expression_fault(book, &flow, program, root, fault, day));
-                        return;
-                    }
-                    Err(problem) => {
-                        self.record.report(problem);
-                        return;
-                    }
-                };
+                let amount = self.amount_of(id, &flow, program, root, day)?;
+                if amount.unit != book.base {
+                    let fault = Fault::UnitMismatch { found: amount.unit, expected: book.base };
+                    return Err(explain::journal_expression_fault(book, &flow, program, root, fault, day));
+                }
                 detail.basis = Some(amount.qty);
                 computed_basis = Some(amount.qty);
             }
         }
-
         if let Some(group) = cost_header {
-            match self.exchange_costs(group, (transaction.flows, source.loc), detail.cost, day) {
-                Ok(cost) => detail.cost = cost.or(detail.cost),
-                Err(problem) => {
-                    self.record.report(problem);
-                    return;
-                }
-            }
+            let cost = self.exchange_costs(group, (transaction.flows, source.loc), detail.cost, day)?;
+            detail.cost = cost.or(detail.cost);
         }
-
         let amounts = self.amounts(&flow, Some(id));
         if computed_quantity {
-            // `posted` and a later return use the exact amount computed on its
-            // first landing, just as they do for `all` and `=`.
             self.record.resolved.insert(id, amounts);
         }
         if let Some(basis) = computed_basis {
             self.record.computed_basis.insert(id, basis);
         }
-        let txn = RuntimeTxn::journal(txn_id).expect("a journal flow cannot name the template sentinel");
-        // A computed basis is a call-local override. Borrow it directly for
-        // this motion instead of allocating a one-entry RuntimeDetail arena.
+        let txn = RuntimeTxn::journal(source.txn).expect("a journal flow cannot name the template sentinel");
+        // A computed basis is a call-local override: borrow it for this motion and allocate no runtime detail.
         let view = book.flow_view_with_detail(&flow, &detail);
-        let flow_ordinal = offset.unwrap_or_default();
-        let motion = Motion::from_view_at(book, view, txn, Cause::Flow(id), day, amounts, flow_ordinal);
+        let motion = Motion::from_view_at(book, view, txn, Cause::Flow(id), day, amounts, offset.unwrap_or_default());
         self.post(&if reversed { motion.reversed() } else { motion });
+        Ok(())
     }
 
     /// A flow's quantities. `?` amounts were solved before the fold, and are
