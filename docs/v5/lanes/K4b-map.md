@@ -353,3 +353,142 @@ Two things the statement path needs that this map's sections 2 and 5 did not pla
 2. **`6%` as an item's amount does not compile today** (`type-mismatch: expected an amount, but this is a number`), and it is
    the second worked example of §3 (`- 6% #selling-costs`). A percentage of the header is a quantity the group has (`Part::Share`
    for a leg); for an item it is not built. Reported; built if the work allows.
+
+## 10. What was built, and where it departs from sections 2, 5 and 9
+
+`crates/model/src/solve.rs` is the algebra of one group: `solve(header, legs, items, settles, env)`. It reads no flow and makes none.
+`Quantity::resolve` is the one reading of a written quantity (an amount, a remainder, a share, `all`, `=`, `?`) against an `Env`;
+`Quantity::stand_in` is what it comes to with no book. `crates/model/src/balance.rs` is what the model does with `solve` for a
+statement: it solves a group whose every amount is written out (`settle`), puts what each part came to into the flows (constant
+folding, `put`) and says what cannot add up (the static check, `split-imbalance`). `crates/engine/src/occurrence.rs` makes a promised
+or kept occurrence from `solve`; `statement.rs` solves a statement's open group when its first flow lands; `evaluate.rs` is the one
+place an expression is read against a flow (`Lent::value`, `Evaluating`).
+
+Where it differs from the plan above:
+
+- **`solve` has a header that may have no amount, and a place for the remainder.** A statement's header may state no total
+  (`Option<Remaining>`: nothing to carve, a remainder of nothing), and a promise's remainder is settled before its items while a
+  split's is settled after them (`Remainder`): a promise's header is a flow of its own and keeps what the items leave, a split has no
+  header flow.
+- **`Env` has `lands`, which section 0 said it would not.** Section 0 argued that `all` and `=` mean the balance at the moment their
+  flow lands, so that a group solved in one go reads the balance from before its first leg. That is true, and a remainder needs every
+  other leg known, so a statement's open group *is* solved in one go, at the first of its flows to land; an `=` or `all` leg, and an
+  `all` header, read the book then. A promise's `Env` reads the book for one thing, an `=` leg's account, because the gap to a balance
+  is what the leg moves (section 9, 4.4); its `all` and `?` stay the markers they were, with the zero they carry.
+- **`Item.amount` is a `Cut`** (`Of(Expr)` or `Share(Ratio)`), so that `- 6%` is an item (section 9, point 2). `solve` settles a
+  share itself, of the header as it was given, as it does a leg's. A promise's items are still only `Of`.
+- **post_journal calls no `solve`.** It reads one flow's computed amounts through `amount_of`, which is `evaluate.rs`'s reading; the
+  group of an open statement is solved in `statement.rs` before its first flow posts, and `Record::resolved` says what each flow came
+  to. Section 2's table said `post_journal` was a third copy of the algorithm; it is a reader of one flow, and the copies were
+  `lower_*` (model), `materialize_group` (engine, promises) and the expression reading around `post_journal`.
+- **The model's solve for a statement is `balance::settle`.** `lower_split_flow`, `lower_named_flow` and `lower_owes` call it; what it
+  cannot close stays open (`Program.open`) and the fold solves it. `Record::unsolved` remembers a group the fold could not solve, and
+  is hashed into checkpoints.
+- **The model's three readings of a written quantity are `Quantity::resolve(LiteralEnv)` and `stand_in`**, not three matches.
+- **A leg in another commodity than the total is the exchange of the remainder, and the solver is not told so.** The model makes
+  such a leg's flow with its written amount on its own side and zero in the total's commodity on the source's, and `Statement::asked`
+  asks the solver for a remainder where a leg's flow is an exchange; `balance::moved` puts the answer on the source's side alone.
+  That keeps `solve` as it was (a leg in another commodity is still a `UnitMismatch` for a promise) and needs no new `Drawn`.
+- **`post_journal` is two functions** (`post_journal` finds what a flow is, `post_computed` reads its amounts, basis and cost),
+  and `lower_owes` is three (`claim_ends`, `claim_program`, the group), because the lane made both longer.
+
+What was not done: the line target. `ledger.rs` lost 1,001 non-test lines, and `occurrence.rs`, `statement.rs`, `evaluate.rs`,
+`solve.rs` and `balance.rs` hold what they became, with their tests, so the lane is longer than it found the code (section 11.5).
+Whether an item is an exchange's cost (`is_exchange_cost` in `statement.rs`) is still decided by the fold and not at model time. A
+`?` leg beside a `...` leg is `cannot-infer` for the fold's solver, as it is opaque to `infer`. A fee leg of an exchange split is not
+a cost of the exchange (the README of example 08 says it is: 9,500.00 USD of basis, not 9,444.90); it is a payment of its own.
+
+## 11. What the statement path found, and what it changed
+
+### 11.1 The premise of section 9 was wrong about the examples
+
+Section 9 says "no example in `examples/` uses a split statement". Five do: `04-freelancer` (8, Stripe fee legs), `06-investor`
+(16, paystubs with `...`), `08-expat` (38: paystubs, Wise-style conversions with a leg in another commodity, a fee leg),
+`09-shared` (63: card bills split between owners, paystubs) and `10-budgeter` (13 paystubs). (A statement is a dated line with an
+arrow whose indented lines are legs; a script over `journal/` counts them.) So the goldens do change, and for the reason the lane
+was given: 17 of 60 golden files (04: 2, 08: 6, 09: 3, 10: 6) and 2 of 100 mistakes (`34-split-short`, `35-split-over`).
+
+| files | what changed | why |
+|---|---|---|
+| `04-freelancer-{tax,available}` | gross receipts 132,900.00 to 158,672.40 (35 to 42 sources), business expenses 6,320.31 to 6,847.91 (19 to 26), and everything that reads them | the seven `fernhill -> 3_100 USD` bills, with `business-checking 3_009.80` and `stripe 90.20 #business-fees` as legs, are flows from the party now: the income and the fee are recognized, where a leg's flow had no amount on its source side |
+| `08-expat-*` (6) | balances, net worth, the assertion gaps | the paystub's `us-checking ...` receives the net pay it never did; the Wise conversions (`girokonto 900 EUR ->` with a fee leg and a USD leg) post as an exchange at the implied rate instead of creating dollars |
+| `09-shared-{balance,available,tax}` | checking 1,031.39 to 25,881.80, wages 6,232.01 to 31,082.42 (44 to 66 sources) | the paystubs' `...` to checking |
+| `10-budgeter-*` (6) | checking 679.92 to 13,230.57; one `cannot-infer` and one `unchecked` note go (the assertions the amounts were solved from now hold different balances) | the paystubs' `checking ...` |
+| `34-split-short`, `35-split-over` | one error is added: `split-imbalance`, at the legs | these are the mistakes their first comment says: legs that add to 4,800 of a 5,000 total with no remainder, legs that take more than the total. The baseline found 3 other errors and not this one |
+
+One book shows what the paystub is: `studio -> 2_307.69 USD` with `fed 226.00`, `payroll-office 176.54`, `insurer 60.00` and `checking ...`
+over a checking account of 1,000.00 leaves it at 1,000.00 on the baseline (the net pay never arrives) and at 2,845.15 now:
+2,307.69 - 226.00 - 176.54 - 60.00 = 1,845.15, which is §3's "...".
+
+What these goldens do **not** show is that the new numbers are right: every example still carries 36 to 461 errors (v3 syntax:
+`/ party`, `income/` accounts), the statements that fail are dropped, and the READMEs' hand-verified figures are matched by neither
+build (10-budgeter on 2026-02-14: checking 6,597.01 by hand, 679.92 before, 13,230.57 now; net worth 10,653.04, 9,699.07, 22,615.12).
+The new numbers are further from the READMEs than the old, with the dropped statements between. Section 11.3 is what shows the
+semantics right: a split is the plain transfers it says, on 5,000 generated books.
+
+The goldens were **not** regenerated or committed: the lane's rule is that they do not change, and they do. `sh tests/golden.sh`
+and `sh tests/mistakes/run.sh` write the new outputs; `git diff tests/` is the 19 files above.
+
+### 11.2 Every behaviour change
+
+LANGUAGE.md line numbers (§3 is lines 130-290). "Ask" says whether the user should be asked.
+
+| # | before | after | spec | ask |
+|---|---|---|---|---|
+| 1 | a split's legs did not debit the source: `checking 100 USD -> acme 60 USD, shop 40 USD` left checking at 10,000.00; legs to the owner's own accounts (`savings 60`, `reserve 40`) created 100.00 | the source is debited by the legs: 9,900.00; nothing is created | 184-185 | no |
+| 2 | `...` was a zero flow | it is what the other legs leave: `reserve ...` of `100 - 60` is 40.00 | 186 | no |
+| 3 | a total after the arrow (`checking -> 100 USD` over legs) was dropped; a header with no total posted its legs and not their sum | the total is read from either side; with none, the sum of the legs is it | 132-135, 185 | no |
+| 4 | an item was paid on top of the header: §3's own example (`120.00` with `32.10` and `12.00` items) debited 164.10 | an item is carved from it, 75.90 keeps the header's purpose; `+` comes on top, `-` is taken off | 197-201, 211-214 | no |
+| 5 | `- 6%` did not compile (`type-mismatch`) | it is 6% of the header: 37.62 of 627.00 | 200, 214 | no |
+| 6 | `2% of amount` in a statement's item read the item's own flow and posted 0.00 USD | `amount` is the header's amount in the item's commodity: 12.00 of 600.00 | 197-206 | no |
+| 7 | the items of a split went between the source and the first leg, reversed for a split that arrives (`- 5 USD #fees` credited the source 5 on top of the legs) | between the source and the remainder leg, in the legs' direction: source 9,905.00 | 203-204 | no |
+| 8 | a statement's `= AMOUNT` leg moved its gap and the header was not debited by the rest | the leg moves the gap, `...` takes what is left: `checking 1_000 USD -> reserve = 5_040 USD, shop ...` debits checking 1,000.00 | 186-187 | no |
+| 9 | `all` as a leg moved everything its source held whatever the total; `all` as a header was ignored (`reserve all -> savings 60 USD, checking ...` posted 60 and nothing to checking) | a leg's `all` is everything the source holds when the split lands, and counts against the total; a header's is the total, so `checking ...` receives the 4,940.00 | 132-135, 186 | no |
+| 10 | a split that does not add up posted what it said: legs over or short of the total, items over the header, a leg in a commodity nothing balances | `split-imbalance`, said at the header and the legs with what each takes, and nothing posted. Judged only when every amount is known (a computed one is judged by the fold). Not judged when a leg failed to read: that error is the one | 184-186, 219 | no |
+| 11 | a leg in another commodity than the total (`girokonto 900 EUR ->` with `fx-fees 4.77 EUR`, `us-checking 1_027.63 USD`) was a flow with nothing out and the dollars in: currency created (net worth +96,000.00 on a probe) | the exchange of what the other legs leave, at the implied rate (out 895.23 EUR, in 1,027.63 USD); with `...` or a second such leg it is an error that says two legs want the remainder, with nothing left it is an error | 217-221; README of example 08 | **yes**: the README says the fee leg is a cost of the exchange (basis 9,500.00 and not 9,444.90); that is not done, it is a payment |
+| 12 | a promise's `= AMOUNT` leg carved the balance itself as if it were the amount (`savings = 5_030 USD` of a 100.00 promise moved 5,030.00 into savings, and the remainder was -4,930) | it moves the gap to the balance (30.00 from savings at 5,000), and the header's remainder is what is left (70.00); a kept occurrence posts what it made, so it moves the gap as well | 186-187 | **yes**: the other reading is that an `=` leg is not carved from the header at all (the header pays its end in full and the leg moves its own gap on top) |
+| 13 | `savings ? USD` beside `...` was `cannot-infer`, nothing posted | still `cannot-infer`; the remainder takes the whole total meanwhile, so the books are not consistent until the error is fixed | none | no, a limitation |
+
+Nothing else on the promise path changes: 25,000 generated books with 70,589 promises and 1,000,279 forecast occurrences, 4,794
+differ and every one has an `=` leg; 2,000 books on the whole CLI, 448 differ and every one has an `=` leg (11.3).
+
+### 11.3 How it was checked
+
+- **A split is the plain transfers it says.** `splits.py equiv`: 5,000 generated splits (from and to a source, a named header with
+  items, totals before, after or none, `...` first or last, amounts, computed legs, `=` legs, `- 6%` shares, `% of amount`, a leg in
+  another commodity with one or two fee legs) each run on the new build against the plain transfers LANGUAGE §3 says it is on the
+  baseline, which gets plain transfers right: balance, flow and net worth the same, 5,000 of 5,000 and none with an error. Mutants of
+  the code it checks (`/tmp/k4b/mutants.txt`) are each killed by it; the 8 mutants of the exchange leg, the `all` header and the
+  lost-leg guard are each killed by `split_tests.rs`, one survives that is a word of a message.
+- **The acceptance tests** are `crates/engine/src/split_tests.rs`: 26, from §3's worked examples and from 1-11 above; each fails on
+  the baseline.
+- **The statement-path oracle, per recipe** (600 books each, `splits.py gen ... recipe:NAME`, new against baseline on `check`,
+  `balance` and `flow`): transfer 0 differ, claims 0, basis 0 (the recipes with no split); `unknown` 105 differ (0 without a `?` leg),
+  `items_under_header` 355 (0 without a carved or computed item), `exchange` 61 (0 without a computed cost item), `split` 588 (the
+  recipe is splits; 12 do not differ, all legs computed). **0 differences are unclassified.**
+- **The static check** over the 2,000 books of `splits.py gen statements`: 488 raise `split-imbalance` (524 errors: 308 legs short
+  of the total, 216 over it), the baseline none. No book of `examples/` raises it, and the 2 mistakes that do are the ones that are
+  meant to.
+- **The promise path.** `internals` (every promise kept or missed, every flow materialized, the debug text of every posted flow,
+  every due day to the end of 2027): 0 differences before the `=` fix on 2,000 books, and after it 393 of 2,000 (4,794 of 25,000), all
+  with a promise `=` leg; the whole CLI (63,201 commands): 448 of 2,000, all with an `=` leg, none without. An `=` leg of a kept
+  occurrence is in them.
+- **The tests**: `cargo test --workspace --release`: 955 passed, 3 failed, 18 ignored; the 3 are the failures of the integration
+  branch (`a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot`,
+  `a_context_forecast_keeps_historical_and_same_day_obligations_once`,
+  `native_loan_forecast_stops_after_the_typed_principal_is_repaid`).
+
+### 11.4 What the oracles cannot see
+
+- The books of `splits.py` use few commodities and every account is a bank; a leg that exchanges into a parcel-holding account
+  (cost basis, lots) is posted as the fold posts any exchange, and nothing says that is what the user means.
+- `is_exchange_cost`: a split's fee leg is not a cost of its exchange (11.2, row 11).
+- A promise's `all` and `?` are still the markers they were; a kept occurrence posts them as written (zero).
+
+### 11.5 Lines
+
+Non-test Rust lines, `briefs/loc.py`: 49,943 before and 50,781 after (+838): model +631 (`solve.rs` 285, `balance.rs` 166, the
+group in `lower/record.rs`, `problem.rs`), engine +207 (`occurrence.rs` 815, `statement.rs` 306, `evaluate.rs` 70, `ledger.rs` -1,001).
+The brief's -1,500 was out of reach: the three copies were not three copies of one algorithm (section 0), the promise path
+(`materialize_group`) moved to `occurrence.rs` whole with its tests, the statement path did not exist in the fold and had to be built,
+and the static check and the acceptance tests are the lane's too.
