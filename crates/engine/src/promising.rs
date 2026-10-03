@@ -370,6 +370,21 @@ opening 2026-01-01
     }
 
     #[test]
+    fn a_line_written_ahead_for_a_standing_day_is_not_promised_again() {
+        // The line on 04-15 keeps the standing order's day, not the payment's (the first of each month).
+        let text = format!(
+            "{PRELUDE}commodity VTI\ncontract invest with landlord\n  50.00 USD monthly on 1 from checking\n  buy VTI for 500.00 USD monthly on 15 from checking\n  from 2026-01-01\n2026-04-15 invest\n"
+        );
+        with_book(&text, |book| {
+            let plan = Plan::new(book);
+            let mut ledger = promising(&plan, "2026-03-31", "2026-05-31");
+            ledger.advance(parse("2026-05-31"));
+            let days: Vec<_> = planned(&ledger).into_iter().map(|(due, _)| due).collect();
+            assert_eq!(days, ["2026-04-01", "2026-05-01", "2026-05-15"], "04-15 was written, so it is not promised");
+        });
+    }
+
+    #[test]
     fn a_line_written_early_for_a_day_after_today_is_not_promised_either() {
         // 2026-04-12 keeps the due day 04-15, and is itself before the day the ledger stands on.
         let early = rent("", "2026-04-12 rent\n");
