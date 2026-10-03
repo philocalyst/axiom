@@ -27,7 +27,7 @@ use crate::facts::{Follows, LawFacts, Reads};
 use crate::lots::Candidate;
 use crate::motion::Motion;
 use crate::plan::Plan;
-use crate::recognition::{Counting, Counts, Piece, Share};
+use crate::recognition::{Counting, Counts, KEEPS_FLOW_DAYS, Piece, Share};
 use crate::show;
 use crate::{Cause, Effect, Owed, Parcel, Posted, Settlement, Waiver};
 
@@ -279,8 +279,14 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
     ) -> bool {
         let ctx = self.ctx;
         let before = current.map_or(flow.day <= ctx.day, |current| id < current);
+        // Most flows are of other days, or of other purposes and settle nothing, and are not worth building the pieces of.
+        let of_other_days = KEEPS_FLOW_DAYS && !flow.recognized.overlaps(read_days);
+        let of_scopes = || flow.purpose.is_some_and(|purposed| self.in_scopes(purposed.purpose, scopes));
+        if !before || of_other_days || !(of_scopes() || self.settled.contains_key(&id)) {
+            return false;
+        }
         let state = self.plan.events.state(id, flow);
-        if !before || !state.is_real_on(ctx.day) {
+        if !state.is_real_on(ctx.day) {
             return false;
         }
         let amounts = self.plan.amounts.get(&id);
@@ -295,11 +301,17 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
         pieces.iter().any(counted)
     }
 
+    /// Whether `purpose` is one of `scopes` or inside one.
+    fn in_scopes(&self, purpose: Id<Purpose>, scopes: &[Id<Purpose>]) -> bool {
+        let purposes = &self.book().purposes;
+        scopes.iter().any(|&wanted| purposes.covers(wanted, purpose))
+    }
+
     /// Whether a piece of a flow is of one of the purposes, and moves money that the owner has a share of.
     fn piece_counts(&self, flow: &Flow, posted: &Posted, piece: &Piece, scopes: &[Id<Purpose>]) -> bool {
         let (book, ctx) = (self.book(), self.ctx);
         let Some(actual) = piece.purpose.map(|purpose| purpose.purpose) else { return false };
-        if !scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted)) {
+        if !self.in_scopes(actual, scopes) {
             return false;
         }
         let owns = |place| {

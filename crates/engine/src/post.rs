@@ -184,6 +184,10 @@ impl Ledger<'_, '_, '_> {
     /// moved, nothing when it only made a claim, and the claims' purposes for what it settled. The pieces stay in
     /// `scratch.pieces` for the laws that fire on them.
     fn count_purposes(&mut self, m: &Motion, claiming: Option<&Claiming>) {
+        if m.purpose.is_none() && claiming.is_none() {
+            self.scratch.pieces.clear();
+            return;
+        }
         let dealing = match claiming {
             Some(claiming) => claiming.dealing(m.out.qty),
             None if self.plan.makes_claim(m.from, m.to) => Dealing::Making,

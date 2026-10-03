@@ -206,8 +206,9 @@ impl<'b, 's> Plan<'b, 's> {
     pub fn makes_claim(&self, from: Id<Place>, to: Id<Place>) -> bool {
         let (book, traits) = (self.book, &self.traits);
         let outside = |place: Id<Place>| book.places[place].class == Class::Outside;
-        let made = outside(from) && traits.place(to).claim;
-        let unmade = outside(to) && traits.place(from).claim && book.places[from].class == Class::Asset;
+        // The traits of a place are compact, and nearly no place is a claim place: ask them before the places.
+        let made = traits.place(to).claim && outside(from);
+        let unmade = traits.place(from).claim && outside(to) && book.places[from].class == Class::Asset;
         made || unmade
     }
 

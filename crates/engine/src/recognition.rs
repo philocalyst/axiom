@@ -33,6 +33,10 @@ pub enum AccrualAt {
 /// The reading of §7 that the books follow.
 const ACCRUAL_AT: AccrualAt = AccrualAt::Made;
 
+/// Whether every piece of a flow is recognized over the flow's own days, as a claim made is not when accrual books count it
+/// when it falls due. A reader that wants the pieces of one set of days may then pass over a flow of other days unbuilt.
+pub const KEEPS_FLOW_DAYS: bool = matches!(ACCRUAL_AT, AccrualAt::Made);
+
 /// What a flow is to the claims.
 #[derive(Clone, Copy)]
 pub enum Dealing<'a> {
@@ -83,7 +87,8 @@ impl<'a> Counting<'a> {
     /// A flow the fold is posting.
     pub(crate) fn moving(plan: &Plan, m: &Motion, dealing: Dealing<'a>) -> Counting<'a> {
         let books = plan.traits.entity(m.owner).books;
-        Counting { books, purpose: m.purpose, day: m.day, recognized: m.recognized, due: m.detail().due, dealing }
+        let due = matches!(dealing, Dealing::Making).then(|| m.detail().due).flatten();
+        Counting { books, purpose: m.purpose, day: m.day, recognized: m.recognized, due, dealing }
     }
 
     /// A claim forgiven on `day`, `qty` of it: what its purpose took back.
