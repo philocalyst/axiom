@@ -356,6 +356,28 @@ opening 2026-01-01
     }
 
     #[test]
+    fn a_miss_is_recorded_before_the_facts_of_a_later_day_and_not_after_them() {
+        let text = format!(
+            "{PRELUDE}contract rent with landlord\n  1_000 USD monthly on 1 from checking\n  from 2026-01-01\ncontract gym with landlord\n  30 USD monthly on 1 from checking\n  from 2026-01-01\n2026-03-01 rent\n"
+        );
+        with_run(&text, day(2026, 3, 10), |book, run| {
+            let name = |promise: &crate::Promise| book.name(book.contracts[promise.contract].name).to_string();
+            let seen: Vec<_> = run.promises.iter().map(|p| (name(p), p.due.to_string(), p.kept.is_some())).collect();
+            let at = |name: &str, due: &str, kept: bool| {
+                let found = seen
+                    .iter()
+                    .position(|(who, when, was)| (who, when, *was) == (&name.to_string(), &due.to_string(), kept));
+                found.unwrap_or_else(|| panic!("{name} {due} {kept}: {seen:?}"))
+            };
+            // The gym's 02-01 is past its reach on 02-17, before the line of 03-01 that keeps the rent's 03-01 (and
+            // settles its 01-01 and 02-01, which nothing kept).
+            assert!(at("gym", "2026-02-01", false) < at("rent", "2026-03-01", true), "{seen:?}");
+            assert!(at("gym", "2026-01-01", false) < at("gym", "2026-02-01", false), "{seen:?}");
+            assert_eq!(seen.len(), 5, "{seen:?}");
+        });
+    }
+
+    #[test]
     fn what_was_missed_is_one_warning_a_contract_with_the_days_listed() {
         let text = rent("", "");
         with_run(&text, day(2026, 5, 1), |book, run| {
