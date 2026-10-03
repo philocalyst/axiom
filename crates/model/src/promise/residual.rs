@@ -69,16 +69,17 @@ impl Residual {
     }
 
     /// The occurrence this waits for has been kept or missed: wait for the one after it. A loan that the payment has
-    /// paid off is done, whatever the schedule would go on to say.
+    /// paid off is done, whatever the schedule would go on to say. The last payment of a loan pays off what is left
+    /// (see [`Annuity::pay`](super::Annuity::pay)), so a loan is done when nothing is owed, and one whose payment cannot be worked out is
+    /// not waited for again.
     pub fn advance(&mut self, promises: &Promises) {
         let Term::Every { schedule, body } = promises.term(self.term) else { return };
-        let (ordinal, payment) = (self.ordinal, self.ordinal - self.began);
         let paid_off = promises.annuity_of(body).is_some_and(|annuity| {
-            let annuity = promises.annuity(annuity);
-            self.open = annuity.pay(self.open, payment).map_or(self.open, |paid| paid.open);
-            self.open == Qty::ZERO || payment + 1 >= annuity.periods()
+            let paid = promises.annuity(annuity).pay(self.open, self.ordinal - self.began);
+            self.open = paid.map_or(Qty::ZERO, |paid| paid.open);
+            self.open == Qty::ZERO
         });
-        self.ordinal = ordinal.saturating_add(1);
+        self.ordinal = self.ordinal.saturating_add(1);
         match promises.schedule_of(schedule).nth(self.ordinal).filter(|_| !paid_off) {
             Some(next) => self.next = next,
             None => *self = Residual::done(),

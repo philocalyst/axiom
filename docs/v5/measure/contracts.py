@@ -54,9 +54,11 @@ import json
 import os
 import random
 import re
+import resource
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
@@ -81,6 +83,7 @@ param sofr
 param lull
   2021 0
   2022 5
+  2025 0
 entity me : person
 entity acme : org
 entity shop : org
@@ -131,10 +134,15 @@ CADENCES = [
     ("every 18m", [(None, "plain"), ("on 04-15", FINE)], []),
     ("every 5y", [(None, "plain"), ("on 02-29", FINE)], []),
     ("every 1m15d", [(None, "plain"), ("on 1", FINE), ("on monday", FINE)], []),
+    # Two steps of a mixed span can land in one month (from 01-29, 1m1d: 03-01, then 03-31), so a day of the month
+    # named for it is due twice a month: not a tiling, and what the criterion that says so must be caught keeping out.
+    ("every 1m1d", [(None, "plain"), ("on 15", FINE), ("on 31", FINE), ("on last", FINE)], []),
+    # Half a year is a step too short for a day of the year to land in a year of its own: 04-15 is due twice.
+    ("every 6m", [(None, "plain"), ("on 15", FINE), ("on last", FINE)], [("on 04-15", COARSE), ("on 04-15, 10-15", COARSE)]),
     ("every 0d", [(None, "plain")], []),
 ]
 
-FROMS = ["2020-01-01", "2024-02-29", "2025-06-15", "2025-12-31", "2026-01-01", "2026-01-15", "2026-01-30",
+FROMS = ["2020-01-01", "2024-02-29", "2026-01-29", "2025-06-15", "2025-12-31", "2026-01-01", "2026-01-15", "2026-01-30",
          "2026-01-31", "2026-02-01", "2026-03-31", "2026-05-17"]
 UNTILS = ["2026-04-28", "2026-08-31", "2027-06-30", "2028-02-29", "2030-12-31"]
 
@@ -481,13 +489,30 @@ def projects(directory):
 
 
 def run_dump(binary, path, extra=(), limit=300):
-    """What the dump says of a project. One that does not answer in LIMIT seconds is a hang: a mutant that loops is
-    caught like one that is wrong."""
-    try:
-        result = subprocess.run([binary, *extra, path], capture_output=True, text=True, timeout=limit)
-    except subprocess.TimeoutExpired:
-        return 124, "", f"no answer in {limit} seconds"
-    return result.returncode, result.stdout, result.stderr
+    """What the dump says of a project. One that does not answer in LIMIT seconds is a hang, one that wants more than
+    MOST_MEMORY or writes more than MOST_OUTPUT stops: a mutant that loops, or collects, or says too much is caught like
+    one that is wrong."""
+    with tempfile.TemporaryFile() as said, tempfile.TemporaryFile() as complained:
+        try:
+            result = subprocess.run([binary, *extra, path], stdout=said, stderr=complained, timeout=limit,
+                                    preexec_fn=limit_resources)
+        except subprocess.TimeoutExpired:
+            return 124, "", f"no answer in {limit} seconds"
+        said.seek(0)
+        complained.seek(0, os.SEEK_END)
+        complained.seek(max(0, complained.tell() - 4000))
+        return result.returncode, said.read().decode(errors="replace"), complained.read().decode(errors="replace")
+
+
+MOST_MEMORY = 2 << 30
+MOST_OUTPUT = 32 << 20
+
+
+def limit_resources():
+    """A mutant that collects what it should count took 14 GB (the kernel killed the run), and a harness that held what
+    a mutant said took 11."""
+    resource.setrlimit(resource.RLIMIT_AS, (MOST_MEMORY, MOST_MEMORY))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MOST_OUTPUT, MOST_OUTPUT))
 
 
 def dump(binary, directory, jobs=3, tag="old", extra=(), limit=300):
@@ -682,21 +707,40 @@ MUTANTS_NEW = [
     (RECKON, "(Some(relative), None) => Recognition::Last(relative),", "(Some(_), None) => Recognition::OnTheDay,", "for last month is the day"),
     (ANNUITY, "loan.term.months.checked_add(months - 1)?", "loan.term.months.checked_add(months)?", "a loan has a payment too many"),
     (ANNUITY, "if index + 1 >= self.periods {", "if index + 1 > self.periods {", "the last payment is the level payment"),
-    (RESIDUAL, "payment + 1 >= annuity.periods()", "payment + 1 > annuity.periods()", "a loan is done a payment late"),
+    (RESIDUAL, "self.ordinal - self.began", "self.ordinal", "a loan's payments are counted from the schedule's first day"),
 ]
+
+
+def leave_out(tree, directory, names):
+    """What a copy of TREE does not need: what is built, kept, or the book's own, and its goldens (`tests/` at the top;
+    a crate's own are what `own_tests_fail` runs)."""
+    top = os.path.samefile(directory, tree)
+    return [name for name in names if name in ("target", ".git", ".claude", "docs", "examples") or (top and name == "tests")]
+
+
+def own_tests_fail(source, work):
+    """Whether the tests of `core` and `model` (their units, and `tests/promises.rs`) fail in SOURCE: what a mutant of
+    the new structure that the dump's verdict does not catch has still to get past, because the old code cannot say
+    what a loan has left after a payment, or what the days before a hole's last day are."""
+    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
+    for package, targets in (("axiom-core", ["--lib"]), ("axiom-model", ["--lib", "--test", "promises"])):
+        run = subprocess.run(["cargo", "test", "--release", "--offline", "-p", package, *targets], cwd=source, env=env,
+                             capture_output=True, text=True)
+        if run.returncode:
+            return True
+    return False
 
 
 def mutate(tree, work, directory, only=None, new=False):
     """Builds each mutant into the dump. Of the machinery under test (the old code), the dump of the mutant must differ
-    from the baseline's; of the new structure (NEW), its verdict must fail. Mutants that are not caught are listed:
+    from the baseline's; of the new structure (NEW), its verdict must fail, or its own tests, which say what the old code cannot. Mutants that are not caught are listed:
     each is either equivalent, and the report says why, or the corpus is too weak."""
     table = MUTANTS_NEW if new else MUTANTS
     work = os.path.abspath(work)
     source = os.path.join(work, "tree")
     if not os.path.isdir(source):
         os.makedirs(work, exist_ok=True)
-        skip = shutil.ignore_patterns("target", ".git", ".claude", "docs", "examples", "tests")
-        shutil.copytree(os.path.abspath(tree), source, ignore=skip)
+        shutil.copytree(os.path.abspath(tree), source, ignore=lambda at, names: leave_out(tree, at, names))
     out = os.path.join(work, "build")
     snapshot = os.path.join(work, "promises")
     if not os.path.isdir(snapshot):
@@ -705,6 +749,7 @@ def mutate(tree, work, directory, only=None, new=False):
     if new:
         baseline = verdict(binary, directory, 4)[1]
         assert not baseline, f"the baseline fails its own verdict: {baseline[:2]}"
+        assert not own_tests_fail(source, work), "the baseline fails its own tests"
     else:
         dump(binary, directory, 4, "base")
     results = []
@@ -716,14 +761,16 @@ def mutate(tree, work, directory, only=None, new=False):
         assert original.count(old) == 1, f"mutant {number}: the text occurs {original.count(old)} times in {path}"
         open(target, "w").write(original.replace(old, replacement))
         tag = f"m{number:02d}"
+        by_tests = False
         try:
             binary = build(source, out, new=new, source=snapshot)
             if new:
-                caught = bool(verdict(binary, directory, 4, limit=20)[1])
+                caught = bool(verdict(binary, directory, 4, limit=20, enough=3)[1])
+                by_tests = not caught and own_tests_fail(source, work)
             else:
                 dump(binary, directory, 4, tag, limit=20)
                 caught = bool(compare(directory, "base", tag, show=0))
-            outcome = "killed" if caught else "SURVIVED"
+            outcome = "killed" if caught else "killed by the tests" if by_tests else "SURVIVED"
         except SystemExit:
             outcome = "does not build"
         finally:
@@ -736,8 +783,8 @@ def mutate(tree, work, directory, only=None, new=False):
         results.append((number, outcome, what))
         print(f"mutant {number:02d} {outcome:<8} {what}", flush=True)
     summary = Counter(outcome for _, outcome, _ in results)
-    print(f"{len(results)} mutants: {summary['killed']} killed, {summary['SURVIVED']} survived, "
-          f"{summary['does not build']} did not build")
+    print(f"{len(results)} mutants: {summary['killed']} killed, {summary['killed by the tests']} killed by the tests, "
+          f"{summary['SURVIVED']} survived, {summary['does not build']} did not build")
     with open(os.path.join(work, "mutants.txt"), "w") as handle:
         for number, outcome, what in results:
             handle.write(f"{number:02d} {outcome} {what}\n")
@@ -746,26 +793,35 @@ def mutate(tree, work, directory, only=None, new=False):
 # ─── The verdict ─────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def verdict(binary, directory, jobs=3, extra=(), limit=120):
-    """Runs the dump's own comparison (`--check`) over every project: what it says, summed, and what failed."""
-    tallies, failures = Counter(), []
+def verdict(binary, directory, jobs=3, extra=(), limit=120, enough=None):
+    """Runs the dump's own comparison (`--check`) over every project: what it says, summed, and what failed. A project's
+    answer is read as it comes and not kept: a mutant can make it as long as MOST_OUTPUT, for every project. With
+    ENOUGH, the projects not yet asked are not once that many have failed: a mutant is caught by one."""
+    failed = []
 
     def one(path):
+        if enough is not None and len(failed) >= enough:
+            return Counter(), []
         code, out, err = run_dump(binary, path, ("--check", *extra), limit)
-        return path, code, out, err
-
-    with ThreadPoolExecutor(jobs) as pool:
-        results = list(pool.map(one, projects(directory)))
-    for path, code, out, err in results:
+        tallies, failures = Counter(), []
         for line in out.split("\n"):
             if line.startswith("check "):
                 *key, count = line.split()
                 tallies[" ".join(key)] += int(count)
             elif line.startswith("FAIL "):
-                failures.append((path, line))
+                failures.append((path, line[:300]))
         if code not in (0, 1):
             failures.append((path, f"FAIL the dump stopped: exit {code} {err[-300:]}"))
-    return tallies, failures, len(results)
+        failed.extend(failures)
+        return tallies, failures[:3]
+
+    tallies, failures, projects_run = Counter(), [], 0
+    with ThreadPoolExecutor(jobs) as pool:
+        for found, failed in pool.map(one, projects(directory)):
+            tallies.update(found)
+            failures.extend(failed)
+            projects_run += 1
+    return tallies, failures, projects_run
 
 
 def check(binary, directory, jobs=3, extra=()):
@@ -784,97 +840,6 @@ def check(binary, directory, jobs=3, extra=()):
 # ─── What the corpus holds ───────────────────────────────────────────────────────────────────────────────────
 
 
-def cover(directory, tag="old"):
-    forms = json.load(open(os.path.join(directory, "forms.json")))
-    held, facts = Counter(), Counter()
-    clean = Counter()
-    for path in projects(directory):
-        name = os.path.basename(path)
-        for form in forms[name]:
-            held[form] += 1
-        try:
-            text = open(os.path.join(path, f"dump.{tag}.txt")).read()
-        except FileNotFoundError:
-            continue
-        codes = text.split("\n", 1)[0].split()[1:]
-        ok = not any(code for code in codes)
-        clean["projects"] += 1
-        clean["without a diagnostic"] += ok
-        for line in text.split("\n"):
-            word = line.split(" ", 1)[0]
-            facts[word] += 1
-            if word == "due" and not line.endswith(": "):
-                facts["due, not empty"] += 1
-            if word == "keep" and not line.endswith("none"):
-                facts["keep, a due day"] += 1
-            if word == "keep" and line.endswith("none"):
-                facts["keep, none"] += 1
-            if word == "keep" and "ambiguous" in line:
-                facts["keep, ambiguous"] += 1
-            if word in ("factor", "recog"):
-                facts[f"{word}, {'error' if 'Err(' in line else 'ok'}"] += 1
-            if word == "ordinal" and "Some" in line:
-                facts["ordinal, a number"] += 1
-            if word == "promise":
-                facts["promises kept"] += 1
-            if word == "terms" and "equal-stretches false" in line:
-                facts["stretches that differ in more than state"] += 1
-            if word == "stretch" and line.endswith("waived"):
-                facts["waived stretches"] += 1
-        for form in forms[name]:
-            if ok:
-                held[form + " (clean)"] += 1
-    width = max((len(form) for form in held), default=0)
-    print(f"{len(forms)} projects; {clean['projects']} dumped, {clean['without a diagnostic']} with no diagnostic at all")
-    for form in sorted(f for f in held if not f.endswith("(clean)")):
-        print(f"  {form:<{width}} {held[form]:>5} {held[form + ' (clean)']:>5}")
-    print("what the dumps asked:")
-    for word, count in sorted(facts.items()):
-        print(f"  {word:<{width}} {count:>8}")
-
-
-def main(argv):
-    if len(argv) >= 4 and argv[1] == "gen":
-        slow = "--slow" in argv
-        rest = [a for a in argv[2:] if a != "--slow"]
-        forms = gen(rest[0], int(rest[1]), int(rest[2]) if len(rest) > 2 else 1, slow)
-        total = Counter()
-        for one in forms.values():
-            total.update(one.keys())
-        print(f"wrote {len(forms)} projects to {rest[0]}; projects holding each form:")
-        for form, count in sorted(total.items()):
-            print(f"  {form:<34} {count}")
-        return 0
-    if len(argv) >= 4 and argv[1] == "build":
-        print(build(argv[2], argv[3], new="--new" in argv))
-        return 0
-    if len(argv) >= 4 and argv[1] == "check":
-        extra = ("--slow",) if "--slow" in argv else ()
-        rest = [a for a in argv if a != "--slow"]
-        return 1 if check(rest[2], rest[3], int(rest[4]) if len(rest) > 4 else 3, extra) else 0
-    if len(argv) >= 4 and argv[1] == "dump":
-        extra = ("--slow",) if "--slow" in argv else ()
-        rest = [a for a in argv if a != "--slow"]
-        jobs = int(rest[4]) if len(rest) > 4 else 3
-        tag = rest[5] if len(rest) > 5 else "old"
-        return 1 if dump(rest[2], rest[3], jobs, tag, extra) else 0
-    if len(argv) >= 5 and argv[1] == "compare":
-        return 1 if compare(argv[2], argv[3], argv[4]) else 0
-    if len(argv) >= 5 and argv[1] == "mutate":
-        new = "--new" in argv
-        rest = [a for a in argv if a != "--new"]
-        only = {int(n) for n in rest[5].split(",")} if len(rest) > 5 else None
-        mutate(rest[2], rest[3], rest[4], only, new)
-        return 0
-    if len(argv) >= 3 and argv[1] == "cover":
-        cover(argv[2], argv[3] if len(argv) > 3 else "old")
-        return 0
-    print(__doc__)
-    return 2
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))
 def cover(directory, tag="old"):
     forms = json.load(open(os.path.join(directory, "forms.json")))
     held, facts = Counter(), Counter()

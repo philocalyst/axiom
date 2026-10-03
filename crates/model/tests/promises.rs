@@ -93,6 +93,44 @@ contract rent with greystar
 }
 
 #[test]
+fn the_last_day_of_a_contract_is_owed_and_the_days_before_a_day_past_it_are_all_of_them() {
+    let text = "\
+contract rent with greystar
+  1_000 USD monthly on 1 from checking
+  from 2026-01-01
+  until 2026-03-01
+";
+    with_book(text, |book| {
+        let schedule = book.promises.schedule(book.contract("rent").unwrap(), ScheduleKind::Regular).unwrap();
+        assert_eq!(schedule.life().last(), day(2026, 3, 1), "the contract ends on a due day");
+        assert_eq!(schedule.before(day(2026, 3, 1)), 2);
+        assert_eq!(schedule.before(day(2026, 3, 2)), 3, "the day it ends is owed");
+        assert_eq!(schedule.before(day(2026, 9, 1)), 3, "and nothing after it is");
+        assert_eq!((schedule.nth(2), schedule.nth(3)), (Some(day(2026, 3, 1)), None));
+    });
+}
+
+#[test]
+fn the_days_before_the_last_day_of_a_hole_leave_out_a_due_day_on_it() {
+    let text = "\
+contract rent with greystar
+  1_000 USD monthly on 1 from checking
+  from 2026-01-01
+2026-03-01 rent waived until 2026-04-01
+";
+    with_book(text, |book| {
+        let rent = book.contract("rent").unwrap();
+        let owed = due_days(book, "rent", ScheduleKind::Regular, window(day(2026, 1, 1), day(2026, 5, 31)));
+        assert_eq!(owed, ["2026-01-01", "2026-02-01", "2026-05-01"], "the waiver ends on a due day, which it takes");
+        let schedule = book.promises.schedule(rent, ScheduleKind::Regular).unwrap();
+        assert_eq!(schedule.before(day(2026, 4, 1)), 2, "two are owed before the hole's last day");
+        assert_eq!(schedule.before(day(2026, 4, 2)), 2);
+        assert_eq!(schedule.before(day(2026, 5, 1)), 2, "the day after the hole is the third");
+        assert_eq!(schedule.before(day(2026, 5, 2)), 3);
+    });
+}
+
+#[test]
 fn the_last_day_of_a_month_is_not_lost_when_a_waiver_ends_in_the_month() {
     // `due` asked from the 16th of March, where the waiver ends, misses 2026-03-31: its step is the 10th.
     let text = "\
