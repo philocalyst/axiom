@@ -457,6 +457,8 @@ def mutate(tree, work, directory, only=None):
                 outcome = "killed by the tests" if own_tests_fail(source, work) else "SURVIVED"
         except SystemExit:
             outcome = "does not build"
+        except subprocess.TimeoutExpired:
+            outcome = "killed by a hang"
         finally:
             open(target, "w").write(original)
         results.append((number, outcome, what))
