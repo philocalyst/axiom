@@ -63,6 +63,8 @@ mod totals;
 mod traits;
 
 #[cfg(test)]
+mod claim_tests;
+#[cfg(test)]
 mod fixture;
 #[cfg(test)]
 mod source_tests;
