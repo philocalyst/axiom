@@ -309,3 +309,94 @@ The oracle reports each of these as listed, not as a failure; the new structure'
 - The four implementations and the numbering: read in full (record.rs:1186-1238, ledger.rs:1112-1232, forecast.rs:330-484,
   sync/promise.rs, binding.rs, world.rs:322).
 - The set `D`: `core/calendar.rs::due` read in full, and its tests; the oracle of Step 1 checks it on generated contracts.
+
+## 10. What was built, and where it departs from sections 8 and 9
+
+Written last, from the tree at the end of the lane. Nothing in the product reads the new structure: `Book.promises` is
+compiled once at the end of `build`, and only the oracle reads it. `git diff tests/` is empty after `sh tests/golden.sh`
+and `sh tests/mistakes/run.sh`.
+
+### 10.1 What is there
+
+| where | what | production lines |
+|---|---|---|
+| `core/dues.rs` | `Dues`: the days a cadence, its `on` and an anchor give, as a set with `nth(n)` and `before(day)` by arithmetic; `Shape::{Never, Tiled, Walked}` | 285 |
+| `model/promise.rs` | `Term`, `Promises` (the arenas and flat pools), `compile`, `Promise`, `Stream`, `Payment` | 245 |
+| `model/promise/schedule.rs` | `Schedule`, `Skip` (a hole), `Sched` (`nth`, `before`, `ordinal`, `days`, `nearest`, `factor`, `recognized`), `Keep` | 183 |
+| `model/promise/reckon.rs` | `Reckoning`: the escalation, the proration and the recognition of a schedule | 108 |
+| `model/promise/annuity.rs` | `Annuity`: a loan's level payment (the engine's arithmetic, once), its periods, `pay` | 81 |
+| `model/promise/residual.rs` | `Residual`: the cursor, `start` and `advance` | 55 |
+| `core/calendar.rs`, `model/lower/record.rs` | `land_number`, `checked_number` (so that a landing can be asked for as a number); `nearest_occurrence` made `pub` for the oracle | +~20 |
+
+`size_of`, asserted by a test or a `const` in each file: `Term` 16, `Residual` 24, `Schedule` 44 (≤ 48), `Skip` 20 (≤ 24),
+`Annuity` 48 (≤ 64), `Reckoning` 40, `Promise` 52, `Stream` 8, `Keep` 12, `Dues` 48. `Payment` is 360: a stream's template,
+program and inputs, cloned (see 10.3).
+
+Commits: `9d22888` map, `f5a1871` and `6058464` the oracle (before any of the new structure), `7396799` `Dues`,
+`2c0c3ef` the compile, `0dbd924` the oracle asks the new structure too, `a04f233` and `c421ff1` mutants and the harness,
+`d606999`, `744f31c` and `88fb4c8` the loan, the grace, the residual walked.
+
+### 10.2 What the oracle says
+
+Corpus: `contracts.py gen DIR 1500 7`: 1,500 projects, one to three contracts each, 2,329 contracts, drawn from 71 forms
+(`contracts.py cover`). The new structure equals the reference on **every** question asked: 45,181 windows of due days, 31,739
+ordinals, 339,756 kept lines, 2,329 factors of 2,200 days each, 2,329 loan payments, 85,858 steps of the residual of every
+stream (121 loans walked to their last payment, 728 streams walked to their end), and the count of a loan's payments, worked
+out a second time. 0 failures; also 0 with debug assertions (which exercise the compile's asserts and every overflow check of
+`core` and `model` over the corpus; `cargo test --release` has them off), and the unit tests of `core` and `model` pass
+in a debug build.
+
+The old code equals the reference except in four listed ways, each counted: `repeats` (1,067 + 2,219 windows and ordinals,
+the `on` for a longer period than the cadence), `lost` (394 + 163 + 1,144: a due day lost when a window begins after its
+step; `on last` has no slack), `repeats+lost`, and `no-start` (383,475 recognition windows of contracts with no `from`).
+Everything else (43,694 windows, 29,345 ordinals, 338,606 kept lines, 5,168,085 recognitions) is the same answer.
+
+Mutation: 50 mutants of the old code (`MUTANTS`): 46 killed by `compare`, 4 survive and are equivalent:
+
+- 11 (`day >= anchor` dropped in `calendar::due`): every caller's window is first cut to the contract's days, which begin at the anchor
+  (the compile asserts `anchor == days.first()`);
+- 22 (`after <= start` to `<` in `covered_span`): `Days::new(start, start - 1)` is `None` and the same error follows;
+- 32 and 33 (`<=` for `<`, and `>=` for `>`, in `nearest_occurrence`): two candidates with the same distance and the same side are the
+  same day.
+
+37 mutants of the new structure (`MUTANTS_NEW`): 35 killed by the verdict, 2 by the lane's own tests (`the last day of a
+contract is owed ...` and `the days before the last day of a hole ...`: the old code has no `before`, so no comparison can ask
+them), 0 survive. The baseline of both sweeps is checked first: 0 failures, and the tests pass. Four times a sweep found the
+corpus too weak and the corpus was changed (an `every 6m` and an `every 1m1d` for the tiling criteria, a zero index for
+`index_at`, an anchor on the 29th) before the mutant counted as killed; one sweep's kills were false (a clock: two projects
+of the corpus take a minute in the old code), and that is why a mutant is now given three times the baseline's slowest.
+
+### 10.3 Where it departs from sections 8 and 9
+
+1. **Not every schedule is arithmetic.** `Tiled` (and `Never`) is exact and O(log n). `Walked` is the old walk with the repeats removed:
+   O(n) in the number of steps. It is what a cadence with a longer `on` than its step (`weekly on 15`), days of two kinds, more than
+   16 landings, **and two days that clamp together (`on 30, last`, which is a meaningful `on`)** get. The compile never walks (a `Walked`
+   schedule's holes carry no counts), but `ordinal` and `nth` of a `Walked` schedule with no `from` walk from `Day::MIN`: 4 billion days.
+   A mixed span (`every 1m1d`) is `Walked` on purpose: two steps of it can land in one month (from 01-29: 03-01, then 03-31).
+2. **The holes are in `model`, not in `core::dayset`.** A hole needs the cadence's count of days before it, which is the schedule's;
+   `DaySet` only merges the waived stretches.
+3. **A `Residual` has a fifth field, `began`** (the index of a loan's first payment among the owed days): 24 bytes still.
+4. **A loan's first payment is the first due day after the loan was made**, not on it: the shape the test
+   `native_loan_forecast_stops_after_the_typed_principal_is_repaid` asks for (payments in February, March and April for a loan
+   made on 2026-01-01 over three months, and then nothing). The old engine pays `loan_payment` on every occurrence the schedule has.
+5. **The payment is not computed past 100,000 periods** (a daily loan of 270 years): an `Annuity` is then `None`, where the engine's
+   loop would run (and overflow, long before a million). No book in the corpus has one.
+6. **The compile's two invariants are `debug_assert!`s** (the stretches of a timeline differ only in whether they are waived; a
+   schedule counts from the contract's first day). They hold for 1,500 projects under debug assertions. They are off in every
+   `--release` run, the one the lane is told to run.
+7. **`Reckoning` is a second copy of `amount_on_schedule` and `recognition_on_schedule`** (and `ratio_pow`, `index_at`,
+   `prorated_share`, `covered_span`), kept equal by the oracle (5,168,085 recognitions, 10,803 factors compared) until K5b deletes the old.
+   The recognition of a contract with no `from` is `Days::on(day)`, which the old code cannot compute (section 7h).
+8. **A promise is held twice until K5b**: `Payment` clones the template, the program and the inputs of the contract's `Terms`.
+9. **`grace` is carried, not read** (7d). The reach is the old one: a full cadence.
+10. **What is not built**: `Choose`, `Accrue`, `Let`, `At`, `If`: no source in today's language (section 6).
+
+### 10.4 What it lets K5b and K5c delete
+
+About 450 lines, none yet deleted: `Contract::occurrences` and `ContractOccurrences`, `amount_on_schedule`, `recognition_on_schedule`
+and their helpers (`model/book.rs`, about 280 lines); `nearest_occurrence` (`lower/record.rs`, 53); `loan_payment` and the count of an
+ordinal (`engine/ledger.rs`, about 55: K4b's file, so not touched here); the schedule half of `contract_forecasts`
+(`report/forecast.rs`); and `sync/promise.rs::keep_paired`, which nothing runs (section 0.1). The new code is about 970 production
+lines: **the structure is larger than what it replaces**. What it buys is the ordinal and the payment in O(log n) (7b, 7g), one
+numbering for the journal and the forecast (7c), a matching that sees the final schedule (7e), a loan that ends (7g), and an oracle
+that holds every reading of a schedule to the same reference.
