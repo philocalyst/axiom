@@ -10,6 +10,7 @@ use crate::book::{Asset, Class, Entity, Kind, Share, Sort};
 use crate::collect::Collected;
 use crate::errors::Word;
 use crate::problem::{self, Noun};
+use crate::spelled::leading;
 
 pub(super) struct AccountDraft<'s> {
     pub path: &'s str,
@@ -18,6 +19,8 @@ pub(super) struct AccountDraft<'s> {
     pub owner: Id<Entity>,
     pub shares: Box<[Share]>,
     pub institution: Option<Id<Entity>>,
+    /// Written with the entities that fill its slots before its name: a root of the tree, with no place for a prefix.
+    pub spelled: bool,
     pub loc: Loc,
 }
 
@@ -40,7 +43,9 @@ pub(super) fn declare_accounts<'a, 's>(
             continue;
         }
         declared.insert(path, file.loc(path));
-        let kind = resolving.kind(names, written, Sort::Place(Class::Asset), resolving.kind_roots.asset, diags);
+        let scope = resolving.seeing.scopes.of(written.home());
+        let spelled = leading(&entities.index, &entities.tree, names, scope, path).is_some();
+        let kind = resolving.account_kind(names, written, spelled, diags);
         let class = match resolving.kinds.tree[kind].sort {
             Sort::Place(class) => class,
             found => {
@@ -80,6 +85,7 @@ pub(super) fn declare_accounts<'a, 's>(
             owner,
             shares: shares.into_boxed_slice(),
             institution,
+            spelled,
             loc: file.loc(path),
         });
     }

@@ -654,6 +654,25 @@ impl Resolving<'_> {
         }
     }
 
+    /// The kind an account is written as; of a spelled path with none written, the kind its name is (`alex/401k`).
+    fn account_kind(
+        &self,
+        names: &Interner,
+        written: &Written<Decl>,
+        spelled: bool,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Id<Kind> {
+        let by_name = || {
+            let (name, scope) = (written.node.name.0.rsplit('/').next()?, self.seeing.scopes.of(written.home()));
+            let kind = self.kinds.index.resolve(names, scope, name).ok()?;
+            matches!(self.kinds.tree[kind].sort, Sort::Place(_)).then_some(kind)
+        };
+        match written.node.kind {
+            None if spelled => by_name().unwrap_or(self.kind_roots.asset),
+            _ => self.kind(names, written, Sort::Place(Class::Asset), self.kind_roots.asset, diags),
+        }
+    }
+
     /// The purpose `name` is, for a declaration in `home`.
     fn purpose(
         &self,

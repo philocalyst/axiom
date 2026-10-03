@@ -47,6 +47,8 @@ pub(super) fn declare<'s>(
 ) -> Places {
     let paths = keys(inputs.accounts, entities, assets);
     let positions: Map<Key<'s>, usize> = paths.iter().enumerate().map(|(at, &key)| (key, at)).collect();
+    let spelled: Set<&'s str> =
+        inputs.accounts.iter().filter(|account| account.spelled).map(|account| account.path).collect();
     let issuer_units = issuer_units(inputs);
     let nodes = Nodes::of(inputs, entities, assets);
     let mut place_nodes = Vec::with_capacity(paths.len() + issuer_units.len());
@@ -56,7 +58,12 @@ pub(super) fn declare<'s>(
         let (node, is_indexed) = nodes.node(names, namespace, path);
         indexed.insert((namespace, path), (place_nodes.len(), is_indexed));
         place_nodes.push(node);
-        parents.push(path.rsplit_once('/').and_then(|(parent, _)| positions.get(&(namespace, parent)).copied()));
+        let is_spelled = namespace == ACCOUNTS && spelled.contains(path);
+        parents.push(
+            path.rsplit_once('/')
+                .filter(|_| !is_spelled)
+                .and_then(|(parent, _)| positions.get(&(namespace, parent)).copied()),
+        );
     }
     let issuer_at: Vec<_> = issuer_units
         .iter()
@@ -90,20 +97,26 @@ pub(super) fn declare<'s>(
 /// Every path of the three namespaces and each of its prefixes, ordered as the tree will have them.
 fn keys<'s>(accounts: &[AccountDraft<'s>], entities: &Entities<'s>, assets: &Assets<'s>) -> Vec<Key<'s>> {
     let mut keys: Set<Key<'s>> = Set::default();
-    let mut add =
-        |namespace: u8, path: &'s str| keys.extend(crate::paths::prefixes(path).map(|prefix| (namespace, prefix)));
+    // A spelled account has no place for its prefixes: the words before its name are no groups of accounts.
     for account in accounts {
-        add(ACCOUNTS, account.path);
+        match account.spelled {
+            true => drop(keys.insert((ACCOUNTS, account.path))),
+            false => add_prefixes(&mut keys, ACCOUNTS, account.path),
+        }
     }
     for &path in entities.ids.keys() {
-        add(ENTITY_PLACES, path);
+        add_prefixes(&mut keys, ENTITY_PLACES, path);
     }
     for &(path, _) in &assets.paths {
-        add(ASSET_PLACES, path);
+        add_prefixes(&mut keys, ASSET_PLACES, path);
     }
     let mut keys: Vec<_> = keys.into_iter().collect();
     keys.sort_unstable_by(|(ns_a, a), (ns_b, b)| ns_a.cmp(ns_b).then_with(|| path_key(a).cmp(path_key(b))));
     keys
+}
+
+fn add_prefixes<'s>(keys: &mut Set<Key<'s>>, namespace: u8, path: &'s str) {
+    keys.extend(crate::paths::prefixes(path).map(|prefix| (namespace, prefix)));
 }
 
 /// The commodities whose kind pays (is, or inherits from, a kind that says `pays`), each of which is issued from

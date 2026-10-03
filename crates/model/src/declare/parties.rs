@@ -1,7 +1,7 @@
 //! Parties: the entities a book has, those written and those a journal implies, and who owns what.
 
 use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Set, Sym, Tree};
-use axiom_syntax::{Decl, DeclKind};
+use axiom_syntax::{Decl, DeclKind, ExprKind};
 
 use super::commodities::Commodities;
 use super::mentions::Mentions;
@@ -150,9 +150,15 @@ fn implied_parties<'a, 's>(
     for contract in &collected.contracts {
         add_path_spellings(&mut contracts, contract.node.name.0);
     }
+    let fillers = filler_words(collected, written);
     let mut implied = Map::default();
     for (&path, &loc) in &mentioned {
         if entities.contains(path) || places.contains(path) || others.contains(path) {
+            continue;
+        }
+        // A path that begins with an entity that fills a slot of some account is meant as an address: if none matches
+        // it, that is for the lookup to say, and the journal brings no party into being by it.
+        if path.split_once('/').is_some_and(|(first, _)| fillers.contains(first)) {
             continue;
         }
         // A contract may be named for its party, but is not a party for being named.
@@ -162,6 +168,24 @@ fn implied_parties<'a, 's>(
         implied.insert(path, loc);
     }
     implied
+}
+
+/// The written entities that some account's words name: before its name, after `at`, or as an argument of one of its
+/// lines. A reference that begins with one is meant as an address.
+fn filler_words<'s>(collected: &Collected<'_, 's>, written: &Map<&'s str, Written_<'_, 's>>) -> Set<&'s str> {
+    let mut words = Set::default();
+    for decl in collected.decls_of(DeclKind::Account) {
+        let (file, node) = (decl.file(), decl.node);
+        let leading = node.name.0.rsplit_once('/').into_iter().flat_map(|(leading, _)| leading.split('/'));
+        let lines = file[node.props].iter().flat_map(|line| file[line.args].iter());
+        let args = lines.filter_map(|&arg| match file.exprs[arg].kind {
+            ExprKind::Name(name) => Some(name.0),
+            _ => None,
+        });
+        let named = leading.chain(node.at.map(|at| at.0)).chain(args);
+        words.extend(named.filter(|&word| written.contains_key(word) || word == "me"));
+    }
+    words
 }
 
 /// The entities made from the drafts, with their kinds and purposes resolved, indexed, and owned.

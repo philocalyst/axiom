@@ -13,13 +13,14 @@ use axiom_core::{
     Arena, Day, Days, Dim, Facts, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
 };
 
+use crate::addresses::Addresses;
 use crate::holders::HolderIndex;
 use crate::journal::{
     Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
     RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
 };
 use crate::law::{Fault, Law, NodeId, Rules, Value};
-use crate::names::{Names, Scoped};
+use crate::names::{Found, Names, Scoped};
 use crate::slots::{Schema, Slot};
 use crate::split::{Expr, Item, Promised, Says, Sign};
 use crate::sync::{Format, Pattern, Source};
@@ -160,6 +161,8 @@ pub struct Lookup {
     pub(crate) params: Scoped<Param>,
     pub(crate) laws: Names<Law>,
     pub(crate) commodities: Map<Sym, Id<Commodity>>,
+    /// The accounts, by the entities that fill their slots: made once the facts are frozen.
+    pub(crate) addresses: Addresses,
 }
 
 /// Built-in things every book has.
@@ -1415,13 +1418,18 @@ impl<'s> Book<'s> {
         }
     }
 
-    /// A place by full path or unique suffix (`checking`), or an entity's place.
-    /// A place wins over an entity of the same name.
+    /// A place by full path or unique suffix (`checking`), by the address it is written as (`jordan/401k`), or an
+    /// entity's place. A place wins over an entity of the same name.
     pub fn place(&self, text: &str) -> Result<Id<Place>, Miss<Place>> {
         let miss = match self.lookup.places.resolve(&self.names, text, |_| true) {
             Err(miss @ Miss::Unknown { .. }) => miss,
             found => return found,
         };
+        match self.address_place(text) {
+            Found::One(place) => return Ok(place),
+            Found::Several(places) => return Err(Miss::Ambiguous(places.into())),
+            Found::Nothing => {}
+        }
         match self.entity(text) {
             Ok(entity) => self.entities[entity].place.ok_or(miss),
             Err(_) => Err(miss),

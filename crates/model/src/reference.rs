@@ -1,0 +1,164 @@
+//! Reading a written reference as an address, and saying so when it is none or several.
+//!
+//! The names every account has (its path and each suffix of it) are tried first and unchanged: a reference that meant one
+//! account before means it still, and nothing declared later changes it. The index of [`Addresses`] is asked in two
+//! cases only. Those names found **several** accounts and one of them is spelled, so the line's day may tell them apart,
+//! or they found **nothing**, and the reference has two words or more and begins with an entity that fills a slot of some
+//! account, so it was meant as an address and not as a party that the journal brings into being.
+//!
+//! Nothing here changes the world: like the rest of `resolve`, it reads the book, so the journal can be elaborated from
+//! every thread.
+
+use axiom_core::diag::closest;
+use axiom_core::{Day, Diagnostic, Id};
+
+use crate::addresses::Part;
+use crate::book::{Book, Entity, Place};
+use crate::declare::World;
+use crate::errors::{Candidate, Word};
+use crate::names::Found;
+use crate::problem::{self, Noun};
+use crate::resolve::End;
+use crate::scope::Home;
+
+/// What a reference found among the names every account has, which is why the index is asked.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Reached {
+    /// Several accounts, and the line's day may tell them apart.
+    Several,
+    /// None, and the reference may be an address no name spells.
+    Nothing,
+}
+
+impl Book<'_> {
+    /// The accounts `text` is an address of, on any day, when it is written as one: two words or more, each before the
+    /// last an entity. For a setting or a report, which have no line and no home to look the words up from.
+    pub(crate) fn address_place(&self, text: &str) -> Found<Place> {
+        let Some((leading, name)) = text.rsplit_once('/') else { return Found::Nothing };
+        let fillers: Result<Vec<Id<Entity>>, _> = leading.split('/').map(|word| self.entity(word)).collect();
+        match (fillers, self.names.get(name)) {
+            (Ok(fillers), Some(name)) => self.lookup.addresses.resolve(&fillers, name, None),
+            _ => Found::Nothing,
+        }
+    }
+}
+
+impl World<'_> {
+    /// The account the words of `word` are an address of on `day` (on any day with none), or why they are not.
+    /// `None` when the reference is not an address attempt: it is for the party and place tables to say what it is.
+    pub(crate) fn address_end(
+        &self,
+        home: Home,
+        word: Word,
+        day: Option<Day>,
+        reached: Reached,
+    ) -> Option<Result<End, Diagnostic>> {
+        let (leading, name) = word.text.rsplit_once('/').map_or(("", word.text), |(leading, name)| (leading, name));
+        let fillers = match self.fillers(home, word, leading, reached) {
+            Ok(fillers) => fillers?,
+            Err(problem) => return Some(Err(problem)),
+        };
+        let Some(name) = self.book.names.get(name) else { return Some(Err(self.unknown_address(word, &fillers, day))) };
+        Some(match self.book.lookup.addresses.resolve(&fillers, name, day) {
+            Found::One(place) => Ok(End { place, entity: None }),
+            Found::Several(places) => Err(self.ambiguous_address(word, &places, day)),
+            Found::Nothing => Err(self.unknown_address(word, &fillers, day)),
+        })
+    }
+
+    /// The entities the words before the name are. None if the reference is not an attempt at an address.
+    fn fillers(
+        &self,
+        home: Home,
+        word: Word,
+        leading: &str,
+        reached: Reached,
+    ) -> Result<Option<Vec<Id<Entity>>>, Diagnostic> {
+        let (book, scope) = (&self.book, self.scopes.of(home));
+        let mut fillers = Vec::new();
+        for (at, text) in leading.split('/').filter(|text| !text.is_empty()).enumerate() {
+            match book.lookup.entities.find(&book.names, scope, text) {
+                Found::One(entity) => fillers.push(entity),
+                // A word that is no entity, after one that is, is a mistake in an address; before it, no address.
+                Found::Nothing if at > 0 => return Err(self.unknown_address(word, &fillers, None)),
+                Found::Nothing => return Ok(None),
+                Found::Several(ids) => return Err(self.ambiguous_entity(Word { text, loc: word.loc }, &ids)),
+            }
+        }
+        let attempt =
+            reached == Reached::Several || fillers.first().is_some_and(|&first| book.lookup.addresses.fills_any(first));
+        Ok(attempt.then_some(fillers))
+    }
+
+    /// An account's address, or a reference, written out.
+    pub(crate) fn spell(&self, parts: &[Part]) -> String {
+        let book = &self.book;
+        let words = parts.iter().map(|part| match *part {
+            Part::Filler(entity) => book.name(book.entities[entity].path),
+            Part::Name(name) => book.names.name(name),
+        });
+        words.collect::<Vec<_>>().join("/")
+    }
+
+    /// Several accounts have this address on the day, each with the shortest address that means only it.
+    pub(crate) fn ambiguous_address(&self, word: Word, places: &[Id<Place>], day: Option<Day>) -> Diagnostic {
+        let addresses = &self.book.lookup.addresses;
+        let describe = |&place: &Id<Place>| Candidate {
+            is: format!("`{}`", self.spell(addresses.address(place))),
+            declared: self.book.places[place].loc,
+            write: Some(self.spell(&addresses.shortest(place, day))),
+        };
+        let candidates: Vec<Candidate> = places.iter().map(describe).collect();
+        let diagnostic = problem::ambiguous(Noun::Address, word, &candidates);
+        match day {
+            Some(day) => {
+                diagnostic.note(format!("these are the accounts open on {day}: a later one may need a longer address"))
+            }
+            None => diagnostic,
+        }
+    }
+
+    /// No account has this address on the day: the closest name among those its words fill, and when an account has it
+    /// on another day, that.
+    fn unknown_address(&self, word: Word, fillers: &[Id<Entity>], day: Option<Day>) -> Diagnostic {
+        let (leading, name) = word.text.rsplit_once('/').unwrap_or(("", word.text));
+        let named: Vec<&str> = self.named_by(fillers).collect();
+        let nearest = closest(name, named.iter().copied()).map(|near| match leading.is_empty() {
+            true => near.to_string(),
+            false => format!("{leading}/{near}"),
+        });
+        let diagnostic = problem::unknown(Noun::Address, word, nearest.as_deref());
+        match (day, self.on_another_day(fillers, name)) {
+            (Some(day), Some(account)) => diagnostic.note(format!("`{account}` is not open on {day}")),
+            _ if named.is_empty() || nearest.is_some() => diagnostic,
+            _ => diagnostic.note(format!(
+                "the accounts these words fill are called {}",
+                crate::errors::list(&named[..named.len().min(6)])
+            )),
+        }
+        .help("an address is the entities that fill an account's slots, in order, then its name: `jordan/bluefin/401k`")
+    }
+
+    /// The names of the accounts the first of `fillers` fills a slot of.
+    fn named_by<'w>(&'w self, fillers: &[Id<Entity>]) -> impl Iterator<Item = &'w str> + 'w {
+        let addresses = &self.book.lookup.addresses;
+        let called = fillers.first().map(|&first| addresses.filled_by(first)).unwrap_or_default();
+        let names = called.into_iter().filter_map(|place| match addresses.address(place).last() {
+            Some(&Part::Name(name)) => Some(self.book.names.name(name)),
+            _ => None,
+        });
+        let mut seen = axiom_core::Set::default();
+        names.filter(move |&name| seen.insert(name)).collect::<Vec<_>>().into_iter()
+    }
+
+    /// An account with these words and this name that is open on some day, written out.
+    fn on_another_day(&self, fillers: &[Id<Entity>], name: &str) -> Option<String> {
+        let name = self.book.names.get(name)?;
+        let addresses = &self.book.lookup.addresses;
+        match addresses.resolve(fillers, name, None) {
+            Found::One(place) => Some(self.spell(addresses.address(place))),
+            Found::Several(places) => Some(self.spell(addresses.address(places[0]))),
+            Found::Nothing => None,
+        }
+    }
+}

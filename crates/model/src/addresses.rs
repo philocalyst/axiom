@@ -17,10 +17,14 @@
 //! the order check reads. Each account's own address is a third table, for the diagnostics and for the shortest unique
 //! address: the words that write only this account.
 
-use axiom_core::{Day, Days, Groups, Id, Sym};
+use axiom_core::{Day, Days, Groups, Id, Many, Sym};
 
-use crate::book::{Entity, Place};
+use crate::book::{Book, Entity, Place, Role};
+use crate::builtin;
+use crate::fill::holds_one;
+use crate::holders::Holder;
 use crate::names::Found;
+use crate::slots::Slot;
 
 /// The most words an address holds. The bits that say where an entity stands are a `u16`.
 pub(crate) const MAX_WORDS: usize = 16;
@@ -72,6 +76,31 @@ impl Default for Addresses {
 }
 
 impl Addresses {
+    /// The index of every account a book declares, once the facts that say what fills their slots are frozen.
+    pub fn of(book: &Book) -> Addresses {
+        let mut written = Vec::new();
+        let mut starts = Vec::new();
+        for (place, account) in book.places.iter() {
+            let named = account.loc.is_some() && matches!(account.role, Role::Account { .. });
+            let Some(name) = named.then(|| book.name(account.path).rsplit('/').next()).flatten() else { continue };
+            let Some(name) = book.names.get(name) else { continue };
+            starts.push((place, written.len()));
+            written.extend(fillers(book, place).map(Part::Filler));
+            written.push(Part::Name(name));
+        }
+        let ends = starts.iter().skip(1).map(|&(_, start)| start).chain([written.len()]);
+        let accounts: Vec<Account<'_>> = starts
+            .iter()
+            .zip(ends)
+            .map(|(&(place, start), end)| Account {
+                place,
+                address: &written[start..end],
+                open: open_days(book, place),
+            })
+            .collect();
+        Addresses::build(book.entities.len(), book.names.len(), book.places.len(), &accounts)
+    }
+
     /// The index of `accounts`, in the order of their places. `entities`, `names` and `places` are how many of each
     /// there are, which are the lengths of the tables.
     pub fn build(entities: usize, names: usize, places: usize, accounts: &[Account<'_>]) -> Addresses {
@@ -149,6 +178,11 @@ impl Addresses {
         &self.address[place]
     }
 
+    /// The accounts an entity fills a slot of, by place number.
+    pub fn filled_by(&self, entity: Id<Entity>) -> Vec<Id<Place>> {
+        self.fills[entity].iter().map(|&place| Id::new(place)).collect()
+    }
+
     /// Whether an entity fills a slot of some account.
     pub fn fills_any(&self, entity: Id<Entity>) -> bool {
         !self.fills[entity].is_empty()
@@ -183,6 +217,45 @@ impl Addresses {
     fn accounts(&self) -> usize {
         (0..self.address.keys()).filter(|&place| !self.address[Id::new(place as u32)].is_empty()).count()
     }
+}
+
+/// The entities that fill the slots of the account `place`, owners first, the custodian last: the words of its address
+/// before its name. An entity whose path has a `/` cannot be written as one word of a path, and is left out.
+fn fillers<'b>(book: &'b Book, place: Id<Place>) -> impl Iterator<Item = Id<Entity>> + 'b {
+    let account = &book.places[place];
+    let owners: Vec<Id<Entity>> = match account.shares.is_empty() {
+        true => vec![account.owner],
+        false => account.shares.iter().map(|share| share.entity).collect(),
+    };
+    let slots = book.schema.entity_slots(&book.kinds, account.kind);
+    let by_slot = slots.into_iter().flat_map(move |(number, slot)| slot_fillers(book, place, number, slot));
+    let institution = match account.role {
+        Role::Account { institution } => institution,
+        _ => None,
+    };
+    let all = owners.into_iter().chain(by_slot).chain(institution);
+    all.filter(|&entity| !book.name(book.entities[entity].path).contains('/')).take(MAX_WORDS - 1)
+}
+
+/// What fills a slot of the account: its own line's, else the nearest kind's.
+fn slot_fillers(book: &Book, place: Id<Place>, number: axiom_core::SlotId, slot: Slot) -> Vec<Id<Entity>> {
+    let kind = book.places[place].kind;
+    let holders = std::iter::once(Holder::Place(place)).chain(book.kinds.lineage(kind).map(Holder::Kind));
+    let said =
+        holders.into_iter().find_map(|holder| book.facts.datum_at(number, book.holders.number(holder), Day::MIN));
+    match (said, holds_one(slot.mult)) {
+        (Some(datum), true) => datum.read::<Id<Entity>>().into_iter().collect(),
+        (Some(datum), false) => {
+            datum.read::<Many<Id<Entity>>>().map_or_else(Vec::new, |set| book.facts.members(set).collect())
+        }
+        (None, _) => Vec::new(),
+    }
+}
+
+/// The days an account is open: from the day it opens to the day it closes, each as its lines say.
+fn open_days(book: &Book, place: Id<Place>) -> Option<Days> {
+    let opened = book.fact(builtin::OPENED, place).unwrap_or(Day::MIN);
+    Days::new(opened, book.fact(builtin::CLOSED, place).unwrap_or(Day::MAX))
 }
 
 /// The entities of `fillers`, each once, in the order they first appear.

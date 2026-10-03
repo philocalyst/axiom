@@ -8,7 +8,7 @@
 
 use axiom_core::diag::closest;
 use axiom_core::num::DecError;
-use axiom_core::{Dec, Diagnostic, Id, Loc};
+use axiom_core::{Day, Dec, Diagnostic, Id, Loc};
 use axiom_syntax::{File, Literal};
 
 use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, Place, Purpose, Role, System};
@@ -17,6 +17,7 @@ use crate::errors::{Candidate, Word};
 use crate::kinds;
 use crate::names::{Found, Scoped};
 use crate::problem::{self, Among, Noun};
+use crate::reference::Reached;
 use crate::scope::Home;
 
 /// A place written in a flow, and the entity it stood for if it was one.
@@ -131,7 +132,7 @@ impl<'s> World<'s> {
         }
     }
 
-    fn ambiguous_entity(&self, word: Word, ids: &[Id<Entity>]) -> Diagnostic {
+    pub(crate) fn ambiguous_entity(&self, word: Word, ids: &[Id<Entity>]) -> Diagnostic {
         let (entities, table) = (&self.book.entities, &self.book.lookup.entities.names);
         let candidates = problem::shortest(&self.book.names, table, ids, |id| entities[id].path, |id| entities[id].loc);
         problem::ambiguous(Noun::Entity, word, &candidates)
@@ -182,11 +183,15 @@ impl<'s> World<'s> {
 
     // ─── Places ─────────────────────────────────────────────────────────────
 
-    /// A place by full path, unique suffix or alias. Not an entity.
+    /// A place by full path, unique suffix, alias or address. Not an entity.
     pub fn seek_place(&self, word: Word) -> Seek<Place> {
         match self.book.lookup.places.find(&self.book.names, word.text, |_| true) {
             Found::One(place) => Ok(Some(place)),
-            Found::Nothing => Ok(None),
+            Found::Nothing => match self.book.address_place(word.text) {
+                Found::One(place) => Ok(Some(place)),
+                Found::Several(places) => Err(self.ambiguous_address(word, &places, None)),
+                Found::Nothing => Ok(None),
+            },
             Found::Several(ids) => {
                 let (places, table) = (&self.book.places, &self.book.lookup.places);
                 let candidates =
@@ -205,10 +210,19 @@ impl<'s> World<'s> {
     /// in the other. Entities stand for their configured holding/outside place
     /// and retain their identity as the counterparty.
     pub(crate) fn end(&self, home: Home, word: Word) -> Result<End, Diagnostic> {
+        self.end_on(home, word, None)
+    }
+
+    /// A flow's end as of the line's `day`: the accounts it may mean are those open that day. With no day, a setting's
+    /// or a report's, every account that is ever open.
+    pub(crate) fn end_on(&self, home: Home, word: Word, day: Option<Day>) -> Result<End, Diagnostic> {
         if let Some(end) = self.special_end(home, word) {
             return end;
         }
-        if let Some(end) = self.found_end(home, word) {
+        if let Some(end) = self.found_end(home, word, day) {
+            return end;
+        }
+        if let Some(end) = self.address_end(home, word, day, Reached::Nothing) {
             return end;
         }
         if let Some(end) = self.commodity_end(word) {
@@ -253,7 +267,7 @@ impl<'s> World<'s> {
     }
 
     /// What the places and parties a name answers to say it is, if it answers to any.
-    fn found_end(&self, home: Home, word: Word) -> Option<Result<End, Diagnostic>> {
+    fn found_end(&self, home: Home, word: Word, day: Option<Day>) -> Option<Result<End, Diagnostic>> {
         let places = self.book.lookup.places.candidates(&self.book.names, word.text);
         let entity_candidates = self.book.lookup.entities.names.candidates(&self.book.names, word.text);
         let visible = || {
@@ -266,6 +280,10 @@ impl<'s> World<'s> {
         let entity = visible_entities.next();
         let several = visible_entities.next().is_some();
         if places.len() > 1 && entity.is_none() {
+            // The line's day may tell apart accounts that are written as addresses; others are ambiguous as ever.
+            if places.iter().any(|&place| self.book.is_spelled(place)) {
+                return self.address_end(home, word, day, Reached::Several);
+            }
             return Some(Err(self.seek_place(word).expect_err("multiple visible places must be ambiguous")));
         }
         if several && places.is_empty() {
