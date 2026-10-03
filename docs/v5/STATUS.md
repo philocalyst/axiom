@@ -16,13 +16,16 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | **merged** (`e5a3554`) |
 | **K4a** one split vocabulary | `Quantity`, `Part`, `Expr`, `Group<H,F,I>`, one `Program` replace the two parallel Template*/Journal* families | **merged** (`d1daf1f`) |
 | **K3a** positions that need no prediction | tabs created lazily; delete the survey, `find_tabs`, `contract_endpoints`, `unregistered-tab` | **merged** |
-| **K4b** one `solve` | `solve` over an `Env`, constant folding at model time, a static conservation check | brief written; starts when verification of K4a is clean |
-| K3 positions and addresses | | after K12 |
-| K4 events | | after K3 |
-| K5 promises | | after K4 |
-| K6 norms (relators) | | after K12 and K3 |
-| K7 facts out, `Session` | | after K5 |
-| L language | | last |
+| **K4b** one `solve` | `solve` over an `Env` makes a split for the model (constant folding, static conservation check), the promise fold and, new, the statement fold | **merged** (`456b2dd`) |
+| **K5a** a promise is a term | `core::Dues` (due days counted by arithmetic), `model::promise` (`Term`, `Schedule`, `Residual`, `Annuity`), compiled once beside the old code, proven equal to an independent reference | **merged** (`92e80c1`) |
+| **K3c** claims and parts | write-off is relief, one relief policy order, readers ask the place; asset parts as parcels if the map says they can be | running |
+| **K5b** the fold reads the promise | the old schedule code goes; `Terms` stored once; the monitor; `grace` as LANGUAGE §7 says | running |
+| K3b addresses | `Addresses`, declaration words fill slots by forced placement | brief written |
+| K5c forecast | the forecast is the fold past today; a missed `Due` is a claim | brief written |
+| K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | brief written |
+| K7 facts out, `Session` | steppers, pivots, provenance `why`, the surface an MCP server and a GUI use | brief to write |
+| K5d loans and the dead features | amortization, `deposit`, `resets`, `prepay`, `match` | after K5c |
+| L language | the junction, paths, debts as promises, `fmt --upgrade` | last |
 
 Test baseline before any lane: 734 passed, 4 failed, 8 ignored. Lane C on top: 777 passed, the same 4 failed, 13
 ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAINING.md` names.
@@ -45,9 +48,68 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). Say if you want the levers pulled.
-3. **Prorata basis semantics** (K3): whether a prorata sale carries basis per unit or by exact share. The lane keeps the
-   current behaviour until you say.
+   20,000 (PROPOSAL §7). The tree is at about 51,800 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
+3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
+   readings and what each changes, and decides neither.
+4. **Two semantic choices K4b left open** (the only ones it could not settle from LANGUAGE.md):
+   - *A fee leg of an exchange split* (`girokonto 900 EUR ->` with `fx-fees 4.77 EUR` and `us-checking 1_027.63 USD`).
+     Today it is a payment of its own; `examples/08-expat`'s README says it is a **cost of the exchange** (basis 9,500.00
+     USD, not 9,444.90). Which?
+   - *A promise's `= AMOUNT` leg.* Built as: it moves the gap to the balance and the header's remainder is what is left
+     (a 100.00 promise to `savings = 5_030 USD` at 5,000 moves 30.00, the remainder is 70.00). The other reading: the
+     leg is not carved from the header at all (the header pays its end in full and the leg moves its gap on top).
+5. **The examples' numbers moved.** K4b made the statement path mean what LANGUAGE §3 says (it created or dropped money
+   before: see its table). 17 of 60 goldens change, all in `04`, `08`, `09`, `10`, which hold split statements. Every
+   example still carries 36 to 461 errors (v3 syntax) and drops the statements that fail, so neither build matches the
+   READMEs' hand-verified figures; K4b's own numbers are validated by 5,000 generated splits equal to the plain
+   transfers they say they are. The examples themselves need migrating (lane L).
+
+## What the grammar accepts and the engine does nothing with
+
+Found by K5a's map (`K5a-map.md` §0, §1, §6) and K4b's: **written, checked, and read by nothing.** None of this is a
+regression; it is what v4 left. K5d is the lane that makes them real, and each is a product decision about whether to.
+
+| feature | what happens | where it stops |
+|---|---|---|
+| `deposit AMOUNT [into HOLDING]` on a contract | lowering checks the amount and the holding and reports diagnostics, then nothing reads `Contract.deposit` | no flow, no claim on the landlord |
+| `match ...` (an employer's match) | `Match` is never set | the match is an `also` line, by hand |
+| `loan ... resets EVERY from DATE to PARAM + PERCENT` | `Loan.resets` is written and read by nothing | the rate never resets |
+| `loan ... prepay shortens \| recasts` | `Loan.prepay` is read by nothing | a flow to the contract is an ordinary flow |
+| `loan ... for ASSET` | `Loan.asset` is read by nothing | no `of ASSET` on the interest |
+| a loan's interest and principal | `Derivation::Interest` and `Principal` are never constructed; there is **no amortization**: a loan's payment is one level amount, and "Loan balance" is the debt tab's holdings, which only the journal moves | `#interest` and `#principal` do not exist as flows |
+| `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
+| `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
+| `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K4b, in numbers
+
+| | |
+|---|---|
+| what it is | `solve(header, legs, items, remainder, env)` in `model/solve.rs`: one algebra of a group over an `Env` (`LiteralEnv` at model time, the fold's reads at run time). `balance::settle` solves a statement whose amounts are written out and says what cannot add up (`split-imbalance`); `engine/statement.rs` solves an open group at its first landing; `engine/occurrence.rs` makes a promise's occurrence by the same `solve` |
+| lines | **+858 net against a target of −1,500** (model +651, engine +206; `ledger.rs` −1,004). The brief was wrong in two ways: the three "copies" were not one algorithm, and the **statement path did not exist in the fold** (a statement's legs did not debit its source: split statements created money, 1,100 against 800 on a probe), so it had to be built |
+| functions over 80 lines | 16 to 12; `post_journal` 249 to 29, `materialize_group` 324 to 65 |
+| proof | 5,000 generated splits equal to the plain transfers LANGUAGE §3 says they are; 250,000 groups solver-vs-old-resolver; per-recipe books, 0 unclassified differences; 25 acceptance tests written from §3's own examples (19 before the code); mutants killed by those tests and the oracle |
+| speed | `check` 1m: 4.17 to 4.14 s; callgrind +0.13%; unchanged |
+| left | two `Env`s with different `lands`; exchange legs recognised by the flow's shape; a fee leg is a payment, not an exchange cost; the `bench/` projects never exercise splits |
+
+**Behaviour changes** (K4b-map §11.2 has all thirteen with LANGUAGE.md line numbers): a split's legs debit its source;
+`...` is the remainder; a total after the arrow or none (the sum of the legs) is read; items are carved from the header (a
+paystub's `32.10` and `12.00` no longer debit 164.10 of a 120.00); `- 6%` and `2% of amount` compile and are of the
+header; `all` as a leg or a header means what §3 says; a split that does not add up is `split-imbalance`, said at the
+header and the legs, and nothing posts (488 of 2,000 generated books); a leg in another commodity is the exchange of the
+remainder instead of creating currency (+96,000.00 on a probe).
+
+## K5a, in numbers
+
+| | |
+|---|---|
+| what it is | `core::Dues`: a schedule's due days as a set that is counted and indexed (`nth`, `before`), tiled schedules by arithmetic in O(log n); `model::promise`: `Term` (16 bytes), `Schedule` (44), `Residual` (24), `Annuity`, compiled once at the end of `build`; **nothing in the product reads them yet** |
+| lines | **+966 now** (core +288, model +678) against **about 450 that K5b and K5c delete**, and `Terms` stored once removes more. The structure is larger than what it replaces until then; what it buys is below |
+| proof | an independent reference; 1,500 generated projects, 2,329 contracts from 77 forms: 45,181 windows, 31,739 ordinals, 339,756 kept lines, 85,858 residual steps, **0 failures**; 50 mutants of the old code (46 killed, 4 argued equivalent) and 37 of the new (all killed) |
+| what the old code gets wrong | eleven defects, each shown on a book (`K5a-map.md` §7): the ordinal is O(n) (a contract with no `from` costs 9 s per kept line); a loan forecast never stops; a due day is lost after a waiver on `on last`; `weekly on 15` lists a day four times; history and forecast number occurrences differently; matching sees the schedule as lowering painted it so far; `grace` is read by nothing |
+| speed | no-`from` ordinal: 4.4-6.4 s to about 9 µs |
+| left | not every schedule is arithmetic: longer-than-cadence `on`, clamping pairs like `on 30, last`, mixed kinds walk (O(n)); `Payment` clones the template (the book holds each promise twice until K5b); the compile's invariants are `debug_assert!`s: K5b makes them types |
 
 ## K0a, in numbers
 
