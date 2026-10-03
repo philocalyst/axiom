@@ -27,6 +27,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | brief written |
 | K7a the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | brief written |
 | K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | brief written (after K7a, K3d) |
+| K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | brief written (after K5c) |
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | brief written (after the kernels) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written) |
