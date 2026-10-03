@@ -16,8 +16,8 @@ What an address is (docs/v5/lanes/K3b-map.md section 8). An account's address is
 first and custodian last, and then its name. A reference is the entities it names, in order, and the name it ends in.
 It is read in two steps. First the names every account has, its written path and each trailing run of it: a name
 that finds one account means it, on any day; a name that finds several, and one is written as an address, goes to the
-second step with the line's day; a name that finds none goes on if it has two words and begins with an entity that
-fills something. The second step is the accounts whose address holds the words in order and that are open that day.
+second step with the line's day; a name that finds none goes on if the book writes some account as an address, and it has two words or more and begins
+with an entity that fills something or ends in an account's name. The second step is the accounts whose address holds the words in order and that are open that day.
 One is the answer, several is `ambiguous-address` with each one's shortest address that means only it, none is
 `unknown-address`.
 
@@ -30,7 +30,10 @@ diagnostic offers must say nothing, and put the flow where the oracle says.
 Two sorts of book are drawn. In a *spelled* book each account is written with the entities that fill its slots in its
 path as far as they can be placed (`ann/acme/ira : plan`), and by role lines for the rest, so its rung of the ladder
 varies; names repeat across owners, as `401k` does. In a *flat* book each account has a unique name and every filler is a
-role line (`account ann-nest : plan`, `owner ann`), as the old spelling writes it: such an account has an address too.
+role line (`account ann-nest : plan`, `owner ann`), as the old spelling writes it, except the first, which is written
+with its words: the old spelling has an address too, in a book that writes one account as an address. A book of either
+sort in which no account is written with words reads every reference as it always did, and the journal says only names
+(a mention that no name answers to is a party there, with no address to be a mistake in).
 
 It is not vacuous, and says so: `gen` and `run` count the references that were one account, ambiguous or unknown, by
 which step decided, and the lines that a sibling opening later keeps unambiguous on an earlier day.
@@ -165,7 +168,7 @@ def path_choices(account):
 
 def declare(account, style, rng):
     """The lines that declare the account, in the style of the book, and the path it is written at."""
-    if style == "flat":
+    if style == "flat" and account.index != 0:
         chosen = ()
     else:
         choices = path_choices(account)
@@ -201,8 +204,8 @@ def draw_account(rng, index, style, taken):
         sponsor = rng.choice(FIRMS) if "sponsor" in SLOTS[kind] and rng.random() < 0.6 else None
         beneficiary = rng.choice(SAVERS + KIDS) if "beneficiary" in SLOTS[kind] and rng.random() < 0.5 else None
         co_owner = rng.choice(SAVERS + KIDS) if style == "flat" and rng.random() < 0.2 else None
-        if co_owner == owner:
-            co_owner = None
+        if co_owner == owner or index == 0:
+            co_owner = None  # the first account of a flat book is the one written as an address: a path cannot say shares
         custodian = rng.choice(BANKS) if rng.random() < 0.6 else None
         opened = day_at(rng.randrange(0, 200)) if rng.random() < 0.35 else None
         closed = day_at(rng.randrange(150, 336)) if rng.random() < 0.25 else None
@@ -243,10 +246,13 @@ def fills_any(accounts, entity):
 
 
 def meant_as_address(accounts, words):
-    """Whether no name answered to a reference, and it still may be an address: two words or more that begin with an
-    entity that fills a slot, or end in the name of an account. Anything else is a party the journal brings into being."""
+    """Whether no name answered to a reference, and it still may be an address: in a book that writes some account as an
+    address, two words or more that begin with an entity that fills a slot, or end in the name of an account. Anything
+    else is a party the journal brings into being, as it always did, and a book that writes no account as an address
+    reads every reference that way."""
     begins = words[0] in ENTITIES and fills_any(accounts, words[0])
-    return len(words) >= 2 and (begins or any(a.name == words[-1] for a in accounts))
+    uses_addresses = any(a.spelled for a in accounts)
+    return uses_addresses and len(words) >= 2 and (begins or any(a.name == words[-1] for a in accounts))
 
 
 def in_order(address, words):
@@ -318,6 +324,8 @@ def typo(rng, words, number):
 def journal(rng, accounts, style):
     """Lines `DAY SOURCE -> TARGET AMOUNT`, the source an account's written path, the target a reference of some rung."""
     lines, expect, tally = [], [], Counter()
+    uses_addresses = any(a.spelled for a in accounts)  # if none is, no reference is read as an address: names only
+    tally["book: no account is written as an address" if not uses_addresses else "book: some account is"] += 1
     days = sorted(rng.sample(range(0, 336), rng.randrange(12, 28)))
     for number, offset in enumerate(days, start=1):
         day = day_at(offset)
@@ -326,7 +334,7 @@ def journal(rng, accounts, style):
             continue
         source = rng.choice(sources)
         target = rng.choice([a for a in accounts if a is not source] or [source])
-        words = rng.choice(list(runs(target.address)))
+        words = rng.choice(list(runs(target.address)) if uses_addresses else [[target.name]])
         if len(words) == 1 and re.fullmatch(r"[0-9_.]+", words[0]):
             continue  # a number cannot be written as a name
         if rng.random() < 0.12 and len(words) >= 2:

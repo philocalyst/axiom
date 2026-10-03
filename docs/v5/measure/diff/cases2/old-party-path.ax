@@ -1,0 +1,15 @@
+// A book that writes no account with the entities that fill its slots before its name reads every reference as it did.
+// A party written as a path that ends in an account's name (`clients/escrow`) or begins with an entity that fills a slot
+// (`jordan/landlord`) is an implied party, and not a mistake in an address.
+use std
+base USD
+entity jordan : person
+account bank/escrow : deposit
+account jordan-nest : deposit
+  owner jordan
+opening 2026-01-01
+  bank/escrow 100 USD
+  jordan-nest 100 USD
+2026-02-01 clients/escrow -> bank/escrow 5 USD
+2026-02-02 bank/escrow -> vendors/escrow 3 USD
+2026-02-03 jordan-nest -> jordan/landlord 7 USD
