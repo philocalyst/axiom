@@ -1035,72 +1035,6 @@ error[assertion]: personal-checking holds 40,485.76 USD, not 4,406.81 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 40 + 2026-03-31 personal-checking = 4_406.81 USD !
 
-warning[overdue]: fernhill still owes 130.80 USD, 396 days past its due day 2025-03-16
-   ╭─[journal/2025/02.ax:26:3]
-   │
-25 │ 2025-02-14 fernhill owes me due 30d ^inv-2025-f1
-26 │   4_500 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2025-02-14, due 2025-03-16
-   │
-   = note: open for 1y2m2d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
-
-warning[overdue]: orbit-labs still owes 30.00 USD, 379 days past its due day 2025-04-02
-   ╭─[journal/2025/03.ax:12:3]
-   │
-11 │ 2025-03-03 orbit-labs owes me due 30d ^inv-2025-o1
-12 │   5_500 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2025-03-03, due 2025-04-02
-   │
-   = note: open for 1y1m13d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
-
-warning[overdue]: fernhill still owes 81.50 USD, 312 days past its due day 2025-06-08
-   ╭─[journal/2025/05.ax:20:3]
-   │
-19 │ 2025-05-09 fernhill owes me due 30d ^inv-2025-f2
-20 │   2_800 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2025-05-09, due 2025-06-08
-   │
-   = note: open for 11m7d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
-
-warning[overdue]: fernhill still owes 180.10 USD, 211 days past its due day 2025-09-17
-   ╭─[journal/2025/08.ax:29:3]
-   │
-28 │ 2025-08-18 fernhill owes me due 30d ^inv-2025-f3
-29 │   6_200 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2025-08-18, due 2025-09-17
-   │
-   = note: open for 7m29d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
-
-warning[overdue]: orbit-labs still owes 15.00 USD, 176 days past its due day 2025-10-22
-   ╭─[journal/2025/09.ax:32:3]
-   │
-31 │ 2025-09-22 orbit-labs owes me due 30d ^inv-2025-o2
-32 │   4_200 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2025-09-22, due 2025-10-22
-   │
-   = note: open for 6m25d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
-
-warning[overdue]: fernhill still owes 90.20 USD, 125 days past its due day 2025-12-12
-   ╭─[journal/2025/11.ax:18:3]
-   │
-17 │ 2025-11-12 fernhill owes me due 30d ^inv-2025-f4
-18 │   3_100 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2025-11-12, due 2025-12-12
-   │
-   = note: open for 5m4d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
-
 warning[overdue]: northpeak still owes 2,600.00 USD, 106 days past its due day 2025-12-31
   ╭─[journal/2025/12.ax:6:3]
   │
@@ -1111,17 +1045,6 @@ warning[overdue]: northpeak still owes 2,600.00 USD, 106 days past its due day 2
   │
   = note: open for 4m15d since it was made
   = help: if it has been paid, record the payment `for` the claim's code
-
-warning[overdue]: fernhill still owes 139.50 USD, 25 days past its due day 2026-03-22
-   ╭─[journal/2026/02.ax:28:3]
-   │
-27 │ 2026-02-20 fernhill owes me due 30d ^inv-2026-f1
-28 │   4_800 USD #design
-   │   ────────┬────────
-   │           ╰── claimed on 2026-02-20, due 2026-03-22
-   │
-   = note: open for 1m27d since it was made
-   = help: if it has been paid, record the payment `for` the claim's code
 
 warning[overdue]: orbit-labs still owes 6,000.00 USD, 7 days past its due day 2026-04-09
    ╭─[journal/2026/03.ax:15:3]
@@ -1149,4 +1072,4 @@ warning[estimate-2-2025]: estimated tax: second installment short: 2,400.00 USD 
    = note: Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
    = help: pay the installment `for` the year to a place of kind `federal-tax`.
 
-✗ 203 errors · 10 warnings
+✗ 203 errors · 3 warnings
