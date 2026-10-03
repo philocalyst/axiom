@@ -219,6 +219,26 @@ fn nothing_with_the_address_is_unknown_with_the_closest_name_and_never_a_party()
 }
 
 #[test]
+fn a_path_that_ends_in_an_accounts_name_is_an_address_attempt_and_makes_no_party_whatever_its_first_word() {
+    // `jordanq` is no entity, but `401k` is an account's name: the path was meant as an address, and a party named
+    // `jordanq/401k` would also be known as `401k`, and make the name ambiguous for every line that uses it.
+    let text = "account jordan/bluefin/401k at fidelity\naccount family/checking : deposit\n\
+2026-01-02 family/checking -> jordanq/401k 1 USD\n2026-01-03 family/checking -> 401k 1 USD\n";
+    built(text, |book, diagnostics| {
+        let said: Vec<&str> = codes(diagnostics).into_iter().filter(|&code| code != "flow-shape").collect();
+        assert_eq!(said, ["unknown-address"], "{diagnostics:#?}");
+        assert!(book.entity("jordanq/401k").is_err());
+    });
+}
+
+#[test]
+fn a_path_that_no_address_could_be_is_a_party_the_journal_makes_as_it_always_was() {
+    // `fidelity` fills no slot (the account is not at it) and `hq` is no account's name: an implied party, no mistake.
+    let text = "account family/checking : deposit\n2026-01-02 family/checking -> fidelity/hq 1 USD\n";
+    clean(text, |book| assert!(book.entity("fidelity/hq").is_ok()));
+}
+
+#[test]
 fn a_sibling_that_opens_later_does_not_make_the_earlier_lines_ambiguous() {
     let accounts = "account family/checking : deposit\naccount jordan/401k\n  employer bluefin\n\
 account me/401k\n  opened 2026-06-01\nopening 2026-01-01\n  family/checking 100 USD\n";

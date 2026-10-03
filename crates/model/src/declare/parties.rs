@@ -156,15 +156,15 @@ fn implied_parties<'a, 's>(
     for contract in &collected.contracts {
         add_path_spellings(&mut contracts, contract.node.name.0);
     }
-    let fillers = filler_words(collected, written);
+    let meant = Addressed::of(collected, written);
     let mut implied = Map::default();
     for (&path, &loc) in &mentioned {
         if entities.contains(path) || places.contains(path) || others.contains(path) {
             continue;
         }
-        // A path that begins with an entity that fills a slot of some account is meant as an address: if none matches
-        // it, that is for the lookup to say, and the journal brings no party into being by it.
-        if path.split_once('/').is_some_and(|(first, _)| fillers.contains(first)) {
+        // A path that begins with an entity that fills a slot of some account, or ends in the name of one, is meant as an
+        // address: if none matches it, that is for the lookup to say, and the journal brings no party into being by it.
+        if meant.is_an_address(path) {
             continue;
         }
         // A contract may be named for its party, but is not a party for being named.
@@ -176,22 +176,37 @@ fn implied_parties<'a, 's>(
     (implied, references)
 }
 
-/// The written entities that some account's words name: before its name, after `at`, or as an argument of one of its
-/// lines. A reference that begins with one is meant as an address.
-fn filler_words<'s>(collected: &Collected<'_, 's>, written: &Map<&'s str, Written_<'_, 's>>) -> Set<&'s str> {
-    let mut words = Set::default();
-    for decl in collected.decls_of(DeclKind::Account) {
-        let (file, node) = (decl.file(), decl.node);
-        let leading = node.name.0.rsplit_once('/').into_iter().flat_map(|(leading, _)| leading.split('/'));
-        let lines = file[node.props].iter().flat_map(|line| file[line.args].iter());
-        let args = lines.filter_map(|&arg| match file.exprs[arg].kind {
-            ExprKind::Name(name) => Some(name.0),
-            _ => None,
-        });
-        let named = leading.chain(node.at.map(|at| at.0)).chain(args);
-        words.extend(named.filter(|&word| written.contains_key(word) || word == "me"));
+/// What the accounts' declarations say a reference of two words or more may be meant as: the written entities that fill
+/// some account's slots (before its name, after `at`, or as an argument of one of its lines), and the names accounts
+/// are called.
+struct Addressed<'s> {
+    fillers: Set<&'s str>,
+    names: Set<&'s str>,
+}
+
+impl<'s> Addressed<'s> {
+    fn of(collected: &Collected<'_, 's>, written: &Map<&'s str, Written_<'_, 's>>) -> Addressed<'s> {
+        let (mut fillers, mut names) = (Set::default(), Set::default());
+        for decl in collected.decls_of(DeclKind::Account) {
+            let (file, node) = (decl.file(), decl.node);
+            let leading = node.name.0.rsplit_once('/').into_iter().flat_map(|(leading, _)| leading.split('/'));
+            let lines = file[node.props].iter().flat_map(|line| file[line.args].iter());
+            let args = lines.filter_map(|&arg| match file.exprs[arg].kind {
+                ExprKind::Name(name) => Some(name.0),
+                _ => None,
+            });
+            let named = leading.chain(node.at.map(|at| at.0)).chain(args);
+            fillers.extend(named.filter(|&word| written.contains_key(word) || word == "me"));
+            names.extend(node.name.0.rsplit('/').next());
+        }
+        Addressed { fillers, names }
     }
-    words
+
+    /// Whether a path of two words or more begins with a filler or ends in an account's name.
+    fn is_an_address(&self, path: &str) -> bool {
+        path.split_once('/').is_some_and(|(first, _)| self.fillers.contains(first))
+            || path.rsplit_once('/').is_some_and(|(_, last)| self.names.contains(last))
+    }
 }
 
 /// The entities made from the drafts, with their kinds and purposes resolved, indexed, and owned.

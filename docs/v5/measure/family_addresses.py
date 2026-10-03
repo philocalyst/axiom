@@ -63,6 +63,21 @@ def rewrite(text):
     return pattern.sub(lambda m: changed[m.group(1)], text)
 
 
+ABOUT = """\
+// Each account is written once, as the entities that fill its slots and then its name. `jordan/bluefin/401k` is
+// jordan's 401(k), sponsored by bluefin: the original called it `jordan-401k` and said `owner jordan` and `employer
+// bluefin` on two lines under it, which nothing checked against the name. A word is placed in the slot its entity's kind
+// fits, and the journal says the shortest address that means one account: `checking`, `me/401k`, `jordan/401k`,
+// `riley/529`. `at` is the custodian: a path word cannot say it until a `has` line can say `as with`.
+"""
+
+
+def explain(text):
+    """The comment that says what the accounts are, above the first of them."""
+    first = text.index("\naccount ") + 1
+    return text[:first] + ABOUT + text[first:]
+
+
 def rewrite_accounts(text):
     """The `account` blocks of accounts.ax: a header and the indented lines under it, replaced by one header, and the
     lines the address cannot say."""
@@ -91,7 +106,7 @@ def write():
             if name.endswith(".ax"):
                 path = os.path.join(folder, name)
                 text = open(path).read()
-                text = rewrite(rewrite_accounts(text) if name == "accounts.ax" else text)
+                text = explain(rewrite(rewrite_accounts(text))) if name == "accounts.ax" else rewrite(text)
                 open(path, "w").write(text)
     with open(os.path.join(COPY, "README.md"), "w") as out:
         out.write(README)

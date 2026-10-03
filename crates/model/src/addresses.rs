@@ -204,6 +204,11 @@ impl Addresses {
         self.fills[entity].iter().map(|&place| Id::new(place)).collect()
     }
 
+    /// Whether some account is called `name`.
+    pub fn is_called(&self, name: Sym) -> bool {
+        !self.called[Id::new(name.index() as u32)].is_empty()
+    }
+
     /// Whether an entity fills a slot of some account.
     pub fn fills_any(&self, entity: Id<Entity>) -> bool {
         !self.fills[entity].is_empty()

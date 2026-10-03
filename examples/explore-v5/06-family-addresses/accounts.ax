@@ -41,6 +41,11 @@ commodity CRV : commodity
   name "the car"
   precision 0
 
+// Each account is written once, as the entities that fill its slots and then its name. `jordan/bluefin/401k` is
+// jordan's 401(k), sponsored by bluefin: the original called it `jordan-401k` and said `owner jordan` and `employer
+// bluefin` on two lines under it, which nothing checked against the name. A word is placed in the slot its entity's kind
+// fits, and the journal says the shortest address that means one account: `checking`, `me/401k`, `jordan/401k`,
+// `riley/529`. `at` is the custodian: a path word cannot say it until a `has` line can say `as with`.
 account family/checking : deposit at chase
 account family/savings : deposit at chase
 account family/escrow at lender

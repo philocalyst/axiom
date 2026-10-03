@@ -100,7 +100,9 @@ impl World<'_> {
         self.book.lookup.addresses.settle(once);
     }
 
-    /// The entities the words before the name are. None if the reference is not an attempt at an address.
+    /// The entities the words before the name are. None if the reference is not an attempt at an address: it is one
+    /// when the names every account has found several, when it begins with an entity that fills a slot, and when it ends
+    /// in the name of an account; a word that is no entity, in an attempt, is a mistake in the address.
     fn fillers(
         &self,
         home: Home,
@@ -109,19 +111,23 @@ impl World<'_> {
         reached: Reached,
     ) -> Result<Option<Vec<Id<Entity>>>, Diagnostic> {
         let (book, scope) = (&self.book, self.scopes.of(home));
+        let addresses = &book.lookup.addresses;
+        let name = word.text.rsplit('/').next().and_then(|name| book.names.get(name));
+        let called = name.is_some_and(|name| addresses.is_called(name));
+        let attempt =
+            |fillers: &[Id<Entity>]| called || fillers.first().is_some_and(|&first| addresses.fills_any(first));
         let mut fillers = Vec::new();
-        for (at, text) in leading.split('/').filter(|text| !text.is_empty()).enumerate() {
+        for text in leading.split('/').filter(|text| !text.is_empty()) {
             match book.lookup.entities.find(&book.names, scope, text) {
                 Found::One(entity) => fillers.push(entity),
-                // A word that is no entity, after one that is, is a mistake in an address; before it, no address.
-                Found::Nothing if at > 0 => return Err(self.unknown_address(word, &fillers, None)),
+                Found::Nothing if reached == Reached::Nothing && attempt(&fillers) => {
+                    return Err(self.unknown_address(word, &fillers, None));
+                }
                 Found::Nothing => return Ok(None),
                 Found::Several(ids) => return Err(self.ambiguous_entity(Word { text, loc: word.loc }, &ids)),
             }
         }
-        let attempt =
-            reached == Reached::Several || fillers.first().is_some_and(|&first| book.lookup.addresses.fills_any(first));
-        Ok(attempt.then_some(fillers))
+        Ok((reached == Reached::Several || attempt(&fillers)).then_some(fillers))
     }
 
     /// Whether the reference of `fillers` and `name` is read as this account on `day`: by the names every account has if

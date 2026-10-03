@@ -67,11 +67,12 @@ kind pot : asset
 SLOTS = {"plan": ["sponsor"], "gift": ["sponsor", "beneficiary"], "pot": []}
 
 SAVERS = ["ann", "bea", "cal", "dee"]
+IDLE = ["zed"]  # an entity that fills no slot of any account: `zed/nest` is no address, and so a party the journal makes
 KIDS = ["kai", "lou"]
 HOUSEHOLDS = ["homeone", "hometwo"]
 FIRMS = ["acme", "bluefin", "cobalt"]
 BANKS = ["first", "second"]
-ENTITIES = {**{e: "saver" for e in SAVERS}, **{e: "kid" for e in KIDS}, **{e: "household" for e in HOUSEHOLDS},
+ENTITIES = {**{e: "saver" for e in SAVERS + IDLE}, **{e: "kid" for e in KIDS}, **{e: "household" for e in HOUSEHOLDS},
             **{e: "firm" for e in FIRMS}, **{e: "bank-co" for e in BANKS}}
 NAMES = ["plan", "gift", "pot", "nest", "fund", "cash"]
 
@@ -233,6 +234,13 @@ def fills_any(accounts, entity):
     return any(entity in a.address[:-1] for a in accounts)
 
 
+def meant_as_address(accounts, words):
+    """Whether no name answered to a reference, and it still may be an address: two words or more that begin with an
+    entity that fills a slot, or end in the name of an account. Anything else is a party the journal brings into being."""
+    begins = words[0] in ENTITIES and fills_any(accounts, words[0])
+    return len(words) >= 2 and (begins or any(a.name == words[-1] for a in accounts))
+
+
 def in_order(address, words):
     at = 0
     for w in words[:-1]:
@@ -251,7 +259,7 @@ def resolve(accounts, words, day):
         return ("one", first[0])
     if len(first) >= 2 and not any(a.spelled for a in first):
         return ("ambiguous", first, "ambiguous-place")
-    if not first and not (len(words) >= 2 and words[0] in ENTITIES and fills_any(accounts, words[0])):
+    if not first and not meant_as_address(accounts, words):
         return ("party",)
     if any(w not in ENTITIES for w in words[:-1]):
         return ("unknown",)
@@ -286,8 +294,17 @@ def runs(address):
             yield [fillers[i] for i in chosen] + [address[-1]]
 
 
-def typo(rng, words):
-    return words[:-1] + [words[-1] + rng.choice("xz")]
+def typo(rng, words, number):
+    """A name that no account has, or, now and then, an entity word that no entity is, or an entity that fills nothing.
+    A name is made once for each line (`number`): a party the journal makes of a path is also known by its suffixes, and
+    two lines that share one would be one party."""
+    pick = rng.random()
+    if pick < 0.4 or len(words) < 2:
+        return words[:-1] + [f"{words[-1]}x{number}"]
+    if pick < 0.6:  # neither word is anything: a party, and not an address
+        return [rng.choice([IDLE[0], words[0] + "q"])] + words[1:-1] + [f"{words[-1]}x{number}"]
+    at = rng.randrange(len(words) - 1)
+    return words[:at] + [rng.choice([words[at] + "q", IDLE[0]])] + words[at + 1:]
 
 
 def journal(rng, accounts, style):
@@ -302,10 +319,10 @@ def journal(rng, accounts, style):
         source = rng.choice(sources)
         target = rng.choice([a for a in accounts if a is not source] or [source])
         words = rng.choice(list(runs(target.address)))
-        if rng.random() < 0.08 and len(words) >= 2:
-            words = typo(rng, words)
+        if rng.random() < 0.12 and len(words) >= 2:
+            words = typo(rng, words, number)
         answer = resolve(accounts, words, day)
-        if answer[0] == "party" or (answer[0] == "one" and answer[1] is source):
+        if answer[0] == "one" and answer[1] is source:
             continue
         entry = {"line": None, "day": day, "source": source.index, "text": "/".join(words), "amount": number,
                  "answer": answer[0]}
@@ -321,6 +338,8 @@ def journal(rng, accounts, style):
             entry["candidates"] = [a.index for a in answer[1]]
             entry["fixes"] = [shortest(accounts, a, day) for a in answer[1]]
             tally[f"ambiguous: {answer[2]}"] += 1
+        elif answer[0] == "party":
+            tally["a party the journal makes: no name, and neither word of an address is an account's"] += 1
         else:
             entry["code"] = "unknown-address"
             tally["unknown-address" + (", though an account has it on another day" if ignoring_days[0] != "unknown" else "")] += 1
@@ -342,7 +361,7 @@ def project(seed, index):
             accounts.append(account)
     # Two accounts written alike would be one declared twice: the written path decides.
     text = [PRELUDE]
-    entities = sorted({e for a in accounts for e in a.address[:-1]})
+    entities = sorted({e for a in accounts for e in a.address[:-1]} | set(IDLE))
     text += [f"entity {e} : {ENTITIES[e]}" for e in entities]
     seen = set()
     for account in list(accounts):
@@ -364,18 +383,20 @@ def project(seed, index):
         entry["line"] = number
     balances = {a.path: 1000 for a in accounts}
     for entry in expect:
-        if entry["answer"] == "one":
+        if entry["answer"] in ("one", "party"):
             balances[accounts[entry["source"]].path] -= entry["amount"]
+        if entry["answer"] == "one":
             balances[accounts[entry["target"]].path] += entry["amount"]
     targets = {}
-    for _ in range(6):
+    for target in range(6):
         pool = [rng.choice(accounts)] if accounts else []
         words = rng.choice(list(runs(pool[0].address))) if pool else []
-        words = typo(rng, words) if words and len(words) >= 2 and rng.random() < 0.2 else words
+        words = typo(rng, words, 1000 + target) if words and len(words) >= 2 and rng.random() < 0.2 else words
         if not words:
             continue
         answer = resolve(accounts, words, None)  # a report's target has no line, and so no day
-        targets["/".join(words)] = [answer[0] if answer[0] != "party" else "unknown", answer[1].path if answer[0] == "one" else None]
+        if answer[0] != "party":  # a party is a place too, if the journal mentions it: nothing to say of a target
+            targets["/".join(words)] = [answer[0], answer[1].path if answer[0] == "one" else None]
     rungs = Counter(len(a.path.split("/")) - 1 for a in accounts)
     tally.update({f"words in the path: {n}": count for n, count in rungs.items()})
     facts = {"style": style, "accounts": [a.path for a in accounts], "journal": expect, "balances": balances,
@@ -429,7 +450,7 @@ def check(binary, path, facts, name="main.ax"):
             by_line.setdefault(line_of(d), []).append(d)
     for entry in facts["journal"]:
         say = by_line.pop(entry["line"], [])
-        if entry["answer"] == "one":
+        if entry["answer"] in ("one", "party"):
             if say:
                 wrong.append(f"line {entry['line']} `{entry['text']}`: expected one account, said {[d['code'] for d in say]}")
         elif len(say) != 1 or say[0]["code"] != entry["code"]:
@@ -468,8 +489,9 @@ def apply_fixes(path, facts, to):
             number = entry["line"] - 1
             lines[number] = lines[number].replace(f"-> {entry['text']} ", f"-> {entry['fixes'][0]} ")
             entry["answer"], entry["target"] = "one", entry["candidates"][0]
-        if entry["answer"] == "one":
+        if entry["answer"] in ("one", "party"):
             balances_[facts["accounts"][entry["source"]]] -= entry["amount"]
+        if entry["answer"] == "one":
             balances_[facts["accounts"][entry["target"]]] += entry["amount"]
     facts["balances"] = balances_
     os.makedirs(to, exist_ok=True)
