@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity ann : org
+entity bob : org
+entity stripe : org
+account checking : bank
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 ann owes me 500 USD due 2026-02-01 ^i1
+2026-01-20 ann -> bob 300 USD
+2026-01-21 ann -> 200 USD
+  bob 120 USD
+  stripe 80 USD

@@ -152,3 +152,43 @@ fn a_split_of_which_no_leg_reaches_the_owner_settles_nothing() {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 200_00)]));
     });
 }
+
+/// A leg that is pending has not been paid yet: what the party pays at this moment is the legs that are real, so the first
+/// leg judges "exactly" on its own 3,009.80 and settles the oldest claim, and the fee leg settles what is left when it lands.
+#[test]
+fn a_leg_that_is_still_pending_is_not_yet_what_the_party_pays() {
+    let lines = "\
+2026-01-02 ann owes me 300 USD due 2026-02-01 ^i0
+2026-01-03 ann owes me 3_100 USD due 2026-02-01 ^i1
+2026-01-20 ann -> 3_100 USD
+  checking 3_009.80 USD
+  stripe (90.20 USD) ^fee-1
+2026-01-25 ^fee-1 settled
+";
+    paid(lines, |book, run| {
+        assert_eq!(
+            tab(book, run, "ann"),
+            claims(&[("i1", 300_00)]),
+            "the oldest claim went first, then 90.20 of the other"
+        );
+        assert_eq!(everything(book, run), 0);
+    });
+}
+
+/// The legs of a statement that come from two parties are two payments: what one party pays in all is not what the other
+/// pays, so ann's 600.00 settles the claim of 600.00 and not the oldest.
+#[test]
+fn the_legs_of_a_statement_from_two_parties_are_a_payment_each() {
+    let lines = "\
+2026-01-02 ann owes me 100 USD due 2026-02-01 ^i0
+2026-01-03 ann owes me 600 USD due 2026-02-01 ^i1
+2026-01-04 bob owes me 400 USD due 2026-02-01 ^j1
+2026-01-20 -> checking 1_000 USD
+  ann 600 USD
+  bob 400 USD
+";
+    paid(lines, |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("i0", 100_00)]));
+        assert_eq!(tab(book, run, "bob"), claims(&[]));
+    });
+}

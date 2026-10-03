@@ -664,7 +664,11 @@ contract job with lumen
   record one without moving money.
 - A later flow between them settles open claims: those its codes name, in order;
   else the one whose open amount is exactly the flow's; else the oldest first. What
-  remains is an ordinary flow.
+  remains is an ordinary flow. A payment written as a statement of several legs is
+  one flow: what the party pays in all, to the owner or, beside a leg that reaches
+  the owner, to a third party on its behalf (a processor's fee), settles by the order
+  above, each leg in its turn and "exactly" being what the party still pays from that
+  leg on. A party that pays only someone else settles nothing of the owner's.
 - A claim's purpose is its recognition: an invoice is income when invoiced in
   accrual books, when settled in cash books (the owner's `books cash|accrual`,
   default cash). A claim `waived` is forgiven; in accrual books what was recognized
