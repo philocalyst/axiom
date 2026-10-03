@@ -17,12 +17,14 @@
 //! | `laws`       | laws compiled and typed, and the order they run in          |
 //! | `rules`      | which laws watch which place, households and residences     |
 //! | `lower`      | the journal and the contracts elaborated into flows         |
+//! | `promise`    | each contract's promise as a term, and the days it falls due |
 //! | `sync_lower` | patterns, formats, code rules and sources of `sync`         |
 //! | `problem`    | the diagnostics that come in families, each worded once     |
 
 pub mod book;
 pub mod journal;
 pub mod law;
+pub mod promise;
 pub mod split;
 pub mod sync;
 
@@ -108,6 +110,8 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     rules::govern(&mut world.book, &order);
     // `end` statements say more of places, once the rest is lowered.
     world.freeze_facts();
+    // What the contracts promise is known when the last waiver and ending has been lowered.
+    world.book.promises = promise::Promises::compile(&world.book);
     // One cause is reported once, however many declarations shared the line.
     let mut seen = Set::default();
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));

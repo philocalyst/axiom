@@ -583,6 +583,7 @@ pub(crate) fn household() -> Household {
         commodities: cast.commodities,
         assets: Arena::new(),
         contracts: Arena::new(),
+        promises: Default::default(),
         also: Arena::new(),
         laws: records.laws,
         rules,
