@@ -47,6 +47,7 @@ mod events;
 mod explain;
 mod facts;
 mod fire;
+mod histories;
 mod infer;
 mod ledger;
 mod lots;
@@ -75,6 +76,8 @@ mod claim_tests;
 #[cfg(test)]
 mod fixture;
 #[cfg(test)]
+mod histories_tests;
+#[cfg(test)]
 mod payment_tests;
 #[cfg(test)]
 mod recognition_tests;
@@ -98,6 +101,7 @@ pub use assets::{
     PartKind, PendingCarry,
 };
 pub use checkpoint::Checkpoint;
+pub use histories::{Extremes, Histories, Position, Steps};
 pub use ledger::Ledger;
 pub use occurrence::{OccurrenceOutput, TemplateError};
 pub use plan::{Known, Plan, run};
@@ -158,6 +162,8 @@ pub struct Run {
     pub posted: Box<[Posted]>,
     /// The final state, by place then commodity.
     pub holdings: Vec<Holding>,
+    /// What every position held on every day, as the fold recorded it.
+    pub histories: Histories,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     pub violations: Vec<Violation>,

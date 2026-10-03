@@ -622,6 +622,7 @@ pub(crate) fn household() -> Household {
         horizon: day(2026, 3, 31),
         posted: journal.posted.into(),
         holdings: records.holdings,
+        histories: Default::default(),
         gains: records.gains,
         effects: records.effects,
         violations: Vec::new(),
