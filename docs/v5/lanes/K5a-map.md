@@ -267,6 +267,7 @@ The oracle reports each of these as listed, not as a failure; the new structure'
 | h | recognition of a due day is `Days::on(anchor).moved(day - anchor)`, which overflows for an anchor of `Day::MIN` (any due day from 1970 on) and which the engine papers over (ledger.rs:540) | read; `promise-no-from.ax` goes through it | `Days::on(day)` |
 | i | an escalating contract with no `from` is `ForecastError::Overflow` (a ratio compounded over 5.9 million years) | `promise-rising-no-from.ax`, `forecast` | the same error; a contract that escalates needs a start (a language question) |
 | j | a due day is lost when a window begins after its step and before the month's end (`on last`, slack 0) | `promise-last-after-waiver.ax` | the day is due |
+| k | a regular cadence of no days (`every 0d`) beside a standing order: the merge of `Contract::occurrences` asks the zero stream for a day that never comes, and a window that is open at the end (the oracle's first-occurrence question) takes about a minute | the oracle's corpus (`contracts.py gen DIR 800 3`, `p0189`: `1_965 USD every 0d into wallet` and `buy VTI for 127 USD every 3d from checking`); `check`, `contracts` and `forecast` of the same book are instant, so it is shown by the oracle and by no CLI book | `Never`: no due day, at once |
 
 ## 8. What this decides
 
@@ -338,7 +339,7 @@ Commits: `9d22888` map, `f5a1871` and `6058464` the oracle (before any of the ne
 
 ### 10.2 What the oracle says
 
-Corpus: `contracts.py gen DIR 1500 7`: 1,500 projects, one to three contracts each, 2,329 contracts, drawn from 71 forms
+Corpus: `contracts.py gen DIR 1500 7`: 1,500 projects, one to three contracts each, 2,329 contracts, drawn from 77 forms
 (`contracts.py cover`). The new structure equals the reference on **every** question asked: 45,181 windows of due days, 31,739
 ordinals, 339,756 kept lines, 2,329 factors of 2,200 days each, 2,329 loan payments, 85,858 steps of the residual of every
 stream (121 loans walked to their last payment, 728 streams walked to their end), and the count of a loan's payments, worked
@@ -361,9 +362,9 @@ Mutation: 50 mutants of the old code (`MUTANTS`): 46 killed by `compare`, 4 surv
 
 37 mutants of the new structure (`MUTANTS_NEW`): 35 killed by the verdict, 2 by the lane's own tests (`the last day of a
 contract is owed ...` and `the days before the last day of a hole ...`: the old code has no `before`, so no comparison can ask
-them), 0 survive. The baseline of both sweeps is checked first: 0 failures, and the tests pass. Four times a sweep found the
-corpus too weak and the corpus was changed (an `every 6m` and an `every 1m1d` for the tiling criteria, a zero index for
-`index_at`, an anchor on the 29th) before the mutant counted as killed; one sweep's kills were false (a clock: two projects
+them), 0 survive. The baseline of both sweeps is checked first: 0 failures, and the tests pass. Three times a sweep found the
+corpus too weak and the corpus was changed (an `every 6m` and an `every 1m1d` with an anchor on the 29th for the tiling
+criteria, a zero index for `index_at`) before the mutant counted as killed; one sweep's kills were false (a clock: two projects
 of the corpus take a minute in the old code), and that is why a mutant is now given three times the baseline's slowest.
 
 ### 10.3 Where it departs from sections 8 and 9
