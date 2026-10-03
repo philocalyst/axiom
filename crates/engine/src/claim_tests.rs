@@ -492,6 +492,10 @@ contract rent with ann
   due 5d
 ";
 
+fn tabs(book: &Book) -> usize {
+    book.places.iter().filter(|(_, place)| matches!(place.role, Role::Tab(_))).count()
+}
+
 fn tab_parcels(book: &Book, run: &Run) -> usize {
     let tab = book.places.iter().find_map(|(id, place)| matches!(place.role, Role::Tab(_)).then_some(id));
     tab.map_or(0, |tab| parcels(book, run, tab).len())
@@ -502,6 +506,7 @@ fn tab_parcels(book: &Book, run: &Run) -> usize {
 fn a_due_day_nothing_kept_is_a_claim_on_the_party() {
     with_run(RENT, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("", 1_000_00), ("", 1_000_00)]), "January and February");
+        assert!(said(run, "missed-occurrence").is_empty(), "a claim is said as overdue, not as missed as well");
     });
 }
 
@@ -558,6 +563,7 @@ fn a_contract_with_no_deadline_makes_no_claim() {
     let text = "contract rent with ann\n  1_000 USD monthly on 1 into checking\n  from 2026-01-01\n";
     with_run(text, |book, run| {
         assert_eq!(tab_parcels(book, run), 0);
+        assert_eq!(tabs(book), 0, "nor is a tab asked for");
         assert_eq!(said(run, "missed-occurrence").len(), 1);
     });
 }
