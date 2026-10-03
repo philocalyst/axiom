@@ -7,8 +7,8 @@
 //! and `claims`, `balance` and `overdue` see it because they read the parcels. What the claim recognized when it was
 //! made is not reversed: that depends on whether the books are cash or accrual, which nothing reads yet.
 
-use axiom_core::{Id, Qty};
-use axiom_model::{ClaimChange, Commodity, Place, Policy, RuntimeTxn, Select};
+use axiom_core::Qty;
+use axiom_model::{Flow, Policy, RuntimeTxn, Select};
 
 use crate::WriteOff;
 use crate::explain;
@@ -20,24 +20,20 @@ impl Ledger<'_, '_, '_> {
     /// first line of an itemized claim takes all its parcels, and the others find nothing left.
     pub(crate) fn write_off(&mut self, at: u32) {
         let book = self.plan.book;
-        let change = book.claim_changes[at as usize];
-        let made = book.flows[book.txns[change.target].flows].iter().filter(|flow| book.makes_claim(flow));
-        let forgiven: usize = made.map(|flow| self.forgive(at, &change, flow.to, flow.arrive.unit, flow.from)).sum();
+        let target = book.claim_changes[at as usize].target;
+        let made = book.flows[book.txns[target].flows].iter().filter(|flow| book.makes_claim(flow));
+        let forgiven: usize = made.map(|flow| self.forgive(at, flow)).sum();
         if forgiven == 0 {
-            self.record.report(explain::empty_write_off(book, &change));
+            self.record.report(explain::empty_write_off(book, &book.claim_changes[at as usize]));
         }
     }
 
-    /// Takes the parcels the change's transaction made out of `place`, gives their value to `back`, and says how many.
-    fn forgive(
-        &mut self,
-        at: u32,
-        change: &ClaimChange,
-        place: Id<Place>,
-        unit: Id<Commodity>,
-        back: Id<Place>,
-    ) -> usize {
+    /// Takes the parcels the write-off `at` makes of one flow of the claim out of the place that flow paid into, gives
+    /// their value back to the place it came from, and says how many parcels that was.
+    fn forgive(&mut self, at: u32, flow: &Flow) -> usize {
         let book = self.plan.book;
+        let change = book.claim_changes[at as usize];
+        let (place, unit) = (flow.to, flow.arrive.unit);
         let made = [Select::Txn(change.target)];
         let open =
             self.world.holdings.get(place, unit).map_or(Qty::ZERO, |slot| slot.admitted(false, &made, &book.codes));
@@ -56,7 +52,7 @@ impl Ledger<'_, '_, '_> {
             explain: &|| false,
         };
         self.world.holdings.relieve(place, unit, &request, &mut self.scratch.relief);
-        self.world.holdings.credit(back, unit, open);
+        self.world.holdings.credit(flow.from, unit, open);
         let slices = &self.scratch.relief.slices;
         let rows = slices.iter().map(|s| WriteOff {
             change: at,

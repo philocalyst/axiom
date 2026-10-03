@@ -186,15 +186,10 @@ impl Ledger<'_, '_, '_> {
     /// `scratch.relief.slices`.
     fn relieve(&mut self, m: &Motion) {
         let book = self.plan.book;
-        let (unit, source, now) = (m.out.unit, m.source, (m.day, m.txn));
-        let is_base = unit == book.base;
+        let (unit, now) = (m.out.unit, (m.day, m.txn));
         self.scratch.relief.slices.clear();
-        if source.class != Class::Asset {
-            let settled = self.settle_claims(m);
-            self.scratch.relief.slices.clear();
-            self.world.holdings.credit(m.from, unit, settled - m.out.qty);
-            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
-            return;
+        if m.source.class != Class::Asset {
+            return self.relieve_balance(m);
         }
         self.ask_ties(m);
         let named = self.name_claims(m, m.from);
@@ -211,6 +206,24 @@ impl Ledger<'_, '_, '_> {
             explain: &|| !self.record.ambiguous.contains(&m.from),
         };
         self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
+        self.account_for_relief(m);
+    }
+
+    /// A source that holds no parcels, a debt or the outside, only a balance: the balance falls by what leaves, less
+    /// what settled a claim, and the value in flight is one fresh slice.
+    fn relieve_balance(&mut self, m: &Motion) {
+        let settled = self.settle_claims(m);
+        self.scratch.relief.slices.clear();
+        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
+        let fresh = fresh_slice(m, m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn));
+        self.scratch.relief.slices.push(fresh);
+    }
+
+    /// What a relief that has been made says: an ambiguous choice, what was missing, and the fresh slice for it.
+    fn account_for_relief(&mut self, m: &Motion) {
+        let book = self.plan.book;
+        let (unit, now) = (m.out.unit, (m.day, m.txn));
+        let is_base = unit == book.base;
         if self.scratch.relief.ambiguous && self.record.ambiguous.insert(m.from) {
             let proceeds = self.realizes(m);
             let diagnostic = explain::ambiguous(book, m, &self.scratch.relief.candidates, proceeds);
@@ -412,17 +425,22 @@ impl Ledger<'_, '_, '_> {
         purpose
     }
 
+    /// A target that holds no parcels, a debt or the outside, only a balance: it rises by what arrives, and a payment that
+    /// bounces opens the claims it had settled.
+    fn arrive_balance(&mut self, m: &Motion) {
+        self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
+        self.reopen_claims(m);
+        if m.moves == Moves::Loss {
+            self.keep_basis(m);
+        }
+        self.sample_temporal(m.day);
+    }
+
     /// Lands the slices at the target.
     fn arrive(&mut self, m: &Motion, keeps: bool) {
         let book = self.plan.book;
         if m.target.class != Class::Asset {
-            self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
-            self.reopen_claims(m);
-            if m.moves == Moves::Loss {
-                self.keep_basis(m);
-            }
-            self.sample_temporal(m.day);
-            return;
+            return self.arrive_balance(m);
         }
         let (stays, restricted) = (stays_with_owner(m), self.restricted_source(m));
         // `for` an entity ties what arrives to it; `for` the owner (or its household) unties it.
