@@ -415,3 +415,163 @@ a law already (point 4).
   `expected-end-of-line`; `Entities.holds`, `Role`, `contracts.rs:128-160, 727-800`, `occurrence.rs:push_item`, `legs_at`.
 - **Lines:** `briefs/loc.py` and `hist.py` on the tree at `8e33a9d`; per-file counts by the same rule.
 - **The baseline:** `cargo test --workspace --release --no-fail-fast` at `8e33a9d`, before any change, is the number the report compares with.
+
+## 13. What was built, where it departs from this map, and what K6b needs
+
+Written after the code, from the tree at the last commit of the lane. Sections 0 to 12 are the map as it stood before the
+first change; where the lane did something else, this section says so, and the sections above are left as they were.
+
+### 13.1 The commits
+
+| commit | what |
+|---|---|
+| `9255f90` | this map, `purposes.py`, the three probes |
+| `05285d7` | `classify`: one ranking of the sources of a purpose, the tie as the one error |
+| `25839dd` | the goldens it moved (41 files; the message lists them by book) |
+| `aaba45d` | one dispatch index: `Rules` as one `Groups<u32, Rule>` keyed by `Watch` |
+| `1505687` | `derive`: the effect, its step, its typing, the occurrence host, a contract's laws fire |
+| `4bec164` | a contract's `also` and `share` are the laws they abbreviate; `lower/also.rs` and the records it made are gone |
+| `25fdfec` | layer 2: `contract NAME : KIND`, the slot line, the root kind `contract`, `lower/contracts/relator.rs` |
+| `aa84037` | the copies of 05-family and 07-landlord, the employer's book, `verify.sh`, LANGUAGE |
+| `bd2a388`, `a843383` | `contract-share-party`, and the tests the mutants asked for |
+| last | `also-inert` for an account too; this section |
+
+The commit that turns the sugars on is `4bec164`, and it is not the last: layer 2 stands on what it made (`compile_also`, `laws/compile/line.rs`
+where `lower/also.rs` was, `Positions`), so reverting it alone does not apply. What holding it back would take is in the report.
+
+### 13.2 Departures from the plan above
+
+1. **One branch, and no golden moved for step 4.** Section 6 planned the sugars on a sibling branch because turning them on
+   changes `05-family`. It changes its `forecast` (the paycheck row of `alex-pay` reads 5,980.00 USD, not 5,750.00: the match
+   is 40% of the 575.00 deferred; the mortgage row 3,192.48, not 2,487.48: the escrow joins it; the net worth at 2026-08-31
+   102,548.56 USD, not 99,337.66) and no command a golden runs: the contracts begin on 2026-01-01, the journal ends in 2025
+   and the golden day is 2026-04-16, so nothing a contract promises is kept or forecast in `check`, `balance`, `available`,
+   `limits`, `claims` or `tax`. The orchestrator's decision (one branch, the engine and the deletions first) was taken; there
+   was no goldens commit to make. `examples/05-family/outputs/forecast.txt` is a snapshot of 2026-01-05 that K5 already left
+   behind; it is not regenerated.
+2. **The occurrence host solves a derived item after its group, not before.** Section 5 put a carved item among `Bear`s before
+   `solve`. A derived amount is an expression of the law, read against the header **as the template gave it**, so it needs
+   nothing the solver finds out, and carving commutes: the group is solved as it always was, and the items the laws derived
+   are then solved against what the header has left by the same `solve` (`Remainder::BeforeItems`, no legs, `LiteralEnv`:
+   amounts that are already numbers). The host is one file (`engine/src/occurrence/derive.rs`, about 200 lines and its tests)
+   and the template path (`items_at`, `Reads`) is untouched.
+3. **`share` is a derive, and a smaller one than LANGUAGE §10 says.** `share 60% for studio` is `on flow`, `derive 60% of
+   amount` as an item carved out of the header, **borne by** the entity (`Derived.owner`, which only a share sets) and for what
+   the header is (a derived flow that names no purpose is its header's). It is the header's share of each occurrence, not "12%
+   of every flow": an item the contract writes is not shared. A `share` for a party, which is a claim, is made as the flow it
+   bears and the book is told so (`contract-share-party`). `Terms.shares`, the second pass that read it, `Purpose.shares` and
+   `Derivation::{Share, SalesTax, Also}` are gone; the three-way `Share` type stays, `Place.shares` and `Entity.owned_by` are
+   ownership.
+4. **`sales-tax` is not made, `match` is deleted, `budget` is untouched.** `sales-tax 8.625%` is a fact on a kind that nothing
+   reads. The tax is *inside a price* a journal flow paid to a party of that kind, so it can only be derived of a flow that has
+   posted: that is the post host (13.4). `match` was never set. The budget functions carry what a law cannot (section 0, point
+   4), and `laws/budget.rs` stays.
+5. **An `also` under a kind, an entity, a purpose or an account is not read, and says so** (`also-inert`, a warning; an account's was
+   the `also-owner` error until the last commit). Section 6's decision stands; the warning was the orchestrator's.
+6. **Projection is a lowering step, as section 8 decided, with one rule more.** The owner of a book is not only the owner
+   of the schedule's account: a member of it (`member family`) stands at the same account, because `05-family`'s `alex` is `me`,
+   a member of the `family` that owns `joint-checking`. Slot lines are a typed node (`Fill`, parsed only where the contract
+   names a kind: no book that does not is read differently), not a property; the contract keeps `kind` and `fillers`.
+7. **`as with` is not built, so nothing checks that `with acme` and `employer acme` are one word.** Section 7 predicted it.
+8. **The word a kind's `also` writes as a role is not made a party.** Layer 2 found that the mentions walk saw `agent` in
+   `also agent -> irs ...` as a party nothing declared and made an entity of it (a role named like a kind, `employer`, was
+   spared by accident). While a kind's lines are read the walk skips every name some kind declares a slot by.
+
+### 13.3 What turned up on the way
+
+- **`% of amount` in a contract's template items fails at the baseline.** `+ 20% of amount #fee` under a contract's header
+  is `contract-occurrence-materialization: Expression { fault: InvalidProgram }` at `8e33a9d` (and on every build since): the
+  occurrence reads the template's `amount` as the header of a flow it has not made. A derived `+ 20% of amount` works, because
+  the law evaluates it. K4b's generator never writes the form in a promise (it declares the computed amount by name), so
+  nothing caught it. It is K5's.
+- **`flow` and `register` do not list what a kept occurrence made, and `check` does not count its flows** (what `balance`
+  and the forecast read is there; these views read the journal's own): the reports could not tell the spellings of a contract
+  apart by purpose, so `derives.py` and `relators.py` compare the engine's own dump (`forecasts/main.rs`) as well as the
+  commands.
+- **The order of the flows inside an occurrence is not the same in a derived book and a written one**, and an overdraft is
+  reported at the first flow that breaches it, so the balance it names can differ by the derived flows not yet posted. The
+  generators keep the account large enough that it is never reached, and say so.
+- **`11-sam` does not check** (17 errors at `8e33a9d`, 11 after the ranking: the purposes `match` and `escrow` its `also`
+  lines use are declared nowhere), so its `also`, `share` and `sales-tax` lines cannot run; it is not a golden's input.
+- `contract-law-never-fires.ax` said nothing on the baseline; the contract's law now warns, once, at the first flow that
+  crosses it.
+
+### 13.4 What the post host needs (K6b)
+
+A law of a place, a kind, an entity or a purpose fires on a flow that has already posted. What it derives is a flow of its own,
+or an item along the same or the reversed ends; a carved item is not possible (the flow has moved). The host needs:
+
+1. **A transaction identity for a derived flow**: a `RuntimeTxn` variant that names the flow and the law that caused it
+   (`Origin::Derived(Derivation::Law)` is there; the txn is not), so that `register`, `why` and the oracles of K5b read it.
+2. **A pool the run keeps them in**: `Recorded::promised_flows` is the occurrence's; a posted flow's derived flows are another
+   record, written as the law fires and replayed by a forecast, which is the same fold.
+3. **A guard that a derived flow does not fire the law that made it**, and a depth for laws that derive from each other's.
+4. **An order**: the derived flow posts after the laws that fired on its cause, so `on out`, relief, `on in`, the purpose's laws
+   and `on spend` see the cause first.
+
+It makes three things expressible at once: an `also` under a kind, an entity or a purpose (a card's cash back, a processor's
+fee, a sales tax collected); `sales-tax` on a party kind (the tax inside a price a journal flow paid, a carved item of the
+price's purpose in the owner's tallies: it needs the flow to be re-attributed, which a posted flow cannot, so it is the
+one sugar that is a *claim of the tax against the price* and not a flow); and `share` on a journal flow (a phone bill in the
+journal, not a contract). A share for a party needs the claim as well (`Derivation::Claim`).
+
+### 13.5 What was proved, and what is not killed
+
+| | |
+|---|---|
+| tests | the workspace: the same two failures as at `8e33a9d` (the prorata test, the year-end context forecast), nothing else |
+| goldens, mistakes | byte-identical after step 4; the 41 goldens of step 1 are `25839dd`'s |
+| `derives.py` | 400 triples (a law, the lines that abbreviate it, what it derives written by hand), every command and 48,137 flows of the engine's dump equal; 29 mutants of the host, the compiler and the dispatch |
+| `relators.py` | 500 cases, each a kind of contract in two books (the household's, the employer's) and each book with the kind and with the legs by hand: every command and 41,329 flows equal; 20 mutants of the projection |
+| fuzz, K4b, K0a | 1,500 mutated examples against the build after step 1: only the diagnostics listed in 13.6 differ; `splits.py`: 300 projects, 8,269 commands, 0 differ; K0a's cases: the five of 13.6 |
+| `verify.sh` | the copies of 05-family and 07-landlord print what the originals print; the employer's kind prints what the legs written by hand print |
+
+**Mutants not killed.** `derives.py`: none. Three survived the dump and the first tests (a law that fires for the last flow of the
+group, an item read on the other side of an exchange header, a contract's law that reads what arrived), and a test was written for
+each (`a_law_fires_for_the_header_and_reads_its_ends_whatever_legs_the_group_has`, `an_item_derived_for_a_standing_buy_is_in_what_is_bought_and_one_in_what_is_spent_is_refused`,
+`a_law_written_in_a_contract_judges_what_it_promises_and_reads_what_left`); the sweep was stopped before it was run again, and each of the three was
+applied by hand to the tree and failed its test. Two did not build as written and were rewritten; one (a derived flow keeps its
+header's waiver) was equivalent, because a header carries none, and the line is deleted. `relators.py`: **one survives**, the last
+of two fillers is the one that stands (`.rev()` in `Positions::of`): only a slot of several filled twice reaches it, no
+generator writes one, and a role of a slot of several is not read (which of its fillers an end means has no answer), so it is
+equivalent until `as with` or a plan says which. Twelve of the twenty were killed by the engine dump, seven by named unit tests.
+Not mutated at all: the diagnostics' wording (the model tests name their codes and a phrase), `mentions.rs`, the syntax of `: KIND` and
+the slot line (the syntax tests), `LANGUAGE.md`.
+
+### 13.6 Output changes
+
+For books that do not use the new spelling, each with the book that shows it:
+
+- **The purpose ranking** (`05285d7`, goldens `25839dd`): 308 `purpose-disagreement`s on the baseline, 1 left (`11-sam`'s genuine tie).
+  The flows and contracts that came back, by book: `04-freelancer` 173 (errors 203 to 0), `05-family` 128 (141 to 0), `07-landlord` 3
+  (46 to 18), `06-investor` 1 (36 to 3), `02-household` 1 (12 to 1), `03-violations` 1 (8 to 7: line 60 pays a grocer `#rent` on purpose, the
+  written purpose now outranks the grocer's, and its comment is stale). `01-first-steps`, `08-expat`, `09-shared` and `10-budgeter` have none
+  and do not move.
+- **`08-expat`, `09-shared`, `10-budgeter` still have 454, 419 and 281 errors for a reason the ranking cannot reach**: they are v3 books. They declare
+  chart accounts (`account income/salary-us : wages`, `expenses/groceries`: `chart-account`, "v4 has no income, expense or equity accounts"),
+  reach them with `via income/salary` (`unknown-place`) and write `/ party` the old way round (`v3-party`); every flow that names one is an
+  error, so a hundred lines of declarations are four hundred errors (`check` prints the first 50). Lane L's `fmt --upgrade` ports them.
+- **A contract's `also` and `share` make flows** (`4bec164`): `05-family`'s `forecast` (13.2, point 1). No golden moved.
+- **A contract's own laws fire** (`1505687`): `contract-law-never-fires.ax` warns where it said nothing.
+- **`also-inert`** (`4bec164`, and for an account in the last commit): `docs/v5/measure/diff/cases/g-also-{entity,kind,account}.ax` print a warning where they printed
+  an error about a name inside the line (`entity`, `kind`: `unknown-purpose`; `account`: `also-owner`), because the line is no longer read.
+- **`contract-share-party`** (`bd2a388`): `c-contract-area` and `g-contract-area` (a measured share for an entity that has no account) gain the warning.
+- **`kind-parent`'s help lists `: contract`** among the roots (`25fdfec`); **`expected-step`'s note lists `derive`** (`1505687`): a bad law
+  step prints both, and no golden or mistake has one.
+
+### 13.7 What Layer 3 needs (not built; stopped at the map, as the brief says)
+
+Section 10 stands; layer 2 sharpened it.
+
+- **`on start` / `on end`** need the post host (13.4): a derived flow with no occurrence to carry it, so a `RuntimeTxn` of its own and a
+  record the forecast replays. They also need the fold to say when a relator's span begins and ends: `Contract.days` and the monitor's
+  `Residual` know it, and a `Trigger` keyed by a contract (`Watch::Contract`, which layer 1 already has) fired from the heap the monitor
+  and `Promising` keep, on the first and last due day.
+- **`part`** is a position that exists with the relator: a place made per instance at lowering (`World::tab` is the model), its owner and
+  `with` inherited by slot name, and a name an address can reach (K3b's `Addresses` takes a path of fillers). `relator-position`
+  is the diagnostic that will become it: a role whose position is not the schedule's account is today an error that says so.
+- **`joins`** (a plan's membership) is a second kind of contract whose `with` is an employment, so the same `Fill` and the same projection;
+  whether a membership is stored or is a projection of (employment, plan) is ASSOCIATIONS §10 item 6, and should be answered with a book
+  written in the layer 2 spelling, not before. The employer's match (`also acme -> alex-401k 40% of ...`) stays on the contract until then,
+  because it differs per employer.
+- **`as with`** (lane L) is what removes the double word (`with acme` and `employer acme`) and makes the check that they agree possible.

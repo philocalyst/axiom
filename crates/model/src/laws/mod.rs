@@ -97,7 +97,7 @@ fn declare_in<'s>(
             compile_native(world, diags, &placement, law);
         }
     }
-    declare_alsos(diags, file, decl, owner);
+    declare_alsos(diags, file, decl);
 }
 
 /// What a declaration's laws govern, or None after saying why they govern nothing.
@@ -254,21 +254,17 @@ fn set_specificity(world: &mut World<'_>) {
 }
 
 /// What a declaration's `also` lines come to today: nothing. Only a contract's `also` derives (it is a law the
-/// contract writes, made with each occurrence), so the line of a kind, an entity or a purpose is not read, and the book
-/// is told so rather than left to think it is enforced. A place or an asset cannot have one at all.
-fn declare_alsos(diags: &mut Vec<Diagnostic>, file: &ast::File, decl: &ast::Decl, owner: Owner) {
-    let what = decl.what;
+/// contract writes, made with each occurrence), so the line of a kind, an entity, a purpose or an account is not read,
+/// and the book is told so rather than left to think it is enforced.
+fn declare_alsos(diags: &mut Vec<Diagnostic>, file: &ast::File, decl: &ast::Decl) {
+    let what = format!("{:?}", decl.what).to_lowercase();
     for also in &file[decl.alsos] {
-        diags.push(match owner {
-            Owner::Entity(_) | Owner::Kind(_) | Owner::Purpose(_) => {
-                Diagnostic::warning("also-inert", "this `also` is not read: only a contract's `also` derives a flow")
-                    .label(also.loc, format!("a {}'s `also` makes nothing yet", format!("{what:?}").to_lowercase()))
-                    .note("a contract's `also` is made with each occurrence the contract promises, before it posts; a flow that has posted cannot be added to")
-                    .help("write it under the contract whose occurrences should carry it, or write the flow it implies")
-            }
-            _ => Diagnostic::error("also-owner", "declaration-level `also` needs an entity, kind, or purpose")
-                .label(also.loc, format!("`also` is not supported on this {what:?}")),
-        });
+        diags.push(
+            Diagnostic::warning("also-inert", "this `also` is not read: only a contract's `also` derives a flow")
+                .label(also.loc, format!("a {what}'s `also` makes nothing yet"))
+                .note("a contract's `also` is made with each occurrence the contract promises, before it posts; a flow that has posted cannot be added to")
+                .help("write it under the contract whose occurrences should carry it, or write the flow it implies"),
+        );
     }
 }
 

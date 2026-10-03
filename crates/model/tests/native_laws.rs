@@ -133,13 +133,17 @@ fn a_declarations_also_is_not_read_and_the_book_is_told_so() {
     let std = source("std.ax", "system std\ncommodity USD\n  precision 2\nkind bank : asset\n", true, 0);
     let project = source(
         "axiom.ax",
-        "use std\nbase USD\nentity me\nkind boss : entity\n  also + 5% of amount #nowhere\naccount checking : bank\npurpose fees : spending\n  also checking -> self 1 USD due 3d\n",
+        "use std\nbase USD\nentity me\nkind boss : entity\n  also + 5% of amount #nowhere\naccount checking : bank\npurpose fees : spending\n  also checking -> self 1 USD due 3d\naccount big : bank\n  also + 5% of amount #nowhere\n",
         false,
         1,
     );
     let (book, diagnostics) = build(&[std, project]);
     let codes: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect();
-    assert_eq!(codes, ["also-inert", "also-inert"], "a line nothing reads is not checked either: {diagnostics:?}");
+    assert_eq!(
+        codes,
+        ["also-inert", "also-inert", "also-inert"],
+        "a line nothing reads is not checked either: {diagnostics:?}"
+    );
     assert!(
         diagnostics.iter().all(|diagnostic| diagnostic.severity == axiom_core::Severity::Warning),
         "it is a warning: the book is otherwise sound"
