@@ -10,6 +10,7 @@ use axiom_model::{Amount, Flow, NodeId, Program, RuntimeTxn, Subject, Value};
 
 use crate::Cause;
 use crate::eval;
+use crate::ledger::Ledger;
 use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
 use crate::state::World;
@@ -71,5 +72,12 @@ impl Lent<'_, '_, '_, '_> {
             &context,
             self.values,
         )
+    }
+}
+
+impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
+    /// What the fold lends an expression to read.
+    pub(crate) fn lent(&mut self) -> Lent<'_, 'p, 'b, 's> {
+        Lent { plan: self.plan, world: &self.world, values: &mut self.scratch.values }
     }
 }

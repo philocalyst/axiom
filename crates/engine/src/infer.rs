@@ -255,7 +255,11 @@ impl Stretches<'_> {
         let txn = &self.book.txns[flow.txn];
         let Some(program_id) = txn.program else { return false };
         let Some(program) = self.book.journal_programs.get(program_id) else { return false };
-        let Some(roots) = txn.offset(id).and_then(|offset| program.roots_of(offset)) else {
+        let offset = txn.offset(id);
+        if offset.is_some_and(|offset| program.folded_at(offset)) {
+            return true;
+        }
+        let Some(roots) = offset.and_then(|offset| program.roots_of(offset)) else {
             return false;
         };
         (roots.out.is_some() || roots.arrive.is_some()) && !flow.is_exchange()

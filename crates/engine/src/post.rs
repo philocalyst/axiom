@@ -945,7 +945,8 @@ impl Ledger<'_, '_, '_> {
 
     /// A sale's header proceeds include explicit Less items before basis is
     /// realized. These item values are carried by the transaction's typed
-    /// journal group, not by the header's Detail.cost field.
+    /// journal group, not by the header's Detail.cost field. A `Less` that makes
+    /// no flow is already off the header, which the model carved it from.
     fn asset_sale_less_items(&mut self, m: &Motion) -> Option<Qty> {
         let book = self.plan.book;
         let Some(txn_id) = m.txn.source_txn() else { return Some(Qty::ZERO) };
@@ -957,7 +958,7 @@ impl Ledger<'_, '_, '_> {
             return Some(Qty::ZERO);
         };
         let mut total = Qty::ZERO;
-        for item in group.items.iter().filter(|item| item.sign == axiom_model::Sign::Less) {
+        for item in group.items.iter().filter(|item| item.sign == axiom_model::Sign::Less && item.flow.is_some()) {
             let amount = match item.amount {
                 axiom_model::Expr::Literal(amount) => amount,
                 axiom_model::Expr::Computed(_) => {

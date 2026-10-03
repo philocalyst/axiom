@@ -177,11 +177,6 @@ struct Headed {
 }
 
 impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
-    /// What the fold lends an expression to read.
-    fn lent(&mut self) -> Lent<'_, 'p, 'b, 's> {
-        Lent { plan: self.plan, world: &self.world, values: &mut self.scratch.values }
-    }
-
     /// Materializes one scheduled contract occurrence into caller-owned pools.
     /// Journaled and forecast occurrences use this same path; grouped header,
     /// split-leg, and item order is preserved, and an omitted input suppresses

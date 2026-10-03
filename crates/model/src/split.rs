@@ -229,6 +229,17 @@ pub enum Heading {
     Source { end: Endpoint, total: Option<Quantity> },
 }
 
+impl Made {
+    /// The side of its flows that the legs and the items of a record take from: a header with items takes from its
+    /// own out side, and a split's legs are on the side opposite the end that is its source.
+    pub fn takes_from(&self) -> FlowSide {
+        match self.header {
+            Heading::Flow(_) => FlowSide::Out,
+            Heading::Source { .. } => self.side.other(),
+        }
+    }
+}
+
 /// A contract's template: its flows are values, and its items are what they say over their parent.
 pub type Promised = Group<Header<Flow>, Flow, Says>;
 

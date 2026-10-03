@@ -139,7 +139,6 @@ fn an_item_that_comes_on_top_is_paid_as_well() {
 }
 
 #[test]
-#[ignore = "waits for the fold to solve a group that has a computed amount"]
 fn a_share_of_amount_in_an_item_is_a_share_of_the_header() {
     let lines = "\
 2026-03-14 checking -> shop 200 USD #household
@@ -248,7 +247,6 @@ fn a_split_with_no_total_is_the_sum_of_its_legs() {
 }
 
 #[test]
-#[ignore = "waits for the fold to solve a group that has a computed amount"]
 fn a_computed_leg_is_solved_when_the_split_lands_and_the_remainder_follows() {
     let lines = "\
 2026-03-14 checking 300 USD ->
@@ -262,7 +260,6 @@ fn a_computed_leg_is_solved_when_the_split_lands_and_the_remainder_follows() {
 }
 
 #[test]
-#[ignore = "waits for the fold to solve a group that has an `=` leg"]
 fn a_target_leg_is_the_gap_to_its_balance_and_the_remainder_is_what_is_left() {
     // savings holds 500.00; `= 800 USD` is a leg of 300.00.
     let lines = "\

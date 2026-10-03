@@ -18,7 +18,7 @@
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, par};
 use axiom_model::{
     Amount, Book, Commodity, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Item, Made, Place,
-    Program, PurposeRoot, RuntimeDetail, RuntimeFlow, RuntimeTxn, Sign, Subject, Value,
+    PurposeRoot, RuntimeDetail, RuntimeFlow, RuntimeTxn, Sign,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -528,6 +528,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let transaction = &book.txns[txn_id];
         let offset = transaction.offset(id);
         let journal = transaction.program.and_then(|program_id| book.journal_programs.get(program_id));
+        if journal.is_some_and(|journal| journal.open) && !self.group_ready(txn_id, id, day) {
+            return;
+        }
         let roots = journal.zip(offset).and_then(|(journal, offset)| journal.roots_of(offset));
         let in_group = journal.and_then(|journal| journal.group.as_deref());
         let group = in_group.filter(|group| offset.is_some_and(|offset| group.header == Heading::Flow(offset)));
@@ -559,52 +562,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let mut computed_quantity = cached_amounts.is_some();
 
         if cached_amounts.is_none() {
-            for (root, target) in [(roots.out, End::From), (roots.arrive, End::To)] {
-                let Some(root) = root else { continue };
-                match journal_expression(
-                    self.plan,
-                    &self.world,
-                    &mut self.scratch.values,
-                    id,
-                    txn_id,
-                    &flow,
-                    program,
-                    root,
-                ) {
-                    Value::Amount(amount) => {
-                        computed_quantity = true;
-                        *flow.amount_at_mut(target) = amount;
-                    }
-                    Value::Fault(fault) => {
-                        self.record.report(explain::journal_expression_fault(book, &flow, program, root, fault, day));
-                        return;
-                    }
-                    _ => {
-                        self.record.report(explain::journal_expression_fault(
-                            book,
-                            &flow,
-                            program,
-                            root,
-                            Fault::InvalidProgram,
-                            day,
-                        ));
-                        return;
-                    }
+            match self.read_quantities(id, &mut flow, roots, program, day) {
+                Ok(read) => computed_quantity |= read,
+                Err(problem) => {
+                    self.record.report(problem);
+                    return;
                 }
-            }
-            // A single written quantity supplies both ends of an ordinary
-            // transfer. The model stores its root on the written side only,
-            // while the literal lowering has already mirrored the placeholder.
-            if roots.out.is_some() && roots.arrive.is_none() && !flow.is_exchange() {
-                flow.arrive = flow.out;
-            } else if roots.arrive.is_some() && roots.out.is_none() && !flow.is_exchange() {
-                flow.out = flow.arrive;
-            }
-        }
-        if cached_amounts.is_none() {
-            if let (Some(_), Infer::Target { end, .. }) = (roots.out.or(roots.arrive), flow.infer) {
-                let amount = if end == End::From { flow.out } else { flow.arrive };
-                flow.infer = Infer::Target { end, balance: amount.qty };
             }
         }
         let mut computed_basis = None;
@@ -612,47 +575,20 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             if let Some(basis) = self.record.computed_basis.get(&id).copied() {
                 detail.basis = Some(basis);
             } else {
-                match journal_expression(
-                    self.plan,
-                    &self.world,
-                    &mut self.scratch.values,
-                    id,
-                    txn_id,
-                    &flow,
-                    program,
-                    root,
-                ) {
-                    Value::Amount(amount) if amount.unit == book.base => {
-                        detail.basis = Some(amount.qty);
-                        computed_basis = Some(amount.qty);
-                    }
-                    Value::Amount(amount) => {
-                        self.record.report(explain::journal_expression_fault(
-                            book,
-                            &flow,
-                            program,
-                            root,
-                            Fault::UnitMismatch { found: amount.unit, expected: book.base },
-                            day,
-                        ));
-                        return;
-                    }
-                    Value::Fault(fault) => {
+                let amount = match self.amount_of(id, &flow, program, root, day) {
+                    Ok(amount) if amount.unit == book.base => amount,
+                    Ok(amount) => {
+                        let fault = Fault::UnitMismatch { found: amount.unit, expected: book.base };
                         self.record.report(explain::journal_expression_fault(book, &flow, program, root, fault, day));
                         return;
                     }
-                    _ => {
-                        self.record.report(explain::journal_expression_fault(
-                            book,
-                            &flow,
-                            program,
-                            root,
-                            Fault::InvalidProgram,
-                            day,
-                        ));
+                    Err(problem) => {
+                        self.record.report(problem);
                         return;
                     }
-                }
+                };
+                detail.basis = Some(amount.qty);
+                computed_basis = Some(amount.qty);
             }
         }
 
@@ -690,43 +626,16 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 };
                 let item_id = Id::new(raw);
                 let item_flow = &book.flows[item_id];
-                let amount = if let Some(cached) = self.record.resolved.get(&item_id).copied() {
-                    Amount::new(cached.out, item_flow.out.unit)
-                } else {
-                    let amount = match item.amount {
-                        Expr::Literal(amount) => amount,
-                        Expr::Computed(root) => match journal_expression(
-                            self.plan,
-                            &self.world,
-                            &mut self.scratch.values,
-                            item_id,
-                            txn_id,
-                            item_flow,
-                            program,
-                            root,
-                        ) {
-                            Value::Amount(amount) => amount,
-                            Value::Fault(fault) => {
-                                self.record.report(explain::journal_expression_fault(
-                                    book, item_flow, program, root, fault, day,
-                                ));
-                                return;
-                            }
-                            _ => {
-                                self.record.report(explain::journal_expression_fault(
-                                    book,
-                                    item_flow,
-                                    program,
-                                    root,
-                                    Fault::InvalidProgram,
-                                    day,
-                                ));
-                                return;
-                            }
-                        },
-                    };
-                    self.record.resolved.insert(item_id, Amounts { out: amount.qty, arrive: amount.qty });
-                    amount
+                // An item that is computed is in an open group, which was solved when its first flow landed.
+                let amount = match (self.record.resolved.get(&item_id), item.amount) {
+                    (Some(cached), _) => Amount::new(cached.out, item_flow.out.unit),
+                    (None, Expr::Literal(amount)) => amount,
+                    (None, Expr::Computed(root)) => {
+                        let fault = Fault::InvalidProgram;
+                        self.record
+                            .report(explain::journal_expression_fault(book, item_flow, program, root, fault, day));
+                        return;
+                    }
                 };
                 let Some(cost) = book.convert(amount, book.base, day) else {
                     self.record.report(
@@ -774,7 +683,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// A flow's quantities. `?` amounts were solved before the fold, and are
     /// the plan's; `=` and `all` depend on the balance and are resolved now,
     /// once, and remembered (a reversal must undo exactly what was done).
-    fn amounts(&mut self, flow: &Flow, id: Option<Id<Flow>>) -> Amounts {
+    pub(crate) fn amounts(&mut self, flow: &Flow, id: Option<Id<Flow>>) -> Amounts {
         if let Some(done) = id.and_then(|id| settled(self.plan, &self.record, id, flow)) {
             return done;
         }
@@ -791,7 +700,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     }
 
     /// `all`: everything the selected parcels at the source hold.
-    fn everything(&self, flow: &Flow, written: Amounts) -> Amounts {
+    pub(crate) fn everything(&self, flow: &Flow, written: Amounts) -> Amounts {
         let book = self.plan.book;
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
         let qty = if book.places[flow.from].class.holds_parcels() {
@@ -806,7 +715,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
 
     /// `= 5_000 USD`: whatever leaves the source, or arrives at the target,
     /// so that its place holds `balance` afterwards.
-    fn resolve_target(&mut self, flow: &Flow, end: End, balance: Qty, written: Amounts) -> Amounts {
+    pub(crate) fn resolve_target(&mut self, flow: &Flow, end: End, balance: Qty, written: Amounts) -> Amounts {
         let book = self.plan.book;
         let (place, unit) = match end {
             End::From => (flow.from, flow.out.unit),
@@ -855,33 +764,6 @@ fn is_exchange_cost(book: &Book, flows: axiom_core::Run<Flow>, group: &Made, ite
     };
     header.is_exchange()
         && item.purpose.is_some_and(|purpose| book.purposes[purpose.purpose].root == PurposeRoot::Spending)
-}
-
-/// Evaluate one transaction-scoped expression with the current source flow as
-/// its `self`, `amount`, `from`, and `to`. This borrows the Book's program and
-/// code/detail pools; only the caller-owned node-value buffer is mutable.
-fn journal_expression<'b, 's>(
-    plan: &Plan<'b, 's>,
-    world: &World,
-    values: &mut Vec<axiom_model::Value>,
-    flow_id: Id<Flow>,
-    txn_id: Id<axiom_model::Txn>,
-    flow: &Flow,
-    program: &Program,
-    root: axiom_model::NodeId,
-) -> Value {
-    let book = plan.book;
-    let txn = RuntimeTxn::journal(txn_id).expect("journal expression cannot use the template transaction sentinel");
-    let view = book.flow_view(flow);
-    let flow_ordinal = plan.book.txns.get(txn_id).and_then(|txn| txn.offset(flow_id)).unwrap_or(0);
-    let motion =
-        Motion::from_view_at(book, view, txn, Cause::Flow(flow_id), flow.day, Amounts::written(flow), flow_ordinal);
-    let mut occasion = crate::eval::Occasion::flow(&motion);
-    occasion.amount = Some(if flow.out.qty == Qty::ZERO { flow.arrive } else { flow.out });
-    let context = crate::eval::Context::new(Subject::Place(flow.from), flow.owner, &occasion)
-        .for_flow()
-        .with_inputs(book.txn_inputs(txn_id));
-    crate::eval::program_expression(crate::eval::Env { plan, world }, program, root, &context, values)
 }
 
 /// Every journal flow as solved and settled. Each depends on nothing but the

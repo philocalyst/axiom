@@ -20,6 +20,7 @@
 //! | `sync_lower` | patterns, formats, code rules and sources of `sync`         |
 //! | `problem`    | the diagnostics that come in families, each worded once     |
 
+pub mod balance;
 pub mod book;
 pub mod journal;
 pub mod law;
@@ -27,7 +28,6 @@ pub mod solve;
 pub mod split;
 pub mod sync;
 
-mod balance;
 pub mod builtin;
 mod collect;
 mod declare;
@@ -58,6 +58,7 @@ mod taxonomy;
 mod tests;
 mod values;
 
+pub use balance::{Settled, Statement, Total};
 pub use book::*;
 pub use holders::{Holder, HolderIndex};
 pub use journal::*;

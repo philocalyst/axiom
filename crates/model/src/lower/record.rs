@@ -16,7 +16,7 @@ use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
-use crate::balance::{self, Settled, Statement, Total};
+use crate::balance::{self, Settled, Total};
 use crate::book::{Amount, Place, ScheduleKind};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
@@ -311,7 +311,7 @@ fn lower_named_flow<'s>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let (cx, written, codes) = (txn.cx, txn.flow, txn.codes);
-    let (first, flow_at) = (staged.flows().start(), staged.flows().len());
+    let flow_at = staged.flows().len();
     let Some((flow, exprs)) = make_flow(staged, txn, ends, diags) else {
         built.successful = false;
         return;
@@ -330,8 +330,8 @@ fn lower_named_flow<'s>(
     let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots, diags);
     let group = Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items };
     let total = if says_amount { Total::Is(header) } else { Total::Later };
-    let settled =
-        balance::settle(&mut staged.book, Statement { group: &group, first, total, side: FlowSide::Out, loc: cx.loc });
+    let flows = staged.flows();
+    let settled = balance::settle(&mut staged.book, &group, flows, total, cx.loc);
     built.keep(group, settled, diags);
 }
 
@@ -384,7 +384,6 @@ fn lower_split_flow<'s>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let (cx, written) = (&txn.cx, txn.flow);
-    let first = staged.flows().start();
     let stated = stated_total(source, written);
     let base = staged.book.base;
     let total = stated.and_then(|(quantity, side)| resolve_quantity(staged, cx, quantity, base, side, diags));
@@ -407,8 +406,8 @@ fn lower_split_flow<'s>(
     }
     let header = Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) };
     let group = Made { header, side: source.side, legs: made.legs.into_boxed_slice(), items };
-    let statement = Statement { group: &group, first, total: total_of(total), side: source.side.other(), loc: cx.loc };
-    let settled = balance::settle(&mut staged.book, statement);
+    let flows = staged.flows();
+    let settled = balance::settle(&mut staged.book, &group, flows, total_of(total), cx.loc);
     built.keep(group, settled, diags);
 }
 
@@ -1382,10 +1381,9 @@ fn lower_owes<'a, 's>(
     let mode = if opening { Mode::Opening } else { Mode::Actual };
     let mut flow_roots = Vec::new();
     let mut group = None;
-    let first = staged.flows().start();
     let mut keep = |staged: &mut Staged<'_, 's>, made: Made, total: Total, diags: &mut Vec<Diagnostic>| {
-        let statement = Statement { group: &made, first, total, side: FlowSide::Out, loc };
-        match balance::settle(&mut staged.book, statement) {
+        let flows = staged.flows();
+        match balance::settle(&mut staged.book, &made, flows, total, loc) {
             Ok(settled) => group = Some((made, settled)),
             Err(problem) => diags.push(problem),
         }

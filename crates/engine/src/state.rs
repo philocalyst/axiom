@@ -70,6 +70,8 @@ pub(crate) struct Record {
     /// checkpoint identity, keyed by the source flow rather than copied into
     /// every Flow record.
     pub computed_basis: Map<Id<Flow>, Qty>,
+    /// Statements whose split could not be solved when its first flow landed: said once, and none of its flows posts.
+    pub unsolved: Set<Id<axiom_model::Txn>>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     /// Basis changes caused by timed asset laws and deferred-loss matching.
@@ -140,6 +142,7 @@ impl Record {
         Record {
             resolved: self.resolved.clone(),
             computed_basis: self.computed_basis.clone(),
+            unsolved: self.unsolved.clone(),
             checks: vec![0; self.checks.len()],
             checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),
@@ -232,6 +235,7 @@ impl Hash for Record {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unordered(&self.resolved).hash(state);
         unordered(&self.computed_basis).hash(state);
+        unordered(&self.unsolved).hash(state);
         unordered(&self.checkpoints).hash(state);
         unordered(&self.headroom).hash(state);
         unordered(&self.waivers).hash(state);
