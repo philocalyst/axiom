@@ -9,6 +9,13 @@ use crate::hash::Map;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Sym(u32);
 
+impl Sym {
+    /// The symbol's place among the names interned, from zero: what a table indexed by name is indexed by.
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 #[derive(Default)]
 pub struct Interner<'s> {
     ids: Map<&'s str, Sym>,
@@ -30,5 +37,14 @@ impl<'s> Interner<'s> {
 
     pub fn name(&self, sym: Sym) -> &'s str {
         self.names[sym.0 as usize]
+    }
+
+    /// How many names are interned: one more than the greatest [`Sym::index`].
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
     }
 }

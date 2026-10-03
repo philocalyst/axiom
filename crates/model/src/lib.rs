@@ -9,6 +9,7 @@
 //! | `taxonomy`   | the trees of `NAME : PARENT` names: kinds and purposes      |
 //! | `slots`      | what the things of a kind have: ranges, counts and weights  |
 //! | `builtin`    | the language's own slots, as typed keys of the facts        |
+//! | `addresses`  | how the words of a reference find the account they mean      |
 //! | `holders`    | the things a book says things about, numbered for the facts |
 //! | `said`       | what a book says of a thing: a slot's value on a day        |
 //! | `fill`       | what a line gives a slot: range, count and weights, checked |
@@ -30,6 +31,7 @@ pub mod solve;
 pub mod split;
 pub mod sync;
 
+mod addresses;
 pub mod builtin;
 mod collect;
 mod declare;
