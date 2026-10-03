@@ -128,16 +128,12 @@ fn implied_parties<'a, 's>(
 ) -> (Map<&'s str, Loc>, Vec<&'s str>) {
     let collected = said.collected;
     let Mentions { first: mentioned, parties } = Mentions::of(said.sites);
-    let mut references: Vec<&'s str> = mentioned.keys().copied().filter(|name| name.contains('/')).collect();
-    references.sort_unstable();
+    let references = of_two_words(&mentioned);
     let mut places = Set::default();
     for decl in collected.decls.iter().filter(|decl| matches!(decl.node.what, DeclKind::Account | DeclKind::Asset)) {
         add_path_spellings(&mut places, decl.node.name.0);
     }
-    let mut entities = Set::default();
-    for &path in written.keys() {
-        add_path_spellings(&mut entities, path);
-    }
+    let mut entities = spellings(written.keys().copied());
     entities.extend(BUILT_IN);
     // Kinds, purposes, commodities, systems and assets.
     let mut others = Set::default();
@@ -152,19 +148,11 @@ fn implied_parties<'a, 's>(
     for decl in collected.decls_of(DeclKind::Asset) {
         add_path_spellings(&mut others, decl.node.name.0);
     }
-    let mut contracts = Set::default();
-    for contract in &collected.contracts {
-        add_path_spellings(&mut contracts, contract.node.name.0);
-    }
+    let contracts = spellings(collected.contracts.iter().map(|contract| contract.node.name.0));
     let meant = Addressed::of(collected, written);
     let mut implied = Map::default();
     for (&path, &loc) in &mentioned {
-        if entities.contains(path) || places.contains(path) || others.contains(path) {
-            continue;
-        }
-        // A path that begins with an entity that fills a slot of some account, or ends in the name of one, is meant as an
-        // address: if none matches it, that is for the lookup to say, and the journal brings no party into being by it.
-        if meant.is_an_address(path) {
+        if entities.contains(path) || places.contains(path) || others.contains(path) || meant.is_an_address(path) {
             continue;
         }
         // A contract may be named for its party, but is not a party for being named.
@@ -176,9 +164,26 @@ fn implied_parties<'a, 's>(
     (implied, references)
 }
 
+/// Every spelling a path of `paths` is written by: the path, each prefix of it, and each suffix of those.
+fn spellings<'s>(paths: impl Iterator<Item = &'s str>) -> Set<&'s str> {
+    let mut spellings = Set::default();
+    for path in paths {
+        add_path_spellings(&mut spellings, path);
+    }
+    spellings
+}
+
+/// The names of two words or more, in the order they sort: what a reference may be an address of.
+fn of_two_words<'s>(mentioned: &Map<&'s str, Loc>) -> Vec<&'s str> {
+    let mut references: Vec<&'s str> = mentioned.keys().copied().filter(|name| name.contains('/')).collect();
+    references.sort_unstable();
+    references
+}
+
 /// What the accounts' declarations say a reference of two words or more may be meant as: the written entities that fill
 /// some account's slots (before its name, after `at`, or as an argument of one of its lines), and the names accounts
-/// are called.
+/// are called. A path that begins with one of the first or ends in one of the second is meant as an address: if no
+/// account has it, that is for the lookup to say, and the journal brings no party into being by it.
 struct Addressed<'s> {
     fillers: Set<&'s str>,
     names: Set<&'s str>,
