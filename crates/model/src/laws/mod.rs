@@ -170,14 +170,13 @@ pub(crate) fn compile_native<'s>(
     Some(push(world, compiled))
 }
 
-/// Rebuilds the per-kind and per-system law runs after native lowering added
-/// nested laws to the Book arena.
-pub(crate) fn register_native(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
+/// Rebuilds the per-kind and per-system law runs after native lowering added nested laws to the Book arena, and
+/// says the order the laws run in: what `rules::govern` needs, once every place there will be exists.
+pub(crate) fn register_native(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) -> Vec<u32> {
     register(world);
     resolve_overrides(world, diags);
     set_specificity(world);
-    let order = rank(&world.book, diags);
-    crate::rules::govern(&mut world.book, &order);
+    rank(&world.book, diags)
 }
 
 /// Resolve `overrides` after every top-level and nested law has a stable id.

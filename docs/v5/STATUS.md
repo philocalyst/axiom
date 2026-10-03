@@ -15,7 +15,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **C2** `core::facts` | the store of timelines: `Key<V>`, painting `Builder`, frozen CSR `Facts`, `days_where` as an integral, sets as `Many` | **merged** (after K0a) |
 | **K12** kinds, slots, facts | typed slots, `Taxonomy`, numbering the holders, moving every reader to `core::facts` | **merged** (`e5a3554`) |
 | **K4a** one split vocabulary | `Quantity`, `Part`, `Expr`, `Group<H,F,I>`, one `Program` replace the two parallel Template*/Journal* families | **merged** (`d1daf1f`) |
-| **K3a** positions that need no prediction | tabs created lazily; delete the survey, `find_tabs`, `contract_endpoints`, `unregistered-tab` | running |
+| **K3a** positions that need no prediction | tabs created lazily; delete the survey, `find_tabs`, `contract_endpoints`, `unregistered-tab` | **merged** |
 | **K4b** one `solve` | `solve` over an `Env`, constant folding at model time, a static conservation check | brief written; starts when verification of K4a is clean |
 | K3 positions and addresses | | after K12 |
 | K4 events | | after K3 |
@@ -66,6 +66,18 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
   was not kept. Belongs to K7's position steppers.
 - A smaller or interned `Diagnostic` in `core` would remove the boxed-error aliases the groundwork needed.
 - The CLI and report render cells twice. K7.
+
+## K3a, in numbers
+
+| | |
+|---|---|
+| deleted | `lower::survey`, `find_tabs`, `TabDraft`, `Mention`, `JournalSurvey`, `EndpointContext`, `contract_endpoints` as a prediction, the `unregistered-tab` diagnostic |
+| built | `Tree::push_root`, `Facts::grow`, `Builder::grow` (things that come to be after a freeze), holders numbered with places last, `World::tab` finds-or-makes, `rules::govern` after `record`, `Book::listing` for an explicit tab order |
+| lines | model −351, total −332 against a −600 target: the implied-party walk stays (about 130 lines) and the replacement code is real |
+| a real bug fixed | a loan paid from an account written by a short name (`joint` for `assets/joint`) gave `unregistered-tab` (11 of 60 generated projects) or, when another mention registered the key, split one debt across two tabs. The same books written with whole paths now report identically (0 differ, 125 before) |
+| visible changes, listed | `check` counts the places that exist; `why LINE` names the first claim that asked; tab order is explicit in `balance`/`lots`/`claims`/`available`; a self-loan gets `contract-loan-party`; one golden (`04-freelancer-balance`) lists its tabs by name |
+| proof | `tabs.py` (900 generated projects), K0a's harness, `splits.py`, 2,000 fuzzed mutants, 11 oracle mutants killed |
+| for K3b/K3c | `Role` does not block `(owner, with, kind)`: delete `institution`, make `Holding` a unit, add `with` to `Place`, give tabs a `claim` kind. The implied-party walk is what K3b deletes; it must decide what an ambiguous suffix means when a second entity is created after the first was resolved |
 
 ## K4a, in numbers
 

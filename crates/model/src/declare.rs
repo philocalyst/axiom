@@ -11,7 +11,7 @@ use axiom_core::{
 };
 use axiom_syntax::{Change, Decl, DeclKind, ExprKind, Setting, Verb};
 
-use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Roots, Share, Sort, System};
+use crate::book::{Book, Class, Entity, Kind, KindRoots, Lookup, Place, Purpose, Role, Roots, Share, Sort, System};
 use crate::builtin;
 use crate::collect::{Collected, Order, Written};
 use crate::errors::Word;
@@ -35,11 +35,10 @@ pub(crate) struct World<'s> {
     /// Everything said of the things so far: frozen into the book once it is all said.
     pub painter: Builder,
     pub tallies: Set<&'s str>,
-    /// Claim tabs allocated from the bounded syntax survey before place IDs
-    /// freeze. A later lookup that was not surveyed is an error.
+    /// The claim tabs made so far, by what they are of. A tab is made by the first claim or loan that asks.
     tabs: Tabs,
-    /// Loan contract names resolve to their actual debt tab, before and after
-    /// contract terms have been compiled.
+    /// A loan contract's name stands for its debt tab, before the contract's terms have been compiled as well as after:
+    /// a template may name a loan declared after it.
     pub(crate) contract_endpoints: Map<Sym, End>,
 }
 
@@ -91,18 +90,41 @@ impl World<'_> {
         self.book.facts = self.painter.freeze();
     }
 
-    pub(crate) fn tab(
-        &self,
-        party: Id<Entity>,
-        owner: Id<Entity>,
-        class: Class,
-        loc: Loc,
-    ) -> Result<Id<Place>, Diagnostic> {
-        self.tabs.get(&(party, owner, class)).copied().ok_or_else(|| {
-            Diagnostic::error("unregistered-tab", "this claim tab was not found during the declaration survey")
-                .label(loc, "a claim relationship must be visible before the place tree is frozen")
-                .help("check that the party, owner and flow direction match the claim or contract declaration")
-        })
+    /// The place that keeps what `party` owes `owner` (an `Asset`-class tab) or what `owner` owes `party` (a `Debt`-class
+    /// tab), made the first time anything asks for it. A tab is a root that ends the tree, with no path of its own: the
+    /// party's name labels it, and nothing finds it by name. `loc` is the line that asked first.
+    pub(crate) fn tab(&mut self, party: Id<Entity>, owner: Id<Entity>, class: Class, loc: Loc) -> Id<Place> {
+        debug_assert!(party != owner, "nobody owes themselves");
+        let key = (party, owner, class);
+        if let Some(&place) = self.tabs.get(&key) {
+            return place;
+        }
+        let kinds = self.book.roots.kinds;
+        let tab = Place {
+            path: self.book.entities[party].path,
+            class,
+            role: Role::Tab(party),
+            kind: if class == Class::Debt { kinds.debt } else { kinds.asset },
+            owner,
+            shares: Box::default(),
+            known_as: Box::default(),
+            doc: None,
+            loc: Some(loc),
+        };
+        let place = self.open_place(tab);
+        self.tabs.insert(key, place);
+        place
+    }
+
+    /// A place that comes to be once the place tree and the facts about it are frozen: the last root of the tree, the last
+    /// number of the holders, and a row of the facts that says nothing.
+    fn open_place(&mut self, place: Place) -> Id<Place> {
+        let id = self.book.places.push_root(place);
+        self.book.holders.add_place();
+        let holders = self.book.holders.len();
+        self.book.facts.grow(holders);
+        self.painter.grow(holders);
+        id
     }
 }
 
@@ -363,13 +385,11 @@ fn contract_party_name_exception(a: &NameClaim<'_>, b: &NameClaim<'_>, spelling:
 /// The place that keeps what one party owes another, by the party, the owner and the class of the claim.
 pub(crate) type Tabs = Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>;
 
-/// What the sources say, three ways: in the order they are written, by kind of item, and as the mentions the
-/// journal makes of parties and ends.
+/// What the sources say, two ways: in the order they are written, and by kind of item.
 #[derive(Clone, Copy)]
 pub(crate) struct Said<'c, 'a, 's> {
     pub sites: &'c [Site<'a, 's>],
     pub collected: &'c Collected<'a, 's>,
-    pub survey: &'c crate::lower::JournalSurvey<'s>,
 }
 
 /// The systems of a build: as a tree, by what they define, and what each home of them sees.
@@ -379,8 +399,8 @@ pub(crate) struct Systems<'s> {
     pub scopes: Scopes,
 }
 
-/// Construct a native v4 Book from the syntax sites and a small survey of only
-/// claim-bearing journal relationships. No v3 chart-account collection is used.
+/// Construct a native v4 Book from the syntax sites. The place tree is frozen here; the claim tabs are not in it, for a
+/// tab is made by the first claim that asks for it.
 pub(crate) fn declare<'a, 's>(
     said: Said<'_, 'a, 's>,
     settings: &Settings<'s>,
@@ -388,7 +408,7 @@ pub(crate) fn declare<'a, 's>(
     systems: Systems<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> World<'s> {
-    let Said { collected, survey, .. } = said;
+    let collected = said.collected;
     let Systems { tree: systems_tree, index: systems, scopes } = systems;
     let seeing = Seeing { systems: &systems_tree, scopes: &scopes };
     let native_kinds = taxonomy::declare::<Kind>(collected, &mut names, seeing, diags);
@@ -403,18 +423,14 @@ pub(crate) fn declare<'a, 's>(
     let mut entities = parties::declare(collected, parties, &resolving, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
-    let account_owners = holdings::owners_by_path(&accounts);
-    let tabs = holdings::find_tabs(survey, &entities, &account_owners);
-    let inputs =
-        PlaceInputs { collected, resolving: &resolving, commodities: &commodities, accounts: &accounts, tabs: &tabs };
+    let inputs = PlaceInputs { collected, resolving: &resolving, commodities: &commodities, accounts: &accounts };
     let places = places::declare(&inputs, &mut entities, &mut assets, &mut names);
-    let contract_endpoints = contract_endpoints(survey, &entities, &account_owners, &places.tabs, &mut names);
 
     let entity_purposes = std::mem::take(&mut entities.purposes);
     let made = Made { commodities, entities, assets, places, kinds: native_kinds, purposes: native_purposes };
-    let tabs = made.places.tabs.clone();
     let book = book(made, names, systems_tree, settings);
     let painter = Facts::builder(book.holders.len());
+    let (tabs, contract_endpoints) = (Tabs::default(), Map::default());
     let mut world = World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints };
     // What an entity's own declaration says its purpose is, said as a line under it would.
     for (entity, purpose) in entity_purposes {
@@ -513,31 +529,6 @@ fn book<'s>(made: Made<'s>, mut names: Interner<'s>, systems: Tree<System>, sett
     }
 }
 
-/// The debt tab a loan contract's name stands for, by the contract's name: the loan's party owes the owner
-/// of the account the contract is paid from.
-fn contract_endpoints<'s>(
-    survey: &crate::lower::JournalSurvey<'s>,
-    entities: &Entities<'s>,
-    account_owners: &Map<&'s str, Id<Entity>>,
-    tabs: &Tabs,
-    names: &mut Interner<'s>,
-) -> Map<Sym, End> {
-    let mut endpoints = Map::default();
-    for mention in &survey.mentions {
-        let crate::lower::Mention::Promise { name, party, holding, loan_party: Some(_), .. } = *mention else {
-            continue;
-        };
-        let Some(&party) = entities.ids.get(party.0) else {
-            continue;
-        };
-        let owner = holding.and_then(|name| account_owners.get(name.0).copied()).unwrap_or(entities.me);
-        if let Some(&place) = tabs.get(&(party, owner, Class::Debt)) {
-            endpoints.insert(names.intern(name.0), End { place, entity: Some(party) });
-        }
-    }
-    endpoints
-}
-
 fn path_key(path: &str) -> impl Iterator<Item = u8> + '_ {
     path.bytes().map(|byte| if byte == b'/' { 0 } else { byte })
 }
@@ -598,6 +589,7 @@ mod tests {
 
 mod commodities;
 mod holdings;
+mod mentions;
 mod parties;
 mod places;
 

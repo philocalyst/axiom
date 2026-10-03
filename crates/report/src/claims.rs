@@ -60,7 +60,8 @@ pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]
 }
 
 /// Every claim open on the lens's day, for its owners, given the holdings on
-/// that day: soonest due first, what is owed to you before what you owe.
+/// that day: soonest due first, what is owed to you before what you owe, and of two claims made and due on one day the
+/// one whose place is listed first (see `Book::listing`).
 pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
     let book = lens.book();
     let claimed = holdings.into_iter().filter(|holding| book.is_claim(holding.place) && lens.owns(holding.place));
@@ -87,7 +88,7 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
         place.class == Class::Debt && lens.owns(id) && payable.is_some_and(|kind| book.is_a(place.kind, kind))
     });
     let mut claims: Vec<Claim> = parcels.chain(payables.flat_map(|(place, _)| owed_by_you(lens, run, place))).collect();
-    claims.sort_by_key(|claim| (!claim.mine, claim.due.unwrap_or(Day::MAX), claim.made));
+    claims.sort_by_key(|claim| (!claim.mine, claim.due.unwrap_or(Day::MAX), claim.made, book.listing(claim.place)));
     claims
 }
 

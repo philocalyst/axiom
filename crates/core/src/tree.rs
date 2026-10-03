@@ -72,6 +72,15 @@ impl<T> Tree<T> {
         Ok((Tree { items, links }, ids))
     }
 
+    /// Appends `item` as the last root. In pre-order the last root's subtree is the end of the numbering, so a new one
+    /// moves no id, no `end` and no depth: the tree is what [`Tree::build`] would make of the same items with this one last.
+    pub fn push_root(&mut self, item: T) -> Id<T> {
+        let id = self.items.len() as u32;
+        self.items.push(item);
+        self.links.push(Link { parent: NONE, end: id + 1, depth: 0 });
+        Id::new(id)
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -244,6 +253,41 @@ mod tests {
         *child += *parent;
         assert_eq!(tree.as_slice(), [1, 10, 110]);
         assert!(tree.with_parent_mut(ids[0]).is_none());
+    }
+
+    /// What a tree says of each id besides the item: its parent, where its subtree ends and how deep it is.
+    fn links<T>(tree: &Tree<T>) -> Vec<(Option<Id<T>>, Id<T>, u32)> {
+        tree.ids().map(|id| (tree.parent(id), tree.end(id), tree.depth(id))).collect()
+    }
+
+    #[test]
+    fn a_pushed_root_is_the_tree_built_with_it_last() {
+        let items = vec!["assets", "assets/bank", "expenses"];
+        let parents = [None, Some(0), None];
+        let (mut pushed, ids) = Tree::build(items.clone(), &parents).unwrap();
+        let before = links(&pushed);
+
+        let tab = pushed.push_root("dana");
+
+        let (built, built_ids) = Tree::build([items, vec!["dana"]].concat(), &[None, Some(0), None, None]).unwrap();
+        assert_eq!(tab, built_ids[3], "a root is made last");
+        assert_eq!(pushed.as_slice(), built.as_slice());
+        assert_eq!(links(&pushed), links(&built));
+        assert_eq!(links(&pushed)[..3], before[..], "no id, end or depth of what was there moved");
+        assert_eq!(pushed.subtree(tab).count(), 1);
+        assert!(pushed.covers(tab, tab) && !pushed.covers(ids[0], tab));
+        assert_eq!(pushed.roots().collect::<Vec<_>>(), [ids[0], ids[2], tab]);
+        assert_eq!(pushed.lineage(tab).collect::<Vec<_>>(), [tab]);
+    }
+
+    #[test]
+    fn a_root_can_be_pushed_onto_nothing() {
+        let mut tree = Tree::default();
+        let first = tree.push_root('a');
+        let second = tree.push_root('b');
+        assert_eq!((first.index(), second.index()), (0, 1));
+        assert_eq!(tree.roots().count(), 2);
+        assert_eq!(tree.end(first), second);
     }
 
     #[test]
