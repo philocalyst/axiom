@@ -99,7 +99,7 @@ pub trait Coded: Copy + PartialEq + 'static {
 }
 
 impl Coded for Policy {
-    const SET: &'static [Policy] = &[Policy::Fifo, Policy::Lifo, Policy::Hifo, Policy::Prorata];
+    const SET: &'static [Policy] = &[Policy::Fifo, Policy::Lifo, Policy::Hifo, Policy::Prorata, Policy::Exact];
 }
 
 impl Coded for Basis {

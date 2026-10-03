@@ -12,7 +12,7 @@ use axiom_model::{Basis, Book, Commodity, Entity, Place, Policy};
 /// What the fold asks of a place.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct PlaceTraits {
-    /// How the place relieves parcels, where it says.
+    /// How the place relieves parcels: what it says, and for a claim place `Exact` where it says nothing.
     pub select: Option<Policy>,
     /// What basis value arriving takes.
     pub basis: Basis,
@@ -44,11 +44,11 @@ pub(crate) struct Traits {
 
 impl Traits {
     pub fn of(book: &Book) -> Traits {
-        let places = book.places.ids().map(|place| PlaceTraits {
-            select: book.select(place),
-            basis: book.basis(place),
-            deferred: book.is_deferred(place),
-            claim: book.is_claim(place),
+        let places = book.places.ids().map(|place| {
+            // A claim is settled by the exact amount, then the oldest, unless its place says another way.
+            let claim = book.is_claim(place);
+            let select = book.select(place).or(claim.then_some(Policy::Exact));
+            PlaceTraits { select, basis: book.basis(place), deferred: book.is_deferred(place), claim }
         });
         let entities = book.entities.ids().map(|entity| EntityTraits {
             member: book.member(entity),

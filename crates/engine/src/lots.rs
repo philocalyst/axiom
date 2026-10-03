@@ -10,8 +10,9 @@
 //! Lots are kept oldest first, so FIFO takes from the front (past a cursor over
 //! the exhausted ones) and LIFO from the back, each in time proportional to the
 //! lots it uses. HIFO asks a heap ordered by basis per unit, built when first
-//! needed and kept up to date by every change to a lot. Only `prorata`,
-//! selectors and ties have to look at every lot.
+//! needed and kept up to date by every change to a lot. `exact` takes the lot
+//! of exactly the size asked, else the oldest, and settles a claim. Only
+//! `prorata`, selectors and ties have to look at every lot.
 //!
 //! Exhausted lots are left in place while the fold runs and swept out when
 //! control returns to the caller, so the holdings a caller sees are always
@@ -504,6 +505,9 @@ impl Slot {
             }
             let of_colour = |lot: &Parcel| !tied || req.colour(lot.tied) == colour;
             let plain_here = colour == Colour::Free;
+            if policy == Some(Policy::Exact) {
+                self.take_exact(&mut left, of_colour, req, out);
+            }
             if plain_here && !lifo {
                 self.take_plain(&mut left, req, out);
             }
@@ -523,6 +527,17 @@ impl Slot {
         let qty = self.holding.plain.min(*left);
         if qty > Qty::ZERO {
             self.take(Source::Plain, qty, req, out);
+            *left -= qty;
+        }
+    }
+
+    /// The oldest lot `keep` admits that holds exactly what was asked, as far as `left` goes: the claim a payment is the
+    /// size of, which is settled before an older one that is not.
+    fn take_exact(&mut self, left: &mut Qty, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
+        let exact = self.holding.lots[self.first..].iter().position(|lot| lot.qty == req.need && keep(lot));
+        if let Some(found) = exact {
+            let qty = req.need.min(*left);
+            self.take(Source::Lot(self.first + found), qty, req, out);
             *left -= qty;
         }
     }
@@ -591,7 +606,7 @@ impl Slot {
         self.gather(req.money, selection, &mut candidates);
         let colour = |c: &Candidate| req.colour(c.tied);
         candidates.retain(|c| req.allows(colour(c)));
-        candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, a, b)));
+        candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, req.need, a, b)));
 
         let mut plan = std::mem::take(&mut out.plan);
         plan.clear();
@@ -801,11 +816,13 @@ impl Candidate {
 
 /// Candidates in the order the policy consumes them. Storage order is oldest
 /// first, so FIFO is the identity, and it also orders "no policy", pro-rata
-/// (whose order does not matter) and ties in the others.
-fn by_policy(policy: Option<Policy>, a: &Candidate, b: &Candidate) -> Ordering {
+/// (whose order does not matter) and ties in the others. `Exact` puts the
+/// candidates of exactly `need` first, oldest of them first.
+fn by_policy(policy: Option<Policy>, need: Qty, a: &Candidate, b: &Candidate) -> Ordering {
     match policy {
         Some(Policy::Lifo) => b.source.cmp(&a.source),
         Some(Policy::Hifo) => basis_per_unit(b, a).then(a.source.cmp(&b.source)),
+        Some(Policy::Exact) => (b.qty == need).cmp(&(a.qty == need)).then(a.source.cmp(&b.source)),
         _ => a.source.cmp(&b.source),
     }
 }
@@ -1439,6 +1456,40 @@ mod tests {
     }
 
     #[test]
+    fn exact_takes_the_lot_of_exactly_the_size_asked_and_otherwise_the_oldest() {
+        let base = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2), lot(300, 300, 3)], false);
+        let exact = Ask { policy: Some(Policy::Exact), ..PLAIN };
+        let mut held = base.clone();
+        let relief = relieve(&mut held, 200, &exact);
+        assert_eq!((taken(&relief), relief.ambiguous), (vec![(200, 200)], false), "not the oldest, which is 300");
+        assert_eq!(lots(&held), [(300, 300), (300, 300)]);
+        let mut held = base.clone();
+        assert_eq!(taken(&relieve(&mut held, 300, &exact)), [(300, 300)]);
+        assert_eq!(lots(&held), [(200, 200), (300, 300)], "of two lots of 300, the older goes");
+        let mut held = base.clone();
+        assert_eq!(
+            taken(&relieve(&mut held, 100, &exact)),
+            [(100, 100)],
+            "nothing is exactly 100: the oldest, in part"
+        );
+        assert_eq!(lots(&held), [(200, 200), (200, 200), (300, 300)]);
+    }
+
+    #[test]
+    fn exact_among_the_lots_a_selector_admits_and_among_the_colours_of_a_tie() {
+        let entity = Id::new(3);
+        let tied = |qty, acquired| Parcel { tied: Some(entity), ..lot(qty, qty, acquired) };
+        let mut held = slot_of(1, 0, &[lot(200, 200, 1), tied(200, 2), lot(300, 300, 3)], false);
+        let exact = Ask { policy: Some(Policy::Exact), spender: Some(entity), ..PLAIN };
+        assert_eq!(taken(&relieve(&mut held, 200, &exact)), [(200, 200)]);
+        assert_eq!(lots(&held), [(200, 200), (300, 300)], "the spender's own lot of 200 goes before the untied one");
+        let mut held = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2)], false);
+        let admit_all = [Select::Range(Days::ALWAYS)];
+        let scanning = Ask { policy: Some(Policy::Exact), selectors: &admit_all, ..PLAIN };
+        assert_eq!(taken(&relieve(&mut held, 200, &scanning)), [(200, 200)]);
+    }
+
+    #[test]
     fn hifo_follows_a_lot_whose_basis_changed_and_lots_that_arrive() {
         let mut held = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 2_000, 2)], false);
         let hifo = Ask { policy: Some(Policy::Hifo), ..PLAIN };
@@ -1847,7 +1898,7 @@ mod tests {
             dice ^= dice >> 27;
             (dice.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) % below
         };
-        for policy in [Policy::Fifo, Policy::Lifo, Policy::Hifo] {
+        for policy in [Policy::Fifo, Policy::Lifo, Policy::Hifo, Policy::Exact] {
             let (mut fast, mut slow) =
                 (Slot::new(Id::new(0), Id::new(1), NONE), Slot::new(Id::new(0), Id::new(1), NONE));
             for step in 0..600 {

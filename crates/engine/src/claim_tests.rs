@@ -108,7 +108,6 @@ fn said(run: &Run, code: &str) -> Vec<String> {
 
 /// "else the one whose open amount is exactly the flow's": 200.00 settles `^i2`, which is not the oldest.
 #[test]
-#[ignore = "K3c: `Exact` is not a policy yet; a USD claim place relieves the oldest first"]
 fn a_flow_settles_the_claim_whose_open_amount_is_exactly_its_own_before_an_older_one() {
     let lines = format!("{THREE}2026-01-20 owed -> checking 200 USD\n");
     with_run(&lines, |book, run| {
@@ -137,7 +136,6 @@ fn a_flow_larger_than_any_claim_settles_oldest_first_across_them() {
 
 /// Two claims of exactly the flow's amount: the older. FIFO would take the 200.00 of `^i1` and then 100.00 of `^i2`.
 #[test]
-#[ignore = "K3c: `Exact` is not a policy yet"]
 fn of_two_claims_that_are_exactly_the_flows_amount_the_older_is_settled() {
     let lines = "\
 2026-01-02 ann -> owed 200 USD due 2026-02-01 #design ^i1
@@ -172,7 +170,6 @@ fn several_codes_name_the_claims_that_may_be_settled_and_the_oldest_of_them_goes
 
 /// A code that no claim there carries labels the payment, as it always did: 200.00 is exactly `^i2`.
 #[test]
-#[ignore = "K3c: `Exact` is not a policy yet"]
 fn a_code_that_names_no_claim_is_only_a_label() {
     let lines = format!("{THREE}2026-01-20 owed -> checking 200 USD ^check-17\n");
     with_run(&lines, |book, run| {
@@ -191,7 +188,6 @@ fn a_written_selector_beats_the_flows_own_code() {
 
 /// A claim of boxes: 5 BOX is exactly `^i2`, and a rule chose it, so no lot is ambiguous (the commodity has no policy).
 #[test]
-#[ignore = "K3c: `Exact` is not a policy yet; a claim of a commodity with no policy is ambiguous"]
 fn a_claim_of_any_commodity_is_settled_by_the_same_order() {
     let lines = "\
 2026-01-02 ann -> owed 12 BOX due 2026-02-01 ^i1

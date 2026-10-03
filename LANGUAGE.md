@@ -472,7 +472,7 @@ Built-in properties:
 |----|----------|---------|
 | account, asset, business | `owner ENTITY [SHARE], …` | default `me`; `owner me 60%, theo 40%` gives each its share of what it earns and bears |
 | | `holds UNIT, … \| any` | commodities it may hold; a measure never |
-| | `select fifo\|lifo\|hifo\|prorata` | relief policy |
+| | `select fifo\|lifo\|hifo\|prorata\|exact` | relief policy |
 | | `opened DATE` | flows before are errors (`ends` closes it) |
 | | `liquidity SPAN` | time to turn into cash |
 | account, entity | `known-as PATTERN, …` | how it appears on statements (§14); a name is its own by default |
@@ -803,7 +803,9 @@ nothing, is plain and always one parcel.
 - **Relief** chooses which parcels leave: ties first, then the policy (the
   selector's, the account's, its kind's, then the commodity kind's; currencies are
   FIFO). Parcels that differ with no policy are ambiguous: an error listing each
-  candidate and its gain, while quantities move FIFO.
+  candidate and its gain, while quantities move FIFO. `exact` takes the parcel
+  that holds exactly what leaves, else the oldest; a place that holds claims
+  relieves by it unless it says otherwise (§7).
 - **Realization** happens when parcels change commodity, leave the owners for a
   party, or leave a `deferred` account for one that is not. `gain = proceeds −
   basis`, in the owner's currency at its system's rates, and `on gain` fires per
