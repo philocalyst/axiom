@@ -1,0 +1,11 @@
+use std
+base USD
+entity me : person
+entity ann : org
+account checking : bank
+account owed : receivable
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 checking -> owed 300 USD due 2026-02-01 ^i1
+2026-01-03 checking -> owed 200 USD due 2026-02-01 ^i2
+2026-01-04 checking -> owed 300 USD due 2026-02-01 ^i3
+2026-01-20 owed -> checking 200 USD
