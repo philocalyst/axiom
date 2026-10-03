@@ -428,6 +428,8 @@ What a client that holds a session pays (`Session` on the same books, one proces
 
 ## 16. How it was checked
 
+The scripts are `docs/v5/measure/session/`: `allcmds.sh` (the 1,592 outputs), `fuzzcmds.py`, `ab.py` (interleaved timing), `mutate.py` and `mutants.py`.
+
 - **No output changed.** `sh tests/golden.sh` and `sh tests/mistakes/run.sh`: `git diff tests/` empty after every commit. The 1,592
   outputs of `allcmds.sh` (every command, text and `--json`, on every example, with `--at`, `--for`, `--all`, `--relaxed`,
   `fmt --check`, `sync --dry`, a missing project, and two one-file projects) and the 468 of `docs/v5/measure/diff/run.sh`: **identical to the
