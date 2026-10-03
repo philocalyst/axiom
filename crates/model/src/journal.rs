@@ -423,6 +423,22 @@ pub enum Provenance {
     Derived,
 }
 
+impl Provenance {
+    /// How early LANGUAGE §2 lists the source: the smaller, the stronger, and the first match wins. A flow's own line
+    /// and its promise outrank everything a party, a commodity or an account says.
+    pub fn rank(self) -> u8 {
+        match self {
+            Provenance::Written => 0,
+            Provenance::Contract(_) => 1,
+            Provenance::Entity(_) => 2,
+            Provenance::Party(_) => 3,
+            Provenance::Commodity(_) => 4,
+            Provenance::Account(_) => 5,
+            Provenance::Derived => 6,
+        }
+    }
+}
+
 /// How a flow came to be.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Origin {

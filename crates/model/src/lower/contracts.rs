@@ -7,7 +7,7 @@ use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
 use super::also::{AlsoCx, lower_alsos};
-use super::infer::infer_for_flow;
+use super::infer::classify;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
@@ -761,9 +761,9 @@ fn template_header<'a, 's>(
         Direction::From => (None, Some(party)),
         Direction::Into => (Some(party), None),
     };
-    let purpose = cx.purpose.map(|at| (at.value, at.loc));
+    let purpose = cx.purpose.map(|at| at.value);
     let (from_end, to_end) = (End { place: from, entity: from_party }, End { place: to, entity: to_party });
-    flow.purpose = infer_for_flow(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
+    flow.purpose = classify(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
     let arrive = buys.map_or(quantity, Quantity::Unknown);
     Some(HeaderCx { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
 }
@@ -789,9 +789,9 @@ fn template_legs<'a, 's>(
         flow.codes = tail.codes;
         flow.select = tail.select;
         flow.waive = tail.waive;
-        let inferred = tail.purpose.or(cx.purpose).map(|at| (at.value, at.loc));
+        let written = tail.purpose.or(cx.purpose).map(|at| at.value);
         let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
-        flow.purpose = infer_for_flow(world, ends.0, ends.1, inferred, leg.loc, diags).ok()?;
+        flow.purpose = classify(world, ends.0, ends.1, written, leg.loc, diags).ok()?;
         flow.description = tail.description.or(flow.description);
         lowered.push(Leg { flow, part });
     }

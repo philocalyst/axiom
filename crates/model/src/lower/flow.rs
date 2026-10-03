@@ -4,7 +4,7 @@ use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Ratio, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
-use super::infer::infer_for_flow;
+use super::infer::classify;
 use super::push_amount_root;
 use super::record::CodeIndex;
 use super::staged::Staged;
@@ -378,8 +378,7 @@ pub(super) fn make_resolved_flow(
 ) -> Option<Flow> {
     let Shape { ends: Ends { from, to }, out, arrive, infer, mode } = shape;
     let (day, txn) = (cx.day, cx.txn);
-    let purpose = tail.purpose.map(|purpose| (purpose, tail.purpose_loc.unwrap_or(loc)));
-    let purpose = infer_for_flow(world, from.end(), to.end(), purpose, loc, diags).ok()?;
+    let purpose = classify(world, from.end(), to.end(), tail.purpose, loc, diags).ok()?;
     let mut detail = tail.detail;
     detail.spender = from.entity;
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));

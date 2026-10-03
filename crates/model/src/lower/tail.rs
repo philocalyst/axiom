@@ -22,7 +22,6 @@ use crate::scope::Home;
 #[derive(Clone, Default)]
 pub(super) struct Tail {
     pub purpose: Option<Purposed>,
-    pub purpose_loc: Option<Loc>,
     pub description: Option<Text>,
     pub payee: Option<Id<Entity>>,
     pub recognized: Option<Days>,
@@ -42,7 +41,6 @@ impl Tail {
     pub fn merge(mut self, child: Tail) -> Tail {
         if child.purpose.is_some() {
             self.purpose = child.purpose;
-            self.purpose_loc = child.purpose_loc;
         }
         if child.description.is_some() {
             self.description = child.description;
@@ -156,10 +154,7 @@ impl<'s> FlowCx<'_, 's> {
         match clause.kind {
             ClauseKind::Purpose(written) => match written_purpose(world, home, file, written, Reach::Anywhere, diags) {
                 Some(purposed) if written.of.is_some() && purposed.of.is_none() => tail.valid = false,
-                Some(purposed) => {
-                    tail.purpose = Some(purposed);
-                    tail.purpose_loc = Some(clause.at);
-                }
+                Some(purposed) => tail.purpose = Some(purposed),
                 None => tail.valid = false,
             },
             ClauseKind::Description(text) => tail.description = Some(world.book.quoted_text(text.0)),

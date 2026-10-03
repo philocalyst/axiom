@@ -202,7 +202,7 @@ account assets/fidelity
 }
 
 #[test]
-fn explicit_purpose_must_agree_with_a_commodity_issuer_rule() {
+fn an_explicit_purpose_outranks_a_commodity_issuer_rule() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -219,8 +219,12 @@ account assets/fidelity
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
-    assert!(book.flows.is_empty(), "a conflicting source purpose cannot be silently overridden");
+    assert!(diagnostics.is_empty(), "first match wins, so nothing disagrees: {diagnostics:?}");
+    let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
+    assert_eq!(
+        (purpose.purpose, purpose.source),
+        (book.purpose("interest").unwrap(), axiom_model::Provenance::Written)
+    );
 }
 
 #[test]
@@ -310,7 +314,7 @@ account checking
 }
 
 #[test]
-fn sibling_purposes_still_disagree_under_the_same_root() {
+fn sibling_purposes_of_one_rank_still_disagree_under_the_same_root() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -318,17 +322,52 @@ commodity USD
 purpose wages : income
 purpose salary : wages
 purpose honoraria : wages
-account checking
 entity employer : entity
   purpose salary
-2026-01-01 employer -> checking 1_000 USD #honoraria
+entity agency : entity
+  purpose honoraria
+2026-01-01 employer -> agency 1_000 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
-    assert!(book.flows.is_empty());
+    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
+    assert_eq!(problem.labels.len(), 3, "both parties and the flow");
+    assert!(book.flows.is_empty(), "two parties of one rank that name unrelated purposes classify nothing");
+}
+
+#[test]
+fn a_party_outranks_its_kind_and_the_written_purpose_outranks_both() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose salary : wages
+purpose tax-paid : spending
+purpose groceries : spending
+kind payroll-agency : entity
+  pays wages
+entity acme : payroll-agency
+entity wa-dor : entity
+  purpose tax-paid
+account checking
+2026-01-01 acme -> wa-dor 180 USD
+2026-01-02 acme -> wa-dor 20 USD #groceries
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purposes: Vec<_> = book.flows.iter().map(|(_, flow)| flow.purpose.unwrap()).collect();
+    let acme_kind = book.kind("payroll-agency").unwrap();
+    assert_eq!(purposes[0].purpose, book.purpose("tax-paid").unwrap());
+    assert_eq!(purposes[0].source, axiom_model::Provenance::Entity(book.entity("wa-dor").unwrap()));
+    assert_ne!(purposes[0].source, axiom_model::Provenance::Party(acme_kind), "the party's own purpose wins");
+    assert_eq!(purposes[1].purpose, book.purpose("groceries").unwrap());
+    assert_eq!(purposes[1].source, axiom_model::Provenance::Written);
 }
 
 #[test]
@@ -391,7 +430,7 @@ contract deferral with acme
 }
 
 #[test]
-fn party_purpose_conflicts_are_diagnostic_and_atomic() {
+fn a_written_purpose_outranks_a_party_kind() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -409,13 +448,51 @@ account checking
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
-    assert_eq!(problem.labels.len(), 3);
-    assert!(book.flows.is_empty());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
+    assert_eq!(
+        (purpose.purpose, purpose.source),
+        (book.purpose("interest").unwrap(), axiom_model::Provenance::Written)
+    );
 }
 
 #[test]
-fn an_explicit_purpose_cannot_conflict_with_an_account_take() {
+fn a_promises_purpose_outranks_its_party_kind_and_a_written_leg_outranks_the_promise() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose bonus : income
+purpose tax-paid : spending
+kind payroll-agency : entity
+  pays wages
+entity acme : payroll-agency
+account checking
+contract pay with acme
+  400 USD monthly on 1 into checking
+  #bonus
+  from 2026-01-01
+  checking 100 USD #tax-paid
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let template = &book.contracts[book.contract("pay").unwrap()].terms.as_ref().unwrap().template[0];
+    let contract = book.contract("pay").unwrap();
+    let header = template.header.flow.purpose.unwrap();
+    assert_eq!(
+        (header.purpose, header.source),
+        (book.purpose("bonus").unwrap(), axiom_model::Provenance::Contract(contract))
+    );
+    let leg = template.legs[0].flow.purpose.unwrap();
+    assert_eq!((leg.purpose, leg.source), (book.purpose("tax-paid").unwrap(), axiom_model::Provenance::Written));
+}
+
+#[test]
+fn an_account_take_rewrites_what_the_ends_said_and_never_what_the_line_wrote() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -428,15 +505,24 @@ kind retirement-account : asset
   takes pretax-deferral from wages
 entity acme : payroll-agency
 account retirement : retirement-account
-2026-01-01 acme -> retirement 400 USD #wages
+2026-01-01 acme -> retirement 400 USD
+2026-01-02 acme -> retirement 400 USD #wages
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
-    assert_eq!(problem.labels.len(), 3);
-    assert!(book.flows.is_empty());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purposes: Vec<_> = book.flows.iter().map(|(_, flow)| flow.purpose.unwrap()).collect();
+    let kind = book.kind("retirement-account").unwrap();
+    assert_eq!(
+        (purposes[0].purpose, purposes[0].source),
+        (book.purpose("pretax-deferral").unwrap(), axiom_model::Provenance::Account(kind))
+    );
+    assert_eq!(
+        (purposes[1].purpose, purposes[1].source),
+        (book.purpose("wages").unwrap(), axiom_model::Provenance::Written)
+    );
 }
 
 #[test]
