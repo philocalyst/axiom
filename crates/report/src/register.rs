@@ -9,7 +9,6 @@ use axiom_core::{Day, Diagnostic, Id, Qty};
 use axiom_engine::{Pad, Run, State};
 use axiom_model::{
     Amount, Asset, Book, Commodity, Contract, Derivation, Entity, Flow, Object, Origin, Place, Role, Subject,
-    TermsState,
 };
 
 use crate::history::{Change, Posting, pad_ends, postings};
@@ -316,10 +315,11 @@ fn contract_register<'s>(
     if !lens.owns_entity(contract.owner) {
         return foreign(book, name, contract.owner);
     }
-    let changes = contract.terms.iter().flat_map(|terms| terms.within(contract.days));
+    let changes =
+        contract.terms.iter().flat_map(|terms| contract.stretches().map(move |(days, waiver)| (days, terms, waiver)));
     let mut rows: Vec<_> = changes
-        .filter(|(days, _)| window.holds(days.first()))
-        .map(|(days, terms)| (days.first(), terms_row(lens, contract, days.first(), terms)))
+        .filter(|(days, ..)| window.holds(days.first()))
+        .map(|(days, terms, waiver)| (days.first(), terms_row(lens, contract, days.first(), terms, waiver)))
         .collect();
     let promises = run.promises.iter().filter(|promise| {
         promise.contract == contract_id && lens.owns_entity(contract.owner) && window.holds(promise.due)
@@ -347,13 +347,20 @@ fn terms_row<'s>(
     contract: &'s Contract,
     day: Day,
     terms: &'s axiom_model::Terms,
+    waiver: Option<&axiom_model::Change>,
 ) -> Row<'s> {
-    let statement = terms.change.map_or(Cell::Source(contract.loc), |change| Cell::Source(change.loc));
-    let activity = match terms.state {
-        TermsState::Active => Cell::Word("terms active"),
-        TermsState::Waived => Cell::Word("terms waived"),
+    let statement = waiver.map_or(Cell::Source(contract.loc), |change| Cell::Source(change.loc));
+    let activity = match waiver {
+        None => Cell::Word("terms active"),
+        Some(_) => Cell::Word("terms waived"),
     };
-    Row::new([Cell::Day(day), activity, crate::contracts::terms_cell(lens, contract, terms), Cell::Blank, statement])
+    Row::new([
+        Cell::Day(day),
+        activity,
+        crate::contracts::terms_cell(lens, contract, terms, waiver),
+        Cell::Blank,
+        statement,
+    ])
 }
 
 /// A promise of a contract: due, or late, and the day it was kept.

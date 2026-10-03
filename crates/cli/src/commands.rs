@@ -267,7 +267,7 @@ fn render_sync(
     terminals: Terminals,
     prior: &[Diagnostic],
 ) -> Outcome {
-    let mut diagnostics: Vec<&Diagnostic> = prior.iter().chain(&planned.problems).chain(&planned.incomplete).collect();
+    let mut diagnostics: Vec<&Diagnostic> = prior.iter().chain(&planned.problems).collect();
     diagnostics.extend(
         planned.sources.iter().filter_map(|source| source.failure.as_ref()).flat_map(SourceFailure::diagnostics),
     );
@@ -582,13 +582,7 @@ mod tests {
         let changes =
             vec![Change { path: "prices.ax".to_owned(), before: Some("old\n".to_owned()), after: "new\n".to_owned() }];
         let fate = Fate::Shown;
-        let planned = PlanOutcome {
-            sources: Vec::new(),
-            changes,
-            problems: Vec::new(),
-            incomplete: Vec::new(),
-            generated: Vec::new(),
-        };
+        let planned = PlanOutcome { sources: Vec::new(), changes, problems: Vec::new(), generated: Vec::new() };
         let terminals = Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) };
         let outcome = render_sync(planned, fate, &sources, terminals, &[]);
 
@@ -612,13 +606,7 @@ mod tests {
         let changes =
             vec![Change { path: "link/new-folder/prices.ax".to_owned(), before: None, after: "new\n".to_owned() }];
         let fate = Fate::apply(&[], &project.root, &changes);
-        let planned = PlanOutcome {
-            sources: Vec::new(),
-            changes,
-            problems: Vec::new(),
-            incomplete: Vec::new(),
-            generated: Vec::new(),
-        };
+        let planned = PlanOutcome { sources: Vec::new(), changes, problems: Vec::new(), generated: Vec::new() };
         let terminals = Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) };
         let outcome = render_sync(planned, fate, &sources, terminals, &[]);
 
@@ -637,13 +625,7 @@ mod tests {
         let changes =
             vec![Change { path: "prices.ax".to_owned(), before: Some("old\n".to_owned()), after: "new\n".to_owned() }];
         let fate = Fate::apply(&invalid_book, &project.root, &changes);
-        let planned = PlanOutcome {
-            sources: Vec::new(),
-            changes,
-            problems: Vec::new(),
-            incomplete: Vec::new(),
-            generated: Vec::new(),
-        };
+        let planned = PlanOutcome { sources: Vec::new(), changes, problems: Vec::new(), generated: Vec::new() };
         let terminals = Terminals { out: crate::style::Terminal::plain(80), err: crate::style::Terminal::plain(80) };
         let outcome = render_sync(planned, fate, &sources, terminals, &invalid_book);
 

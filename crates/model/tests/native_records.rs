@@ -384,7 +384,7 @@ contract deferral with acme
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[book.contract("deferral").unwrap()];
-    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+    let terms = contract.terms.as_ref().unwrap();
     let purpose = terms.template[0].header.flow.purpose.unwrap();
     assert_eq!(purpose.purpose, book.purpose("pretax-deferral").unwrap());
     assert_eq!(purpose.source, axiom_model::Provenance::Account(book.kind("retirement-account").unwrap()));
@@ -633,9 +633,8 @@ contract c with p
     let (book, diagnostics) = build(&[Source { path: "contracts.ax", file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
-    let day = Day::from_ymd(2026, 1, 1).unwrap();
-    assert!(!contract.terms.as_ref().unwrap().at(day).program.nodes.is_empty());
-    assert!(!contract.standing.as_ref().unwrap().at(day).program.nodes.is_empty());
+    assert!(!contract.terms.as_ref().unwrap().program.nodes.is_empty());
+    assert!(!contract.standing.as_ref().unwrap().program.nodes.is_empty());
 }
 
 #[test]
@@ -659,9 +658,8 @@ contract c with p
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract_id = book.contract("c").unwrap();
     let contract = &book.contracts[contract_id];
-    let day = Day::from_ymd(2026, 1, 1).unwrap();
-    let regular = contract.terms.as_ref().unwrap().at(day);
-    let standing = contract.standing.as_ref().unwrap().at(day);
+    let regular = contract.terms.as_ref().unwrap();
+    let standing = contract.standing.as_ref().unwrap();
     assert_eq!(regular.grace, None);
     assert_eq!(standing.grace, None);
     assert_eq!(regular.also, standing.also);
@@ -701,7 +699,7 @@ contract flat with greystar
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
     let area = contract.area.expect("contract retains its typed area");
-    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+    let terms = contract.terms.as_ref().unwrap();
     let share = &terms.shares[0];
     assert_eq!(share.rate, axiom_core::Ratio::new(3, 25).unwrap());
     assert_eq!(
@@ -832,7 +830,7 @@ fn measured_shares_reject_missing_and_mismatched_denominators() {
         let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-share-measure"), "{diagnostics:?}");
         let contract = &book.contracts[Id::new(0)];
-        let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+        let terms = contract.terms.as_ref().unwrap();
         assert!(terms.shares.is_empty(), "an invalid measured share must not be retained");
     }
 }
@@ -850,7 +848,7 @@ contract flat with greystar
   2_900 USD monthly on 1 from checking
   grace 3d
   input water USD
-2026-02-05 flat
+2026-02-04 flat
   water = 155 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
@@ -864,21 +862,22 @@ contract flat with greystar
         axiom_core::Day::from_ymd(2026, 2, 6).unwrap(),
     )
     .unwrap();
-    assert_eq!(contract.terms.as_ref().unwrap().at(due_window.first()).grace, Some(axiom_core::Span::days(3)));
-    let terms = contract.terms.as_ref().unwrap().at(due_window.first());
-    assert_eq!(terms.anchor, axiom_core::Day::MIN);
+    assert_eq!(contract.terms.as_ref().unwrap().grace, Some(axiom_core::Span::days(3)));
+    let terms = contract.terms.as_ref().unwrap();
+    assert_eq!(contract.days.first(), axiom_core::Day::MIN, "a schedule counts from the contract's first day");
     assert_eq!(terms.every, axiom_model::Cadence::Every(axiom_core::Span::months(1)));
     assert_eq!(terms.on.as_ref(), &[axiom_model::On::MonthDay(1)]);
     assert_eq!(
-        axiom_core::calendar::due(terms.every, &terms.on, terms.anchor, due_window).collect::<Vec<_>>(),
+        axiom_core::calendar::due(terms.every, &terms.on, contract.days.first(), due_window).collect::<Vec<_>>(),
         [axiom_core::Day::from_ymd(2026, 2, 1).unwrap()]
     );
-    assert_eq!(contract.due_days(due_window), [axiom_core::Day::from_ymd(2026, 2, 1).unwrap()]);
+    let schedule = book.promises.schedule(contract_id, axiom_model::ScheduleKind::Regular).unwrap();
+    assert_eq!(schedule.days(due_window).collect::<Vec<_>>(), [axiom_core::Day::from_ymd(2026, 2, 1).unwrap()]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let txn = book.txns.iter().map(|(id, txn)| (id, txn)).find(|(_, txn)| txn.contract.is_some()).unwrap();
     assert_eq!(txn.1.contract, Some(contract_id));
     assert_eq!(txn.1.contract_schedule, Some(axiom_model::ScheduleKind::Regular));
-    assert_eq!(txn.1.day, axiom_core::Day::from_ymd(2026, 2, 5).unwrap());
+    assert_eq!(txn.1.day, axiom_core::Day::from_ymd(2026, 2, 4).unwrap());
     let occurrence = &book.written_occurrences[txn.1.occurrence.expect("sparse written occurrence identity")];
     assert_eq!(occurrence.due, axiom_core::Day::from_ymd(2026, 2, 1).unwrap());
     assert_eq!(occurrence.schedule, axiom_model::ScheduleKind::Regular);
@@ -1089,14 +1088,13 @@ contract phone with carrier
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
-    let regular = contract.terms.as_ref().unwrap();
     let waived = Day::from_ymd(2026, 1, 20).unwrap();
     let restored = Day::from_ymd(2026, 2, 16).unwrap();
-    assert_eq!(regular.at(waived).state, axiom_model::book::TermsState::Waived);
-    assert_eq!(regular.at(restored).state, axiom_model::book::TermsState::Active);
+    assert!(contract.waiver_on(waived).is_some());
+    assert!(contract.waiver_on(restored).is_none());
     assert_eq!(contract.days.last(), Day::from_ymd(2026, 2, 20).unwrap());
     assert!(contract.ended.is_some());
-    assert_eq!(book.name(regular.at(waived).change.unwrap().code.unwrap()), "pause");
+    assert_eq!(book.name(contract.waiver_on(waived).unwrap().code.unwrap()), "pause");
     assert_eq!(book.endings.len(), 1);
     assert_eq!(book.endings[0].day, Day::from_ymd(2026, 2, 20).unwrap());
     assert_eq!(book.endings[0].target, axiom_model::journal::EndTarget::Contract(Id::new(0)));
@@ -1155,10 +1153,7 @@ fn rejected_waiver_and_early_end_do_not_change_contract_terms() {
         let contract = &book.contracts[Id::new(0)];
         assert_eq!(contract.days.first(), Day::from_ymd(2026, 1, 1).unwrap());
         assert_eq!(contract.days.last(), Day::MAX);
-        assert_eq!(
-            contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap()).state,
-            axiom_model::book::TermsState::Active
-        );
+        assert!(contract.waiver_on(Day::from_ymd(2026, 1, 15).unwrap()).is_none());
         assert!(contract.ended.is_none());
         assert!(book.endings.is_empty());
     }
@@ -1226,7 +1221,7 @@ contract job with lumen
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
-    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap());
+    let terms = contract.terms.as_ref().unwrap();
     assert_eq!(terms.template[0].header.flow.payee, Some(contract.party));
     let leg = &terms.template[0].legs[0];
     let employer = book.entity("lumen").unwrap();
@@ -1337,7 +1332,7 @@ contract mortgage with rocket
         flow.origin,
         axiom_model::journal::Origin::Occurrence(contract) if contract == Id::new(0)
     ));
-    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+    let terms = contract.terms.as_ref().unwrap();
     assert_eq!(terms.rate, Some(axiom_core::Ratio::percent(5_875, 3).unwrap()));
     assert!(matches!(terms.template[0].header.out, axiom_model::Quantity::Derived));
 }

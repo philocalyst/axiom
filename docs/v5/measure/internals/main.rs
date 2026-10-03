@@ -50,25 +50,16 @@ fn main() {
     for (id, contract) in book.contracts.iter() {
         let first = contract.days.first().max(Day::from_ymd(2026, 1, 1).unwrap());
         let Some(window) = Days::new(first, Day::from_ymd(2027, 6, 30).unwrap()) else { continue };
-        let mut ordinals = [0u32; 2];
-        for occurrence in contract.occurrences(window) {
-            let slot = match occurrence.schedule {
-                ScheduleKind::Regular => 0,
-                ScheduleKind::Standing => 1,
-            };
+        let mut occurrences: Vec<_> = [ScheduleKind::Regular, ScheduleKind::Standing]
+            .into_iter()
+            .flat_map(|schedule| book.promises.expected(id, schedule, window).map(move |(ordinal, day)| (day, schedule, ordinal)))
+            .collect();
+        occurrences.sort_by_key(|&(day, schedule, _)| (day, schedule == ScheduleKind::Standing));
+        for (day, schedule, ordinal) in occurrences {
             let (mut flows, mut details, mut missing) = (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
-            let made = ledger.instantiate_occurrence(
-                id,
-                occurrence.schedule,
-                occurrence.day,
-                ordinals[slot],
-                None,
-                &mut flows,
-                &mut details,
-                &mut missing,
-            );
-            ordinals[slot] += 1;
-            println!("forecast {:?} {:?} {:?} -> {:?}", id, occurrence.schedule, occurrence.day, made);
+            let made =
+                ledger.instantiate_occurrence(id, schedule, day, ordinal, None, &mut flows, &mut details, &mut missing);
+            println!("forecast {:?} {:?} {:?} -> {:?}", id, schedule, day, made);
             for flow in &flows {
                 println!("  flow {flow:?}");
                 if let Some(detail) = flow.detail {

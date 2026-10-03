@@ -117,7 +117,7 @@ fn a_template_may_name_a_loan_declared_after_it_and_its_name_stands_for_the_debt
     with_book(&format!("{PARTIES}{contracts}{LOAN}"), |book| {
         let debt = book.contracts[book.contract("mortgage").unwrap()].loan.expect("a loan").debt;
         let plan = &book.contracts[book.contract("plan").unwrap()];
-        let template = &plan.terms.as_ref().expect("terms").at(axiom_core::Day::MIN).template[0];
+        let template = &plan.terms.as_ref().expect("terms").template[0];
         let leg = &template.legs[0];
         assert!([leg.flow.from, leg.flow.to].contains(&debt), "the leg ends at the loan's debt tab");
         assert_eq!(tabs(book).iter().filter(|&&(id, ..)| id == debt).count(), 1);

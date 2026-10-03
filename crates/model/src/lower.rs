@@ -24,7 +24,6 @@ mod statements;
 mod tail;
 
 pub(crate) use contracts::contracts;
-pub use record::nearest_occurrence;
 pub(crate) use record::record;
 
 use axiom_core::{Diagnostic, Loc, Map};

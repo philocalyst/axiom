@@ -12,7 +12,7 @@ use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
-    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, Terms, TermsState, Text,
+    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
@@ -99,6 +99,7 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
         days: Days::ALWAYS,
         terms: None,
         standing: None,
+        waived: Timeline::new(None),
         buys: None,
         deposit: None,
         deposit_holding: None,
@@ -235,10 +236,10 @@ fn lower_contract<'a, 's>(
         also: &also,
     };
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
-        contract.terms = Some(Timeline::new(lower_terms(world, &cx, schedule, program, ids, diags)?));
+        contract.terms = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
     if let (Some(schedule), Some((program, ids))) = (node.standing, standing) {
-        contract.standing = Some(Timeline::new(lower_terms(world, &cx, schedule, program, ids, diags)?));
+        contract.standing = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
     Some(contract)
 }
@@ -701,10 +702,8 @@ fn lower_terms<'a, 's>(
     };
     let grace = grace_property(file, node.props, diags)?;
     Some(Terms {
-        state: TermsState::Active,
         every,
         on: file[schedule.terms.on].to_vec().into_boxed_slice(),
-        anchor: cx.anchor,
         template: Box::new([template]),
         program,
         inputs: cx.inputs.to_vec().into_boxed_slice(),
@@ -718,7 +717,6 @@ fn lower_terms<'a, 's>(
         shares: shares(world, cx, diags).into_boxed_slice(),
         also: cx.also.to_vec().into_boxed_slice(),
         rate: cx.loan_rate,
-        change: None,
     })
 }
 

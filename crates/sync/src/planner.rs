@@ -77,10 +77,6 @@ pub struct PlanOutcome {
     pub changes: Vec<Change>,
     /// Errors while validating the combined target files.
     pub problems: Vec<Diagnostic>,
-    /// The current engine fold still has a declared-but-unpopulated promise
-    /// and open-claim result seam. These diagnostics make that limitation
-    /// visible until the native monitor fills it.
-    pub incomplete: Vec<Diagnostic>,
     pub generated: Vec<GeneratedSource>,
 }
 
@@ -133,7 +129,7 @@ pub fn plan<'b, 's>(
     let sources = planner.plan_sources(&work);
     let (changes, problems) = planner.settle();
     let generated = planner.files.generated;
-    Ok(PlanOutcome { sources, changes, problems, incomplete: monitor_gaps(book, run), generated })
+    Ok(PlanOutcome { sources, changes, problems, generated })
 }
 
 /// The project's files as planning sees them: each read once through the
@@ -506,19 +502,6 @@ fn command_units<'s>(book: &Book<'s>, run: &EngineRun) -> Vec<&'s str> {
     units.sort_unstable();
     units.dedup();
     units
-}
-
-fn monitor_gaps(book: &Book<'_>, run: &EngineRun) -> Vec<Diagnostic> {
-    let has_contracts = !book.contracts.is_empty();
-    let has_claim_places = book.places.ids().any(|place| book.is_claim(place));
-    if (has_contracts || has_claim_places) && !run.monitor_complete {
-        vec![Diagnostic::warning(
-            "sync-monitor-incomplete",
-            "this outlook does not yet use the engine's contract occurrence and open-claim results; matching may omit contract and claim records",
-        )]
-    } else {
-        Vec::new()
-    }
 }
 
 #[cfg(test)]

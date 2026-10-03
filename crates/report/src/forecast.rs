@@ -372,17 +372,14 @@ fn contract_forecasts<'s>(
         if !lens.owns_entity(contract.owner) {
             continue;
         }
-        for (ordinal, occurrence) in contract.occurrences(window).enumerate() {
-            // A written occurrence is already part of the ledger's journal
-            // fold, including when it was recorded after its due day.
-            if written.contains(&(id, occurrence.schedule, occurrence.day)) {
-                continue;
+        for schedule in [ScheduleKind::Regular, ScheduleKind::Standing] {
+            for (ordinal, day) in book.promises.expected(id, schedule, window) {
+                // A written occurrence is already part of the ledger's journal
+                // fold, including when it was recorded after its due day.
+                if !written.contains(&(id, schedule, day)) {
+                    scheduled.push(Scheduled { day, contract: id, schedule, ordinal });
+                }
             }
-            let Ok(ordinal) = u32::try_from(ordinal) else {
-                issues.push((id, "too many scheduled occurrences to identify".to_string()));
-                break;
-            };
-            scheduled.push(Scheduled { day: occurrence.day, contract: id, schedule: occurrence.schedule, ordinal });
         }
     }
     scheduled.sort_by_key(|occurrence| {
@@ -458,7 +455,7 @@ fn contract_forecasts<'s>(
             });
             let what = main.map_or_else(|| book.name(contract.name).to_string(), |flow| route(book, &flow.flow));
             let cadence = contract
-                .terms_on_schedule(item.schedule, item.day)
+                .terms_of(item.schedule)
                 .map(|terms| describe_contract(terms.every))
                 .unwrap_or_else(|| "scheduled".to_string());
             rows.push(ContractRow { contract: item.contract, every: cadence, what, next: item.day, amount });
@@ -467,7 +464,7 @@ fn contract_forecasts<'s>(
             }
             if !missing.is_empty() {
                 let names = contract
-                    .terms_on_schedule(item.schedule, item.day)
+                    .terms_of(item.schedule)
                     .into_iter()
                     .flat_map(|terms| missing.iter().filter_map(|&index| terms.inputs.get(index as usize)))
                     .map(|input| book.name(input.name))
@@ -657,9 +654,9 @@ contract rent with landlord
 ";
 
     #[test]
-    fn forecast_materializes_contracts_even_when_the_run_monitor_is_incomplete() {
+    fn forecast_materializes_contracts_beside_a_run_whose_monitor_is_complete() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
-            assert!(!run.monitor_complete);
+            assert!(run.monitor_complete);
             let report =
                 crate::report(book, run, &crate::Query::Forecast { until: Some(day(2026, 2, 28)), paths: 0 }, None)
                     .unwrap();

@@ -12,9 +12,7 @@ use super::flow::{
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::{Reach, Tail, written_purpose};
-use crate::book::{
-    Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, Role, Terms, TermsState,
-};
+use crate::book::{Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, Role};
 use crate::builtin;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -553,7 +551,7 @@ pub(super) fn lower_contract_change<'s>(world: &mut World<'s>, at: Stated<'_, '_
     };
     let code = tail.code.map(|code| world.book.names.intern(code.name()));
     let change = BookChange { days, description: tail.description, code, loc };
-    if !waive_contract(&mut world.book.contracts[contract_id], statement.date, change) {
+    if !waive_contract(&mut world.book.contracts[contract_id], change) {
         diags.push(
             Diagnostic::error("waiver-without-schedule", "this contract has no schedule to waive")
                 .label(loc, "there is no regular or standing occurrence here"),
@@ -591,18 +589,13 @@ fn waiver_tail<'s>(
     Some(tail)
 }
 
-/// Waives the contract's regular and standing terms for `change.days`; whether there were any to waive.
-fn waive_contract(contract: &mut Contract, day: Day, change: BookChange) -> bool {
-    let schedules = [contract.terms.as_mut(), contract.standing.as_mut()];
-    let mut painted = false;
-    for terms in schedules.into_iter().flatten() {
-        let mut waived: Terms = terms.at(day).clone();
-        waived.state = TermsState::Waived;
-        waived.change = Some(change);
-        terms.paint(change.days, waived);
-        painted = true;
+/// Waives the contract's regular and standing schedules for `change.days`; whether there were any to waive.
+fn waive_contract(contract: &mut Contract, change: BookChange) -> bool {
+    let scheduled = contract.terms.is_some() || contract.standing.is_some();
+    if scheduled {
+        contract.waived.paint(change.days, Some(change));
     }
-    painted
+    scheduled
 }
 
 /// `thing ended`: a promise, a place or an asset stops on this day.

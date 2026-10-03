@@ -15,13 +15,14 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, par};
+use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{
     Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Made, Place,
     RuntimeDetail, RuntimeFlow, RuntimeTxn,
 };
 
 use crate::checkpoint::CheckpointPhase;
+use crate::monitor;
 use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
 use crate::scope::is_money;
@@ -64,7 +65,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub(crate) fn start(plan: &'p Plan<'b, 's>, options: Options) -> Ledger<'p, 'b, 's> {
         let timeline = Timeline::new(plan);
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
-        let (world, record) = (World::new(plan.book, &plan.watch), Record::new(plan.book.laws.len(), plan.problems()));
+        let (mut world, record) =
+            (World::new(plan.book, &plan.watch), Record::new(plan.book.laws.len(), plan.problems()));
+        world.monitor = monitor::Monitor::start(&plan.book.promises, plan.watch_from(options.today));
         Ledger::resumed(
             plan,
             options,
@@ -315,7 +318,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             });
         let mut unused: Vec<_> = self.record.waivers.iter().filter(|&(_, &used)| !used).map(|(&loc, _)| loc).collect();
         unused.sort_unstable();
-        let reports: Vec<Diagnostic> = overdue.chain(unused.into_iter().map(explain::unused_waiver)).collect();
+        let missed = monitor::missed(book, &self.record.promises, self.horizon);
+        let reports: Vec<Diagnostic> =
+            overdue.chain(missed).chain(unused.into_iter().map(explain::unused_waiver)).collect();
+        let open_claims = monitor::open_claims(self.plan, &self.world.holdings);
         self.record.diagnostics.extend(reports);
         let mut headroom = std::mem::take(&mut self.record.passed);
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading));
@@ -342,8 +348,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             promised_flows: record.promised_flows.into_boxed_slice(),
             runtime_details: record.promise_runtime_details,
             missing_inputs: record.promise_missing_inputs.into_boxed_slice(),
-            open_claims: Box::default(),
-            monitor_complete: false,
+            open_claims,
+            monitor_complete: true,
             checks: record.checks.into(),
             diagnostics: record.diagnostics,
         }
@@ -357,6 +363,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else {
                 break;
             };
+            self.miss_through(moment.day);
             self.sample_temporal_through(moment.day);
             self.clock.timeline.consume(moment, self.plan);
             self.clock.day = moment.day;
@@ -365,7 +372,15 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             self.step(moment);
             self.sample_temporal(moment.day);
         }
+        self.miss_through(limit.day);
         self.sample_temporal_through(limit.day);
+    }
+
+    /// Records the occurrences that can no longer be kept as of `day`: each comes before the facts of the day it is
+    /// missed on, since a line dated that day is out of its reach.
+    fn miss_through(&mut self, day: Day) {
+        let (promises, record) = (&self.plan.book.promises, &mut self.record);
+        self.world.monitor.miss_through(promises, day, |missed| record.promises.push(missed));
     }
 
     fn step(&mut self, moment: Moment) {
@@ -416,19 +431,15 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             return;
         };
         let due = written.due;
-        let Some(contract) = book.contracts.get(contract_id) else {
+        if book.contracts.get(contract_id).is_none() {
             self.record.report(
                 Diagnostic::error("contract-occurrence-source", "this occurrence points at a missing contract")
                     .label(txn.loc, "the occurrence cannot be materialized"),
             );
             return;
-        };
-        let through = Days::new(contract.days.first(), due).unwrap_or(Days::on(due));
-        let count = contract
-            .occurrences(through)
-            .filter(|occurrence| occurrence.schedule == schedule && occurrence.day <= due)
-            .count();
-        let Some(ordinal) = count.checked_sub(1).and_then(|index| u32::try_from(index).ok()) else {
+        }
+        let ordinal = book.promises.schedule(contract_id, schedule).and_then(|schedule| schedule.ordinal(due));
+        let Some(ordinal) = ordinal else {
             self.record.report(
                 Diagnostic::error("contract-occurrence-source", "this occurrence is not part of its contract schedule")
                     .label(txn.loc, "the occurrence cannot be materialized"),
@@ -497,6 +508,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             self.post(&motion);
         }
         self.record.promise_missing_inputs.extend_from_slice(output_missing);
+        let record = &mut self.record;
+        self.world
+            .monitor
+            .settle(&book.promises, contract_id, schedule, ordinal, |missed| record.promises.push(missed));
         self.record.promises.push(Promise {
             contract: contract_id,
             schedule,

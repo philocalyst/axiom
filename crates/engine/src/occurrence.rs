@@ -13,7 +13,8 @@
 
 use std::borrow::Cow;
 
-use axiom_core::{Arena, Cadence, Day, Days, Id, Loc, Ratio, Span};
+use axiom_core::{Arena, Day, Days, Id, Loc, Ratio};
+use axiom_model::promise::Sched;
 use axiom_model::{
     Amount, Answer, Bear, Book, Commodity, Contract, Detail, Draw, Drawn, End, Env, Expr, Failed, Fault, Flow,
     FlowSide, Infer, Item, Line, Made, Mode, OccurrenceTail, Origin, Part, Program, Promised, Remainder, Remaining,
@@ -62,14 +63,13 @@ enum OccurrenceAmount {
     Value(Amount),
 }
 
-/// What the quantities of one occurrence are read against: the promise and the terms in force, the day it is due
+/// What the quantities of one occurrence are read against: the promise, the day it is due
 /// and who it is, the inputs it binds, and the program its expressions are nodes of, with the scale its terms'
 /// escalation puts on what they compute. A promise's quantities are read against the terms' own program and the
 /// day's escalation; a written occurrence's against its own program, and unscaled: it said what it said.
 #[derive(Clone, Copy)]
 struct Reading<'a> {
     contract: Id<Contract>,
-    terms: &'a Terms,
     program: &'a Program,
     scale: Ratio,
     due: Day,
@@ -106,7 +106,8 @@ impl Stamp<'_> {
 /// What every group of one occurrence is made against.
 struct Making<'a> {
     contract: Id<Contract>,
-    schedule: ScheduleKind,
+    /// The schedule the occurrence falls due on.
+    sched: Sched<'a>,
     due: Day,
     /// The day it was written, or the due day for one that was not.
     source_day: Day,
@@ -200,12 +201,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let source_flows = source.and_then(|txn| book.txns.get(txn)).map_or(&[][..], |txn| &book.flows[txn.flows]);
         let mut making = Making {
             contract: contract_id,
-            schedule,
+            sched: found.sched,
             due,
             source_day: found.source_day,
             txn: RuntimeTxn::contract_occurrence(contract_id, schedule, due, ordinal, source),
             terms: found.terms,
-            ratio: found.contract.amount_on_schedule(book, schedule, due).map_err(TemplateError::Forecast)?,
+            ratio: found.sched.factor(book, due).map_err(TemplateError::Forecast)?,
             amount: OccurrenceAmount::Inherit,
             tail: found.written.map(|written| &written.tail),
             program,
@@ -284,23 +285,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         group: &GroupAt<'_>,
         pools: &mut Pools<'_>,
     ) -> Result<(), TemplateError> {
-        let book = self.plan.book;
         let template = group.template;
-        let recognized = match book.contracts[making.contract].recognition_on_schedule(
-            &template.header.flow,
-            making.schedule,
-            making.due,
-        ) {
-            Ok(recognized) => recognized,
-            // A contract without an authored `from` date uses Day::MIN as
-            // the template's storage anchor. Its default recognition day is
-            // the occurrence itself; shifting that sentinel by `due - MIN`
-            // overflows even though no date arithmetic is semantically
-            // needed. Explicit recognition periods are resolved before this
-            // shift in `recognition_on_schedule` and keep their normal path.
-            Err(axiom_model::ForecastError::Overflow) if template.header.flow.day == Day::MIN => Days::on(making.due),
-            Err(error) => return Err(TemplateError::Forecast(error)),
-        };
+        let recognized = making.sched.recognized(making.due).map_err(TemplateError::Forecast)?;
         let stamp = Stamp {
             contract: making.contract,
             recognized: making.tail.and_then(|tail| tail.recognized).unwrap_or(recognized),
@@ -516,10 +502,11 @@ fn tidy(missing: &mut Vec<u16>, start: usize) {
     missing.truncate(write);
 }
 
-/// The contract, the terms it has on `due`, and what was written of the occurrence if it was kept.
+/// The contract, the terms of the schedule the occurrence falls due on, and what was written of the occurrence if it
+/// was kept.
 struct Found<'b> {
-    contract: &'b Contract,
     terms: &'b Terms,
+    sched: Sched<'b>,
     source_day: Day,
     written: Option<&'b WrittenOccurrence>,
 }
@@ -536,12 +523,11 @@ fn find<'b>(
     if !contract.days.contains(due) {
         return Err(outside);
     }
-    let terms = contract.terms_on_schedule(schedule, due).ok_or(outside)?;
-    if terms.is_waived() {
-        return Err(TemplateError::Forecast(axiom_model::ForecastError::Waived(due)));
-    }
+    let terms = contract.terms_of(schedule).ok_or(outside)?;
+    let sched = book.promises.schedule(contract_id, schedule).ok_or(outside)?;
+    sched.owed(due).map_err(TemplateError::Forecast)?;
     let Some(txn_id) = source else {
-        return Ok(Found { contract, terms, source_day: due, written: None });
+        return Ok(Found { terms, sched, source_day: due, written: None });
     };
     let txn = book.txns.get(txn_id).ok_or(outside)?;
     let exact = txn.occurrence.and_then(|id| book.written_occurrences.get(id));
@@ -549,13 +535,12 @@ fn find<'b>(
     if txn.contract != Some(contract_id) || txn.contract_schedule != Some(schedule) || !keeps {
         return Err(outside);
     }
-    Ok(Found { contract, terms, source_day: txn.day, written: exact })
+    Ok(Found { terms, sched, source_day: txn.day, written: exact })
 }
 
 fn template_at<'a>(making: &Making<'a>) -> Reading<'a> {
     Reading {
         contract: making.contract,
-        terms: making.terms,
         program: &making.terms.program,
         scale: making.ratio,
         due: making.due,
@@ -716,9 +701,8 @@ impl Env for Reads<'_, '_, '_, '_> {
 
     fn payment(&mut self, at: Line) -> Result<Answer, TemplateError> {
         let reading = self.site(at).0;
-        let contract = &self.lent.plan.book.contracts[reading.contract];
-        loan_payment(contract, reading.terms)
-            .map(Answer::Amount)
+        let loan = self.lent.plan.book.promises.loan(reading.contract);
+        loan.map(|loan| Answer::Amount(loan.payment()))
             .ok_or(TemplateError::Forecast(axiom_model::ForecastError::UnsupportedLoan(reading.due)))
     }
 }
@@ -905,59 +889,6 @@ fn bought_quantity(
         let missing = if out.unit != unit && arrive.unit == unit { out.unit } else { arrive.unit };
         TemplateError::Expression { fault: Fault::NoPrice { unit: missing, quote: unit }, loc: Loc::default() }
     })
-}
-
-fn loan_payment(contract: &Contract, terms: &Terms) -> Option<Amount> {
-    let loan = contract.loan?;
-    let annual = terms.rate.unwrap_or(Ratio::ZERO);
-    let (periods, period_rate) = match terms.every {
-        Cadence::Every(Span { months, days: 0 }) if months > 0 => {
-            let periods = loan.term.months.checked_add(months - 1)?.checked_div(months)?;
-            let rate = annual.checked_mul(Ratio::new(months as i128, 12)?)?;
-            (periods, rate)
-        }
-        Cadence::Every(Span { months: 0, days }) if days > 0 => {
-            let periods = loan.term.days.checked_add(days - 1)?.checked_div(days)?;
-            let rate = annual.checked_mul(Ratio::new(days as i128, 365)?)?;
-            (periods, rate)
-        }
-        Cadence::TwiceMonthly => {
-            let periods = loan.term.months.checked_mul(2)?;
-            let rate = annual.checked_div(Ratio::int(24))?;
-            (periods, rate)
-        }
-        _ => return None,
-    };
-    if periods <= 0 || period_rate.is_negative() {
-        return None;
-    }
-    let factor = if period_rate.is_zero() {
-        Ratio::new(1, periods as i128)?
-    } else {
-        // Keep the compound factor at 18 decimal places. Repeated exact Ratio
-        // multiplication grows its numerator and denominator exponentially;
-        // fixed-point intermediates stay bounded while retaining far more
-        // precision than a currency quantum.
-        const SCALE: i128 = 1_000_000_000_000_000_000;
-        let rate = checked_mul_div(period_rate.num() as i128, SCALE, period_rate.den() as i128)?;
-        let mut growth = SCALE;
-        for _ in 0..periods {
-            growth = checked_mul_div(growth, SCALE.checked_add(rate)?, SCALE)?;
-        }
-        let factor = checked_mul_div(rate, growth, growth.checked_sub(SCALE)?)?;
-        Ratio::new(factor, SCALE)?
-    };
-    Some(Amount::new(loan.principal.qty.scale(factor)?, loan.principal.unit))
-}
-
-fn checked_mul_div(left: i128, right: i128, denominator: i128) -> Option<i128> {
-    let numerator = left.checked_mul(right)?;
-    let quotient = numerator / denominator;
-    let remainder = numerator % denominator;
-    let twice = remainder.unsigned_abs().checked_mul(2)?;
-    let divisor = denominator.unsigned_abs();
-    let away = twice > divisor || (twice == divisor && quotient & 1 != 0);
-    Some(if away { quotient.checked_add(numerator.signum() * denominator.signum())? } else { quotient })
 }
 
 #[cfg(test)]

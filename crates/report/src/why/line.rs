@@ -212,13 +212,8 @@ pub(super) fn scoped_codes(book: &Book, lens: Lens<'_, '_, '_, '_>) -> BTreeSet<
         codes.extend(measure.codes.iter().copied());
     }
     for (_, contract) in book.contracts.iter().filter(|(_, contract)| lens.owns_entity(contract.owner)) {
-        for (_, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
+        for terms in [&contract.terms, &contract.standing].into_iter().flatten() {
             add_terms_codes(book, terms, &mut codes);
-        }
-        if let Some(standing) = &contract.standing {
-            for (_, terms) in standing.within(contract.days) {
-                add_terms_codes(book, terms, &mut codes);
-            }
         }
     }
     codes

@@ -65,7 +65,6 @@ pub use book::*;
 pub use holders::{Holder, HolderIndex};
 pub use journal::*;
 pub use law::*;
-pub use lower::nearest_occurrence;
 pub use slots::{Mult, Range, Schema, Slot, View, Weight};
 pub use solve::*;
 pub use split::*;

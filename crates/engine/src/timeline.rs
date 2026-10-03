@@ -120,6 +120,16 @@ pub(crate) fn start(book: &Book, events: &Events) -> Option<Day> {
     others.into_iter().chain([flow]).flatten().chain(occurrences).min()
 }
 
+/// The first day the journal has a fact on: the day the book begins. What its contracts promise is owed from then.
+pub(crate) fn first_fact(book: &Book) -> Option<Day> {
+    let first_flow = book.flows.as_slice().first().map(|flow| flow.day);
+    let first_occurrence = book.txns.iter().filter_map(|(_, txn)| txn.occurrence.map(|_| txn.day)).min();
+    let first_assert = book.asserts.first().map(|assert| assert.day);
+    let first_split = book.splits.first().map(|split| split.day);
+    let first_claim_change = book.claim_changes.first().map(|change| change.day);
+    [first_flow, first_occurrence, first_assert, first_split, first_claim_change].into_iter().flatten().min()
+}
+
 /// The last day the journal has a fact on. Periods close and deadlines fire up
 /// to the later of this and the day the fold is run to, and no further, so a
 /// deadline the journal itself reaches (an assertion dated on it) fires even

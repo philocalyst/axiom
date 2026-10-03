@@ -17,8 +17,8 @@ use crate::write::Layout;
 type Mismatch = Box<Diagnostic>;
 
 /// Build the part of the sync world that is directly backed by the canonical
-/// book and run. Contract occurrences and open claims are intentionally left
-/// to the engine's typed monitor API; this adapter never reconstructs them.
+/// book and run. Contract occurrences and open claims are the engine monitor's
+/// (`Run::promises`, `Run::open_claims`); this adapter does not reconstruct them.
 pub(crate) fn world<'b, 's>(
     book: &'b Book<'s>,
     run: &'b Run,
@@ -40,7 +40,6 @@ pub(crate) fn world<'b, 's>(
             .iter()
             .map(|(_, unit)| Unit { name: book.name(unit.symbol), scale: unit.scale })
             .collect(),
-        dues: Vec::new(),
         claims: Map::default(),
     })
 }

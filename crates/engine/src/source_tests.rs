@@ -12,7 +12,7 @@ use axiom_syntax::Folder;
 
 use crate::{Holding, Options, Run};
 
-fn day(year: i32, month: u32, day: u32) -> Day {
+pub(crate) fn day(year: i32, month: u32, day: u32) -> Day {
     Day::from_ymd(year, month, day).unwrap()
 }
 
@@ -26,7 +26,7 @@ fn with_book<R>(text: &str, then: impl FnOnce(&Book) -> R) -> R {
 }
 
 /// Folds `text` through `today`.
-fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R {
+pub(crate) fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R {
     with_book(text, |book| then(book, &crate::run(book, Options { today, relaxed: false })))
 }
 
@@ -167,7 +167,7 @@ contract payroll with lumen
         assert_eq!(promised.len(), 1);
         assert_eq!(promised[0].flow.arrive.qty.0, 617_300);
         assert_eq!(promised[0].txn.source_txn(), promise.kept.map(|(_, txn)| txn));
-        assert!(!run.monitor_complete, "this does not claim the due/claim monitor is complete");
+        assert!(run.monitor_complete, "the fold monitors every promise and claim");
     });
 }
 

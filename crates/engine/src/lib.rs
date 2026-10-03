@@ -50,6 +50,7 @@ mod fire;
 mod infer;
 mod ledger;
 mod lots;
+mod monitor;
 mod motion;
 mod occurrence;
 mod owners;
@@ -158,9 +159,8 @@ pub struct Run {
     pub pads: Vec<Pad>,
     /// Every asset's parts at the end of the fold, by asset.
     pub assets: Vec<AssetState>,
-    /// Every occurrence a contract expected up to the horizon, and whether and
-    /// when the journal kept it. These are complete only when
-    /// `monitor_complete` is true.
+    /// Every occurrence a contract expected that the journal kept, and every one that was missed: no line kept it, and
+    /// none can now. An occurrence still within its reach at the horizon is in neither.
     pub promises: Vec<Promise>,
     /// Item-level instantiated flows for promises, in promise order. The range
     /// on each Promise indexes this shared pool.
@@ -170,13 +170,9 @@ pub struct Run {
     /// Unbound required inputs, stored as declaration-order indices. A promise
     /// range identifies only the inputs omitted by that occurrence.
     pub missing_inputs: Box<[u16]>,
-    /// Claims still open after all settlements, as projected by the same
-    /// monitor that produced the fold's holdings. These are complete only
-    /// when `monitor_complete` is true.
+    /// Claims still open after all settlements: one for each open parcel of a claim place.
     pub open_claims: Box<[OpenClaim]>,
-    /// Whether native contract occurrences and claims were monitored for this
-    /// run. Empty result vectors alone do not mean the book has no promises or
-    /// claims.
+    /// Whether the fold monitored contract occurrences and claims: it always does.
     pub monitor_complete: bool,
     /// Basis the laws moved: consumed (depreciation) or carried (wash sales).
     pub adjustments: Vec<Adjustment>,
@@ -244,10 +240,10 @@ pub struct OpenClaim {
     pub origin: RuntimeTxn,
     pub source: Option<Id<Flow>>,
     pub ordinal: u32,
-    pub due: Day,
+    pub due: Option<Day>,
     pub claimant: Id<Place>,
     pub counterpart: Id<Place>,
-    pub debtor: Id<Entity>,
+    pub debtor: Option<Id<Entity>>,
     pub creditor: Id<Entity>,
     pub owner: Id<Entity>,
     pub unit: Id<Commodity>,

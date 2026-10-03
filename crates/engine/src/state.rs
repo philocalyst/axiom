@@ -20,6 +20,7 @@ use axiom_model::{
 use crate::assets::Assets;
 use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
+use crate::monitor::Monitor;
 use crate::motion::Amounts;
 use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
@@ -27,6 +28,8 @@ use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Parcel, Violation,
 
 #[derive(Clone)]
 pub(crate) struct World {
+    /// Where each contract's streams stand: what has still to be kept or missed.
+    pub monitor: Monitor,
     pub holdings: Holdings,
     pub totals: Totals,
     pub tallies: Tallies,
@@ -37,6 +40,7 @@ pub(crate) struct World {
 impl World {
     pub fn new(book: &Book, watch: &Watch) -> World {
         World {
+            monitor: Monitor::default(),
             holdings: Holdings::new(book.places.len()),
             totals: Totals::new(watch),
             tallies: Tallies::default(),

@@ -97,6 +97,8 @@ pub struct Plan<'b, 's> {
     /// The day the laws that close periods begin: the first fact of the journal, or the first step of anything the
     /// book says of its things, a residence beginning being one.
     pub(crate) schedule_start: Option<Day>,
+    /// The day the book begins: its contracts' streams are watched from then.
+    first_fact: Option<Day>,
     last_fact: Option<Day>,
     /// By index in `Rules::timed`: when each falls due.
     pub(crate) timed: Box<[Schedule]>,
@@ -138,6 +140,7 @@ impl<'b, 's> Plan<'b, 's> {
             occurrence_txns: occurrence_txns(book),
             period_start: timeline::start(book, &events),
             schedule_start: schedule_start(book, &events),
+            first_fact: timeline::first_fact(book),
             last_fact: timeline::last_fact(book, &events),
             events,
             laws,
@@ -258,6 +261,12 @@ impl<'b, 's> Plan<'b, 's> {
     /// the journal's last fact if that is later.
     pub(crate) fn horizon(&self, today: Day) -> Day {
         self.last_fact.map_or(today, |last| last.max(today))
+    }
+
+    /// The day the monitor starts watching what contracts promise: the day the book begins, or, for a book with no
+    /// fact at all, the day the fold is run for.
+    pub(crate) fn watch_from(&self, today: Day) -> Day {
+        self.first_fact.unwrap_or(today)
     }
 
     /// The problems solving found, for a ledger's record to begin with.

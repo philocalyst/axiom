@@ -11,7 +11,7 @@ use axiom_core::{Day, Qty};
 use super::{Promises, Term, TermId};
 
 /// The part of a promise that is still owed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Residual {
     term: TermId,
     next: Day,
@@ -28,13 +28,22 @@ impl Residual {
     /// What is owed of the stream that `every` is, before anything has been kept: its first occurrence is the first due
     /// day, or, for a loan, the first after the day the loan was made. Done if nothing is ever due.
     pub fn start(promises: &Promises, every: TermId) -> Residual {
+        Residual::starting_at(promises, every, Day::MIN)
+    }
+
+    /// What is owed of the stream from `day` on: its first occurrence is the first owed day on or after `day` (and, for a
+    /// loan, after the day the loan was made), with the ordinal it has in the schedule, and what a loan still owes is what
+    /// the payments before it left. A contract with no `from` does not walk from the beginning of time to get here.
+    pub fn starting_at(promises: &Promises, every: TermId, day: Day) -> Residual {
         let Term::Every { schedule, body } = promises.term(every) else { return Residual::done() };
         let schedule = promises.schedule_of(schedule);
         let annuity = promises.annuity_of(body).map(|annuity| promises.annuity(annuity));
         let began = annuity.map_or(0, |annuity| schedule.before(Day(annuity.begins().0.saturating_add(1))));
-        let open = annuity.map_or(Qty::ZERO, |annuity| annuity.principal().qty);
-        let first = schedule.nth(began);
-        first.map_or(Residual::done(), |next| Residual { term: every, next, ordinal: began, began, open })
+        let ordinal = schedule.before(day).max(began);
+        let open = annuity.map_or(Qty::ZERO, |annuity| annuity.owed_after(ordinal - began));
+        let owed = annuity.is_none_or(|_| open != Qty::ZERO);
+        let first = schedule.nth(ordinal).filter(|_| owed);
+        first.map_or(Residual::done(), |next| Residual { term: every, next, ordinal, began, open })
     }
 
     /// Nothing owed.
@@ -61,11 +70,10 @@ impl Residual {
         self.open
     }
 
-    /// The last day the next occurrence may be kept by, if its promise has a deadline.
+    /// The day the deadline of the next occurrence passes, if its promise has one.
     pub fn deadline(&self, promises: &Promises) -> Option<Day> {
         let Term::Every { body, .. } = promises.term(self.term) else { return None };
-        let deadline = promises.deadline_of(body)?;
-        self.next.checked_add(promises.deadline(deadline).after)
+        self.next.checked_add(promises.deadline_of(body)?)
     }
 
     /// The occurrence this waits for has been kept or missed: wait for the one after it. A loan that the payment has

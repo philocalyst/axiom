@@ -195,6 +195,7 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
         days: Days::ALWAYS,
         terms: None,
         standing: None,
+        waived: axiom_core::Timeline::new(None),
         buys: None,
         deposit: None,
         deposit_holding: None,

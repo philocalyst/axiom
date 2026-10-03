@@ -37,11 +37,10 @@ fn walk_stream(
     tally: &mut Tally,
 ) {
     let contract = reference.contract;
-    let timeline = if kind == ScheduleKind::Regular { &contract.terms } else { &contract.standing };
-    let Some(declared) = timeline.as_ref().map(|timeline| timeline.at(Day::MIN)) else { return };
+    let Some(declared) = contract.terms_of(kind) else { return };
     // A cadence that can only be walked is walked from its first day, which for a contract with no `from` is the
     // beginning of time: the walk is not asked of it (the old ordinal is the slow question that does).
-    if !Dues::new(declared.every, &declared.on, declared.anchor).is_counted() && contract.days.first() == Day::MIN {
+    if !Dues::new(declared.every, &declared.on, contract.days.first()).is_counted() && contract.days.first() == Day::MIN {
         return;
     }
     let loan = contract.loan.as_ref().filter(|_| kind == ScheduleKind::Regular);

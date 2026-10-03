@@ -10,39 +10,28 @@
 //!   count of the days before a day is the count of the cadence's less the holes before it, and the `n`th owed day is
 //!   the cadence's `n + (days swallowed by the holes before it)`th;
 //! * **keeping** is the matching of a line to its due day: the nearest owed day on either side, the earlier when they
-//!   are equally near, if it is within the contract's reach.
+//!   are equally near, if it is within the schedule's reach (`grace`, else half a cadence).
 
 use axiom_core::{Cadence, Day, Days, Dues, Id, On, Ratio, Run};
 
-use super::{Promises, Reckoning};
+use super::{Promise, Promises, Reckoning, Stream};
 use crate::book::{Book, ForecastError, ScheduleKind};
 
 /// One stream of a contract's occurrences: a regular schedule, or a standing order's.
 #[derive(Clone, Copy, Debug)]
 pub struct Schedule {
-    kind: ScheduleKind,
-    every: Cadence,
-    on: Run<On>,
+    pub(super) kind: ScheduleKind,
+    pub(super) every: Cadence,
+    pub(super) on: Run<On>,
     /// The days the contract lives, the first being where the cadence counts from.
-    life: Days,
-    skips: Run<Skip>,
-    reckoning: Id<Reckoning>,
+    pub(super) life: Days,
+    pub(super) skips: Run<Skip>,
+    pub(super) reckoning: Id<Reckoning>,
+    /// How far from a due day a line may be dated and still keep it.
+    pub(super) reach: i32,
 }
 
 const _: () = assert!(size_of::<Schedule>() <= 48);
-
-impl Schedule {
-    pub(super) fn new(
-        kind: ScheduleKind,
-        every: Cadence,
-        on: Run<On>,
-        life: Days,
-        skips: Run<Skip>,
-        reckoning: Id<Reckoning>,
-    ) -> Schedule {
-        Schedule { kind, every, on, life, skips, reckoning }
-    }
-}
 
 /// A waived stretch of a schedule: its days, and where in the cadence's days it is.
 #[derive(Clone, Copy, Debug)]
@@ -131,6 +120,11 @@ impl<'p> Sched<'p> {
         self.schedule.life
     }
 
+    /// How far from a due day a line may be dated and still keep it: the contract's `grace`, else half a cadence.
+    pub fn reach(&self) -> i32 {
+        self.schedule.reach
+    }
+
     /// The `n`th owed day, counting from 0.
     pub fn nth(&self, n: u32) -> Option<Day> {
         self.nth_in(&self.dues(), n)
@@ -149,12 +143,9 @@ impl<'p> Sched<'p> {
     }
 
     /// The owed days in `window`, in order.
-    pub fn days(&self, window: Days) -> impl Iterator<Item = Day> + 'p {
+    pub fn days(&self, window: Days) -> impl Iterator<Item = Day> + use<'p> {
         let (this, window) = (*self, window.intersect(self.schedule.life));
-        window
-            .into_iter()
-            .flat_map(move |window| this.dues().days(window))
-            .filter(move |day| this.counted(*day).is_ok())
+        window.into_iter().flat_map(move |window| this.dues().days(window)).filter(move |day| this.owed(*day).is_ok())
     }
 
     /// The owed day nearest `day`, within `reach` of it: the earlier of two equally near. It looks at the days within
@@ -167,18 +158,18 @@ impl<'p> Sched<'p> {
 
     /// The multiplier of an occurrence on `day`: what `amount_on_schedule` says of it.
     pub fn factor(&self, book: &Book<'_>, day: Day) -> Result<Ratio, ForecastError> {
-        self.counted(day)?;
+        self.owed(day)?;
         self.promises.reckoning(self.schedule.reckoning).factor(book, self.schedule.life, day)
     }
 
     /// The days an occurrence on `day` is recognized over: what `recognition_on_schedule` says of it.
     pub fn recognized(&self, day: Day) -> Result<Days, ForecastError> {
-        self.counted(day)?;
+        self.owed(day)?;
         self.promises.reckoning(self.schedule.reckoning).recognized(day)
     }
 
     /// Whether `day` is one the schedule can say anything of: in the contract's life and not waived.
-    fn counted(&self, day: Day) -> Result<(), ForecastError> {
+    pub fn owed(&self, day: Day) -> Result<(), ForecastError> {
         if !self.schedule.life.contains(day) {
             return Err(ForecastError::OutsideContract(day));
         }
@@ -231,16 +222,18 @@ impl<'p> Sched<'p> {
     }
 }
 
-impl Promises {
-    /// Which due day a line dated `day` keeps, as the old `nearest_occurrence` says it: the nearest owed day of the
-    /// regular and of the standing schedule, within the contract's reach, and the nearer of the two.
-    pub fn keep(&self, contract: Id<crate::book::Contract>, day: Day) -> Keep {
-        let promise = self.of(contract);
-        if !promise.life.contains(day) {
+impl Promise {
+    /// Which due day a line dated `day` keeps: the nearest owed day of the regular and of the standing schedule, each
+    /// within its own reach, and the nearer of the two.
+    pub fn keep(&self, promises: &Promises, day: Day) -> Keep {
+        if !self.life.contains(day) {
             return Keep::Outside;
         }
-        let near = |kind| self.schedule(contract, kind).and_then(|schedule| schedule.nearest(day, promise.reach));
-        match (near(ScheduleKind::Regular), near(ScheduleKind::Standing)) {
+        let near = |stream: Option<Stream>| {
+            let schedule = promises.schedule_of(stream?.schedule);
+            schedule.nearest(day, schedule.reach())
+        };
+        match (near(self.regular), near(self.standing)) {
             (Some(regular), Some(standing)) if regular.apart == standing.apart => {
                 Keep::Ambiguous { regular: regular.due, standing: standing.due }
             }
@@ -250,6 +243,13 @@ impl Promises {
             (None, Some(standing)) => kept(ScheduleKind::Standing, standing),
             (None, None) => Keep::Outside,
         }
+    }
+}
+
+impl Promises {
+    /// Which due day a line dated `day` keeps, of a contract the book was built with.
+    pub fn keep(&self, contract: Id<crate::book::Contract>, day: Day) -> Keep {
+        self.of(contract).keep(self, day)
     }
 }
 
