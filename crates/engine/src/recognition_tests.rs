@@ -251,3 +251,15 @@ fn a_limit_that_broke_names_the_payments_that_counted_and_not_the_claims_made() 
         assert!(!counted.contains("2026-01-20"), "and its payment counted nothing: {counted}");
     });
 }
+
+// ─── The default ────────────────────────────────────────────────────────────
+
+/// "The owner's `books cash|accrual`, default cash": a book that says nothing counts a claim when it is settled.
+#[test]
+fn a_book_that_says_nothing_of_its_books_is_cash() {
+    let text = prelude("cash").replace("  books cash\n", "");
+    let lines = format!("{INVOICE}2026-01-20 ann -> checking 300 USD ^i1\n");
+    with_run(&format!("{text}{lines}"), day(2026, 4, 1), |book, run| {
+        assert_eq!(counted(book, run, "receipts"), [on("2026-01-20", 300_00)]);
+    });
+}

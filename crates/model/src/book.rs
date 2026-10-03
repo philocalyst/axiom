@@ -316,9 +316,9 @@ pub struct Entity {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Books {
     /// When it is settled.
+    #[default]
     Cash,
     /// When it is made (LANGUAGE section 7: "when invoiced").
-    #[default]
     Accrual,
 }
 
