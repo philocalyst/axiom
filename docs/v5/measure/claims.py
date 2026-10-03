@@ -23,7 +23,9 @@ the proof is two things: a *reference* (this file) of what LANGUAGE §7 says for
 Each project is one family, written by a seeded random generator (deterministic: the same SEED and N write the same books),
 with a little noise (ordinary flows) between its lines:
 
-    tab      claims on parties (`ann owes me 300 USD due ... ^i1`, some itemized), written off on later days, some twice
+    tab      claims on parties (`ann owes me 300 USD due ... ^i1`, some itemized), paid by the party (`ann -> checking 300
+             USD ^p1`, with a claim's code or `[^code]` or neither, of the claim's size, half of it, or more than all of
+             them), some payments returned, and written off on later days, some twice
     place    claims in a declared claim place (`ann -> owed 300 USD due ... #design ^i1`), settled by flows out of it: plain,
              with a code of its own that names a claim or none, with a written `[^code]` or `[day]`, equal amounts, larger
              than any claim, more than all of them; and written off
@@ -36,9 +38,11 @@ with a little noise (ordinary flows) between its lines:
 The reference simulates the book it wrote: the claims it made, in the order the fold reaches them (a day's movements in the
 order written, then its write-offs), and what each rule leaves open. It has two sets of rules. `old` is the engine at 36ead82:
 a written `[^code]` or `[day]` filters, then the commodity's policy (FIFO for a currency, FIFO in effect for any other), a
-flow's own codes are labels, `waived` does nothing, and a write-off in a declared place is refused. `new` is LANGUAGE §7:
+flow's own codes are labels, a payment from a party settles nothing, `waived` does nothing, and a write-off in a declared
+place is refused. `new` is LANGUAGE §7:
 a written selector filters, else the codes of the flow that some claim carries name the claims it may settle, then the exact
-amount, then the oldest; `waived` forgives what is open; and warns when nothing is.
+amount, then the oldest, for a flow out of a claim place and for a payment from a party alike, and a returned payment
+opens what it settled; `waived` forgives what is open; and warns when nothing is.
 """
 import calendar
 import datetime
@@ -813,17 +817,15 @@ def cover(directory):
 # dump of the mutated tree fails the verdict for the new rules, or moves what no claim rule may move, or differs from the
 # baseline on a project that the references say is the same; or, failing that, when the tests of the crates fail.
 MUTANTS = [
-    ("crates/engine/src/lots.rs", "lot.qty == req.need && keep(lot)", "lot.qty >= req.need && keep(lot)",
-     "exact takes a lot of at least the need"),
-    ("crates/engine/src/lots.rs", "(b.qty == need).cmp(&(a.qty == need)).then(a.source.cmp(&b.source))",
-     "(a.qty == need).cmp(&(b.qty == need)).then(a.source.cmp(&b.source))", "scanning puts the exact lots last"),
-    ("crates/engine/src/lots.rs", "(b.qty == need).cmp(&(a.qty == need)).then(a.source.cmp(&b.source))",
-     "(b.qty == need).cmp(&(a.qty == need)).then(b.source.cmp(&a.source))", "of equal lots the newest, when scanning"),
+    ("crates/engine/src/lots.rs", "if held == req.need {", "if held >= req.need {", "exact takes a claim of at least the need"),
+    ("crates/engine/src/lots.rs", "(b.claim == need).cmp(&(a.claim == need)).then(a.source.cmp(&b.source))",
+     "(a.claim == need).cmp(&(b.claim == need)).then(a.source.cmp(&b.source))", "scanning puts the exact claims last"),
+    ("crates/engine/src/lots.rs", "(b.claim == need).cmp(&(a.claim == need)).then(a.source.cmp(&b.source))",
+     "(b.claim == need).cmp(&(a.claim == need)).then(b.source.cmp(&a.source))", "of equal claims the newest, when scanning"),
     ("crates/engine/src/lots.rs", "            if policy == Some(Policy::Exact) {\n                self.take_exact(&mut left, of_colour, req, out);\n            }\n",
      "", "the ordered path never takes the exact lot"),
-    ("crates/engine/src/lots.rs", "self.holding.lots[self.first..].iter().position(|lot| lot.qty == req.need && keep(lot))",
-     "self.holding.lots[self.first..].iter().rposition(|lot| lot.qty == req.need && keep(lot))",
-     "of equal lots the newest, when ordered"),
+    ("crates/engine/src/lots.rs", "let held: Qty = self.holding.lots[at..end].iter().filter(|&lot| keep(lot)).map(|lot| lot.qty).sum();",
+     "let held: Qty = self.holding.lots[at..end].iter().map(|lot| lot.qty).sum();", "a claim holds the lines of every colour, when ordered"),
     ("crates/engine/src/lots.rs", "by = made.peek().is_none() || made.any(|txn| lot.txn.source_txn() == Some(txn))",
      "by = made.peek().is_none() || made.any(|txn| lot.txn.source_txn() != Some(txn))", "a write-off selects the other transactions"),
     ("crates/engine/src/lots.rs", "pool[lot.codes.header].contains(&code) || pool[lot.codes.local].contains(&code)",
@@ -845,7 +847,7 @@ MUTANTS = [
     ("crates/engine/src/post.rs", "[m.code_runs.header, m.code_runs.local]", "[m.code_runs.header]", "the flow's own line's codes are not read"),
     ("crates/engine/src/claims.rs", "let made = [Select::Txn(change.target)];", "let made: [Select; 0] = [];",
      "a write-off forgives every claim in the place"),
-    ("crates/engine/src/claims.rs", "        self.world.holdings.credit(back, unit, open);\n", "", "the forgiven value goes nowhere"),
+    ("crates/engine/src/claims.rs", "        self.world.holdings.credit(flow.from, unit, open);\n", "", "the forgiven value goes nowhere"),
     ("crates/engine/src/claims.rs", "if forgiven == 0 {", "if forgiven == 1 {", "an empty write-off is said when one parcel was forgiven"),
     ("crates/engine/src/claims.rs", "basis: s.basis,", "basis: Qty::ZERO,", "a write-off records no basis"),
     ("crates/engine/src/claims.rs", "qty: s.qty,", "qty: open,", "a write-off records the whole open amount for each parcel"),
@@ -855,7 +857,7 @@ MUTANTS = [
      "a claim place funded by the owner's own money is a claim on a party"),
     ("crates/model/src/said.rs", "self.is_claim(flow.to) && self.places[flow.from].class == Class::Outside", "self.is_claim(flow.to)",
      "a claim made of the owner's own money can be forgiven"),
-    ("crates/model/src/declare.rs", "    world.say(kinds.claim, builtin::CLAIM, true);\n", "", "the kind of a tab does not say `claim`"),
+    ("crates/model/src/declare.rs", "        self.say(kinds.claim, builtin::CLAIM, true);\n", "", "the kind of a tab does not say `claim`"),
     ("crates/report/src/history.rs", "        && by(book.claim_changes.last().map(|change| change.day))\n", "",
      "a view dated before a write-off is the run's final state"),
     ("crates/engine/src/settle.rs", "let money = m.target.class == Class::Asset && !self.plan.traits.place(m.to).claim;",
@@ -867,8 +869,8 @@ MUTANTS = [
      "a returned payment does not open its claims"),
     ("crates/engine/src/settle.rs", "        self.world.holdings.credit(m.to, unit, -reopened);\n", "",
      "a returned payment makes value when it opens its claims"),
-    ("crates/engine/src/post.rs", "self.world.holdings.credit(m.from, unit, settled - m.out.qty);",
-     "self.world.holdings.credit(m.from, unit, -m.out.qty);", "a payment that settles claims makes value"),
+    ("crates/engine/src/post.rs", "self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);",
+     "self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);", "a payment that settles claims makes value"),
     ("crates/engine/src/traits.rs", "partition_point(|&(found, by, _)| (found, by) < (party, owner))",
      "partition_point(|&(found, by, _)| (found, by) <= (party, owner))", "the tab of a party is not found"),
     ("crates/engine/src/lots.rs", "lots.iter().take_while(|lot| lot.txn == lots[0].txn).count()", "1",

@@ -295,11 +295,12 @@ Claims, in this order, each behind acceptance tests written first and ignored un
    parcel: `claim_target` refuses one that made a debt of the owner's (a plain balance, section 0.3), which today it
    accepts and does nothing with.
 4. **The readers ask the place.** A tab is given a built-in kind that says `claim`, so `said.rs::is_claim` is the fact and
-   `claim_target` asks `is_claim` of the place; `claims.rs` lists a debt by `is_claim` and its class and no longer by the
-   `payable` kind. The last line changes what `claims` lists for tab debts (section 0.3), and the report lists it.
+   `claim_target` asks `is_claim` of the place. (The second half of the first sentence in the plan, `claims.rs` listing a
+   debt by `is_claim` and its class and no longer by the `payable` kind, was tried and is not built: section 9.4.)
 
-Not built, and said: settlement by a party's flow (section 6); reversing what a written-off claim recognized (needs `books`);
-a purpose or items on a write-off (the statement does not carry them); assets (section 4).
+Not built, and said: settlement by a party's flow (section 6; it was built afterwards, section 10), reversing what a
+written-off claim recognized (needs `books`, section 11), a purpose or items on a write-off (the statement does not carry
+them), and assets (section 4).
 
 ## 8. How this map was checked
 
@@ -311,3 +312,189 @@ a purpose or items on a write-off (the statement does not carry them); assets (s
 - Section 5: a scratch copy of the tree with the special case removed, and the workspace's tests and goldens run on it.
 - `cargo test --workspace --release --no-fail-fast` at `36ead82`: 928 passed, 3 failed, 19 ignored; the three failures are the
   known ones.
+
+## 9. Phase 1 as built, and where it departs from section 7
+
+Commits `b6aa81c` (the acceptance tests, ignored), `489aba9`, `8feba74`, `6565c53`, `fdd0a33`, `74d92c0` (the four items of
+section 7), `baffa9d` (a correction the oracle forced), `7dacdc9` (the 04-freelancer goldens). The acceptance tests are
+31 in `engine/src/claim_tests.rs`, 3 in `lots.rs`, 1 in `model/tests/tabs.rs`, 3 in `report/src/source_tests.rs`; none is
+ignored now, and no existing test was edited except to give a fixture the two new `KindRoots` fields and to add `Exact`
+to the equivalence test of the three relief paths.
+
+1. **`exact` is a relief policy** (`Policy::Exact` in the syntax table and in `Coded`; `lots.rs` `take_exact` on the ordered
+   path, `whole_claims` and `by_policy` on the scanning path). *Departure from 7.1:* it is not "the parcel whose quantity is
+   exactly what is asked" but **the claim** whose open amount is: the parcels of one transaction (and one colour) add up, so
+   an itemized invoice of 3,000 + 800 is a claim of 3,800: a payment of 3,800 settles it, where a per-parcel test sees no
+   parcel of 3,800 and settles the oldest claim of any size, and a payment of 800 settles an older claim of 800 and not the
+   invoice's 800 line. The oracle found it (section 12). A claim place relieves by `Exact` unless its own `select`
+   says otherwise (`Traits::of`), so a declared `select fifo` keeps FIFO. LANGUAGE §9 says it in one sentence.
+2. **A flow's codes name claims** (`Ledger::name_claims`, `post.rs`): at a claim place, each code of the flow that a live
+   parcel there carries becomes a `Select::Code`, unless the flow wrote a code or a day itself. A code that names no claim
+   there is a label, as it was. The result is the scratch `selectors`, so nothing is allocated per flow.
+3. **Write-off is relief** (`engine/src/claims.rs`, the one-line `Fact::ClaimChange(at) => self.write_off(at)` in
+   `ledger.rs`). *Departure:* it selects by the transaction (`Select::Txn`, new), not by the code. A payment that carries the
+   invoice's code (`^i1` on both) would have made `^i1 waived` ambiguous in `CodeIndex` and a `Select::Code` would have
+   taken the payment's own parcels too; `CodeIndex` now keeps the carriers that *make* a claim apart (`claims`) and the
+   waiver resolves there. The parcels leave every claim place the transaction's flows paid into, in FIFO, and the value
+   goes back to the place it came from (conserved). Each forgiven parcel is a `WriteOff { change, place, unit, qty, basis,
+   acquired }` in `Run.written_off`. A write-off with nothing open is the warning `claim-writeoff-empty`; one on a debt of the
+   owner's is the error `claim-writeoff-target` with its own words (it used to be accepted and do nothing).
+   A view dated before the write-off day must show the claim open: `report/history.rs::journal_ends_by` counts
+   `claim_changes`, which it did not, and `why ^code` lists the waiver.
+4. **The readers ask the place.** A tab's kind is `claim` (Asset class) or `debt-claim` (Debt class), both saying `claim`;
+   `Book::is_claim` is the fact and no longer the role; `makes_claim` and `makes_debt` say what a flow made. *Not built:*
+   `report/claims.rs` is **unchanged**. The plan was to list a debt by `is_claim` and its class instead of the `payable`
+   kind. On `claim-debt-tab.ax` that lists `me owes pge` bills in `claims` and takes them from `available`, and a bill that
+   was paid (`checking -> pge 142.50 USD ^b1`) is still listed, because `owed_by_you` nets only flows that touch the tab and
+   a payment to the party's place does not: `available` falls from 857.50 to 665.00 USD, counting the 142.50 twice. A debt
+   is a plain balance (section 0.3) and nothing connects a payment to it; the gate stays until it does (section 10).
+
+5. **Two kind words are reserved.** A tab's kinds are built-in roots (`ROOTS` of `Kind`), so `claim` and `debt-claim` are
+   words a book can no longer declare: `kind claim : asset` was accepted and is now `duplicate-kind: kind `claim` is built
+   in` (checked on a three-line book, baseline against final), and the help line of an undeclared kind now lists
+   `: claim` and `: debt-claim` among the words to write (the one example mutant outside 04-freelancer that differs in the
+   fuzz). No example, std or golden declares either word. They are also words a book may write after `:`, which is what a
+   claim place of one's own would say.
+
+Not touched, as decided: `post.rs:278` (the prorata line; section 5's table stands and the failing test stays failing),
+`assets*.rs` and everything of section 4.
+
+## 10. Phase 2a: a payment from a party settles its claims
+
+LANGUAGE §7: "a later flow between them settles open claims: those its codes name, in order; else the one whose open
+amount is exactly the flow's; else the oldest first. What remains is an ordinary flow." Built in `engine/src/settle.rs`
+(commit `61809e4`), as the three needs of section 6 said it had to be, except the second.
+
+- **Which flow.** One out of a party's place (`Role::Outside(Some(party))`) that pays an owner's asset place which is not
+  itself a claim place, in one commodity, not an opening and not an exchange, where the owner has a tab with that party
+  (`Traits::tab_of`, a binary search over a sorted table built once). A flow that makes a claim (`ann -> owed 300`) does not
+  settle the claims before it; an opening is a state.
+- **What it does.** `Ledger::relieve` of a non-asset source calls `settle_claims`: the tab is relieved by
+  `min(flow, what the flow's selectors and codes reach)` by the tab's policy (codes, then exact, then oldest: the same
+  `Request`, the same `lots.rs`); the party's place is debited `out - settled` and not `out`, because the claims were already
+  counted in the tab; the rest of the flow is the ordinary flow it was. The tab's parcels are what `claims`, `balance`
+  and `available` read, so a settled claim leaves all three with no new reader.
+- **How `Record::resolved` holds a returned flow: it does not change.** `resolved` keeps the one `Amounts` a flow was posted
+  with, and a return (`Fact::Settle` with `State::Returned`) runs that flow backwards from it. The settlement is a second
+  fact about the same flow, so it has its own table, `Record::settled: Map<Id<Flow>, Settled { tab, unit, parcels }>`: the
+  parcels exactly as they left (widening `Amounts`, a `Copy` value on the hot path, with a boxed slice would have made it
+  not). The reversed motion's target is the party's place, so `arrive` calls `reopen_claims` there: it removes the entry,
+  lands the parcels back in the tab and credits the party back what it was not debited. `settled` is in the record's hash and
+  in a fork of the record, as `resolved` is.
+- **A debt is still a plain balance, so "exactly the flow's amount" has nothing to compare for what the owner owes.** There
+  is no parcel on a `Debt`-class tab (`Class::holds_parcels`) and `owed_by_you` rebuilds from flows that touch the tab, which a
+  payment to the party's place does not. Making it a parcel changes `holds_parcels`, `credit`, `balance`, `owed_by_you` and
+  the `payable` gate of `claims.rs` together; it needs the parcel, and the lane did not build it. A debt paid is still not
+  settled (`claim-debt-tab.ax` shows it).
+- **Not done, and said.** A payment written as a split statement does not debit its source yet (K4b's area), so a client
+  whose payments are split lines (`fernhill`, `orbit-labs` of 04-freelancer) keeps its claims; a payment in another
+  commodity than the claim's is an exchange and settles nothing; a hypothetical (applied) flow settles but cannot be
+  reopened, because only a journal flow has an id to key the table by; and the order of the lines of a reopened claim may
+  differ from the order it had, which `claims.py` allows for a returned payment (`may_differ`) and nothing else.
+
+Goldens and probes this moves, with the reason, are in section 12.
+
+## 11. Recognition: why it is not built, and what it would take
+
+What `books cash|accrual` says is when a claim's purpose counts as income or spending. Today it counts when the claim is
+made (section 0.5), and a payment from the party is a flow with the same purpose, so it counts again. Phase 2a leaves that
+as it was, and settles the claim, which is the visible part: `docs/v5/measure/diff/cases2/claim-recognition.ax` (an invoice
+of 300 with `#design ^i1` and its payment with the same) shows it in both builds:
+
+| | baseline `36ead82` | phase 2a |
+|---|---|---|
+| `flow`, income `design` | 600.00 USD (300 when made, 300 when paid) | 600.00 USD |
+| purpose law `seen` (`on flow`) | fires at the claim, "also at line 12" | the same |
+| net worth | 1,600.00 USD (the claim is still open after it was paid) | 1,300.00 USD |
+| `check` | the law twice and "ann still owes 300.00 USD" (3 warnings) | the law twice (2 warnings) |
+
+Net worth is right now and income is not: it is 600 where either reading says 300. LANGUAGE §7 gives the readings and the
+default (cash). Doing it means:
+
+1. `books` read once into the traits (as `currency` is), and the default decided: cash, as the text says, **moves every book
+   that writes a claim with a purpose** (the sources of 04-freelancer, 07-landlord, 08-expat, 09-shared and 11-sam do), and
+   with it the income, spending and tax they show. Which goldens move was not measured, since nothing was built to measure
+   with. That is a decision to take, not an edit.
+2. A settlement needs a purpose: the payment may write its own, or have none, and the claim has the one it was made with.
+   Under cash the claim's making counts nothing and the settled part of the payment counts under the claim's purpose; under
+   accrual the claim counts when made and the settled part counts nothing. `settle_claims` knows which parcels it settled and
+   so which transaction made them; the posting path does not yet ask. The purpose laws (`on flow`) must follow the same
+   gate, or the law above fires on a flow that counts nothing.
+3. The readers: `flow`, `budget` and `tax` read each flow's posting and recompute what a purpose gets; they need the settled
+   amount of a flow on `Posted`, and the forecast has its own copy of the rule.
+4. **When accrual counts is itself two statements**: LANGUAGE §7 says "when invoiced" and the doc of `Books::Accrual` and §6
+   say "when it is due". The two differ by the `due` span of every invoice.
+5. A write-off in accrual books reverses what was recognized: a posting with the claim's purpose, the forgiven amount, and no
+   movement, on the day of the write-off (the statement carries no purpose of its own, section 0.4). In cash books there is
+   nothing to reverse. `claims.rs` of the engine says so where it stops.
+
+That is the posting path's purpose gating, three report readers, the forecast and a default flip that moves many outputs,
+and two of its four decisions are the user's. It is larger than a lane, so the lane stops here and the design is above.
+
+## 12. How phases 1 and 2a were checked, and everything that moved
+
+**Probe books** (`docs/v5/measure/diff/cases2/`, each through the baseline `axiom-base` built from `36ead82` and the final
+binary): `claim-writeoff.ax` (a write-off), `claim-party-flow.ax` (a payment from the party), `claim-flow-code.ax` (a flow's
+code), `claim-receivable-merge.ax`, `claim-debt-tab.ax` (a bill is a plain balance), `claim-recognition.ax` (section 11) and
+`asset-parts.ax` (section 4, untouched).
+
+**The oracle** (`docs/v5/measure/claims.py`, `docs/v5/measure/parcels/main.rs`). A seeded generator writes books of seven
+families (tab, place, boxes, lots, assets, debts, mixed), 1,500 for seed 7; `parcels` dumps every parcel of every claim
+place and tab, every gain, adjustment, asset part and carry, the claims view and the diagnostics; a Python reference of
+LANGUAGE §7 (`old`: the rules at `36ead82`; `new`: this lane's) predicts which open claims each book must leave. A build is held
+to the reference (`verdict`), what no claim rule may move (gains, adjustments, assets, carries, posted flows, non-claim
+holdings) must be equal to the baseline's (`unmoved`), and every difference between the two builds must be one the reference
+predicts (`compare`).
+
+| | result on the final tree |
+|---|---|
+| `verdict base old` (the baseline against the old rules) | 1500 held, 0 fail |
+| `verdict new new` | 1500 held, 0 fail |
+| `compare base new` | 637 same, 863 differ as predicted, 0 differ and should not, 0 should differ and do not |
+
+What the 1,500 hold (`cover`): 485 projects with claims in a place and 402 on tabs; 720 write-offs (504 in a place, 90 twice);
+settlements equal to a claim (527), part of one (336), across several (282), more than all (167), by the flow's codes (271), by
+a written code (250), by a written day (96), with a label (125), with a written selector and codes at once (206); 428
+itemized claims; 344 payments from a party (146 naming a claim by code, 61 selecting one, 110 returned); 356 securities
+projects with every sale policy and 102 asset projects with the sale of a part, as the proof that lots and parts did not move.
+
+**Mutation.** `claims.py mutate` applies 33 one-line mutants of this lane's code, one at a time, builds the dump and asks
+whether the verdict or `compare` notices; a mutant the oracle misses is run against the unit tests of the three crates.
+Result on the tree before the last refactor: 27 killed by the oracle, 5 by the unit tests alone (4, 6, 21, 22, 24: a
+claim tied to an entity, a code on a line item, a write-off of the owner's own money, a view dated before a write-off, which
+the generated books do not write), and 1 survived (14: a code written on a line item of a payment, which no generated book
+has). A unit test now kills it (`a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles`), and 14, 16, 23 and 30,
+whose text the refactor changed, were run again on the final tree: killed. Two survivors of earlier runs shaped the
+generator: a written code or day that does not stop the flow's codes naming claims (11, 12), which the "selector and codes"
+form now kills, and a dedupe of codes that was equivalent and was removed from the code.
+
+**Tests.** `cargo test --workspace --release --no-fail-fast`: 966 passed, 3 failed, 19 ignored, against 928, 3 and 19 at
+`36ead82`: the 38 added tests pass, and the three failures are the known ones, unchanged
+(`a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot`,
+`a_context_forecast_keeps_historical_and_same_day_obligations_once`,
+`native_loan_forecast_stops_after_the_typed_principal_is_repaid`). No test was deleted or weakened.
+
+**Goldens and mistakes.** `sh tests/golden.sh` changes four files, all of `04-freelancer` (`-check`, `-balance`, `-available`,
+`-claims`), in two commits; the 203 mistakes and the other 56 goldens do not move. The example writes an invoice as
+`X owes me due 30d ^inv-N` and its payment as `X 3_200 USD -> business-checking #design ^inv-N`, and one claim is written off
+(`2025-12-15 ^inv-2025-d1 waived "not collected under the cash method"`):
+
+| output | at `36ead82` | write-off done (`7dacdc9`) | payments settle (`e5aa382`) |
+|---|---|---|---|
+| `available`, Coming in | 108,000.00 USD | 104,200.00 | 42,900.00 |
+| `balance`, net worth | 208,820.15 USD | 205,020.15 | 143,720.15 |
+| `balance`, brightwave / northpeak | 51,200.00 / 15,900.00 | the same | 3,200.00 / 2,600.00 |
+| `check`, warnings | 28 | 27 | 10 |
+| `claims`, rows of `^inv-` | 28 | 27 (delta-rugs' 3,800.00 gone) | 10 |
+
+The 3,800.00 written off is the claim the example's text says is forgiven; 61,300.00 of paid invoices had been counted twice
+(in the tab and in checking); the warnings that went are `overdue` ones for invoices that had been paid (`check` lists the
+first of them, so four later `overdue` and one `estimate-2-2025` now show that were beyond the limit). `fernhill` and
+`orbit-labs` keep their balances: their payments are split statements, which do not debit their source yet (section 10).
+`tax` does not move: what a claim recognized is the section 11 question. Probe books for the two reasons: `claim-writeoff.ax`
+and `claim-party-flow.ax`.
+
+**Fuzz** (`fuzz.py OLD NEW examples 11 1000 diff`, 36 claims books of the oracle's corpus beside it): no panic in either build;
+138 of the 1,000 example mutants print something different, 137 of them mutants of 04-freelancer and one of 06-investor,
+which differs only in the help line of an undeclared kind (section 9.5). Of the claims books, 408 of 1,000 mutants differ,
+as they should.
