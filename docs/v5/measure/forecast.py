@@ -4,6 +4,7 @@
     forecast.py gen DIR N [SEED]                    write N projects of promises into DIR (splits.py's `promises` kind)
     forecast.py cli BINARY DIR [JOBS] [UNTIL]       layer A: through the CLI of any build
     forecast.py dump BINARY DIR [JOBS] [UNTIL]      layer B: through `forecasts/main.rs`, which asks the engine itself
+    forecast.py against BASE NEW DIR                layer C: the occurrences each forecast lists, one build's against another's
     forecast.py build TREE OUT                      build the dump of layer B against the crates of TREE
     forecast.py mutate TREE WORK DIR [N,M..]        the mutants of the code under test: each must be caught by layer B
 
@@ -150,6 +151,30 @@ def cli(binary, directory, jobs=4, until=UNTIL, quiet=False):
                 shown += 1
                 print(f"  {name}: " + "; ".join(details[:3]))
     return 1 if tally["differ"] else 0
+
+
+def listed(binary, directory, until=UNTIL, jobs=4):
+    """The occurrences the forecast of each project lists, as a build says them: the rows of its `Contract occurrences`."""
+    projects = sorted(p for p in os.listdir(directory) if re.fullmatch(r"p\d+", p))
+
+    def one(name):
+        forecast, _ = forecast_of(binary, os.path.join(directory, name, "main.ax"), until)
+        found = section(forecast, "Contract occurrences") if forecast else None
+        return name, [[cell(c) for c in row["cells"]] for row in found["rows"]] if found else []
+
+    with ThreadPoolExecutor(jobs) as pool:
+        return dict(pool.map(one, projects))
+
+
+def against(base, new, directory, until=UNTIL):
+    """layer C: the occurrences the forecast of a build lists, against another build's. A forecast that history cannot
+    contradict (history is written from what the forecast lists) can still leave an occurrence out; the driver it replaced, or
+    the same build without a mutant, is the reference for that."""
+    before, after = listed(base, directory, until), listed(new, directory, until)
+    differ = sorted(name for name in before if before[name] != after[name])
+    count = sum(1 for rows in before.values() if rows)
+    print(f"{len(before)} projects, {count} list occurrences, {len(differ)} list others: {differ[:12]}")
+    return 1 if differ else 0
 
 
 # ─── layer B: the engine ────────────────────────────────────────────────────────────────────────────────────────────
@@ -410,6 +435,7 @@ def mutate(tree, work, directory, only=None):
     cli_binary = build_cli(source, work)
     assert dump_all(binary, directory, 4, quiet=True) == 0, "the baseline fails its own comparison"
     assert cli(cli_binary, directory, 4, quiet=True) == 0, "the baseline's CLI fails its own comparison"
+    reference = listed(cli_binary, directory)
     results = []
     for number, (path, old, replacement, what, layer) in enumerate(MUTANTS):
         if only is not None and number not in only:
@@ -422,7 +448,11 @@ def mutate(tree, work, directory, only=None):
             COVERED.clear()
             outcome = "killed by the dump" if layer == "engine" and dump_all(build(source, out), directory, 4, quiet=True) else None
             if outcome is None and layer in ("engine", "cli"):
-                outcome = "killed by the CLI layer" if cli(build_cli(source, work), directory, 4, quiet=True) else None
+                mutant = build_cli(source, work)
+                if cli(mutant, directory, 4, quiet=True):
+                    outcome = "killed by the CLI layer"
+                elif listed(mutant, directory) != reference:
+                    outcome = "killed by the occurrences it lists"
             if outcome is None:
                 outcome = "killed by the tests" if own_tests_fail(source, work) else "SURVIVED"
         except SystemExit:
@@ -448,6 +478,8 @@ def main(argv):
         return dump_all(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 4, argv[5] if len(argv) > 5 else UNTIL)
     if len(argv) >= 5 and argv[1] == "mutate":
         return mutate(argv[2], argv[3], argv[4], {int(n) for n in argv[5].split(",")} if len(argv) > 5 else None) or 0
+    if len(argv) >= 5 and argv[1] == "against":
+        return against(argv[2], argv[3], argv[4])
     if len(argv) >= 4 and argv[1] == "build":
         print(build(argv[2], argv[3]))
         return 0

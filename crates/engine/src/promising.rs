@@ -20,7 +20,7 @@
 //! of written due days is kept beside the streams, sorted, and searched when an entry is made.
 //!
 //! The state is not in the monitor's `World`, which a checkpoint hashes and a resumed ledger starts from: a ledger that does
-//! not promise carries two empty vectors, and a fork of a ledger that does carries the promise with it.
+//! not promise carries three empty collections, and a fork of a ledger that does carries the promise with it.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
