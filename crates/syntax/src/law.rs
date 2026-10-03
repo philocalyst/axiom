@@ -17,7 +17,7 @@ const ON_TRIGGERS: [(&str, Trigger); 5] = [
 pub(crate) const PERIODS: [(&str, Period); 2] = [("month", Period::Month), ("year", Period::Year)];
 
 const TRIGGER_WORDS: [&str; 4] = ["on", "each", "by", "always"];
-const STEP_WORDS: [&str; 5] = ["when", "unless", "let", "require", "warn"];
+const STEP_WORDS: [&str; 6] = ["when", "unless", "let", "require", "warn", "derive"];
 /// The steps that do something to the world, which `require … else` may name too.
 const EFFECTS: [&str; 4] = ["owe", "count", "consume", "carry"];
 
@@ -136,6 +136,7 @@ impl<'s> Parser<'s> {
                 let message = self.take_message();
                 Ok(StepKind::Require { cond, otherwise: Many::EMPTY, message, warn: true })
             }
+            "derive" => self.derived_line("expected-derive").map(|line| StepKind::Effect(Effect::Derive(line))),
             _ if EFFECTS.contains(&word) => self.effect_after(word).map(StepKind::Effect),
             _ => Err(self.unknown_step(keyword, word)),
         }
@@ -211,9 +212,9 @@ impl<'s> Parser<'s> {
             .label(keyword.loc, "not a step of a law");
         let diag = match closest(word, STEP_WORDS.into_iter().chain(EFFECTS).chain(TRIGGER_WORDS)) {
             Some(near) => diag.fix(format!("did you mean `{near}`?"), keyword.loc, near),
-            None => {
-                diag.note("steps are `when`, `unless`, `let`, `require`, `warn`, `owe`, `count`, `consume` and `carry`")
-            }
+            None => diag.note(
+                "steps are `when`, `unless`, `let`, `require`, `warn`, `owe`, `count`, `consume`, `carry` and `derive`",
+            ),
         };
         self.report(diag)
     }

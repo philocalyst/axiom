@@ -2,24 +2,25 @@
 //! before any template expression compiles, so a template may mention a
 //! contract declared later in the project.
 
+mod relator;
+
 use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Run, Span, Sym, Timeline};
 use axiom_syntax as ast;
 use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, Name};
 
-use super::also::{AlsoCx, lower_alsos};
-use super::infer::infer_for_flow;
+use super::infer::classify;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
-    Also, AlsoOn, Amount, Asset, At, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation,
-    Input, Loan, Param, Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
+    Amount, Asset, At, Book, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation, Input, Loan,
+    Param, Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Flow, Infer, Mode, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
-use crate::laws::Placement;
+use crate::laws::{Placement, Positions};
 use crate::problem::{self, Noun};
 use crate::promise::Blame;
 use crate::resolve::End;
@@ -82,6 +83,10 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
         let file = written.file();
         let placement = Placement { file, home: written.home(), owner: Owner::Contract(written.id), subject: Ty::Flow };
         let mut laws = Vec::new();
+        for also in &file[written.node.alsos] {
+            laws.extend(crate::laws::compile_also(world, diags, &placement, also, Positions::NONE));
+        }
+        laws.extend(relator::legs(world, collected, written, diags));
         for law in &file[written.node.laws] {
             laws.extend(crate::laws::compile_native(world, diags, &placement, law));
         }
@@ -92,6 +97,8 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
 fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
     Contract {
         name,
+        kind: None,
+        fillers: Box::default(),
         party: me,
         owner: me,
         purpose: None,
@@ -105,7 +112,6 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
         deposit: None,
         deposit_holding: None,
         loan: None,
-        matching: None,
         ended: None,
         laws: Box::default(),
         doc: None,
@@ -195,17 +201,12 @@ fn lower_contract<'a, 's>(
         .or(node.standing)
         .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at)));
     let deposit = contract_deposit(world, written, Keeping { owner, default_holding }, diags).ok()?;
-    let also_cx = AlsoCx {
-        file,
-        home,
-        owner: Owner::Contract(written.id),
-        on: AlsoOn::Contract(written.id),
-        inputs: &contract_inputs,
-        currency: world.book.currency(owner),
-    };
-    let also = lower_alsos(world, &also_cx, node.alsos, diags);
     let loan = contract_loan(world, written, party, owner, diags)?;
+    let relation = relator::relation(world, written, diags);
     let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
+    if let Some((kind, fillers)) = relation {
+        (contract.kind, contract.fillers) = (Some(kind), fillers);
+    }
     contract.party = party;
     contract.owner = owner;
     contract.days = days;
@@ -234,13 +235,18 @@ fn lower_contract<'a, 's>(
         description,
         area,
         loan_rate: loan.map(|(_, rate)| rate),
-        also: &also,
     };
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
         contract.terms = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
     if let (Some(schedule), Some((program, ids))) = (node.standing, standing) {
         contract.standing = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
+    }
+    for share in shares(world, &cx, diags) {
+        if !bears(&world.book, share.entity) {
+            diags.push(share_for_a_party(&world.book, &share));
+        }
+        crate::laws::push_share(world, Owner::Contract(written.id), home, &share);
     }
     owed_by_party(world, &contract);
     Some(contract)
@@ -666,7 +672,6 @@ struct TermsCx<'a, 's> {
     description: Option<Text>,
     area: Option<Amount>,
     loan_rate: Option<Ratio>,
-    also: &'a [Id<Also>],
 }
 
 /// The header flow of a schedule, with what the legs and the items under it are made against.
@@ -725,8 +730,6 @@ fn lower_terms<'a, 's>(
         covers: coverage_property(file, node.props, diags),
         prorated: has_property(file, node.props, "prorated"),
         escalation: escalation_property(world, home, file, node.props, diags),
-        shares: shares(world, cx, diags).into_boxed_slice(),
-        also: cx.also.to_vec().into_boxed_slice(),
         rate: cx.loan_rate,
     })
 }
@@ -761,9 +764,9 @@ fn template_header<'a, 's>(
         Direction::From => (None, Some(party)),
         Direction::Into => (Some(party), None),
     };
-    let purpose = cx.purpose.map(|at| (at.value, at.loc));
+    let purpose = cx.purpose.map(|at| at.value);
     let (from_end, to_end) = (End { place: from, entity: from_party }, End { place: to, entity: to_party });
-    flow.purpose = infer_for_flow(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
+    flow.purpose = classify(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
     let arrive = buys.map_or(quantity, Quantity::Unknown);
     Some(HeaderCx { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
 }
@@ -789,9 +792,9 @@ fn template_legs<'a, 's>(
         flow.codes = tail.codes;
         flow.select = tail.select;
         flow.waive = tail.waive;
-        let inferred = tail.purpose.or(cx.purpose).map(|at| (at.value, at.loc));
+        let written = tail.purpose.or(cx.purpose).map(|at| at.value);
         let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
-        flow.purpose = infer_for_flow(world, ends.0, ends.1, inferred, leg.loc, diags).ok()?;
+        flow.purpose = classify(world, ends.0, ends.1, written, leg.loc, diags).ok()?;
         flow.description = tail.description.or(flow.description);
         lowered.push(Leg { flow, part });
     }
@@ -1490,6 +1493,23 @@ fn deposit_holding<'s>(
         return Err(());
     }
     Ok(place)
+}
+
+/// Whether an entity is an owner in this book, which has an account of its own: what it bears is its own.
+fn bears(book: &Book, entity: Id<Entity>) -> bool {
+    book.entities[entity].place.is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)))
+}
+
+/// A share for a party is what it owes, and a contract makes the flow it bears and not the claim on it.
+fn share_for_a_party(book: &Book, share: &Share) -> Diagnostic {
+    let party = book.name(book.entities[share.entity].path);
+    Diagnostic::warning(
+        "contract-share-party",
+        format!("`{party}` is a party, and a share for a party is what it owes"),
+    )
+    .label(share.loc, format!("this share is made as a flow `{party}` bears, and no claim on it"))
+    .note("an owner of the book (one with an account of its own) bears its share, and nothing more is needed")
+    .help(format!("for what `{party}` owes, write the claim: `{party} owes me AMOUNT`"))
 }
 
 /// The shares a contract divides what it brings in by: each `share RATE for ENTITY`, as a percentage, a fraction or

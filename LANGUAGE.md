@@ -232,9 +232,12 @@ gain is less by them, a purchase's basis more.
 4. its commodity's kind in party position (`kind fund … pays dividend`);
 5. its accounts' kinds (a `401k`'s `takes pre-tax-deferral from wages`).
 
-Parent and child purposes are compatible classifications at different levels
-of detail; the first match still selects the event's purpose. Two sources naming
-unrelated purposes, or different explicit objects, are an error naming both.
+A source never contradicts one listed above it: the first match selects the
+event's purpose, and a written purpose is not compared with what a party says. Two
+sources of the same rank that name unrelated purposes (the party at one end says
+`wages`, the party at the other `insurance`) are an error naming both, and the line
+that settles it is a written `#purpose`. Parent and child purposes are compatible
+classifications at different levels of detail.
 An event none of them
 classifies is *unclassified*; with a description it is *unclassified, described*.
 `check --strict` asks for a purpose on each. `#NAME of THING` gives a purpose its
@@ -554,7 +557,8 @@ late rent, an unpaid invoice and a friend's loan are the same thing to `check`,
 `claims` and the forecast.
 
 ```text
-contract NAME [with PARTY]
+contract NAME [: KIND] [with PARTY]
+  [SLOT NAME]*                                              // the roles of its kind, filled (below)
   [about] AMOUNT CADENCE [on DAY] (from | into) HOLDING     // the schedule
   [buy UNIT for AMOUNT CADENCE [on DAY] from HOLDING]       // a standing order
   [PURPOSE] [STRING]
@@ -583,6 +587,30 @@ carry any tail of its own (`15 estimates 8_800 USD for 2025`). `covers the month
 is the calendar period that contains the due day, `covers 1y` twelve months from
 it. `prorated` makes an occurrence that starts or ends inside its period that
 share of it, by days, legs and all.
+
+**A kind of contract** says what two parties are to each other, and what always follows
+from it. It declares its roles (`has employee person`) and its legs, as `also` lines
+whose ends are those roles; a contract of the kind fills the roles with a line of two
+names. Each book that owns a contract of the kind has the legs it touches: a role the
+contract's owner (or a member of the owner) fills stands at the account the schedule
+pays from or into, a role anyone else fills stands outside, at the party, and a leg with
+both ends outside moves value between two parties and is not made. One kind, two books:
+
+```text
+kind employment : contract
+  has employee person
+  has employer employer
+  also employer -> irs 7.65% of amount #payroll-tax        // the employer's half
+
+contract alex-pay : employment with acme                   // in the household's book: nothing
+  employee me                                              // of the half, both its ends are outside;
+  employer acme                                            // in acme's book, paid `from payroll`,
+  5_750 USD twice monthly on 15, last into joint-checking  // `payroll -> irs 7.65%` is made
+```
+
+A role must be filled, once, by an entity of a kind its slot takes. `as with` (the slot a
+contract's `with` fills), a leg that starts with an arrow, and a role at a position that
+is not the schedule's own account (a plan's) are not read yet.
 
 **Kept.** `DATE NAME` is one occurrence: the contract's flows on that day, as its
 terms stand that day. An amount after the name replaces the contract's this once
@@ -699,6 +727,7 @@ law NAME [overrides NAME]
   count EXPR as NAME
   consume EXPR                     // on an asset: lowers its basis (depreciation)
   carry EXPR to UNIT_EXPR within SPAN   // a disallowed loss joins a nearby purchase's basis
+  derive ITEM | FLOW                // in a contract: with each occurrence (§10), a flow or an item
 ```
 
 `UNIT_EXPR` is a full expression whose checked type is `unit`: either a written
@@ -759,7 +788,12 @@ a violation is reported once per subject and window, at the flow that crossed th
 line. `owe` creates a claim for an entity. `consume` lowers the governed asset's
 basis. `carry` holds a disallowed loss and adds it to the basis of the nearest
 acquisition of that commodity within the span, before or after (a wash sale).
-Every `require` and `warn` comparing two amounts records its headroom.
+Every `require` and `warn` comparing two amounts records its headroom. `derive` is read
+when a contract's occurrence is made, before any of it posts, so a law that derives is a
+contract's, `on flow`, and says nothing that judges a posted flow (`derive-and-judge`):
+`amount` is the header as the contract gave it, and `[end]` selects from the flows the
+occurrence made. What it derives joins the occurrence: a flow of its own after the others,
+an item solved against the header with the contract's own.
 
 ### Expressions and units
 
@@ -889,6 +923,14 @@ purpose design
 ```
 
 A written line that says the same thing replaces the derived one.
+
+A contract's `also` and `share` are laws: `also LINE [when E]` is `on flow`, `when E`,
+`derive LINE`, and `share 60% for studio` is `on flow`, `derive 60% of amount` as an item
+carved from the header, borne by the studio and for what the header is. They are made with
+each occurrence of the contract, a forecast's too. An `also` under a kind, an entity or a
+purpose derives nothing yet, and the book is told so (`also-inert`): what it would derive
+is a flow of a flow that has already posted. A `share` for a party, which is a claim, and a
+party kind's `sales-tax`, which is inside a price a journal flow paid, are not made yet.
 
 ## 11. Dates, files, documents and returns
 

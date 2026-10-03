@@ -27,16 +27,7 @@ const KINDS: [PurposeRoot; 4] =
 
 impl Purpose {
     fn blank(name: Sym, root: PurposeRoot) -> Purpose {
-        Purpose {
-            name,
-            root,
-            system: None,
-            of: None,
-            shares: Box::default(),
-            laws: Box::default(),
-            doc: None,
-            loc: None,
-        }
+        Purpose { name, root, system: None, of: None, laws: Box::default(), doc: None, loc: None }
     }
 }
 

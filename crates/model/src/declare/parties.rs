@@ -126,7 +126,7 @@ fn implied_parties<'a, 's>(
     written: &Map<&'s str, Written_<'a, 's>>,
 ) -> (Map<&'s str, Loc>, Vec<&'s str>) {
     let collected = said.collected;
-    let Mentions { first: mentioned, parties } = Mentions::of(said.sites);
+    let Mentions { first: mentioned, parties, .. } = Mentions::of(said.sites);
     let references = of_two_words(&mentioned);
     let mut places = Set::default();
     for decl in collected.decls.iter().filter(|decl| matches!(decl.node.what, DeclKind::Account | DeclKind::Asset)) {

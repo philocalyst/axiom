@@ -7,7 +7,7 @@
 
 use axiom_core::{Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Entity, Law, Subject};
+use axiom_model::{Amount, Book, Entity, Law, Subject, Watch};
 
 use super::laws_table;
 use crate::claims;
@@ -57,8 +57,9 @@ fn places_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>)
 /// What governs the entity itself: its `on spend` laws while it holds money for others, and its own timed laws.
 fn governing_laws(book: &Book<'_>, run: &Run, entity: Id<Entity>) -> Vec<Id<Law>> {
     let rules = &book.rules;
-    let timed = rules.timed.iter().filter(|rule| rule.subject == Subject::Entity(entity));
-    rules.on_spend[entity]
+    let timed = rules.timed().iter().filter(|rule| rule.subject == Subject::Entity(entity));
+    rules
+        .at(Watch::Spend(entity))
         .iter()
         .chain(timed)
         .filter(|rule| rule.days.contains(run.today))

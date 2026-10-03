@@ -51,21 +51,6 @@ error[ambiguous-lots]: ambiguous lot: wallet holds 2 lots that differ and no pol
    = help: name the lot, `wallet[2026-02-10]`, or a policy, `wallet[fifo]` (or lifo, hifo, prorata),
            or give the account `select fifo`
 
-error[purpose-disagreement]: this flow's purpose sources disagree
-    ╭─[03-violations.ax:60:46]
-    │
- 60 │ 2026-03-02 checking -> trader-joes 84.20 USD #rent
-    │ ─────────────────────────┬─────────────────────┬──
-    │                          │                     ╰── the written purpose is `#rent`
-    │                          ╰── these sources classify the same flow differently
-    │
-    ├─[std.ax:110:11] (built in)
-    │
-109 │ kind grocer : merchant
-110 │   purpose groceries
-    │           ────┬────
-    │               ╰── party kind `grocer` gives purpose `#groceries`
-
 error[price-disagrees]: the stated price does not match the flow amounts
    ╭─[03-violations.ax:64:50]
    │
@@ -88,7 +73,7 @@ error[purpose]: grant money spent outside its purpose
     │                │                ╰── no value (`grant-purpose` is not set)
     │                ╰── #fun
 
-error[assertion]: checking holds 59,000.00 USD, not 57,915.80 USD
+error[assertion]: checking holds 58,915.80 USD, not 57,915.80 USD
    ╭─[03-violations.ax:75:1]
    │
 41 │ opening 2025-12-31
@@ -110,11 +95,15 @@ error[assertion]: checking holds 59,000.00 USD, not 57,915.80 USD
    │ ────────────────────────┬────────────────────────
    │                         ╰── +24,000.00 USD from wallet
    ⋮
+60 │ 2026-03-02 checking -> trader-joes 84.20 USD #rent
+   │ ─────────────────────────┬────────────────────────
+   │                          ╰── -84.20 USD to trader-joes
+   ⋮
 75 │ 2026-12-31 checking = 57_915.80 USD
    │ ─────────────────┬─────────────────
-   │                  ╰── 1,084.20 USD less than the ledger holds
+   │                  ╰── 1,000.00 USD less than the ledger holds
    │
-   = note: 1,084.20 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = note: 1,000.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 75 + 2026-12-31 checking = 57_915.80 USD !
@@ -149,4 +138,4 @@ note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, du
            substantially equal payments, and others in §72(t)(2)), keep the withdrawal and mark it
            `!` with the reason.
 
-✗ 8 errors · 1 priced
+✗ 7 errors · 1 priced

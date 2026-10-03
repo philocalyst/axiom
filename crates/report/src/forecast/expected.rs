@@ -247,12 +247,12 @@ mod tests {
             covers: None,
             prorated: false,
             escalation: None,
-            shares: Box::default(),
-            also: Box::default(),
             rate: None,
         };
         let contract = Contract {
             name: house.book.names.intern("rent-promise"),
+            kind: None,
+            fillers: Box::default(),
             party: Id::new(0),
             owner: Id::new(0),
             purpose: None,
@@ -266,7 +266,6 @@ mod tests {
             deposit: None,
             deposit_holding: None,
             loan: None,
-            matching: None,
             ended: None,
             laws: Box::default(),
             doc: None,

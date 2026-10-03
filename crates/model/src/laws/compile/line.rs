@@ -1,21 +1,60 @@
-//! `also` lines, which declaration and contract lowering share: what every matching flow implies, declared once.
+//! What a line that derives says: the `FLOW` or `ITEM` after an `also` or a `derive`, read.
+//!
+//! The two spellings are one line (`+ 5% of amount #fee`, `lumen -> retirement 50% of ... #match`), so one reader
+//! turns it into a [`Said`] (its shape against the flow that fires it, its amount as written, its clauses) and one
+//! reader turns the clauses into the metadata a derived flow carries.
+//!
+//! A line a contract's kind writes (`also employer -> irs 7.65% of amount #payroll-tax`) has the kind's roles for
+//! ends. A role is not an entity: it is whoever fills the slot in the contract being lowered, standing where
+//! [`Positions`] says, so the same line reads one way for the household that pays `employer` and another for the
+//! `employer` whose book it is.
 
+use axiom_core::diag::closest;
 use axiom_core::{Days, Diagnostic, Id, Loc, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
-use super::tail::{Reach, written_purpose, written_waive};
-use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Text};
+use crate::book::{Place, Shape, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
-use crate::law::{Law, NodeId, Owner, Rank, Trigger, Ty};
+use crate::lower::tail::{Reach, written_purpose, written_waive};
 use crate::scope::Home;
-use crate::split::{Expr, Sign};
+use crate::split::Sign;
 
-/// Pooled metadata shared by contract and declaration `also` clauses.
+/// Where each role of a contract's kind stands in the book the contract is lowered into: the place its filler is at,
+/// which is the owner's holding where the filler is the owner and the filler's outside place where it is anyone else.
 #[derive(Clone, Copy)]
-pub(crate) struct AlsoMetadata {
+pub(crate) struct Positions<'a> {
+    pub stands: &'a [(Sym, Id<Place>)],
+    /// The roles the contract leaves empty (an `optional` slot nothing fills).
+    pub empty: &'a [Sym],
+}
+
+/// What a name written as an end is, when a contract's kind has roles.
+enum Standing {
+    Stands(Id<Place>),
+    Empty,
+    NoRole,
+}
+
+impl Positions<'_> {
+    /// The positions of a contract with no kind: it has no roles.
+    pub(crate) const NONE: Positions<'static> = Positions { stands: &[], empty: &[] };
+
+    fn of(self, name: Option<Sym>) -> Standing {
+        let Some(name) = name else { return Standing::NoRole };
+        match self.stands.iter().find(|(slot, _)| *slot == name) {
+            Some(&(_, place)) => Standing::Stands(place),
+            None if self.empty.contains(&name) => Standing::Empty,
+            None => Standing::NoRole,
+        }
+    }
+}
+
+/// What the clauses of a derived line say, pooled in the book.
+#[derive(Clone, Copy)]
+pub(crate) struct Metadata {
     pub codes: Run<Sym>,
     pub select: Run<Select>,
     pub detail: Option<Id<Detail>>,
@@ -24,16 +63,15 @@ pub(crate) struct AlsoMetadata {
     pub description: Option<Text>,
 }
 
-/// Resolves exactly the metadata retained by `book::Also`. Endpoints belong to
-/// the caller because an implied flow may inherit either endpoint from the
-/// flow that caused it.
+/// Resolves exactly the metadata a [`crate::book::Derived`] keeps. Its ends belong to the line, because a derived flow
+/// may take either end from the flow that fired it.
 pub(crate) fn tail<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     clauses: ast::Many<ast::Clause<'s>>,
     diags: &mut Vec<Diagnostic>,
-) -> AlsoMetadata {
+) -> Metadata {
     let code_start = world.book.codes.len();
     let select = Run::new(Id::new(world.book.selectors.len() as u32), 0);
     let mut detail = Detail::NONE;
@@ -99,125 +137,70 @@ pub(crate) fn tail<'s>(
 
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
     let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
-    AlsoMetadata { codes, select, detail, waive, purpose, description }
+    Metadata { codes, select, detail, waive, purpose, description }
 }
 
-/// What the `also` lines of one declaration are lowered against. `inputs` are the caller's template inputs, and
-/// `currency` is the unit of an amount written without one. The caller chooses the owner and the `AlsoOn` it
-/// matches, and owns any fallback endpoint semantics.
-pub(crate) struct AlsoCx<'a, 's> {
-    pub file: &'a ast::File<'s>,
-    pub home: Home,
-    pub owner: Owner,
-    pub on: AlsoOn,
-    pub inputs: &'a [Input],
-    pub currency: Id<Commodity>,
+/// What a line that derives, an `also` or a `derive`, says, read: how it lies against the flow that fires it, its
+/// amount as written, the clauses after it, and the selectors it narrows its source by.
+pub(crate) struct Said<'s> {
+    pub shape: Shape,
+    pub amount: ast::Amount<'s>,
+    pub clauses: ast::Many<ast::Clause<'s>>,
+    pub selectors: Option<ast::Many<ast::Select<'s>>>,
 }
 
-/// An implied amount: a literal is resolved now, and an expression is compiled with the rest of its `also`.
-#[derive(Clone, Copy)]
-enum PendingAmount {
-    Literal(Amount),
-    Computed(usize),
-}
-
-/// What an `also` implies, read: the item or flow (its amount still to come), the clauses after it, and the
-/// selectors an implied flow narrows its source by.
-struct Line<'s> {
-    what: Implied,
-    amount: PendingAmount,
-    clauses: ast::Many<ast::Clause<'s>>,
-    selectors: Option<ast::Many<ast::Select<'s>>>,
-}
-
-/// Lowers `also` clauses shared by declaration and contract lowering.
-pub(crate) fn lower_alsos<'s>(
-    world: &mut World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    alsos: ast::Many<ast::Also<'s>>,
+/// What `line` says, or nothing after what is wrong with it has been said.
+pub(crate) fn read_line<'s>(
+    world: &World<'s>,
+    home: Home,
+    file: &ast::File<'s>,
+    line: &ast::AlsoLine<'s>,
+    at: Loc,
+    positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
-) -> Box<[Id<Also>]> {
-    cx.file[alsos].iter().filter_map(|also| lower_also(world, cx, also, diags)).collect()
+) -> Option<Said<'s>> {
+    match line {
+        ast::AlsoLine::Item(item) => Some(implied_item(item)),
+        ast::AlsoLine::Flow(flow) => implied_flow(world, home, file, flow, at, positions, diags),
+    }
 }
 
-/// One `also`, or nothing after what is wrong with it has been said.
-fn lower_also<'s>(
-    world: &mut World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    also: &ast::Also<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Also>> {
-    let (file, home) = (cx.file, cx.home);
-    let mut roots = Vec::new();
-    let when_index = also.when.map(|when| {
-        roots.push((when, Ty::Bool));
-        roots.len() - 1
-    });
-    let Line { mut what, amount, clauses, selectors } = match &also.line {
-        ast::AlsoLine::Item(item) => implied_item(world, cx, item, &mut roots, diags)?,
-        ast::AlsoLine::Flow(flow) => implied_flow(world, cx, flow, also.loc, &mut roots, diags)?,
-    };
-    let metadata_errors = diags.len();
-    let metadata = tail(world, home, file, clauses, diags);
-    if diags.len() != metadata_errors {
-        return None;
-    }
-    let selector_errors = diags.len();
-    let select = selectors.map_or(metadata.select, |selectors| lower_selectors(world, home, file, selectors, diags));
-    if diags.len() != selector_errors {
-        return None;
-    }
-    let (law, compiled_roots) = compile_also(world, cx, &roots, also.loc, diags)?;
-    let amount = match amount {
-        PendingAmount::Literal(amount) => Expr::Literal(amount),
-        PendingAmount::Computed(index) => Expr::Computed(compiled_roots[index]),
-    };
-    match &mut what {
-        Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => *slot = amount,
-    }
-    Some(world.book.also.push(Also {
-        on: cx.on,
-        what,
-        when: when_index.map(|index| compiled_roots[index]),
-        law,
-        purpose: metadata.purpose,
-        description: metadata.description,
-        codes: metadata.codes,
-        select,
-        detail: metadata.detail,
-        waive: metadata.waive,
-        loc: also.loc,
-    }))
+/// The places a line's two ends stand at (`None` is the end of the flow that fires it), if it is a flow and both ends
+/// are something. Nothing is said of an end that is not: reading the line for real says it once.
+pub(crate) fn flow_ends<'s>(
+    world: &World<'s>,
+    home: Home,
+    file: &ast::File<'s>,
+    line: &ast::AlsoLine<'s>,
+    positions: Positions<'_>,
+) -> Option<(Option<Id<Place>>, Option<Id<Place>>)> {
+    let ast::AlsoLine::Flow(flow) = line else { return None };
+    let mut unsaid = Vec::new();
+    let from = implied_end(world, home, file, flow.from.end, positions, &mut unsaid)?;
+    let to = implied_end(world, home, file, flow.to.end, positions, &mut unsaid)?;
+    Some((from, to))
 }
 
 /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow that implies it.
-fn implied_item<'s>(
-    world: &World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    item: &ast::LineItem<'s>,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Line<'s>> {
-    let amount = pending_amount(world, cx.file, item.amount, cx.currency, roots, diags)?;
+fn implied_item<'s>(item: &ast::LineItem<'s>) -> Said<'s> {
     let sign = match item.sign {
         ast::Sign::Carve => Sign::Carve,
         ast::Sign::Add => Sign::Add,
         ast::Sign::Less => Sign::Less,
     };
-    let what = Implied::Item { sign, amount: Expr::Literal(Amount::zero(cx.currency)) };
-    Some(Line { what, amount, clauses: item.tail, selectors: None })
+    Said { shape: Shape::Item(sign), amount: item.amount, clauses: item.tail, selectors: None }
 }
 
 /// `-> escrow 410 USD`: a flow of its own, whose ends are the implying flow's own where it names none (`self`).
 fn implied_flow<'s>(
     world: &World<'s>,
-    cx: &AlsoCx<'_, 's>,
+    home: Home,
+    file: &ast::File<'s>,
     flow: &ast::Flow<'s>,
     also_loc: Loc,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
+    positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Line<'s>> {
-    let file = cx.file;
+) -> Option<Said<'s>> {
     if !file[flow.body.legs].is_empty() || !file[flow.body.items].is_empty() {
         diags.push(
             Diagnostic::error("also-flow-body", "a declaration `also` flow cannot have split legs or items")
@@ -237,8 +220,8 @@ fn implied_flow<'s>(
     }
     // Both ends are looked up before either failure stops the line, so both are said.
     let (from, to) = (
-        implied_end(world, cx.home, file, flow.from.end, diags),
-        implied_end(world, cx.home, file, flow.to.end, diags),
+        implied_end(world, home, file, flow.from.end, positions, diags),
+        implied_end(world, home, file, flow.to.end, positions, diags),
     );
     let (from, to) = (from?, to?);
     let from_amount = implied_amount(file, flow.from.amount, also_loc, diags)?;
@@ -260,26 +243,47 @@ fn implied_flow<'s>(
             return None;
         }
     };
-    let amount = pending_amount(world, file, amount, cx.currency, roots, diags)?;
-    let what = Implied::Flow { from, to, amount: Expr::Literal(Amount::zero(cx.currency)) };
-    Some(Line { what, amount, clauses: flow.tail, selectors: flow.from.end.map(|end| end.select) })
+    let selectors = flow.from.end.map(|end| end.select);
+    Some(Said { shape: Shape::Flow { from, to }, amount, clauses: flow.tail, selectors })
 }
 
-/// The place an end of an implied flow names: none for `self` or no end, and nothing at all, after it is said,
-/// for a name that is none.
+/// The place an end of an implied flow names: none for `self` or no end, the place a role stands at, and nothing at
+/// all, after it is said, for a name that is none.
 fn implied_end<'s>(
     world: &World<'s>,
     home: Home,
     file: &ast::File<'s>,
     end: Option<ast::End<'s>>,
+    positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Id<Place>>> {
-    match end {
-        Some(end) if end.name.0 != "self" => {
-            world.end(home, Word::of(file, end.name.0)).map(|end| Some(end.place)).or_report(diags)
+    let Some(end) = end.filter(|end| end.name.0 != "self") else { return Some(None) };
+    let word = Word::of(file, end.name.0);
+    match positions.of(world.book.names.get(word.text)) {
+        Standing::Stands(place) => Some(Some(place)),
+        Standing::Empty => {
+            diags.push(empty_role(world, word, positions));
+            None
         }
-        _ => Some(None),
+        Standing::NoRole => world.end(home, word).map(|end| Some(end.place)).or_report(diags),
     }
+}
+
+/// A leg of a contract's kind names a role the contract leaves empty.
+fn empty_role(world: &World<'_>, word: Word, positions: Positions<'_>) -> Diagnostic {
+    let filled: Vec<&str> = positions.stands.iter().map(|&(slot, _)| world.book.name(slot)).collect();
+    let near = closest(word.text, filled.iter().copied());
+    let mut diagnostic = Diagnostic::error("relator-role-empty", format!("nothing fills `{}` here", word.text))
+        .label(word.loc, "this contract leaves the role empty, so the leg has no end")
+        .help(format!("fill it in the contract: `{} NAME`", word.text));
+    if let Some(near) = near {
+        diagnostic = diagnostic.note(format!("the roles it fills are {}", crate::errors::list(&filled))).fix(
+            format!("did you mean `{near}`?"),
+            word.loc,
+            near,
+        );
+    }
+    diagnostic
 }
 
 /// The amount one side of an implied flow states: none if it states none, and nothing at all, after it is said,
@@ -303,56 +307,7 @@ fn implied_amount<'s>(
     }
 }
 
-/// An implied amount: a literal is resolved now, and an expression is compiled with the rest of its `also`.
-fn pending_amount<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    amount: ast::Amount<'s>,
-    currency: Id<Commodity>,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<PendingAmount> {
-    match amount {
-        ast::Amount::Literal(literal) => {
-            world.literal_amount(file, literal, Some(currency)).or_report(diags).map(PendingAmount::Literal)
-        }
-        ast::Amount::Computed(root) => {
-            roots.push((root, Ty::AMOUNT));
-            Some(PendingAmount::Computed(roots.len() - 1))
-        }
-    }
-}
-
-/// Compiles the expression roots of an `also` into a law arena of its own. The caller stores the law in its
-/// `Also`; roots are ordered as written (`when`, then amounts).
-fn compile_also<'s>(
-    world: &mut World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    roots: &[(ast::ExprId, Ty)],
-    loc: Loc,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<(Id<Law>, Box<[NodeId]>)> {
-    let name = world.book.names.intern("also");
-    let compiled = crate::laws::compile_template(world, diags, cx.file, cx.home, Ty::Flow, name, cx.inputs, roots)?;
-    let (program, roots) = compiled;
-    let law = Law {
-        name,
-        doc: None,
-        owner: cx.owner,
-        system: if let Home::System(system) = cx.home { Some(system) } else { None },
-        trigger: Trigger::Flow,
-        budget: None,
-        overrides: None,
-        override_name: None,
-        rank: Rank::ZERO,
-        steps: Box::default(),
-        nodes: program.nodes,
-        loc,
-    };
-    Some((world.book.laws.push(law), roots))
-}
-
-fn lower_selectors<'s>(
+pub(crate) fn lower_selectors<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,

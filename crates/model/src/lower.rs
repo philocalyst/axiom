@@ -8,20 +8,18 @@
 //! | `record`     | the journal in order: transactions, openings, occurrences and claims         |
 //! | `statements` | the dated statements that are not flows: values, measures, endings, basis    |
 //! | `flow`       | one flow: its quantities, its ends, its items                                |
-//! | `tail`       | the clauses after an amount, read once for flows, term lines and `also`      |
+//! | `tail`       | the clauses after an amount, read once for flows, terms and derived lines    |
 //! | `infer`      | a flow's purpose, when it names none, from what its ends say                 |
-//! | `also`       | `also` lines, which add flows to the flows of a kind, entity or contract     |
-//! | `contracts`  | a contract's facts, schedules, loan, deposit and shares                      |
+//! | `contracts`  | a contract's facts, schedules, loan, deposit, and the laws its lines imply   |
 //! | `staged`     | the guard that takes back what a rejected record had already added           |
 
-pub(crate) mod also;
 mod contracts;
 mod flow;
 mod infer;
 mod record;
 mod staged;
 mod statements;
-mod tail;
+pub(crate) mod tail;
 
 pub(crate) use contracts::contracts;
 pub(crate) use record::record;

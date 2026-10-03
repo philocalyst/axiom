@@ -1,5 +1,5 @@
 use axiom_core::{Day, FileId, Id};
-use axiom_model::{Source, build};
+use axiom_model::{BinOp, Effect, Law, NodeId, Op, Owner, Shape, Source, StepKind, Trigger, Value, Var, build};
 use axiom_syntax::{Folder, parse};
 
 #[test]
@@ -202,7 +202,7 @@ account assets/fidelity
 }
 
 #[test]
-fn explicit_purpose_must_agree_with_a_commodity_issuer_rule() {
+fn an_explicit_purpose_outranks_a_commodity_issuer_rule() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -219,8 +219,12 @@ account assets/fidelity
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
-    assert!(book.flows.is_empty(), "a conflicting source purpose cannot be silently overridden");
+    assert!(diagnostics.is_empty(), "first match wins, so nothing disagrees: {diagnostics:?}");
+    let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
+    assert_eq!(
+        (purpose.purpose, purpose.source),
+        (book.purpose("interest").unwrap(), axiom_model::Provenance::Written)
+    );
 }
 
 #[test]
@@ -310,7 +314,7 @@ account checking
 }
 
 #[test]
-fn sibling_purposes_still_disagree_under_the_same_root() {
+fn sibling_purposes_of_one_rank_still_disagree_under_the_same_root() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -318,17 +322,52 @@ commodity USD
 purpose wages : income
 purpose salary : wages
 purpose honoraria : wages
-account checking
 entity employer : entity
   purpose salary
-2026-01-01 employer -> checking 1_000 USD #honoraria
+entity agency : entity
+  purpose honoraria
+2026-01-01 employer -> agency 1_000 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
-    assert!(book.flows.is_empty());
+    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
+    assert_eq!(problem.labels.len(), 3, "both parties and the flow");
+    assert!(book.flows.is_empty(), "two parties of one rank that name unrelated purposes classify nothing");
+}
+
+#[test]
+fn a_party_outranks_its_kind_and_the_written_purpose_outranks_both() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose salary : wages
+purpose tax-paid : spending
+purpose groceries : spending
+kind payroll-agency : entity
+  pays wages
+entity acme : payroll-agency
+entity wa-dor : entity
+  purpose tax-paid
+account checking
+2026-01-01 acme -> wa-dor 180 USD
+2026-01-02 acme -> wa-dor 20 USD #groceries
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purposes: Vec<_> = book.flows.iter().map(|(_, flow)| flow.purpose.unwrap()).collect();
+    let acme_kind = book.kind("payroll-agency").unwrap();
+    assert_eq!(purposes[0].purpose, book.purpose("tax-paid").unwrap());
+    assert_eq!(purposes[0].source, axiom_model::Provenance::Entity(book.entity("wa-dor").unwrap()));
+    assert_ne!(purposes[0].source, axiom_model::Provenance::Party(acme_kind), "the party's own purpose wins");
+    assert_eq!(purposes[1].purpose, book.purpose("groceries").unwrap());
+    assert_eq!(purposes[1].source, axiom_model::Provenance::Written);
 }
 
 #[test]
@@ -391,7 +430,7 @@ contract deferral with acme
 }
 
 #[test]
-fn party_purpose_conflicts_are_diagnostic_and_atomic() {
+fn a_written_purpose_outranks_a_party_kind() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -409,13 +448,51 @@ account checking
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
-    assert_eq!(problem.labels.len(), 3);
-    assert!(book.flows.is_empty());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purpose = book.flows.iter().next().unwrap().1.purpose.unwrap();
+    assert_eq!(
+        (purpose.purpose, purpose.source),
+        (book.purpose("interest").unwrap(), axiom_model::Provenance::Written)
+    );
 }
 
 #[test]
-fn an_explicit_purpose_cannot_conflict_with_an_account_take() {
+fn a_promises_purpose_outranks_its_party_kind_and_a_written_leg_outranks_the_promise() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+purpose wages : income
+purpose bonus : income
+purpose tax-paid : spending
+kind payroll-agency : entity
+  pays wages
+entity acme : payroll-agency
+account checking
+contract pay with acme
+  400 USD monthly on 1 into checking
+  #bonus
+  from 2026-01-01
+  checking 100 USD #tax-paid
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let template = &book.contracts[book.contract("pay").unwrap()].terms.as_ref().unwrap().template[0];
+    let contract = book.contract("pay").unwrap();
+    let header = template.header.flow.purpose.unwrap();
+    assert_eq!(
+        (header.purpose, header.source),
+        (book.purpose("bonus").unwrap(), axiom_model::Provenance::Contract(contract))
+    );
+    let leg = template.legs[0].flow.purpose.unwrap();
+    assert_eq!((leg.purpose, leg.source), (book.purpose("tax-paid").unwrap(), axiom_model::Provenance::Written));
+}
+
+#[test]
+fn an_account_take_rewrites_what_the_ends_said_and_never_what_the_line_wrote() {
     let path = "journal/2026/01.ax";
     let text = "\
 base USD
@@ -428,15 +505,24 @@ kind retirement-account : asset
   takes pretax-deferral from wages
 entity acme : payroll-agency
 account retirement : retirement-account
-2026-01-01 acme -> retirement 400 USD #wages
+2026-01-01 acme -> retirement 400 USD
+2026-01-02 acme -> retirement 400 USD #wages
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
 
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    let problem = diagnostics.iter().find(|diagnostic| diagnostic.code == "purpose-disagreement").unwrap();
-    assert_eq!(problem.labels.len(), 3);
-    assert!(book.flows.is_empty());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let purposes: Vec<_> = book.flows.iter().map(|(_, flow)| flow.purpose.unwrap()).collect();
+    let kind = book.kind("retirement-account").unwrap();
+    assert_eq!(
+        (purposes[0].purpose, purposes[0].source),
+        (book.purpose("pretax-deferral").unwrap(), axiom_model::Provenance::Account(kind))
+    );
+    assert_eq!(
+        (purposes[1].purpose, purposes[1].source),
+        (book.purpose("wages").unwrap(), axiom_model::Provenance::Written)
+    );
 }
 
 #[test]
@@ -637,8 +723,21 @@ contract c with p
     assert!(!contract.standing.as_ref().unwrap().program.nodes.is_empty());
 }
 
+/// The laws a contract's own lines abbreviate: `also` and `share` are named for what they abbreviate.
+fn laws_named<'b>(book: &'b axiom_model::Book<'_>, contract: Id<axiom_model::Contract>, name: &str) -> Vec<&'b Law> {
+    let owner = Owner::Contract(contract);
+    book.laws.iter().map(|(_, law)| law).filter(|law| law.owner == owner && book.name(law.name) == name).collect()
+}
+
+/// What the one `derive` step of a law makes, and the node that says how much.
+fn derive_of(law: &Law) -> (Id<axiom_model::Derived>, NodeId) {
+    let [step] = &law.steps[..] else { panic!("one step: {:?}", law.steps) };
+    let StepKind::Effect(Effect::Derive { template, amount }) = step.kind else { panic!("a derive step") };
+    (template, amount)
+}
+
 #[test]
-fn contract_also_is_shared_by_regular_and_standing_terms() {
+fn a_contracts_also_is_the_law_that_derives_for_its_occurrences() {
     let path = "contracts.ax";
     let text = "\
 base USD
@@ -658,22 +757,40 @@ contract c with p
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract_id = book.contract("c").unwrap();
     let contract = &book.contracts[contract_id];
-    let regular = contract.terms.as_ref().unwrap();
-    let standing = contract.standing.as_ref().unwrap();
-    assert_eq!(regular.grace, None);
-    assert_eq!(standing.grace, None);
-    assert_eq!(regular.also, standing.also);
-    assert_eq!(regular.also.len(), 1);
+    assert_eq!(contract.terms.as_ref().unwrap().grace, None);
+    assert_eq!(contract.standing.as_ref().unwrap().grace, None);
 
-    let also = &book.also[regular.also[0]];
-    assert_eq!(also.on, axiom_model::AlsoOn::Contract(contract_id));
-    assert_eq!(book.name(book.codes[also.codes.start()]), "match");
-    let axiom_model::Implied::Flow { to: Some(to), amount: axiom_model::Expr::Computed(root), .. } = also.what else {
-        panic!("contract also should retain the typed implied flow")
-    };
-    assert_eq!(to, book.place("assets/savings").unwrap());
-    assert!(!book.laws[also.law].nodes.is_empty());
-    assert!(book.laws[also.law].nodes.len() > root.index() as usize);
+    let laws = laws_named(&book, contract_id, "also");
+    let [law] = laws[..] else { panic!("one law for the one line: {}", laws.len()) };
+    assert_eq!(law.trigger, Trigger::Flow, "an `also` is `on flow`");
+    assert_eq!(contract.laws.len(), 1, "the contract knows it");
+    assert!(law.derives());
+    let (template, amount) = derive_of(law);
+    let derived = &book.derived[template];
+    assert_eq!(derived.shape, Shape::Flow { from: None, to: Some(book.place("assets/savings").unwrap()) });
+    assert_eq!(book.name(book.codes[derived.codes.start()]), "match");
+    assert!(law.nodes.len() > amount.index(), "the amount is a node of the law");
+}
+
+#[test]
+fn an_also_with_a_when_is_a_law_that_derives_only_where_it_holds() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+account assets/checking
+contract c with p
+  500 USD monthly from checking
+  also + 5% of amount when value(amount, USD) > 100 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let laws = laws_named(&book, book.contract("c").unwrap(), "also");
+    let [law] = laws[..] else { panic!("one law") };
+    let [when, derive] = &law.steps[..] else { panic!("a `when`, then the derive: {:?}", law.steps) };
+    assert!(matches!(when.kind, StepKind::When(_)) && matches!(derive.kind, StepKind::Effect(Effect::Derive { .. })));
 }
 
 #[test]
@@ -687,6 +804,8 @@ kind person : entity
 entity greystar : person
 entity studio : person
 account assets/checking
+account assets/studio-bank
+  owner studio
 contract flat with greystar
   2_900 USD monthly from checking
   area 1_000 SQFT
@@ -698,14 +817,40 @@ contract flat with greystar
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let contract = &book.contracts[Id::new(0)];
-    let area = contract.area.expect("contract retains its typed area");
-    let terms = contract.terms.as_ref().unwrap();
-    let share = &terms.shares[0];
-    assert_eq!(share.rate, axiom_core::Ratio::new(3, 25).unwrap());
-    assert_eq!(
-        share.measure,
-        Some((axiom_model::Amount::new(axiom_core::Qty(120), book.commodity("SQFT").unwrap()), area,))
-    );
+    assert!(contract.area.is_some(), "contract retains its typed area");
+    let laws = laws_named(&book, Id::new(0), "share");
+    let [law] = laws[..] else { panic!("one law for the one share: {}", laws.len()) };
+    let (template, amount) = derive_of(law);
+    let derived = &book.derived[template];
+    assert_eq!(derived.shape, Shape::Item(axiom_model::Sign::Carve), "a share is carved out of the header");
+    assert_eq!(derived.owner, book.entity("studio").ok(), "and borne by the studio");
+    assert!(derived.makes_flow(), "so it is a flow of its own, for what the header is");
+    let Op::Bin(BinOp::Mul, rate, of) = law.nodes[amount].op else { panic!("a rate of the amount") };
+    assert_eq!(law.nodes[rate].op, Op::Const(Value::Num(axiom_core::Ratio::new(3, 25).unwrap())), "120 of 1,000");
+    assert_eq!(law.nodes[of].op, Op::Var(Var::Amount));
+}
+
+#[test]
+fn a_share_for_a_party_is_made_as_a_flow_it_bears_and_the_book_is_told_it_owes_nothing_yet() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity greystar : person
+entity ben : person
+account assets/checking
+contract flat with greystar
+  2_900 USD monthly from checking
+  share 1/3 for ben
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    let codes: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect();
+    assert_eq!(codes, ["contract-share-party"], "{diagnostics:?}");
+    assert!(diagnostics[0].help.iter().any(|help| help.text.contains("ben owes me")), "{diagnostics:?}");
+    assert_eq!(laws_named(&book, Id::new(0), "share").len(), 1, "and the share is made all the same");
 }
 
 #[test]
@@ -830,8 +975,8 @@ fn measured_shares_reject_missing_and_mismatched_denominators() {
         let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-share-measure"), "{diagnostics:?}");
         let contract = &book.contracts[Id::new(0)];
-        let terms = contract.terms.as_ref().unwrap();
-        assert!(terms.shares.is_empty(), "an invalid measured share must not be retained");
+        assert!(laws_named(&book, Id::new(0), "share").is_empty(), "an invalid measured share must not be retained");
+        assert!(contract.terms.is_some(), "and the contract is still lowered");
     }
 }
 

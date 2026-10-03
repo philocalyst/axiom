@@ -81,6 +81,14 @@ impl<K, V> Groups<K, V> {
         &self.values
     }
 
+    /// The values under the keys `first..after`, which are contiguous: every row of a stretch of keys at once.
+    pub fn span(&self, first: usize, after: usize) -> &[V] {
+        match (self.starts.get(first), self.starts.get(after)) {
+            (Some(&a), Some(&b)) => &self.values[a as usize..b as usize],
+            _ => &[],
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (Id<K>, &[V])> {
         (0..self.keys()).map(|k| (Id::new(k as u32), &self[Id::new(k as u32)]))
     }
@@ -120,6 +128,9 @@ mod tests {
         assert_eq!(&g[Id::new(2)], &['a', 'c']);
         assert_eq!(&g[Id::new(0)], &['b']);
         assert!(g[Id::new(3)].is_empty() && g[Id::new(9)].is_empty());
+        assert_eq!(g.span(0, 3), &['b', 'd', 'a', 'c'], "keys 0, 1 and 2 are the first three rows");
+        assert_eq!(g.span(2, 4), &['a', 'c']);
+        assert!(g.span(3, 3).is_empty() && g.span(2, 9).is_empty());
     }
 
     #[test]

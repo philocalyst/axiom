@@ -5,8 +5,7 @@ use axiom_core::{Arena, Day, Days, Id, Loc, Qty, Ratio, Run, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System,
-    Text,
+    Amount, Asset, Commodity, Contract, Entity, EventState, Kind, Place, Policy, Purpose, ScheduleKind, System, Text,
 };
 use crate::law::{Law, Node, NodeId, Subject};
 use crate::split::{Expr, Made};
@@ -423,6 +422,22 @@ pub enum Provenance {
     Derived,
 }
 
+impl Provenance {
+    /// How early LANGUAGE §2 lists the source: the smaller, the stronger, and the first match wins. A flow's own line
+    /// and its promise outrank everything a party, a commodity or an account says.
+    pub fn rank(self) -> u8 {
+        match self {
+            Provenance::Written => 0,
+            Provenance::Contract(_) => 1,
+            Provenance::Entity(_) => 2,
+            Provenance::Party(_) => 3,
+            Provenance::Commodity(_) => 4,
+            Provenance::Account(_) => 5,
+            Provenance::Derived => 6,
+        }
+    }
+}
+
 /// How a flow came to be.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Origin {
@@ -439,19 +454,15 @@ pub enum Derivation {
     /// A loan payment's interest, or its principal.
     Interest(Id<Contract>),
     Principal(Id<Contract>),
-    /// An owner's share of a flow: `business 60% for studio`, declared on
-    /// a contract, a party kind or a purpose.
-    Share(Sharer),
-    /// The tax inside a price paid to a party with `sales-tax`.
-    SalesTax(Id<Kind>),
     /// What an exchange rate cost: what was given less what was got.
     ExchangeCost,
     /// A leg between two parties, split into its two halves through the owner.
     PassThrough,
     /// A contract deposit or a missing occurrence: a claim.
     Claim(Id<Contract>),
-    /// An `also` line: escrow, an employer's match, a card's cash back.
-    Also(Id<Also>),
+    /// A `derive` step of a law, made with a promise's occurrence: escrow, an employer's match, a share. A
+    /// contract's `also` and `share` lines are such laws.
+    Law(Id<Law>),
     /// A deadline's `else`, when it passed (a late fee).
     Otherwise(Id<Contract>),
     /// A law's reparation (`require … else …`).
@@ -465,14 +476,6 @@ pub enum Derivation {
     WriteOff,
     /// `DATE ASSET ends`: the asset leaves the owners for nothing.
     Disposal(Id<Asset>),
-}
-
-/// What declared a share, so `why` can point at its line.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Sharer {
-    Contract(Id<Contract>),
-    Kind(Id<Kind>),
-    Purpose(Id<Purpose>),
 }
 
 /// What a flow says about the parcels it moves, beyond how many.

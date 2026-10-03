@@ -11,6 +11,13 @@ use axiom_model::*;
 use crate::fixture::{Fixture, LawBuilder, span};
 use crate::{Bound, Cause, Holding, Options, Owed, Parcel, Plan, Run, State, Verdict, run};
 
+/// The book's rules with `extra` added: what a test says about purposes, once the purpose tree is the book's.
+fn with_rules(book: &Book, extra: impl IntoIterator<Item = (Watch, Rule)>) -> Rules {
+    let mut entries = book.rules.entries();
+    entries.extend(extra);
+    Rules::build(Keys::of(book), entries.into_iter())
+}
+
 fn options() -> Options {
     Options { today: Day(1000), relaxed: false }
 }
@@ -187,6 +194,8 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
     let mut book = f.book();
     let contract = book.contracts.push(Contract {
         name: book.entities[book.roots.me].path,
+        kind: None,
+        fillers: Box::default(),
         party: book.roots.me,
         owner: book.roots.me,
         purpose: None,
@@ -200,7 +209,6 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
         deposit: None,
         deposit_holding: None,
         loan: None,
-        matching: None,
         ended: None,
         laws: Box::default(),
         doc: None,
@@ -327,7 +335,6 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
             root: PurposeRoot::Income,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -337,7 +344,6 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
             root: PurposeRoot::Spending,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -347,7 +353,6 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
             root: PurposeRoot::Spending,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -357,7 +362,6 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
             root: PurposeRoot::Capital,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -367,7 +371,6 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
             root: PurposeRoot::Transfer,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -379,7 +382,7 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
     book.roots.purposes.spending = ids[1];
     book.roots.purposes.capital = ids[3];
     book.roots.purposes.transfer = ids[4];
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)].into_iter());
+    book.rules = with_rules(&book, [(Watch::Purpose(purpose), rule)]);
 
     let run = run(&book, options());
     assert_eq!(run.checks[law.index()], 1);
@@ -407,7 +410,7 @@ fn purpose_rules_use_each_flows_owner_for_scope_and_sparse_totals() {
     f.laws[law].owner = Owner::Purpose(purpose);
     let placeholder = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
     let mut book = f.book();
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, placeholder)].into_iter());
+    book.rules = with_rules(&book, [(Watch::Purpose(purpose), placeholder)]);
 
     let run = run(&book, options());
     assert_eq!(run.violations.len(), 1, "only the grant owner's 150.00 total exceeds 100.00");
@@ -454,7 +457,7 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     let mut book = f.book();
     let rule = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
     let flow_rule = Rule { law: flow_only, ..rule };
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule), (purpose, flow_rule)].into_iter());
+    book.rules = with_rules(&book, [(Watch::Purpose(purpose), rule), (Watch::Purpose(purpose), flow_rule)]);
     let run = run(&book, Options { today: Day(date(2026, 2, 28)), relaxed: false });
 
     assert_eq!(run.violations.len(), 1, "only January's recognized share exceeds the monthly cap");
@@ -509,7 +512,6 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
             root: PurposeRoot::Income,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -519,7 +521,6 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
             root: PurposeRoot::Spending,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -529,7 +530,6 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
             root: PurposeRoot::Spending,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -539,7 +539,6 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
             root: PurposeRoot::Capital,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -549,7 +548,6 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
             root: PurposeRoot::Transfer,
             system: None,
             of: None,
-            shares: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
@@ -561,10 +559,8 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
     book.roots.purposes.spending = ids[1];
     book.roots.purposes.capital = ids[3];
     book.roots.purposes.transfer = ids[4];
-    book.rules.purposes = Groups::build(
-        book.purposes.len(),
-        [(purpose, Rule { law, subject: Subject::Entity(me), days: span(3, 3) })].into_iter(),
-    );
+    book.rules =
+        with_rules(&book, [(Watch::Purpose(purpose), Rule { law, subject: Subject::Entity(me), days: span(3, 3) })]);
 
     let run = run(&book, options());
     assert!(run.violations.is_empty(), "84.00 charge less a 40.00 refund is 44.00");

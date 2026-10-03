@@ -1820,3 +1820,38 @@ opening 2026-01-01
         assert_eq!((posted.out.0, posted.arrive.0), (1_000, 1_000));
     });
 }
+
+/// A contract's laws, which no flow used to fire: the ones that judge are read as each of its occurrences posts.
+#[test]
+fn a_law_written_in_a_contract_judges_what_it_promises_and_reads_what_left() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+commodity VTI
+entity lender
+account checking : asset
+opening 2026-01-01
+  checking 10_000.00 USD
+contract rent with lender
+  1_000.00 USD monthly on 1 from checking
+  from 2026-01-01
+  law small
+    on flow
+    warn value(amount, USD) <= 500.00 USD \"too much\"
+contract invest with lender
+  buy VTI for 100.00 USD monthly on 15 from checking
+  from 2026-01-01
+  law spent
+    on flow
+    warn amount.unit is USD \"what is judged is what left\"
+2026-01-02 VTI = 100.00 USD
+2026-01-01 rent
+2026-01-15 invest 5 VTI
+";
+    with_run(text, day(2026, 1, 31), |_, run| {
+        let codes: Vec<_> = run.diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect();
+        assert!(codes.contains(&"small"), "1,000.00 is more than 500.00: {codes:?}");
+        assert!(!codes.contains(&"spent"), "the buy spent USD, and what it got is not what the law reads: {codes:?}");
+    });
+}

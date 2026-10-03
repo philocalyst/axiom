@@ -13,7 +13,8 @@
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Span, Sym};
 use axiom_model::{
-    Amount, Cap, CapTarget, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind, Subject, Trigger, Window,
+    Amount, Cap, CapTarget, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind, Subject, Trigger, Watch,
+    Window,
 };
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
@@ -103,7 +104,7 @@ impl Ledger<'_, '_, '_> {
     pub(crate) fn permits_spend(&mut self, entity: Id<Entity>, m: &Motion) -> bool {
         let (plan, book) = (self.plan, self.plan.book);
         let on = Occasion { amount: Some(m.out), ..Occasion::flow(m) };
-        book.rules.on_spend[entity].iter().filter(|rule| applies(plan, rule, &on)).all(|rule| {
+        book.rules.at(Watch::Spend(entity)).iter().filter(|rule| applies(plan, rule, &on)).all(|rule| {
             self.evaluate(rule.law, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
             let holds = !self.scratch.outcomes.iter().any(|o| {
                 matches!(o, Outcome::Broken { warn: false, .. } | Outcome::Priced { .. } | Outcome::Faulted { .. })
@@ -116,7 +117,7 @@ impl Ledger<'_, '_, '_> {
     /// Fires one `by` law whose date the journal has reached, or closes a
     /// month or year for an `each` law, if its rule was in force then.
     pub(crate) fn deadline(&mut self, rule: usize, day: Day, period: Days) {
-        let rule = self.plan.book.rules.timed[rule];
+        let rule = self.plan.book.rules.timed()[rule];
         if let Subject::Asset(asset) = rule.subject {
             let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
             let on = Occasion::time(day, period);
@@ -144,7 +145,7 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         let mut rules = Vec::new();
-        for rule in self.plan.book.rules.timed.iter().copied() {
+        for rule in self.plan.book.rules.timed().iter().copied() {
             if rule.subject != Subject::Asset(asset) || !law_consumes(self.plan.book, rule.law) {
                 continue;
             }
@@ -591,6 +592,9 @@ impl Ledger<'_, '_, '_> {
                 Outcome::Carry { step, amount, unit, within } => {
                     self.carry(rule, ctx, step, amount, unit, within);
                 }
+                // A law that derives is read when an occurrence is made, and the model keeps it out of every table
+                // a posted flow fires: one that gets here is a program that is not what the model made.
+                Outcome::Derive { step, .. } => self.fault(rule, ctx, step as usize, Fault::InvalidProgram),
                 Outcome::Priced { step, name, amount, owed } => self.charge(rule, ctx, step, (name, amount, owed)),
                 Outcome::Broken { step, warn } => self.violate(rule, ctx, step, warn),
                 Outcome::Faulted { step, fault } => self.fault(rule, ctx, step as usize, fault),

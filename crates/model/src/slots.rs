@@ -150,6 +150,8 @@ pub(crate) fn receiver(sort: Sort) -> Ty {
         Sort::Thing => Ty::Asset,
         Sort::Commodity => Ty::Unit,
         Sort::Entity => Ty::Entity,
+        // What a contract is as a law's receiver is the flow of its occurrence (its laws say `self` of that).
+        Sort::Contract => Ty::Flow,
     }
 }
 

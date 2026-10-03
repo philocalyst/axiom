@@ -22,7 +22,6 @@ use crate::scope::Home;
 #[derive(Clone, Default)]
 pub(super) struct Tail {
     pub purpose: Option<Purposed>,
-    pub purpose_loc: Option<Loc>,
     pub description: Option<Text>,
     pub payee: Option<Id<Entity>>,
     pub recognized: Option<Days>,
@@ -42,7 +41,6 @@ impl Tail {
     pub fn merge(mut self, child: Tail) -> Tail {
         if child.purpose.is_some() {
             self.purpose = child.purpose;
-            self.purpose_loc = child.purpose_loc;
         }
         if child.description.is_some() {
             self.description = child.description;
@@ -81,7 +79,7 @@ impl Tail {
 
 /// What the object of a purpose (`#improvement of condo`) may be.
 #[derive(Clone, Copy)]
-pub(super) enum Reach {
+pub(crate) enum Reach {
     /// An asset or a party, as a contract's lines have it.
     Parties,
     /// An asset, a party or a place, as a flow has it.
@@ -116,7 +114,7 @@ pub(super) fn resolve_object<'s>(
 
 /// A written `#purpose [of OBJECT]`: the purpose with its object, which is none when it was written and names
 /// nothing (said, and the purpose is kept), or no purpose at all when the purpose itself names nothing.
-pub(super) fn written_purpose<'s>(
+pub(crate) fn written_purpose<'s>(
     world: &World<'s>,
     home: Home,
     file: &ast::File<'s>,
@@ -131,7 +129,7 @@ pub(super) fn written_purpose<'s>(
 }
 
 /// A written `!` and the reason after it.
-pub(super) fn written_waive<'s>(world: &mut World<'s>, waive: ast::Waive<'s>) -> Waive {
+pub(crate) fn written_waive<'s>(world: &mut World<'s>, waive: ast::Waive<'s>) -> Waive {
     Waive { loc: waive.at, reason: waive.reason.map(|text| world.book.quoted_text(text.0)) }
 }
 
@@ -156,10 +154,7 @@ impl<'s> FlowCx<'_, 's> {
         match clause.kind {
             ClauseKind::Purpose(written) => match written_purpose(world, home, file, written, Reach::Anywhere, diags) {
                 Some(purposed) if written.of.is_some() && purposed.of.is_none() => tail.valid = false,
-                Some(purposed) => {
-                    tail.purpose = Some(purposed);
-                    tail.purpose_loc = Some(clause.at);
-                }
+                Some(purposed) => tail.purpose = Some(purposed),
                 None => tail.valid = false,
             },
             ClauseKind::Description(text) => tail.description = Some(world.book.quoted_text(text.0)),

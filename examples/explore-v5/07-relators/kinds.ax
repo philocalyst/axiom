@@ -1,0 +1,31 @@
+// What two parties are to each other, written once.
+//
+// A kind of contract declares its roles (`has employee person`) and the legs that follow from it, with the roles for ends. A
+// contract of the kind fills the roles (`employee me`), and each book that owns a contract of it has the legs it touches:
+//
+//   * a role its owner (or a member of the owner) fills stands at the account the schedule pays from or into;
+//   * a role anyone else fills stands outside, at the party;
+//   * a leg with both ends outside moves value between two parties, which no book of an owner of neither has anything to say
+//     of, and is not made.
+//
+// So the employer's half of the payroll tax below is in the employer's book and not in the household's, from one line. The
+// copies of 05-family and 07-landlord in this folder write their contracts by it and check to what the originals check to
+// (`verify.sh`); `employer/` is the book it is true in from the other side.
+
+/// An employment: one pays the other for work. The employer pays the other half of the payroll tax, which is the same 7.65% of
+/// the gross (6.2% social security, 1.45% medicare) whoever's book it is in, and the employee's is withheld from the pay.
+kind employment : contract
+  has employee person
+  has employer employer
+  also employer -> irs 7.65% of amount #payroll-tax
+
+/// A lease: a tenant lives in what a landlord owns. Nothing follows from a lease that is not a line of the contract (the rent,
+/// the deposit, the dates), so a lease is its two roles for now.
+kind lease : contract
+  has landlord landlord
+  has tenant tenant
+
+/// A management agreement: a manager keeps a property for its client (who owns it), for a fee that the contract says.
+kind management : contract
+  has client person
+  has manager org

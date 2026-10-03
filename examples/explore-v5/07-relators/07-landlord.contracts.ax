@@ -1,0 +1,42 @@
+/// Gross wages with the same withholding and net cash as the original paystub.
+contract paycheck : employment with acme
+  employee me
+  employer acme
+  8_000 USD monthly on 28 into checking #wages
+  from 2025-01-28
+  irs 1_215 USD #federal-tax
+  payroll-office 612 USD #tax-paid
+  checking ...
+
+/// The leases carry the same rents and refundable deposits as the source ledger.
+contract rent-a : lease with tenant-a
+  landlord oak-street
+  tenant tenant-a
+  2_400 USD monthly on 1 into rental-bank #rent of house
+  deposit 2_400 USD
+  from 2025-02-01
+  until 2025-08-31
+
+contract rent-b : lease with tenant-b
+  landlord oak-street
+  tenant tenant-b
+  2_500 USD monthly on 1 into rental-bank #rent of house
+  deposit 2_500 USD
+  from 2025-10-01
+  until 2025-12-29 // Jamie's landlord contract ends when the house and lease transfer to the buyer.
+
+/// Loan terms drive principal and interest; the journal still supplies each
+/// statement balance and payoff amount for independent reconciliation.
+contract home-loan with lender
+  loan 279_000 USD on 2024-12-18 at 6.75% over 30y for house
+  monthly on 1 from rental-bank
+  from 2025-02-01
+
+/// The manager's 8% fee was 192 USD on ordinary 2,400 USD rent, with explicit
+/// restatements for the late fee and tenant B's 2,500 USD rent.
+contract manager-fee : management with hartwell-pm
+  client me
+  manager hartwell-pm
+  about 192 USD monthly on 5 from rental-bank #management of house
+  from 2025-03-05
+  until 2025-12-31

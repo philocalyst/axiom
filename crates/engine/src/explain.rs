@@ -578,7 +578,8 @@ pub(crate) fn first_fault(f: &Frame, step: usize) -> Option<usize> {
             LawEffect::Owe { amount, .. }
             | LawEffect::Count { amount, .. }
             | LawEffect::Consume { amount }
-            | LawEffect::Carry { amount, .. },
+            | LawEffect::Carry { amount, .. }
+            | LawEffect::Derive { amount, .. },
         ) => *amount,
     };
     origin(f, root)

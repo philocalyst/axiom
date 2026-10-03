@@ -42,7 +42,7 @@ fn reads(law: &Law) -> Vec<Sym> {
 fn writes(law: &Law) -> Vec<Sym> {
     let counted = |effect: &Effect| match effect {
         Effect::Count { name, .. } => Some(*name),
-        Effect::Owe { .. } | Effect::Consume { .. } | Effect::Carry { .. } => None,
+        Effect::Owe { .. } | Effect::Consume { .. } | Effect::Carry { .. } | Effect::Derive { .. } => None,
     };
     let effects = law.steps.iter().flat_map(|step| match &step.kind {
         StepKind::Effect(effect) => std::slice::from_ref(effect),

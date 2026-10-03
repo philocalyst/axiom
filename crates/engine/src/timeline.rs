@@ -233,7 +233,7 @@ impl Schedule {
 
 /// What a deadline closes: a law for a subject over a period.
 fn key(plan: &Plan, due: Deadline) -> (Id<Law>, Subject, Day) {
-    let rule = &plan.book.rules.timed[due.rule as usize];
+    let rule = &plan.book.rules.timed()[due.rule as usize];
     (rule.law, rule.subject, due.period.first())
 }
 
@@ -292,7 +292,7 @@ pub(crate) struct Timeline {
 impl Timeline {
     /// At the start.
     pub fn new(plan: &Plan) -> Timeline {
-        let rules = plan.book.rules.timed.iter().zip(plan.timed.iter());
+        let rules = plan.book.rules.timed().iter().zip(plan.timed.iter());
         let first =
             rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.schedule_start));
         let mut timeline = Timeline {
@@ -420,7 +420,7 @@ impl Timeline {
 
     /// Puts the rule's next deadline on the heap, and notes that its period is closed.
     fn passed(&mut self, plan: &Plan, done: Deadline) {
-        let rule = &plan.book.rules.timed[done.rule as usize];
+        let rule = &plan.book.rules.timed()[done.rule as usize];
         self.due.extend(plan.timed[done.rule as usize].after(done.rule, rule, done).map(Reverse));
         if self.closed.0 != done.day {
             self.closed = (done.day, Vec::new());

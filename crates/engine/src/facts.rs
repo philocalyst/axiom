@@ -8,7 +8,7 @@
 
 use axiom_core::{Days, Id, Map, Severity, Sym};
 use axiom_model::{
-    BinOp, Book, Cap, Dir, Effect as LawEffect, Func, Law, NodeId, Op, Owner, Purpose, Rule, StepKind, Subject,
+    BinOp, Book, Cap, Dir, Effect as LawEffect, Func, Law, NodeId, Op, Owner, Purpose, Rule, StepKind, Subject, Table,
     Trigger, Ty, Value, Var, Window,
 };
 
@@ -224,13 +224,11 @@ pub(crate) type Readers = Map<(Subject, Window), Vec<Rule>>;
 /// Every rule that reads a month's or a year's total, once each.
 pub(crate) fn readers(book: &Book, laws: &[LawFacts]) -> Readers {
     let mut readers = Readers::default();
-    for (_, list) in book.rules.per_place().into_iter().flat_map(|table| table.iter()) {
-        for &rule in list {
-            let Some(window) = laws[rule.law.index()].window else { continue };
-            let known = readers.entry((rule.subject, window)).or_default();
-            if !known.contains(&rule) {
-                known.push(rule);
-            }
+    for &rule in Table::PLACE.into_iter().flat_map(|table| book.rules.table(table)) {
+        let Some(window) = laws[rule.law.index()].window else { continue };
+        let known = readers.entry((rule.subject, window)).or_default();
+        if !known.contains(&rule) {
+            known.push(rule);
         }
     }
     readers
@@ -245,7 +243,7 @@ pub(crate) type PurposeReaders = Map<(Id<Purpose>, Window), Vec<Rule>>;
 pub(crate) fn purpose_readers(book: &Book) -> PurposeReaders {
     let mut readers = PurposeReaders::default();
     let mut seen = Vec::new();
-    for &rule in book.rules.purposes.values() {
+    for &rule in book.rules.table(Table::Purpose) {
         if seen.contains(&rule) {
             continue;
         }

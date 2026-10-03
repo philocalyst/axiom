@@ -1,5 +1,5 @@
 use axiom_core::{Day, FileId};
-use axiom_model::{Expr, Func, Implied, Limit, Owner, Period, Source, build};
+use axiom_model::{Func, Limit, Owner, Period, Source, build};
 use axiom_syntax::{Folder, parse};
 
 fn source(path: &'static str, text: &'static str, embedded: bool, id: u16) -> Source<'static> {
@@ -9,11 +9,11 @@ fn source(path: &'static str, text: &'static str, embedded: bool, id: u16) -> So
 }
 
 #[test]
-fn native_budget_and_declaration_also_are_linked() {
+fn native_budgets_are_linked_to_their_laws() {
     let std = source("std.ax", "system std\nkind bank : asset\ncommodity USD\n  precision 2\n", true, 0);
     let project = source(
         "axiom.ax",
-        "use std\nbase USD\naccount checking : bank\naccount reserve : bank\naccount envelope : bank\npurpose groceries : spending\n  budget 100 USD monthly carries funded from checking into reserve\n  also + 5% of amount #fees when value(amount, USD) > 10 USD\n  also checking[^invoice] -> self 2 USD #fees\npurpose fees : spending\npurpose pay : income\npurpose hobbies : spending\n  budget 10% of #pay yearly carries\n2026-03-01 #groceries now budget 250 USD yearly funded from checking into envelope until 04-30\npurpose late : spending\n2026-03-01 #late now budget 30 USD monthly\n",
+        "use std\nbase USD\naccount checking : bank\naccount reserve : bank\naccount envelope : bank\npurpose groceries : spending\n  budget 100 USD monthly carries funded from checking into reserve\npurpose fees : spending\npurpose pay : income\npurpose hobbies : spending\n  budget 10% of #pay yearly carries\n2026-03-01 #groceries now budget 250 USD yearly funded from checking into envelope until 04-30\npurpose late : spending\n2026-03-01 #late now budget 30 USD monthly\n",
         false,
         1,
     );
@@ -72,24 +72,6 @@ fn native_budget_and_declaration_also_are_linked() {
     assert!(
         matches!(late.terms.at(late.starts).limit, Limit::Amount(amount) if book.show(amount).to_string() == "30.00 USD")
     );
-    assert_eq!(book.also.len(), 2);
-    let implied = book
-        .also
-        .iter()
-        .find(|(_, implied)| matches!(implied.what, Implied::Item { .. }))
-        .map(|(_, implied)| implied)
-        .expect("computed implied item");
-    assert!(matches!(implied.what, Implied::Item { amount: Expr::Computed(_), .. }));
-    assert!(implied.purpose.is_some(), "the implied item keeps #fees");
-    assert!(implied.when.is_some(), "the Also keeps its typed predicate");
-    assert!(implied.law.index() < book.laws.len());
-    let self_flow = book
-        .also
-        .iter()
-        .find(|(_, implied)| matches!(implied.what, Implied::Flow { .. }))
-        .map(|(_, implied)| implied)
-        .expect("implied flow");
-    assert!(matches!(self_flow.what, Implied::Flow { from: Some(_), to: None, .. }));
     let (share_id, share_budget) = book
         .budgets
         .iter()
@@ -104,18 +86,6 @@ fn native_budget_and_declaration_also_are_linked() {
             .all(|(_, node)| !matches!(node.op, axiom_model::Op::Call(Func::PurposeTotal { .. }, _))),
         "Share dependencies are derived from Budget.terms by Plan, not duplicated as unused law nodes"
     );
-    let source_selected_flow = book
-        .also
-        .iter()
-        .find(|(_, implied)| matches!(implied.what, Implied::Flow { .. }))
-        .map(|(_, implied)| implied)
-        .expect("source-selected flow");
-    let selectors = &book.selectors[source_selected_flow.select];
-    assert_eq!(selectors.len(), 1);
-    assert!(matches!(
-        selectors[0],
-        axiom_model::Select::Code(code) if book.name(code) == "invoice"
-    ));
 }
 
 #[test]
@@ -159,21 +129,29 @@ fn invalid_initial_budget_terms_do_not_leave_a_zero_budget_law() {
 }
 
 #[test]
-fn invalid_declaration_also_metadata_does_not_leave_a_partial_rule() {
-    let std = source("std.ax", "system std\ncommodity USD\n  precision 2\n", true, 0);
+fn a_declarations_also_is_not_read_and_the_book_is_told_so() {
+    let std = source("std.ax", "system std\ncommodity USD\n  precision 2\nkind bank : asset\n", true, 0);
     let project = source(
         "axiom.ax",
-        "use std\nbase USD\naccount checking : asset\npurpose fees : spending\npurpose wages : income\n  also checking -> self 1 USD due 3d\n",
+        "use std\nbase USD\nentity me\nkind boss : entity\n  also + 5% of amount #nowhere\naccount checking : bank\npurpose fees : spending\n  also checking -> self 1 USD due 3d\naccount big : bank\n  also + 5% of amount #nowhere\n",
         false,
         1,
     );
     let (book, diagnostics) = build(&[std, project]);
+    let codes: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect();
     assert_eq!(
-        diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect::<Vec<_>>(),
-        ["also-relative-due"],
-        "unsupported tail metadata is diagnosed"
+        codes,
+        ["also-inert", "also-inert", "also-inert"],
+        "a line nothing reads is not checked either: {diagnostics:?}"
     );
-    assert!(book.also.is_empty(), "an invalid Also line must not enter the runtime book");
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic.severity == axiom_core::Severity::Warning),
+        "it is a warning: the book is otherwise sound"
+    );
+    assert!(
+        book.laws.iter().all(|(_, law)| law.owner != Owner::Kind(book.kind("boss").unwrap())),
+        "and it made no law"
+    );
 }
 
 #[test]

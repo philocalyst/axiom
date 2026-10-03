@@ -11,7 +11,7 @@ use axiom_model::{Book, Closing, Period, Rule, Trigger};
 
 /// The rules of the book's closing laws, with the day of the year each closes on.
 fn rules<'b>(book: &'b Book) -> impl Iterator<Item = (&'b Rule, Closing)> {
-    book.rules.timed.iter().filter_map(|rule| match book.laws[rule.law].trigger {
+    book.rules.timed().iter().filter_map(|rule| match book.laws[rule.law].trigger {
         Trigger::Each(Period::Year, Some(closing)) => Some((rule, closing)),
         _ => None,
     })

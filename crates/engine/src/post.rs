@@ -22,7 +22,8 @@
 
 use axiom_core::{Day, Diagnostic, Id, Loc, Qty};
 use axiom_model::{
-    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot, RuntimeTxn, Select, Subject,
+    Amount, Asset, Basis, Class, Contract, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot, RuntimeTxn, Select,
+    Subject, Watch,
 };
 
 use crate::eval::{Occasion, Realized};
@@ -128,19 +129,20 @@ impl Ledger<'_, '_, '_> {
         self.count_purposes(m, claiming);
         self.sample_temporal(m.day);
         let leaving = Occasion { amount: Some(m.out), skip_internal: true, ..*on };
-        self.fire(&self.plan.book.rules.on_out[m.from], &leaving);
+        self.fire(self.plan.book.rules.at(Watch::Out(m.from)), &leaving);
     }
 
     /// Fires the laws that watch what arrives, the purposes and the spending a flow is for, and the laws that watch
     /// every flow of either place.
     fn fire_arrival(&mut self, m: &Motion, on: &Occasion) {
         let rules = &self.plan.book.rules;
-        self.fire(&rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..*on });
+        self.fire(rules.at(Watch::In(m.to)), &Occasion { amount: Some(m.arrive), skip_internal: true, ..*on });
         self.fire_purpose(m, on);
+        self.fire_contract(m, on);
         self.fire_spend(m);
-        self.fire(&rules.always[m.from], on);
+        self.fire(rules.at(Watch::Always(m.from)), on);
         if m.to != m.from {
-            self.fire(&rules.always[m.to], on);
+            self.fire(rules.at(Watch::Always(m.to)), on);
         }
     }
 
@@ -159,12 +161,30 @@ impl Ledger<'_, '_, '_> {
                 Share::Part(qty) => Amount::new(qty, m.out.unit),
             };
             let purpose_on = Occasion { purpose: Some(purpose), amount: Some(amount), over: recognized, ..*on };
-            self.fire_as(&book.rules.purposes[purpose.purpose], &purpose_on, Some(Subject::Entity(m.owner)));
+            self.fire_as(book.rules.at(Watch::Purpose(purpose.purpose)), &purpose_on, Some(Subject::Entity(m.owner)));
             if let Some(Object::Asset(asset)) = purpose.of {
                 let place = book.assets[asset].place;
-                self.fire(&book.rules.about[place], &purpose_on);
+                self.fire(book.rules.at(Watch::About(place)), &purpose_on);
             }
         }
+    }
+
+    /// The contract whose promise a flow keeps: an occurrence a line wrote, or one the fold made.
+    fn contract_of(&self, m: &Motion) -> Option<Id<Contract>> {
+        let book = self.plan.book;
+        match m.txn {
+            RuntimeTxn::Journal(txn) => book.txns.get(txn.id()).and_then(|txn| txn.contract),
+            RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
+            RuntimeTxn::Adjustment { .. } => None,
+        }
+        .filter(|&contract| book.contracts.get(contract).is_some())
+    }
+
+    /// A flow of a contract's occurrence is judged by the laws written in the contract, whose `self` is the contract.
+    fn fire_contract(&mut self, m: &Motion, on: &Occasion) {
+        let Some(contract) = self.contract_of(m) else { return };
+        let rules = self.plan.book.rules.at(Watch::Contract(contract));
+        self.fire(rules, &Occasion { amount: Some(m.out), ..*on });
     }
 
     /// Adds the flow to the totals some law reads, valuing only the sides
@@ -179,13 +199,7 @@ impl Ledger<'_, '_, '_> {
         // Contract-scoped totals describe that contract's occurrences, not
         // all activity of its owner. Runtime future flows already carry their
         // contract identity; journal occurrences resolve through their Txn.
-        let contract = match m.txn {
-            RuntimeTxn::Journal(txn) => self.plan.book.txns.get(txn.id()).and_then(|txn| txn.contract),
-            RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
-            RuntimeTxn::Adjustment { .. } => None,
-        }
-        .filter(|&contract| self.plan.book.contracts.get(contract).is_some());
-        if let Some(contract) = contract {
+        if let Some(contract) = self.contract_of(m) {
             let owner = self.plan.book.contracts[contract].owner;
             let within_owner = Subject::Entity(owner);
             let (source_owned, target_owned) =
@@ -474,7 +488,7 @@ impl Ledger<'_, '_, '_> {
                 purpose,
                 ..Occasion::flow(m)
             };
-            self.fire(&book.rules.on_gain[m.from], &on);
+            self.fire(book.rules.at(Watch::Gain(m.from)), &on);
         }
     }
 
@@ -872,7 +886,7 @@ impl Ledger<'_, '_, '_> {
 
         let on_out =
             Occasion { amount: Some(Amount::new(quantity, declaration.unit)), purpose: m.purpose, ..Occasion::flow(m) };
-        self.fire(&book.rules.on_out[declaration.place], &on_out);
+        self.fire(book.rules.at(Watch::Out(declaration.place)), &on_out);
         let mut shares = Shares::new(proceeds, quantity);
         for at in 0..self.scratch.relief.slices.len() {
             let slice = self.scratch.relief.slices[at];
@@ -906,7 +920,7 @@ impl Ledger<'_, '_, '_> {
                 purpose: m.purpose,
                 ..Occasion::flow(m)
             };
-            self.fire(&book.rules.on_gain[declaration.place], &on_gain);
+            self.fire(book.rules.at(Watch::Gain(declaration.place)), &on_gain);
         }
         if let Err(error) = self.dispose_asset(asset, m.txn, self.source_flow(m), boundary) {
             self.report_asset_state_error(m, error);
@@ -1020,7 +1034,7 @@ impl Ledger<'_, '_, '_> {
             }
             let spent: Qty = slices.iter().filter(|s| s.tied == Some(entity)).map(|s| s.qty).sum();
             let on = Occasion { amount: Some(Amount::new(spent, m.out.unit)), ..Occasion::flow(m) };
-            self.fire(&book.rules.on_spend[entity], &on);
+            self.fire(book.rules.at(Watch::Spend(entity)), &on);
         }
     }
 

@@ -555,6 +555,35 @@ fn a_contracts_lines_come_in_any_order() {
 }
 
 #[test]
+fn a_contract_of_a_kind_has_slot_lines_that_no_leg_is() {
+    let src = "contract alex-pay : employment with acme\n  employee alex\n  employer acme\n  5 USD monthly from x\n  irs 3 USD\n  savings ...\n";
+    let file = parse_clean(src);
+    let contract: &Contract = file.iter().next().unwrap();
+    assert_eq!(
+        (contract.kind.map(|kind| kind.0), contract.party.map(|party| party.0)),
+        (Some("employment"), Some("acme"))
+    );
+    let fills: Vec<_> = file[contract.fills].iter().map(|fill| (fill.slot.0, fill.filler.0)).collect();
+    assert_eq!(fills, [("employee", "alex"), ("employer", "acme")], "two names and nothing else fill a slot");
+    assert!(contract.props.is_empty());
+    assert_eq!(contract.body.legs.len(), 2, "a leg has an amount: `irs 3 USD`, `savings ...`");
+}
+
+#[test]
+fn a_contract_with_no_kind_reads_two_names_as_it_always_did() {
+    let file = parse_clean("contract c with p\n  5 USD monthly from x\n  savings rest\n");
+    let contract: &Contract = file.iter().next().unwrap();
+    assert!(contract.kind.is_none() && contract.props.is_empty() && contract.fills.is_empty());
+    assert_eq!(contract.body.legs.len(), 1, "a leg whose amount is a name");
+}
+
+#[test]
+fn a_contract_kind_is_a_name_after_the_colon() {
+    let error = only_error("contract c :\n  5 USD monthly from x\n", "expected-kind");
+    assert!(error.message.contains("kind"), "{error:?}");
+}
+
+#[test]
 fn every_cadence_is_a_span_between_occurrences() {
     let cadences = ["daily", "weekly", "monthly", "quarterly", "yearly", "every 2w", "every 1y6m"];
     let months = [0, 0, 1, 3, 12, 0, 18];
@@ -1514,6 +1543,25 @@ fn laws_take_closing_days_and_desugar_their_sources() {
     only_error("law l\n  each year closing 13-45\n", "bad-day");
 }
 
+#[test]
+fn a_law_derives_an_item_or_a_flow_and_a_repair_does_not() {
+    let src = "contract c\n  5 USD monthly from x\n  law match\n    on flow\n    when amount > 20 USD\n    derive acme -> me 5 USD #bonus\n    derive + 2% of amount #fee\n";
+    let file = parse_clean(src);
+    let law: &Law = file.iter().next().unwrap();
+    let steps = &file[law.steps];
+    assert!(matches!(steps[0].kind, StepKind::When(_)));
+    assert!(matches!(steps[1].kind, StepKind::Effect(Effect::Derive(AlsoLine::Flow(_)))));
+    assert!(matches!(steps[2].kind, StepKind::Effect(Effect::Derive(AlsoLine::Item(_)))));
+    only_error("law l\n  on flow\n  derive\n", "expected-derive");
+    // An amount names its commodity, as it does everywhere.
+    only_error("law l\n  on flow\n  derive -> me 5 #bonus\n", "expected-commodity");
+    // A repair owes, counts, consumes or carries; what a law makes is its own step.
+    only_error("law l\n  on flow\n  require amount > 0 USD else derive -> me 5 USD\n", "expected-effect");
+    // A step that does not exist suggests the one that does.
+    let near = only_error("law l\n  on flow\n  derrive -> me 5 USD\n", "unknown-step");
+    assert!(near.help.iter().any(|help| help.edit.as_ref().is_some_and(|(_, text)| text == "derive")), "{near:?}");
+}
+
 // ─── Line items, `via`, and what v3 wrote ───────────────────────────────────
 
 /// The items of the first flow or statement of `src`, as (sign, amount text, tail kinds).
@@ -2259,7 +2307,14 @@ fn children(file: &File, kind: &ExprKind) -> Vec<ExprId> {
 }
 
 fn effect_roots(effect: &Effect) -> Vec<ExprId> {
+    let mut derived = Vec::new();
     match effect {
+        Effect::Derive(AlsoLine::Item(item)) => amount_root(&item.amount, &mut derived),
+        Effect::Derive(AlsoLine::Flow(flow)) => flow_roots(flow, &mut derived),
+        _ => {}
+    }
+    match effect {
+        Effect::Derive(_) => derived,
         Effect::Owe { amount, due, .. } => [*amount].into_iter().chain(*due).collect(),
         Effect::Count { amount, .. } | Effect::Consume(amount) => vec![*amount],
         Effect::Carry { amount, to, .. } => vec![*amount, *to],
@@ -3166,6 +3221,7 @@ fn dump(file: &File) -> String {
             ItemKind::Contract(id) => {
                 let Contract {
                     name,
+                    kind,
                     party,
                     schedule: schedule_field,
                     standing,
@@ -3173,6 +3229,7 @@ fn dump(file: &File) -> String {
                     description,
                     deadline,
                     alsos: also,
+                    fills,
                     props: lines,
                     body,
                     laws: nested,
@@ -3185,10 +3242,11 @@ fn dump(file: &File) -> String {
                     .as_ref()
                     .map(|d| format!("{:?} {:?}", d.span, d.otherwise.as_ref().map(|item| dump_item(file, item))));
                 format!(
-                    "{name:?} {party:?} {:?} {:?} {purpose:?} {description:?} {deadline:?} {:?} {:?} {} {:?} {damaged}",
+                    "{name:?} {kind:?} {party:?} {:?} {:?} {purpose:?} {description:?} {deadline:?} {:?} {:?} {:?} {} {:?} {damaged}",
                     schedule(schedule_field),
                     schedule(standing),
                     alsos(*also),
+                    &file[*fills],
                     props(*lines),
                     dump_body(file, *body),
                     laws(*nested),

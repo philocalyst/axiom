@@ -17,7 +17,8 @@ use axiom_core::day::days_in_month;
 use axiom_core::{Arena, Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
 use crate::book::{
-    Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System, Text,
+    Amount, Asset, Book, Budget, Commodity, Contract, Derived, Entity, Kind, Param, Place, Purpose, Schedule, System,
+    Text,
 };
 use crate::journal::Object;
 
@@ -77,6 +78,71 @@ impl Rank {
 }
 
 #[cfg(test)]
+mod rules_tests {
+    use axiom_core::{Days, Id};
+
+    use super::{Keys, Law, Rule, Rules, Subject, Table, Watch};
+
+    fn rule(law: u32) -> Rule {
+        Rule { law: Id::<Law>::new(law), subject: Subject::Place(Id::new(0)), days: Days::ALWAYS }
+    }
+
+    const KEYS: Keys = Keys { places: 3, entities: 2, purposes: 2, contracts: 2 };
+
+    /// One rule in each table, two in one row, and a table with none: every lookup finds what was put there and
+    /// nothing else, whatever the key spaces before it hold.
+    #[test]
+    fn a_watch_finds_its_own_row_in_the_one_table() {
+        let entries = [
+            (Watch::In(Id::new(2)), rule(0)),
+            (Watch::Out(Id::new(0)), rule(1)),
+            (Watch::Out(Id::new(0)), rule(2)),
+            (Watch::Gain(Id::new(1)), rule(3)),
+            (Watch::About(Id::new(2)), rule(4)),
+            (Watch::Spend(Id::new(1)), rule(5)),
+            (Watch::Purpose(Id::new(0)), rule(6)),
+            (Watch::Contract(Id::new(1)), rule(7)),
+            (Watch::Occurrence(Id::new(1)), rule(9)),
+            (Watch::Timed, rule(8)),
+        ];
+        let rules = Rules::build(KEYS, entries.into_iter());
+        for (watch, found) in entries {
+            assert!(rules.at(watch).contains(&found), "{watch:?}");
+        }
+        assert_eq!(rules.at(Watch::Out(Id::new(0))), [rule(1), rule(2)], "a row keeps its order");
+        assert!(rules.at(Watch::Always(Id::new(2))).is_empty());
+        assert!(rules.at(Watch::In(Id::new(0))).is_empty(), "the row before it is not its row");
+        assert!(rules.at(Watch::Contract(Id::new(0))).is_empty());
+        assert!(
+            rules.at(Watch::Occurrence(Id::new(0))).is_empty() && rules.at(Watch::Occurrence(Id::new(1))) == [rule(9)]
+        );
+        assert!(rules.at(Watch::Spend(Id::new(9))).is_empty(), "past the end of its key space is nothing");
+        assert_eq!(rules.table(Table::Out), [rule(1), rule(2)]);
+        assert_eq!(rules.table(Table::Always), []);
+        assert_eq!(rules.timed(), [rule(8)]);
+        assert_eq!(rules.all().len(), 10);
+        assert_eq!(rules.lists().count(), 3 * 5 + 2 + 2 + 2 + 2 + 1);
+    }
+
+    #[test]
+    fn entries_give_back_what_was_built_row_by_row() {
+        let entries = vec![
+            (Watch::In(Id::new(0)), rule(0)),
+            (Watch::In(Id::new(2)), rule(1)),
+            (Watch::Always(Id::new(1)), rule(2)),
+            (Watch::Purpose(Id::new(1)), rule(3)),
+            (Watch::Timed, rule(4)),
+        ];
+        let rules = Rules::build(KEYS, entries.iter().copied());
+        assert_eq!(rules.entries(), entries);
+        let nothing = Rules::default();
+        assert!(
+            nothing.at(Watch::In(Id::new(0))).is_empty() && nothing.timed().is_empty() && nothing.entries().is_empty()
+        );
+    }
+}
+
+#[cfg(test)]
 mod rank_tests {
     use super::{Rank, RankClass};
 
@@ -91,6 +157,11 @@ mod rank_tests {
 }
 
 impl Law {
+    /// Whether the law makes flows (it has a `derive` step) rather than judging them.
+    pub fn derives(&self) -> bool {
+        self.steps.iter().any(|step| matches!(step.kind, StepKind::Effect(Effect::Derive { .. })))
+    }
+
     /// The nodes of `root`'s expression, in evaluation order: `first..=root`.
     pub fn range(&self, root: NodeId) -> std::ops::RangeInclusive<usize> {
         self.nodes[root].first.index()..=root.index()
@@ -242,6 +313,8 @@ pub enum Effect {
     /// acquisition of `unit` within the span `within`, before or after (a wash
     /// sale).
     Carry { amount: NodeId, unit: NodeId, within: NodeId },
+    /// Makes a flow: `template` says what it is and `amount` how much.
+    Derive { template: Id<Derived>, amount: NodeId },
 }
 
 /// Index of a node in its law's arena.
@@ -571,49 +644,207 @@ pub enum Fault {
 
 /// Which laws watch what, resolved once so the engine never searches.
 ///
-/// A place's rule list holds its own and its ancestors' laws, its kind chain's
-/// laws, and the top-level laws of its owner's jurisdictions (each rule dated
-/// by the residence that brings it; a household's for its members' places).
-/// Every list, `timed` included, is in dependency order: a law that reads
-/// `tally(x)` comes after every law that counts into `x`, and declaration
-/// order decides the rest.
+/// Every rule lives in one table of compressed rows. A row is one thing an occasion happens at, for one kind of
+/// occasion: the laws that watch a place when value arrives, the laws of a purpose for each of its flows, the laws of
+/// a contract for each of its occurrences. The key spaces of the eight keyed tables lie end to end, so a lookup is a
+/// base per table and an index, and one row at the end holds the `each` and `by` rules, which no occasion looks up.
+///
+/// A place's rule list holds its own and its ancestors' laws, its kind chain's laws, and the top-level laws of its
+/// owner's jurisdictions (each rule dated by the residence that brings it; a household's for its members' places).
+/// Every row, `Timed` included, is in dependency order: a law that reads `tally(x)` comes after every law that counts
+/// into `x`, and declaration order decides the rest.
 #[derive(Default)]
 pub struct Rules {
-    pub on_in: Groups<Place, Rule>,
-    pub on_out: Groups<Place, Rule>,
-    pub on_gain: Groups<Place, Rule>,
-    pub always: Groups<Place, Rule>,
-    /// `on spend` laws of each restricted entity.
-    pub on_spend: Groups<Entity, Rule>,
-    /// `on flow` laws of each purpose, ancestors' included, in dependency order.
-    pub purposes: Groups<Purpose, Rule>,
-    /// `on flow` laws of each asset's place (its kind chain's and its own):
-    /// flows whose purpose is `of` it.
-    pub about: Groups<Place, Rule>,
-    /// Laws of a contract, indexed separately from its party so two promises
-    /// with one party keep independent scope and accounting.
-    pub contracts: Groups<Contract, Rule>,
+    rows: Groups<Row, Rule>,
+    /// Where each table's rows begin, and, last, where the rows end.
+    bases: [u32; Table::COUNT + 1],
+}
+
+/// A row of [`Rules`]: one thing watched, for one kind of occasion.
+pub struct Row;
+
+/// What happens, which is also what decides the key a rule is looked up by.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Table {
+    /// Value arrives at a place.
+    In,
+    /// Value leaves a place.
+    Out,
+    /// Parcels leaving a place realize a gain.
+    Gain,
+    /// After any change to a place.
+    Always,
+    /// A flow whose purpose is `of` an asset, at the asset's place: the asset kind's and its own `on flow` laws.
+    About,
+    /// Money held for a restricted entity leaves its owner.
+    Spend,
+    /// A flow of a purpose or of one beneath it, ancestors' laws included.
+    Purpose,
+    /// A flow of a contract's occurrence, keyed by the contract and never by its party, so that two promises with one
+    /// party keep independent scope and accounting: the laws that judge it.
+    Contract,
+    /// An occurrence of a contract being made: the laws that derive flows for it.
+    Occurrence,
+    /// The end of a period, or a date the journal reaches: one row, which no occasion looks up.
+    Timed,
+}
+
+impl Table {
+    pub const ALL: [Table; Table::COUNT] = [
+        Table::In,
+        Table::Out,
+        Table::Gain,
+        Table::Always,
+        Table::About,
+        Table::Spend,
+        Table::Purpose,
+        Table::Contract,
+        Table::Occurrence,
+        Table::Timed,
+    ];
+    const COUNT: usize = 10;
+    /// The tables that watch a place for what happens to it, in the order a flow fires them.
+    pub const PLACE: [Table; 4] = [Table::In, Table::Out, Table::Gain, Table::Always];
+}
+
+/// Where a rule is looked up: a kind of occasion and the thing it happens at. A table and its key cannot disagree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Watch {
+    In(Id<Place>),
+    Out(Id<Place>),
+    Gain(Id<Place>),
+    Always(Id<Place>),
+    About(Id<Place>),
+    Spend(Id<Entity>),
+    Purpose(Id<Purpose>),
+    Contract(Id<Contract>),
+    Occurrence(Id<Contract>),
     /// `each` and `by` laws, once per subject they govern.
-    pub timed: Vec<Rule>,
+    Timed,
+}
+
+impl Watch {
+    pub fn table(self) -> Table {
+        match self {
+            Watch::In(_) => Table::In,
+            Watch::Out(_) => Table::Out,
+            Watch::Gain(_) => Table::Gain,
+            Watch::Always(_) => Table::Always,
+            Watch::About(_) => Table::About,
+            Watch::Spend(_) => Table::Spend,
+            Watch::Purpose(_) => Table::Purpose,
+            Watch::Contract(_) => Table::Contract,
+            Watch::Occurrence(_) => Table::Occurrence,
+            Watch::Timed => Table::Timed,
+        }
+    }
+
+    /// What `key` of `table` is.
+    fn of(table: Table, key: u32) -> Watch {
+        match table {
+            Table::In => Watch::In(Id::new(key)),
+            Table::Out => Watch::Out(Id::new(key)),
+            Table::Gain => Watch::Gain(Id::new(key)),
+            Table::Always => Watch::Always(Id::new(key)),
+            Table::About => Watch::About(Id::new(key)),
+            Table::Spend => Watch::Spend(Id::new(key)),
+            Table::Purpose => Watch::Purpose(Id::new(key)),
+            Table::Contract => Watch::Contract(Id::new(key)),
+            Table::Occurrence => Watch::Occurrence(Id::new(key)),
+            Table::Timed => Watch::Timed,
+        }
+    }
+
+    /// The thing watched, as its dense index in the key space of its table.
+    fn key(self) -> usize {
+        match self {
+            Watch::In(at) | Watch::Out(at) | Watch::Gain(at) | Watch::Always(at) | Watch::About(at) => at.index(),
+            Watch::Spend(at) => at.index(),
+            Watch::Purpose(at) => at.index(),
+            Watch::Contract(at) | Watch::Occurrence(at) => at.index(),
+            Watch::Timed => 0,
+        }
+    }
+}
+
+/// How many of each thing a rule can be looked up by.
+#[derive(Clone, Copy, Debug)]
+pub struct Keys {
+    pub places: usize,
+    pub entities: usize,
+    pub purposes: usize,
+    pub contracts: usize,
+}
+
+impl Keys {
+    pub fn of(book: &Book) -> Keys {
+        Keys {
+            places: book.places.len(),
+            entities: book.entities.len(),
+            purposes: book.purposes.len(),
+            contracts: book.contracts.len(),
+        }
+    }
+
+    /// How many rows `table` has.
+    fn rows(self, table: Table) -> usize {
+        match table {
+            Table::In | Table::Out | Table::Gain | Table::Always | Table::About => self.places,
+            Table::Spend => self.entities,
+            Table::Purpose => self.purposes,
+            Table::Contract | Table::Occurrence => self.contracts,
+            Table::Timed => 1,
+        }
+    }
 }
 
 impl Rules {
-    /// The four tables of laws that watch a place: `on in`, `on out`, `on gain`
-    /// and `always`.
-    pub fn per_place(&self) -> [&Groups<Place, Rule>; 4] {
-        [&self.on_in, &self.on_out, &self.on_gain, &self.always]
+    /// The rules of `entries`, each under what it watches, in the order given within one row.
+    pub fn build(keys: Keys, entries: impl Iterator<Item = (Watch, Rule)> + Clone) -> Rules {
+        let mut bases = [0; Table::COUNT + 1];
+        for table in Table::ALL {
+            bases[table as usize + 1] = bases[table as usize] + keys.rows(table) as u32;
+        }
+        let row = |watch: Watch| Id::new(bases[watch.table() as usize] + watch.key() as u32);
+        let rows = Groups::build(bases[Table::COUNT] as usize, entries.map(|(watch, rule)| (row(watch), rule)));
+        Rules { rows, bases }
     }
 
-    /// Every rule that runs while the fold does, in each list it is in: the
-    /// per-place tables, `on spend`, and the timed rules.
-    pub fn all(&self) -> impl Iterator<Item = &Rule> {
-        let per_place = self.per_place().into_iter().flat_map(|table| table.values());
-        per_place
-            .chain(self.on_spend.values())
-            .chain(self.purposes.values())
-            .chain(self.about.values())
-            .chain(self.contracts.values())
-            .chain(&self.timed)
+    /// What watches `watch`, in order.
+    pub fn at(&self, watch: Watch) -> &[Rule] {
+        &self.rows[Id::new(self.bases[watch.table() as usize] + watch.key() as u32)]
+    }
+
+    /// Every rule of one table, row after row.
+    pub fn table(&self, table: Table) -> &[Rule] {
+        self.rows.span(self.bases[table as usize] as usize, self.bases[table as usize + 1] as usize)
+    }
+
+    /// Every rule, in each row it is in.
+    pub fn all(&self) -> &[Rule] {
+        self.rows.values()
+    }
+
+    /// Every rule with what it watches: what `build` was given, row after row.
+    pub fn entries(&self) -> Vec<(Watch, Rule)> {
+        let mut entries = Vec::with_capacity(self.rows.values().len());
+        for (row, list) in self.rows.iter() {
+            let row = row.index() as u32;
+            let table = Table::ALL[self.bases.partition_point(|&base| base <= row) - 1];
+            let watch = Watch::of(table, row - self.bases[table as usize]);
+            entries.extend(list.iter().map(|&rule| (watch, rule)));
+        }
+        entries
+    }
+
+    /// Every row, for a check that no law reaches one subject twice.
+    pub fn lists(&self) -> impl Iterator<Item = &[Rule]> {
+        self.rows.iter().map(|(_, list)| list)
+    }
+
+    /// The `each` and `by` rules: the timeline schedules them by their place in this list.
+    pub fn timed(&self) -> &[Rule] {
+        self.table(Table::Timed)
     }
 }
 

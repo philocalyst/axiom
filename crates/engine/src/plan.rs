@@ -12,8 +12,8 @@
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
 use axiom_model::promise::Blame;
 use axiom_model::{
-    Asset, Book, Class, Commodity, Contract, Entity, Field, Flow, Func, Kind, Op, Place, Rule, ScheduleKind, Subject,
-    Txn, Ty, Value, Var,
+    Asset, Book, Class, Commodity, Contract, Entity, Field, Flow, Func, Kind, Op, Place, ScheduleKind, Subject, Txn,
+    Ty, Value, Var,
 };
 
 use crate::events::{self, Events};
@@ -152,7 +152,7 @@ impl<'b, 's> Plan<'b, 's> {
             daily_temporal,
         };
         let (world, mut values) = (World::new(book, &plan.watch), Vec::new());
-        plan.timed = book.rules.timed.iter().map(|rule| Schedule::of(&plan, rule, &world, &mut values)).collect();
+        plan.timed = book.rules.timed().iter().map(|rule| Schedule::of(&plan, rule, &world, &mut values)).collect();
         plan
     }
 
@@ -434,14 +434,7 @@ fn schedule_start(book: &Book, events: &Events) -> Option<Day> {
 /// Whether some list of rules brings one law to one subject twice, as two
 /// residences under one system do.
 fn repeats(book: &Book) -> bool {
-    let rules = &book.rules;
-    let per_place = rules.per_place().into_iter().flat_map(|table| table.iter().map(|(_, list)| list));
-    let lists = per_place
-        .chain(rules.on_spend.iter().map(|(_, list)| list))
-        .chain(rules.purposes.iter().map(|(_, list)| list))
-        .chain(rules.about.iter().map(|(_, list)| list))
-        .chain([&rules.timed[..]]);
-    lists.into_iter().any(|list: &[Rule]| {
+    book.rules.lists().any(|list| {
         let mut seen = Set::default();
         list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
     })
