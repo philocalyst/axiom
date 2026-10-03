@@ -83,32 +83,47 @@ enum CodeTarget {
     Ambiguous { first: Loc, second: Loc },
 }
 
+/// The transactions that carry each code, said as far as it matters: one, or that two do.
+#[derive(Default)]
+struct Carriers {
+    by_code: Map<axiom_core::Sym, CodeTarget>,
+}
+
+impl Carriers {
+    fn note(&mut self, code: axiom_core::Sym, txn: Id<Txn>, loc: Loc) {
+        match self.by_code.get(&code).copied() {
+            None => {
+                self.by_code.insert(code, CodeTarget::Unique { txn, loc });
+            }
+            Some(CodeTarget::Unique { txn: first, loc: at }) if first != txn => {
+                self.by_code.insert(code, CodeTarget::Ambiguous { first: at, second: loc });
+            }
+            Some(CodeTarget::Unique { .. } | CodeTarget::Ambiguous { .. }) => {}
+        }
+    }
+}
+
 /// A chronological index of transaction codes. Each transaction is visited
 /// once after its lowering succeeds; repeated code storage on its header and
-/// flows is deduplicated by the transaction ID.
+/// flows is deduplicated by the transaction ID. A payment carries the code of
+/// the claim it settles (LANGUAGE §7), so a code is often on two transactions:
+/// the claims are indexed apart, for a write-off names the one that made the claim.
 #[derive(Default)]
 pub(super) struct CodeIndex {
-    by_code: Map<axiom_core::Sym, CodeTarget>,
+    all: Carriers,
+    claims: Carriers,
 }
 
 impl CodeIndex {
     fn add(&mut self, world: &World<'_>, txn_id: Id<Txn>) {
-        let source = &world.book.txns[txn_id];
-        let mut add_code = |code| match self.by_code.get(&code).copied() {
-            None => {
-                self.by_code.insert(code, CodeTarget::Unique { txn: txn_id, loc: source.loc });
-            }
-            Some(CodeTarget::Unique { txn, loc }) if txn != txn_id => {
-                self.by_code.insert(code, CodeTarget::Ambiguous { first: loc, second: source.loc });
-            }
-            Some(CodeTarget::Unique { .. } | CodeTarget::Ambiguous { .. }) => {}
-        };
-        for code in source.codes.ids().map(|id| world.book.codes[id]) {
-            add_code(code);
-        }
-        for flow_id in source.flows.ids() {
-            for code in world.book.flows[flow_id].codes.ids().map(|id| world.book.codes[id]) {
-                add_code(code);
+        let (book, source) = (&world.book, &world.book.txns[txn_id]);
+        let makes_claim = source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
+        let header = source.codes.ids().map(|id| book.codes[id]);
+        let flows = source.flows.ids().flat_map(|flow| book.flows[flow].codes.ids().map(|id| book.codes[id]));
+        for code in header.chain(flows) {
+            self.all.note(code, txn_id, source.loc);
+            if makes_claim {
+                self.claims.note(code, txn_id, source.loc);
             }
         }
     }
@@ -123,7 +138,9 @@ impl CodeIndex {
         diags: &mut Vec<Diagnostic>,
     ) -> Option<Id<Txn>> {
         let symbol = world.book.names.intern(code.name());
-        let problem = match self.by_code.get(&symbol).copied() {
+        let claimed = matches!(used, CodeUse::ClaimWaiver) && self.claims.by_code.contains_key(&symbol);
+        let carriers = if claimed { &self.claims } else { &self.all };
+        let problem = match carriers.by_code.get(&symbol).copied() {
             Some(CodeTarget::Unique { txn, .. }) => return Some(txn),
             Some(CodeTarget::Ambiguous { first, second }) => {
                 problem::ambiguous_code(used, code.name(), at, first, second)

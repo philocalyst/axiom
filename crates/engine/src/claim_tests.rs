@@ -304,6 +304,21 @@ fn a_write_off_forgives_what_a_payment_of_the_same_day_left() {
     });
 }
 
+/// A payment carries the code of the claim it settles, so the code is on two transactions: the write-off names the one
+/// that made the claim.
+#[test]
+fn a_claim_whose_payment_carries_its_code_is_still_written_off_by_that_code() {
+    let lines = "\
+2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
+2026-01-20 owed -> checking 100 USD ^i1
+2026-02-15 ^i1 waived
+";
+    with_run(lines, |book, run| {
+        assert_eq!(open(book, run, "assets/owed"), claims(&[]));
+        assert_eq!(run.written_off.iter().map(|off| off.qty.0).collect::<Vec<_>>(), [200_00]);
+    });
+}
+
 /// Two claims of one amount from one party on one day are told apart by their transaction.
 #[test]
 fn a_write_off_forgives_the_claim_it_names_and_not_one_of_the_same_amount() {
