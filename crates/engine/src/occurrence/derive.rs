@@ -379,7 +379,7 @@ opening 2026-01-01
     #[test]
     fn a_law_fires_for_the_header_and_reads_its_ends_whatever_legs_the_group_has() {
         let text = format!(
-            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  checking ...\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
+            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
         );
         with_run(&text, day(2026, 1, 31), |book, run| {
             assert_eq!(
@@ -390,27 +390,28 @@ opening 2026-01-01
         });
     }
 
+    /// An item is in the unit of the header's side as the template has it, and for a standing buy that side is what is
+    /// bought: a derived carve in the unit that is spent is refused, as a written item of it is.
     #[test]
-    fn an_item_derived_for_a_standing_buy_is_in_what_is_spent_not_in_what_is_bought() {
-        let text = format!(
-            "{PRELUDE}commodity VTI\ncontract invest with lender\n  buy VTI for 500.00 USD monthly on 15 from checking\n  from 2026-01-01\n  law derived\n    on flow\n    derive + 2.00 USD #fee\n2026-01-02 VTI = 100.00 USD\n2026-01-15 invest 5 VTI\n"
-        );
-        with_run(&text, day(2026, 1, 31), |book, run| {
-            let said: Vec<_> = run
-                .diagnostics
-                .iter()
-                .map(|diagnostic| (diagnostic.code.to_string(), diagnostic.message.clone()))
-                .collect();
-            assert_eq!(
-                held(book, run, "checking"),
-                Qty(10_000_00 - 500_00 - 2_00),
-                "the 5 VTI cost 500.00, and the fee is 2.00 more: {said:?}"
-            );
+    fn an_item_derived_for_a_standing_buy_is_in_what_is_bought_and_one_in_what_is_spent_is_refused() {
+        let buy = |item: &str| {
+            format!(
+                "{PRELUDE}commodity VTI\ncontract invest with lender\n  buy VTI for 500.00 USD monthly on 15 from checking\n  from 2026-01-01\n  law derived\n    on flow\n    derive {item}\n2026-01-02 VTI = 100.00 USD\n2026-01-15 invest 5 VTI\n"
+            )
+        };
+        with_run(&buy("2.00 USD #fee"), day(2026, 1, 31), |book, run| {
+            assert!(run.diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-occurrence-materialization"));
+            assert_eq!(held(book, run, "checking"), Qty(10_000_00), "the occurrence did not post");
+        });
+        with_run(&buy("1 VTI #fee"), day(2026, 1, 31), |_, run| {
             assert!(
-                run.diagnostics.iter().all(|diagnostic| diagnostic.severity != axiom_core::Severity::Error),
+                run.diagnostics.iter().all(|diagnostic| diagnostic.code != "contract-occurrence-materialization"),
                 "{:?}",
                 run.diagnostics
             );
+            let flows = run.promises[0].flows.get(&run.promised_flows).unwrap();
+            let bought: Vec<_> = flows.iter().map(|flow| flow.flow.arrive.qty).collect();
+            assert_eq!(bought, [Qty(4), Qty(1)], "1 of the 5 VTI is the item, and the header keeps the rest");
         });
     }
 

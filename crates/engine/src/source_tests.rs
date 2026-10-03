@@ -1845,6 +1845,7 @@ contract invest with lender
   law spent
     on flow
     warn amount.unit is USD \"what is judged is what left\"
+2026-01-02 VTI = 100.00 USD
 2026-01-01 rent
 2026-01-15 invest 5 VTI
 ";
