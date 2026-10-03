@@ -21,7 +21,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K3c** claims and parts | `exact` is a relief policy, a flow's codes name claims, write-off is relief, a payment from a party settles its claims, a tab is a claim by its kind. Asset parts: **no**, with evidence | **merged** (`0089678`) |
 | **K5b** the fold reads the promise | a contract's terms stored once, the old schedule walkers and sync's dead `dues` deleted, the monitor (`missed-occurrence`), `grace` as LANGUAGE §7 says | **merged** (`c8c1695`) |
 | K3b addresses | `Addresses`, declaration words fill slots by forced placement | running (map first; stops at the map if a grammar change is needed) |
-| K5c forecast | the forecast is the fold past today; a missed `Due` is a claim | running |
+| **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
 | K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | brief written |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | brief written |
@@ -53,7 +53,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 51,800 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 51,970 non-test lines: the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -83,6 +83,25 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    invoiced) as one enum variant so the other is a line. And `claim` and `debt-claim` are now built-in kind words (a book
    that declared `kind claim` gets `duplicate-kind`): keep them or choose less common names.
 
+9. **The forecast now pays what the book promises (K5c).** The old second ledger capped every contract flow with
+   `within_means`, so a forecast paid only what the escrow held; the fold posts a promised occurrence whole, as it posts a
+   kept one. `examples/05-family`'s forecast changes on 6 of 54 runs (the `Net worth` column only: `Committed` is the same):
+   from 2026-02-14 the escrow holds 1,440.00 USD on 03-31 and the 04-10 property tax is 3,300.00 and the 06-20 insurance
+   1,870.00, so the last row of the default horizon goes from +7,801.94 to -2,528.06. The old figure hid 3,730.00 USD the book
+   promises. I read this as the forecast becoming right; say if the capping was a feature. No golden changed.
+10. **The year-end forecast test cannot pass as written.** `a_context_forecast_keeps_historical_and_same_day_obligations_once`
+    says `each year closing 12-31` and asserts a `year-end-tax` due 2027-01-15, but LANGUAGE §8 closes the 2026 year on
+    2027-12-31, so it cannot exist in a forecast to 2027-03-01 (`why year-end-tax` says "Ran 0 times"). With `each year` the
+    baseline gives the three asserted rows. K5c left the assertions untouched and added a passing sibling with `each year`.
+    Options: change the original book's `closing 12-31` to `each year` (a test-input fix) or delete it as superseded.
+11. **K5c's claim, and the habit forecast.** The claim a missed party-owed `due` makes is posted the day *after* the later of
+    the occurrence's reach and its deadline (so a line within reach still keeps the occurrence and "oldest first" cannot
+    settle the wrong claim); a brief reading made it on the day `due 5d` passes: one line in `monitor.rs::expect`. And the
+    habit forecast (`expected.rs`, `variable.rs`, `recurrence.rs`, `bands.rs`: 368 lines, about 550 with what only they feed)
+    is untouched: if it moves out the forecast is promises only (no "What recurs", no p10/p50/p90, a flat outlook where
+    spending is not in a contract); if it moves to its own crate the report takes it as a list of flows to apply, the
+    interface K5c left (`Ledger::promise_through` goes with it).
+
 ## What the grammar accepts and the engine does nothing with
 
 Found by K5a's map (`K5a-map.md` §0, §1, §6) and K4b's: **written, checked, and read by nothing.** None of this is a
@@ -99,6 +118,18 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K5c, in numbers
+
+| | |
+|---|---|
+| what it is | `Ledger::promise` gives the ledger one `Residual` per stream (`engine/promising.rs`), a min-heap of due days and a sorted table of the days a line wrote; the fold takes promised occurrences at `Moment::after_flows` and posts them through the function that posts a kept one, tells the monitor, and records a `Planned`. The report reads `Recorded::planned`: no second numbering, no second `today`. A missed `due` the party owes the owner is a claim in the tab the owner keeps with that party (`Book::claim_of` replaces `paid_into`); `Term::Due.after` is used |
+| deleted | `contract_forecasts`, `view_from/_with/_with_lens`, `project_runtime*`, `Promises::expected`, `RuntimeFlow::source`, the driver in `forecast/projection.rs` (now `trace.rs`: the reading code only) |
+| lines | **+98 against a target of -900**: gross 590 deleted, 1,099 added (`promising.rs` 531, about 300 of them tests). The second driver was about 330 lines, not 1,200; no function was orphaned by the deletions. The trail was **not** used: `core::trail` is a log of `Copy` cells and the fold's state (`lots.rs` 2,015, totals 1,011, assets 1,175) is not that shape, so one clone at today replaces two or three (map §7) |
+| speed | callgrind on `bench/100k`: `check` 1,860M to 1,867M, `forecast` 2,184M to 2,179M (a forecast costs 3.6% less beyond `check`) |
+| behaviour | no golden or mistake changed; the forecast changes in the cases of Waiting on you 9; 59 of 600 generated promise projects differ in `forecast` (an overdraft is noted per occurrence; a leg reading a balance is read once), 40 of 600 differ where a party-owed deadline contract makes a claim |
+| proof | a forecast oracle (400 projects: the forecast from earlier today equals the same book with the occurrences written down; 375 with occurrences, all agree on both layers); 30 mutants, none survives; K5b's promise oracle needed its reference taught the deadline (18 of 1,500 first disagreed; **an oracle edited to agree with the engine: reviewed, the reference reads the deadline from the terms as the spec says**) |
+| left | claim recognition (K3d); the owner's debts stay plain balances; `else ITEM` read by nothing; `Ledger::promise_through` is an API for one reader; `Monitor` and `Promising` each keep a heap of streams (a generic is possible); `fuzz.py ... diff` shows nothing about valid books because every example already has `check` errors |
 
 ## K3c, in numbers
 
