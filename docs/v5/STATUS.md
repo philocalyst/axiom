@@ -22,12 +22,12 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5b** the fold reads the promise | a contract's terms stored once, the old schedule walkers and sync's dead `dues` deleted, the monitor (`missed-occurrence`), `grace` as LANGUAGE §7 says | **merged** (`c8c1695`) |
 | **K3b** addresses | an account is written with the entities that fill its slots (`jordan/bluefin/401k`); `Addresses` is an inverted index resolved by posting-list intersection on the line's day; forced placement fills the slots; three new diagnostics | **merged** (`8e33a9d`) |
 | **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
-| K3d claims, recognition | `books cash\|accrual`, a split payment settles by what the party pays, debts as parcels | running (map first) |
+| **K3d** claims, recognition | a split payment settles by what the party pays in all; `books cash\|accrual` read once and one rule (`engine/recognition.rs`) says when a claim counts, asked by the fold and every reader; the default is cash; a write-off takes back each line for its own purpose. **Debts as parcels: not built** (design in K3d-map §6) | **merged** (`3f17468`) |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
 | K6b the post host | a law of a kind, purpose, entity or account derives a flow from a posted one (cash back, a processor's fee), with a cause, a record, a cycle guard and returns that reverse | brief written (after K6) |
 | K6 norms and relators | one rule IR (`Derive`), relators written once and projected per book | running (map first) |
 | **K7a** the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | **merged** (`368e5e8`) |
-| K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | brief written (after K7a, K3d) |
+| K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | running (map first) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | brief written (after K5c) |
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | brief written (after the kernels) |
@@ -54,7 +54,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 53,300 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 53,700 non-test lines: the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -103,6 +103,21 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
     spending is not in a contract); if it moves to its own crate the report takes it as a list of flows to apply, the
     interface K5c left (`Ledger::promise_through` goes with it).
 
+12. **Recognition, and what it did to `04-freelancer` (K3d).** `books` defaults to **cash**, as LANGUAGE §7 says, and gross receipts of 2025
+    are now **74,800.00 USD from 27 sources, the README's own figure** (it was 158,672.40 from 42: every invoice counted when
+    made and again when paid); federal income tax owed 25,970.50 to 2,073.22, SEP-IRA `available` 3,166.80 to 2,919.24; the seven
+    invoices that showed a processor's fee as a remainder are settled (`fernhill still owes 130.80 USD` for an invoice paid in
+    full is gone) and `claims` goes 12,467.10 to 11,800.00. The flip to cash is one line (`5da3aee`) with its goldens in the
+    next commit, so it can be dropped. **§7 and the doc of `Books::Accrual` disagree** (income "when invoiced" against "when it
+    is due"; §7's own contract paragraph says due): K3d built "when made" as an enum (`AccrualAt::{Made, Due}`, one function,
+    `Due` untested) and corrected the doc. Other examples' `flow` moves too (`11-sam`, `explore-v5/01-agency`: payments no
+    longer count as Unclassified, write-offs take back their purposes). **K5c's missed-occurrence claim still has no purpose**:
+    giving it one is one line in `claims.rs::claim_missed` and one K5c test, and then accrual counts the occurrence on the day
+    the miss is found and cash when paid.
+13. **Debts are still plain balances.** A bill you owe is not a parcel, so a payment to the party does not settle it
+    (`claim-debt-tab.ax`: `available` 857.50 against 665.00 when the `payable` gate is dropped). K3d stopped at the design
+    (its map §6); it is the next claims lane and belongs before K3e (parcels in columns).
+
 ## What the grammar accepts and the engine does nothing with
 
 Found by K5a's map (`K5a-map.md` §0, §1, §6) and K4b's: **written, checked, and read by nothing.** None of this is a
@@ -119,6 +134,17 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K3d, in numbers
+
+| | |
+|---|---|
+| what it is | **A**: a payment is the flows of one statement out of one party's place (same unit, real on the day) that reach the owner or pay someone beside a flow that does, so a processor's fee leg settles; "exactly the flow's" is judged on what the party still pays from that leg on (`Request::exact`); a payment to a third party alone settles nothing; a payment out of a claim place is also a settlement. **B**: `engine/recognition.rs`, 137 lines: `Counting { books, purpose, day, recognized, due, dealing }.pieces()` with `Dealing::{Ordinary, Making, Settling, Forgiving}`, a `Piece` being the part of a flow that counts toward one purpose; the fold (`count_purposes`, `fire_purpose`, `explain`) and the readers (`flow::for_each_counted`) ask it, `budget` and `tax` follow the fold with no edit; `Run.settlements`; cash counts a claim when settled as the purpose it was made with, accrual when made and its settlement nothing; a write-off in accrual reverses (totals only: a law cannot subtract) |
+| a bug the oracle found | an itemized write-off used the first line's purpose for every parcel (fixed, with a test) |
+| lines | **+414 non-test** (engine +380, report +27, model +7) plus 610 test lines. The rule did not make the readers smaller: four private walks and the dead `Lens::purpose_direction` went (-32), the one shared walk is +55. `post` went from 42 to 32 lines |
+| speed | callgrind `check` +1.3% on a book with no claims (`Counting::pieces`, `makes_claim`, a non-inlined `record_purpose` per purposed flow); 100k +3%, 1m +1.4% wall (first version was +2.7% before pre-filters) |
+| proof | the claims oracle (600 projects, references written from §7, cash default): 0 failures; against the start commit 324 differ as the references say, 0 unexplained; 46 mutants at the final commit, 43 killed (30 by the oracle, 13 by tests), 3 survived and judged equivalent |
+| left | **debts as parcels**; the three places its author is least proud of: three records of what a flow settled (`Record::settled`, `Record::settlements`, `Frame::settled`) that disagree on one kind of flow (a settlement should be recorded once on the flow and a return should read it back); a write-off's reversal written twice (`claims.rs::take_back` in the fold, `flow.rs::forgiven_by` in the reader; `Run` should carry it); the rule costs 1.3% on books with no claims; a limit that broke does not name a claim-place settlement in cash books |
 
 ## K7a, in numbers
 
