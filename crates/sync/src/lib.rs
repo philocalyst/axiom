@@ -14,7 +14,6 @@
 //! | `peg`           | the patterns the ledger writes: a small PEG                      |
 //! | `recognize`     | `known-as` patterns and names, compiled once; `via`; codes       |
 //! | `reconcile`     | records already written: same amount, within three days          |
-//! | `promise`       | records that keep a contract's occurrence                        |
 //! | `world`         | borrowed reconciliation state bound from the book and run      |
 //! | `sink`          | Axiom output merged into the journal, a file or a param          |
 //! | `write`         | the file a day belongs to, day order, short dates                |
@@ -47,7 +46,6 @@ mod format;
 mod paths;
 mod peg;
 mod planner;
-mod promise;
 mod recognize;
 mod reconcile;
 mod sink;

@@ -189,7 +189,6 @@ fn project(name: &str) -> Project {
 fn native_book_reconciles_two_feeds_and_the_next_plan_is_empty() {
     let mut project = project("twice");
     let first = plan_project(&project, AXIOM, &[]);
-    assert!(first.incomplete.is_empty(), "the fixture has no claims or contracts to monitor");
     assert!(first.problems.is_empty(), "{:?}", first.problems);
     let journal = &first.changes[0].after;
     assert_eq!(first.changes.len(), 1);

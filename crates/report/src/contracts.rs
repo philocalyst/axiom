@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Days, Id, Qty};
+use axiom_core::{Day, Days, Id, Qty};
 use axiom_engine::Run;
 use axiom_model::{
-    Cadence, Contract, Cut, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, Sign, Terms, TermsState,
+    Cadence, Change, Contract, Cut, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, ScheduleKind, Sign, Terms,
 };
 
 use crate::lens::Lens;
@@ -28,17 +28,8 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
             continue;
         }
         let name = book.name(contract.name);
-        let terms = contract.terms_on(run.today);
-        let next = contract
-            .days
-            .intersect(Days::new(run.today, contract.days.last()).unwrap_or(Days::on(run.today)))
-            .and_then(|days| {
-                contract.occurrences(days).map(|occurrence| occurrence.day).find(|due| {
-                    !run.promises
-                        .iter()
-                        .any(|promise| promise.contract == id && promise.due == *due && promise.kept.is_some())
-                })
-            });
+        let terms = contract.terms.as_ref();
+        let next = next_due(lens.book(), run, id, contract);
         let promises = run.promises.iter().filter(|promise| promise.contract == id);
         let (kept, late, age) = promises.fold((0, 0, 0i64), |(kept, late, age), promise| {
             let late_days = promise.late(run.today);
@@ -48,7 +39,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
         let cells = [
             Cell::Name(name),
             Cell::Name(book.name(book.entities[contract.party].path)),
-            terms.map_or(Cell::Blank, |terms| terms_cell(lens, contract, terms)),
+            terms.map_or(Cell::Blank, |terms| terms_cell(lens, contract, terms, contract.waiver_on(run.today))),
             next.map_or(Cell::Blank, Cell::Day),
             Cell::Count(kept, "kept"),
             if late == 0 { Cell::Blank } else { Cell::text(format!("{late} occurrences, {age} days")) },
@@ -62,9 +53,29 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
     Report::new("Contracts").with(section)
 }
 
-pub(crate) fn terms_cell<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract, terms: &'s Terms) -> Cell<'s> {
+/// The next due day from today that no occurrence has kept, of either of the contract's schedules.
+fn next_due(book: &axiom_model::Book<'_>, run: &Run, id: Id<Contract>, contract: &Contract) -> Option<Day> {
+    let from_today = Days::new(run.today, contract.days.last()).unwrap_or(Days::on(run.today));
+    let window = contract.days.intersect(from_today)?;
+    let kept = |due: Day| {
+        run.promises.iter().any(|promise| promise.contract == id && promise.due == due && promise.kept.is_some())
+    };
+    [ScheduleKind::Regular, ScheduleKind::Standing]
+        .into_iter()
+        .filter_map(|kind| book.promises.schedule(id, kind))
+        .filter_map(|schedule| schedule.days(window).find(|due| !kept(*due)))
+        .min()
+}
+
+/// The terms of one stretch of a contract's life: what they say, or that a statement waived them.
+pub(crate) fn terms_cell<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    contract: &'s Contract,
+    terms: &'s Terms,
+    waiver: Option<&Change>,
+) -> Cell<'s> {
     let book = lens.book();
-    if terms.state == TermsState::Waived {
+    if waiver.is_some() {
         return Cell::Word("waived");
     }
     let mut parts: Vec<Cell<'s>> = vec![cadence(terms.every)];

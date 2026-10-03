@@ -88,6 +88,19 @@ impl Annuity {
         let principal = (due - interest).clamp(Qty::ZERO, open);
         Some(Paid { interest, principal, open: open - principal })
     }
+
+    /// What is owed after `payments` payments have been made, one after another. Zero once it is paid off, and for a
+    /// payment that cannot be worked out.
+    pub fn owed_after(&self, payments: u32) -> Qty {
+        let mut open = self.principal.qty;
+        for index in 0..payments.min(self.periods) {
+            open = self.pay(open, index).map_or(Qty::ZERO, |paid| paid.open);
+            if open == Qty::ZERO {
+                break;
+            }
+        }
+        if payments >= self.periods { Qty::ZERO } else { open }
+    }
 }
 
 /// The most periods a payment is compounded over. The loop is one multiplication a period, and the payment is worked out

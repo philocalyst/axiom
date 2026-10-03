@@ -2,7 +2,7 @@
 
 use axiom_core::Id;
 use axiom_engine::Run;
-use axiom_model::{Contract, Derivation, Origin, TermsState};
+use axiom_model::{Contract, Derivation, Origin};
 
 use crate::lens::Lens;
 use crate::places::route;
@@ -50,15 +50,17 @@ fn terms_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Sect
         Column::left("Statement"),
     ])
     .headed("Terms over time");
-    for (days, value) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
+    let stretches =
+        contract.terms.iter().flat_map(|terms| contract.stretches().map(move |(days, waiver)| (days, terms, waiver)));
+    for (days, value, waiver) in stretches {
         let active_days = days.intersect(contract.days).unwrap_or(days);
         let templates =
             value.template.iter().map(|flow| crate::contracts::template_flow_cell(lens, flow)).collect::<Vec<_>>();
-        let state = match value.state {
-            TermsState::Active => Cell::Word("active"),
-            TermsState::Waived => Cell::Word("waived"),
+        let state = match waiver {
+            None => Cell::Word("active"),
+            Some(_) => Cell::Word("waived"),
         };
-        let change = value.change.map_or(Cell::Blank, |change| Cell::Source(change.loc));
+        let change = waiver.map_or(Cell::Blank, |change| Cell::Source(change.loc));
         terms.push(Row::new([
             Cell::Day(active_days.first()),
             Cell::Day(active_days.last()),

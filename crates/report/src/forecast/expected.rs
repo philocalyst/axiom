@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn contract_suppression_tracks_each_projected_date_and_typed_identity() {
         use axiom_core::{Loc, Timeline};
-        use axiom_model::{Cadence, Contract, Expr, FlowSide, Header, Program, Promised, Quantity, Terms, TermsState};
+        use axiom_model::{Cadence, Contract, Expr, FlowSide, Header, Program, Promised, Quantity, Terms};
 
         let mut house = household();
         let today = day(2026, 5, 1);
@@ -224,10 +224,8 @@ mod tests {
         let template_id = house.book.flows.iter().next().unwrap().0;
         let template = house.book.flows[template_id].clone();
         let terms = Terms {
-            state: TermsState::Active,
             every: Cadence::Every(axiom_core::Span::months(1)),
             on: Box::default(),
-            anchor: today,
             template: vec![Promised {
                 header: Header {
                     flow: template.clone(),
@@ -251,7 +249,6 @@ mod tests {
             shares: Box::default(),
             also: Box::default(),
             rate: None,
-            change: None,
         };
         let contract = Contract {
             name: house.book.names.intern("rent-promise"),
@@ -261,8 +258,9 @@ mod tests {
             description: None,
             area: None,
             days: Days::new(start, end).unwrap(),
-            terms: Some(Timeline::new(terms)),
+            terms: Some(terms),
             standing: None,
+            waived: Timeline::new(None),
             buys: None,
             deposit: None,
             deposit_holding: None,
@@ -286,17 +284,12 @@ mod tests {
 
         let waiver_start = start.add_days(10);
         let waiver_end = start.add_days(14);
-        let mut waiver = house.book.contracts[Id::new(0)].terms.as_ref().unwrap().at(waiver_start).clone();
-        waiver.state = TermsState::Waived;
-        waiver.template = Box::default();
-        house.book.contracts[Id::new(0)]
-            .terms
-            .as_mut()
-            .unwrap()
-            .paint(Days::new(waiver_start, waiver_end).unwrap(), waiver);
+        let days = Days::new(waiver_start, waiver_end).unwrap();
+        let waiver = axiom_model::Change { days, description: None, code: None, loc: Loc::default() };
+        house.book.contracts[Id::new(0)].waived.paint(days, Some(waiver));
         assert!(
             covered_on(&house.book, &template, waiver_start.add_days(1)),
-            "an empty waiver borrows its matching active template so the fallback does not resurrect"
+            "a waived stretch keeps the contract's template, so the fallback does not resurrect"
         );
         let mut other_owner = template.clone();
         other_owner.owner = Id::new(99);

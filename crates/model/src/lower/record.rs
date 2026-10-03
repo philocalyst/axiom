@@ -1,7 +1,7 @@
 //! Native S5 journal records. This pass reads the source AST directly and
 //! appends resolved records to the pooled Book arenas.
 
-use axiom_core::{Day, Days, Diagnostic, Groups, Id, Loc, Map, Run};
+use axiom_core::{Day, Diagnostic, Groups, Id, Loc, Map, Run};
 use axiom_syntax as ast;
 use axiom_syntax::Subject;
 
@@ -17,7 +17,7 @@ use super::statements::{
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
 use crate::balance::{self, Settled, Total};
-use crate::book::{Amount, Place, ScheduleKind};
+use crate::book::{Amount, Place};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::Word;
@@ -27,6 +27,7 @@ use crate::journal::{
 };
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
+use crate::promise::{Keep, Promises};
 use crate::scope::Home;
 use crate::solve::Remaining;
 use crate::sources::Site;
@@ -677,9 +678,10 @@ fn lower_occurrence<'a, 's>(
         return;
     }
     let contract = &world.book.contracts[contract_id];
-    let (schedule, due, terms) = match nearest_occurrence(contract, statement.date) {
-        Ok(Some(found)) => found,
-        Ok(None) => {
+    let (promises, promise) = Promises::alone(contract);
+    let (schedule, due) = match promise.keep(&promises, statement.date) {
+        Keep::Kept { schedule, due } => (schedule, due),
+        Keep::Outside => {
             diags.push(
                 Diagnostic::error(
                     "contract-occurrence-date",
@@ -689,7 +691,7 @@ fn lower_occurrence<'a, 's>(
             );
             return;
         }
-        Err((regular, standing)) => {
+        Keep::Ambiguous { regular, standing } => {
             diags.push(
                 Diagnostic::error(
                     "ambiguous-contract-occurrence",
@@ -701,6 +703,7 @@ fn lower_occurrence<'a, 's>(
             return;
         }
     };
+    let terms = contract.terms_of(schedule).expect("a kept day belongs to a schedule the contract has");
     let inputs = terms.inputs.clone();
     let templates = terms.template.clone();
     let fallback = occurrence_amount_unit(contract, terms, world.book.base);
@@ -1110,18 +1113,10 @@ fn lower_loan_origin<'a, 's>(
             );
             return;
         };
-        let template = contract
-            .terms
-            .as_ref()
-            .map(|timeline| timeline.at(loan.on))
-            .filter(|terms| !terms.template.is_empty())
-            .or_else(|| {
-                contract
-                    .standing
-                    .as_ref()
-                    .map(|timeline| timeline.at(loan.on))
-                    .filter(|terms| !terms.template.is_empty())
-            })
+        let template = [&contract.terms, &contract.standing]
+            .into_iter()
+            .flatten()
+            .find(|terms| !terms.template.is_empty())
             .and_then(|terms| terms.template.first());
         let Some(template) = template else {
             diags.push(
@@ -1232,62 +1227,6 @@ fn lower_loan_origin<'a, 's>(
     };
     staged.book.txns.push(txn);
     staged.commit();
-}
-
-/// The occurrence a line dated `day` keeps: the nearest due day within a cadence of it, the earlier of two equally near.
-/// Public so that the oracle of `docs/v5/measure/promises` can ask it of a finished book; lane K5 replaces it.
-pub fn nearest_occurrence<'a>(
-    contract: &'a crate::book::Contract,
-    day: Day,
-) -> Result<Option<(ScheduleKind, Day, &'a crate::book::Terms)>, (Day, Day)> {
-    if !contract.days.contains(day) {
-        return Ok(None);
-    }
-    let mut radius = 0i64;
-    for timeline in [contract.terms.as_ref(), contract.standing.as_ref()].into_iter().flatten() {
-        let schedules = std::iter::once(timeline.at(Day::MIN)).chain(timeline.changes().map(|(_, terms)| terms));
-        for terms in schedules {
-            let cadence = match terms.every {
-                crate::book::Cadence::Every(span) => {
-                    i64::from(span.months).saturating_mul(31).saturating_add(i64::from(span.days))
-                }
-                crate::book::Cadence::TwiceMonthly => 31,
-            };
-            radius = radius.max(cadence);
-        }
-    }
-    let radius = radius.clamp(0, i64::from(i32::MAX)) as i32;
-    let Some(search) = Days::new(Day(day.0.saturating_sub(radius)), Day(day.0.saturating_add(radius))) else {
-        return Ok(None);
-    };
-    let mut regular = None;
-    let mut standing = None;
-    for occurrence in contract.occurrences(search) {
-        let distance = (i64::from(day.0) - i64::from(occurrence.day.0)).abs();
-        let candidate = (distance, occurrence.day > day, occurrence.day, occurrence.terms);
-        let best = match occurrence.schedule {
-            ScheduleKind::Regular => &mut regular,
-            ScheduleKind::Standing => &mut standing,
-        };
-        if best.is_none_or(|(best_distance, best_future, _, _)| (distance, candidate.1) < (best_distance, best_future))
-        {
-            *best = Some(candidate);
-        }
-    }
-    match (regular, standing) {
-        (Some((r_distance, _, r_day, regular_terms)), Some((s_distance, _, s_day, standing_terms))) => {
-            if r_distance == s_distance {
-                Err((r_day, s_day))
-            } else if r_distance < s_distance {
-                Ok(Some((ScheduleKind::Regular, r_day, regular_terms)))
-            } else {
-                Ok(Some((ScheduleKind::Standing, s_day, standing_terms)))
-            }
-        }
-        (Some((_, _, due, terms)), None) => Ok(Some((ScheduleKind::Regular, due, terms))),
-        (None, Some((_, _, due, terms))) => Ok(Some((ScheduleKind::Standing, due, terms))),
-        (None, None) => Ok(None),
-    }
 }
 
 /// The ends of a claim and whose it is: the party it is with on one end, and on the other the tab the owners keep it in.

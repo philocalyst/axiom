@@ -5,7 +5,7 @@
 //! day; `indexed to cpi yearly` reads a parameter on the latest anniversary; `prorated` is the share of the period an
 //! occurrence covers that the contract lives in; `for last month` and `covers the quarter` say which period that is.
 //! Every one is a function of the day, the contract's life and the book's parameters, so they are the schedule's, kept
-//! beside the due days, and the fold is handed the factor as it is today ([`amount_on_schedule`](crate::Contract)).
+//! beside the due days, and the fold is handed the factor of the day it makes an occurrence for.
 
 use axiom_core::calendar::{self, Window};
 use axiom_core::{Day, Days, Id, Ratio, Span};

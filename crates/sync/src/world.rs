@@ -11,7 +11,6 @@ use axiom_model::sync::Format;
 
 use crate::amount::amount;
 use crate::date::iso_day;
-use crate::promise::{Due, keep_paired};
 use crate::recognize::{Reading, Recognizer, Scratch, Tie, Who};
 use crate::reconcile::{Existing, reconcile_paired};
 use crate::write::Layout;
@@ -51,8 +50,6 @@ pub struct World<'b, 's> {
     pub accounts: Map<&'s str, Account<'s>>,
     /// Every unit the book has, for a record that names its own currency.
     pub units: Vec<Unit<'s>>,
-    /// Occurrences that are due and not written.
-    pub dues: Vec<Due<'s>>,
     /// Open claims that carry a code: the code, and the party it is with.
     pub claims: Map<&'s str, &'s str>,
 }
@@ -104,12 +101,8 @@ struct Statement<'a, 't, 's> {
     /// Each record beside the reading of its memo, by day, a day's records in the export's order.
     paired: Vec<(Record<'t>, Reading<'s>)>,
     existing: Option<&'a Account<'s>>,
-    /// The occurrences of the account's contracts that are due and not written.
-    dues: Vec<Due<'s>>,
     /// The flow of the account a record is already written as.
     matched: Vec<Option<usize>>,
-    /// The due occurrence a record keeps.
-    kept: Vec<Option<usize>>,
     others: Vec<Option<Other<'s>>>,
     exchanges: Vec<Exchange>,
 }
@@ -319,10 +312,8 @@ impl<'b, 's> World<'b, 's> {
         let flows = existing.map_or(&[][..], |account| &account.flows);
         let matched = reconcile_paired(&paired, flows, feed.unit.name);
         let others = self.others(feed, account, &paired, &matched)?;
-        let dues: Vec<Due> = self.dues.iter().filter(|due| due.account == account).cloned().collect();
-        let kept = keep_paired(&paired, &parties(&paired, &others), &dues);
-        let exchanges = self.exchanges(&paired, &others, &kept);
-        Ok(Statement { account, paired, existing, dues, matched, kept, others, exchanges })
+        let exchanges = self.exchanges(&paired, &others);
+        Ok(Statement { account, paired, existing, matched, others, exchanges })
     }
 
     /// Each record beside the reading of its memo, by day. A memo may say its own amount or day, which is what the
@@ -363,8 +354,8 @@ impl<'b, 's> World<'b, 's> {
         moving.filter_map(|(at, _)| self.line(statement, feed, at, &mut codes)).collect()
     }
 
-    /// The line the record at `at` is written as, if it is written at all: a written record only settles, a
-    /// kept promise is an occurrence, an exchange is one line for its two records, and any other is a flow.
+    /// The line the record at `at` is written as, if it is written at all: a written record only settles, an
+    /// exchange is one line for its two records, and any other is a flow.
     fn line(
         &self,
         statement: &Statement<'_, '_, 's>,
@@ -372,15 +363,14 @@ impl<'b, 's> World<'b, 's> {
         at: usize,
         codes: &mut PendingCodes,
     ) -> Option<Line<'s>> {
-        let Statement { account, paired, dues, matched, kept, others, exchanges, .. } = statement;
+        let Statement { account, paired, matched, others, exchanges, .. } = statement;
         let record = &paired[at].0;
-        match (matched[at], kept[at], &others[at]) {
-            (Some(flow), _, _) => {
+        match (matched[at], &others[at]) {
+            (Some(flow), _) => {
                 let settles = statement.flows()[flow].settle.filter(|_| !record.pending);
                 settles.map(|code| Line::statement(record.day, format!("^{code} settled")))
             }
-            (None, Some(due), _) => Some(occurrence(&dues[due], record, account, self.unit_of(feed, record))),
-            (None, None, Some(other)) => match exchanges[at] {
+            (None, Some(other)) => match exchanges[at] {
                 Exchange::Second => None,
                 Exchange::First(with) => Some(self.exchange(account, feed, record, &paired[with].0, other)),
                 Exchange::No => {
@@ -388,7 +378,7 @@ impl<'b, 's> World<'b, 's> {
                     Some(self.new_flow(account, feed, record, other, code.as_deref()))
                 }
             },
-            (None, None, None) => None,
+            (None, None) => None,
         }
     }
 
@@ -522,15 +512,10 @@ impl<'b, 's> World<'b, 's> {
 
     /// Which records are the two sides of one exchange: the same `id`, one
     /// unit out and another in, both new and neither pending.
-    fn exchanges<'t>(
-        &self,
-        records: &[(Record<'t>, Reading<'s>)],
-        others: &[Option<Other>],
-        kept: &[Option<usize>],
-    ) -> Vec<Exchange> {
+    fn exchanges<'t>(&self, records: &[(Record<'t>, Reading<'s>)], others: &[Option<Other>]) -> Vec<Exchange> {
         let mut by_id: Map<&str, Vec<usize>> = Map::default();
         for (at, (record, _)) in records.iter().enumerate() {
-            let free = others[at].is_some() && kept[at].is_none() && !record.pending && !record.qty.is_zero();
+            let free = others[at].is_some() && !record.pending && !record.qty.is_zero();
             if let Some(id) = record.facts().id.as_deref().filter(|_| free) {
                 by_id.entry(id).or_default().push(at);
             }
@@ -692,26 +677,6 @@ fn tie_error(book: &Book<'_>, record: &Record, tie: &Tie) -> Diagnostic {
         }
     }
     diagnostic
-}
-
-/// The party each record was with, where a promise of that party could be kept: only a record that is neither
-/// written nor pending can keep one, and an account is no party.
-fn parties<'s>(records: &[(Record, Reading)], others: &[Option<Other<'s>>]) -> Vec<Option<&'s str>> {
-    let party = |(record, _): &(Record, Reading), other: &Option<Other<'s>>| {
-        let who = other.as_ref().filter(|_| !record.pending).and_then(|other| other.who);
-        who.filter(|who| !who.account).map(|who| who.name)
-    };
-    records.iter().zip(others).map(|(record, other)| party(record, other)).collect()
-}
-
-/// `01 flat`, or `08 phone 47.30 USD` when the record was for another amount.
-fn occurrence<'a>(due: &Due, record: &Record, account: &'a str, unit: Unit<'a>) -> Line<'a> {
-    let amount = match record.qty == due.qty {
-        true => String::new(),
-        false => format!(" {}", money(record.qty.abs(), unit)),
-    };
-    let moved = vec![(account, Some(unit.name), record.qty)];
-    Line { day: record.day, body: format!("{}{amount}", due.contract), moved }
 }
 
 /// `2_900 USD`, `84.20 USD`: a whole amount without decimals, any other to the

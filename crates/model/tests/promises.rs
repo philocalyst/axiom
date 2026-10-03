@@ -1,7 +1,7 @@
 //! What a book's contracts compile to: terms, the schedules they fall due on, and what is still owed.
 
 use axiom_core::{Day, Days, FileId};
-use axiom_model::promise::{Keep, Residual, Term};
+use axiom_model::promise::{Keep, Promises, Residual, Term};
 use axiom_model::{Book, ScheduleKind, Source, build};
 use axiom_syntax::{Folder, parse};
 
@@ -140,11 +140,8 @@ contract rent with greystar
 2026-03-01 rent waived until 2026-03-15
 ";
     with_book(text, |book| {
-        let rent = book.contract("rent").unwrap();
         let owed = due_days(book, "rent", ScheduleKind::Regular, window(day(2026, 1, 1), day(2026, 5, 31)));
         assert_eq!(owed, ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"]);
-        let walked: Vec<_> = book.contracts[rent].due_days(window(day(2026, 1, 1), day(2026, 5, 31)));
-        assert!(!walked.contains(&day(2026, 3, 31)), "the old walk loses it");
     });
 }
 
@@ -240,9 +237,13 @@ contract rent with greystar
         let rent = book.contract("rent").unwrap();
         let promise = book.promises.of(rent);
         let Term::Every { body, .. } = book.promises.term(promise.regular.unwrap().every) else { panic!("an Every") };
-        let Term::Due { deadline, blame, .. } = book.promises.term(body) else { panic!("a Due") };
-        assert_eq!(book.promises.deadline(deadline).after, axiom_core::Span::days(5));
-        assert_eq!(blame, book.contracts[rent].party, "money into the owner's account is owed by the party");
+        let Term::Due { after, blame, .. } = book.promises.term(body) else { panic!("a Due") };
+        assert_eq!(after, axiom_core::Span::days(5));
+        assert_eq!(
+            blame.of(&book.contracts[rent]),
+            book.contracts[rent].party,
+            "money into the owner's account is owed by the party"
+        );
         let owed = Residual::start(&book.promises, promise.regular.unwrap().every);
         assert_eq!(owed.next(), Some(day(2026, 1, 1)));
         assert_eq!(owed.deadline(&book.promises), Some(day(2026, 1, 6)));
@@ -250,7 +251,31 @@ contract rent with greystar
 }
 
 #[test]
-fn a_grace_is_carried_though_nothing_reads_it() {
+fn the_reach_of_a_schedule_is_its_grace_or_half_its_own_cadence() {
+    let text = "\
+contract rent with greystar
+  1_000 USD monthly on 1 into checking
+  from 2026-01-01
+  grace 3d
+contract invest with greystar
+  50 USD weekly on monday from checking
+  buy VTI for 500 USD monthly on 1 from checking
+  from 2026-01-01
+";
+    with_book(text, |book| {
+        let reach = |name: &str, kind| book.promises.schedule(book.contract(name).unwrap(), kind).unwrap().reach();
+        assert_eq!(reach("rent", ScheduleKind::Regular), 3, "a grace is the reach");
+        assert_eq!(reach("invest", ScheduleKind::Regular), 3, "weekly is half of 7 days, rounded down");
+        assert_eq!(
+            reach("invest", ScheduleKind::Standing),
+            15,
+            "a month is 31 days, and the standing order has its own"
+        );
+    });
+}
+
+#[test]
+fn a_line_beyond_the_reach_of_its_due_day_keeps_nothing() {
     let text = "\
 contract rent with greystar
   1_000 USD monthly on 1 into checking
@@ -258,7 +283,46 @@ contract rent with greystar
   grace 3d
 ";
     with_book(text, |book| {
-        assert_eq!(book.promises.of(book.contract("rent").unwrap()).grace, Some(axiom_core::Span::days(3)));
+        let rent = book.contract("rent").unwrap();
+        let regular = |due| Keep::Kept { schedule: ScheduleKind::Regular, due };
+        assert_eq!(book.promises.keep(rent, day(2026, 2, 4)), regular(day(2026, 2, 1)));
+        assert_eq!(book.promises.keep(rent, day(2026, 1, 29)), regular(day(2026, 2, 1)));
+        assert_eq!(book.promises.keep(rent, day(2026, 2, 5)), Keep::Outside, "four days late is past a grace of three");
+        assert_eq!(book.promises.keep(rent, day(2026, 1, 28)), Keep::Outside);
+    });
+}
+
+#[test]
+fn a_loan_expects_its_payments_and_no_more() {
+    let text = "\
+contract car-loan with bank
+  loan 3_000 USD on 2026-01-01 at 0% over 3m
+  monthly on 1 from checking
+";
+    with_book(text, |book| {
+        let loan = book.contract("car-loan").unwrap();
+        let ever = window(day(2026, 1, 1), day(2030, 1, 1));
+        let owed: Vec<_> = book.promises.expected(loan, ScheduleKind::Regular, ever).collect();
+        let first = book.promises.schedule(loan, ScheduleKind::Regular).unwrap().ordinal(day(2026, 2, 1)).unwrap();
+        assert_eq!(owed, [(first, day(2026, 2, 1)), (first + 1, day(2026, 3, 1)), (first + 2, day(2026, 4, 1))]);
+        let later = window(day(2026, 3, 1), day(2030, 1, 1));
+        assert_eq!(book.promises.expected(loan, ScheduleKind::Regular, later).count(), 2);
+    });
+}
+
+#[test]
+fn a_contract_alone_is_asked_as_it_stands() {
+    let text = "\
+contract rent with greystar
+  1_000 USD monthly on 1 into checking
+  from 2026-01-01
+";
+    with_book(text, |book| {
+        let (promises, promise) = Promises::alone(&book.contracts[book.contract("rent").unwrap()]);
+        assert_eq!(
+            promise.keep(&promises, day(2026, 2, 3)),
+            Keep::Kept { schedule: ScheduleKind::Regular, due: day(2026, 2, 1) }
+        );
     });
 }
 

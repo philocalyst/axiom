@@ -15,7 +15,7 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, par};
+use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{
     Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Made, Place,
     RuntimeDetail, RuntimeFlow, RuntimeTxn,
@@ -415,19 +415,15 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             return;
         };
         let due = written.due;
-        let Some(contract) = book.contracts.get(contract_id) else {
+        if book.contracts.get(contract_id).is_none() {
             self.record.report(
                 Diagnostic::error("contract-occurrence-source", "this occurrence points at a missing contract")
                     .label(txn.loc, "the occurrence cannot be materialized"),
             );
             return;
-        };
-        let through = Days::new(contract.days.first(), due).unwrap_or(Days::on(due));
-        let count = contract
-            .occurrences(through)
-            .filter(|occurrence| occurrence.schedule == schedule && occurrence.day <= due)
-            .count();
-        let Some(ordinal) = count.checked_sub(1).and_then(|index| u32::try_from(index).ok()) else {
+        }
+        let ordinal = book.promises.schedule(contract_id, schedule).and_then(|schedule| schedule.ordinal(due));
+        let Some(ordinal) = ordinal else {
             self.record.report(
                 Diagnostic::error("contract-occurrence-source", "this occurrence is not part of its contract schedule")
                     .label(txn.loc, "the occurrence cannot be materialized"),
