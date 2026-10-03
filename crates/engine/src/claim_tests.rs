@@ -584,6 +584,16 @@ fn a_claim_the_monitor_made_has_no_purpose_for_a_law_to_count() {
     });
 }
 
+/// A header that is no amount owes nothing, so there is nothing to claim of it: it is warned of as missed.
+#[test]
+fn an_occurrence_of_no_amount_is_warned_of_and_claims_nothing() {
+    let text = "contract rent with ann\n  0 USD monthly on 1 into checking\n  from 2026-01-01\n  due 5d\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 0);
+        assert_eq!(said(run, "missed-occurrence").len(), 1);
+    });
+}
+
 /// What the owner was to pay is not a claim of the owner's: a debt is a plain balance and no payment to the party settles it.
 #[test]
 fn what_the_owner_failed_to_pay_is_not_claimed() {

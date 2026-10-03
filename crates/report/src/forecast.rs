@@ -523,6 +523,32 @@ mod tests {
         );
     }
 
+    /// Two habits in a journal, one on the 5th and one on the 20th: each expects a flow every month, and what the report applies
+    /// is all of them in date order, not one habit's and then the other's.
+    #[test]
+    fn the_flows_habits_expect_come_in_date_order() {
+        let mut text =
+            String::from("base USD\ncommodity USD\n  precision 2\nentity landlord\nentity gym\naccount checking\n");
+        text += "opening 2025-10-01\n  checking 10_000.00 USD\n";
+        for (year, month) in [(2025, 11), (2025, 12), (2026, 1), (2026, 2)] {
+            text += &format!("{year}-{month:02}-05 checking -> landlord 500.00 USD\n");
+            text += &format!("{year}-{month:02}-20 checking -> gym 30.00 USD\n");
+        }
+        crate::source_tests::with_run(&text, day(2026, 3, 1), |book, run| {
+            let plan = axiom_engine::Plan::new(book);
+            let whose = Whose::default();
+            let lens = Lens::new(&plan, &whose, day(2026, 3, 1));
+            let habits = expected(lens, run);
+            let (today, until) = (day(2026, 3, 1), day(2026, 6, 30));
+            let apart: Vec<_> =
+                habits.iter().flat_map(|habit| habit.flows(today, until)).map(|flow| flow.day).collect();
+            assert!(apart.windows(2).any(|pair| pair[0] > pair[1]), "one habit and then the other: {apart:?}");
+            let together: Vec<_> = habit_flows(book, &habits, today, until).iter().map(|flow| flow.day).collect();
+            assert_eq!(together.len(), apart.len());
+            assert!(together.windows(2).all(|pair| pair[0] <= pair[1]), "in date order: {together:?}");
+        });
+    }
+
     const RENT: &str = "\
 base USD
 commodity USD
