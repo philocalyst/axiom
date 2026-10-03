@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity acme : org
+account checking : bank
+account escrow : bank
+2025-12-31 market -> checking 9_000 USD
+contract lease with acme
+  1_000 USD monthly on 1 from checking #rent
+  from 2026-01-01
+  also -> escrow 100 USD #contribution
+2026-01-01 lease
+2026-02-01 lease
