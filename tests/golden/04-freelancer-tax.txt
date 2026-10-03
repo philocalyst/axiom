@@ -1044,31 +1044,31 @@ Counted
   Tally                       Amount  From
   ──────────────────────────────────────────────
   project
-    gross-receipts     84,400.00 USD  22 sources
+    gross-receipts     74,800.00 USD  27 sources
     business-expenses   6,847.91 USD  26 sources
     sep-contributions   8,000.00 USD  4 sources
-    net-profit         77,552.09 USD  period end
-    se-tax             10,957.76 USD  period end
-    other-taxes        10,957.76 USD  period end
-    se-deduction        5,478.88 USD  period end
+    net-profit         67,952.09 USD  period end
+    se-tax              9,601.33 USD  period end
+    other-taxes         9,601.33 USD  period end
+    se-deduction        4,800.66 USD  period end
   ──────────────────────────────────────────────
   us
     interest              290.12 USD  12 sources
-    total-income       77,842.21 USD  13 sources
+    total-income       68,242.21 USD  13 sources
     investment-income     290.12 USD  12 sources
     payments           11,100.00 USD  5 sources
-    adjustments        13,478.88 USD  5 sources
-    deductions         25,472.67 USD  2 sources
-    agi                64,363.33 USD  period end
-    taxable-income     38,890.66 USD  period end
-    income-tax          4,428.38 USD  period end
-    total-tax          15,386.14 USD  period end
+    adjustments        12,800.66 USD  5 sources
+    deductions         23,688.31 USD  2 sources
+    agi                55,441.55 USD  period end
+    taxable-income     31,753.24 USD  period end
+    income-tax          3,571.89 USD  period end
+    total-tax          13,173.22 USD  period end
 
 Owed
   Owed                  To   Due               Amount  From
   ───────────────────────────────────────────────────────────────
   us
-    federal-income-tax  irs  2026-04-15  4,286.14 USD  period end
+    federal-income-tax  irs  2026-04-15  2,073.22 USD  period end
   ───────────────────────────────────────────────────────────────
-  Total owed                             4,286.14 USD
+  Total owed                             2,073.22 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
