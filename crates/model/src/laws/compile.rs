@@ -17,6 +17,8 @@ use axiom_syntax::{
 };
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
+mod derive;
+
 use super::vars::When;
 use crate::book::{Entity, Input, Param};
 use crate::declare::World;
@@ -344,6 +346,10 @@ impl<'s> Compiler<'_, '_, 's> {
         if self.failed || steps.len() != written.len() {
             return None;
         }
+        self.check_derives(trigger, &steps, law.loc);
+        if self.failed {
+            return None;
+        }
         Some(Law {
             name: self.law_name,
             doc: law.doc.map(|doc| self.world.book.names.intern(doc.0)),
@@ -420,6 +426,7 @@ impl<'s> Compiler<'_, '_, 's> {
             WrittenEffect::Consume(amount) => {
                 Some(Effect::Consume { amount: self.expression(*amount, self.owner_amount_ty())? })
             }
+            WrittenEffect::Derive(line) => self.derive(line, loc),
             WrittenEffect::Carry { amount, to, within } => {
                 let amount = self.expression(*amount, self.owner_amount_ty())?;
                 let unit = self.expression(*to, Ty::Unit)?;

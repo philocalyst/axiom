@@ -1470,6 +1470,9 @@ pub enum Effect<'s> {
     /// by `to` within `within`, before or after (a wash sale). The model checks
     /// its unit type in context; the expression's `Loc` preserves provenance.
     Carry { amount: ExprId, to: ExprId, within: Span },
+    /// `derive ITEM | FLOW`: when the law fires, an item of the flow that fired it, or a flow of its own. It is a
+    /// step of a law, never a reparation: `require … else` does not parse it.
+    Derive(AlsoLine<'s>),
 }
 
 // ─── Expressions ────────────────────────────────────────────────────────────

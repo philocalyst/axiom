@@ -11,6 +11,8 @@
 //! An expression is read against a flow, so the environment keeps the flows by line; it owns no state of its own
 //! but what the fold lends it.
 
+mod derive;
+
 use std::borrow::Cow;
 
 use axiom_core::{Arena, Day, Days, Id, Loc, Ratio};
@@ -18,7 +20,8 @@ use axiom_model::promise::Sched;
 use axiom_model::{
     Amount, Answer, Bear, Book, Commodity, Contract, Detail, Draw, Drawn, End, Env, Expr, Failed, Fault, Flow,
     FlowSide, Infer, Item, Line, Made, Mode, OccurrenceTail, Origin, Part, Program, Promised, Remainder, Remaining,
-    Resolved, RuntimeDetail, RuntimeFlow, RuntimeTxn, Says, ScheduleKind, Sign, Terms, Value, WrittenOccurrence, solve,
+    Resolved, RuntimeDetail, RuntimeFlow, RuntimeTxn, Says, ScheduleKind, Sign, Solved, Terms, Value,
+    WrittenOccurrence, solve,
 };
 
 use crate::evaluate::{Binds, Evaluating, Lent};
@@ -320,13 +323,27 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             .map_err(|failed| failure(failed, &header, &legs, &items))?;
         let left = solved.header.expect("a promise's header has an amount");
         (header.out, header.arrive) = (left.out, left.arrive);
+        let first = pools.flows.len();
         self.push_occurrence_flow(header.clone(), making, group.base, detail, pools)?;
+        self.push_legs_and_items(&cx, &header, (legs, &items), &solved, pools)?;
+        self.derive_group(&cx, remaining, first, pools)
+    }
+
+    /// The legs and the items of a solved group as flows, after its header, in the order they were written.
+    fn push_legs_and_items(
+        &self,
+        cx: &Cx<'_>,
+        header: &Flow,
+        (legs, items): (Vec<LegAt>, &[ItemAt<'_>]),
+        solved: &Solved,
+        pools: &mut Pools<'_>,
+    ) -> Result<(), TemplateError> {
         for (leg, drawn) in legs.into_iter().zip(solved.legs.iter()) {
-            self.push_leg(&cx, leg, *drawn, pools)?;
+            self.push_leg(cx, leg, *drawn, pools)?;
         }
         for (item, amount) in items.iter().zip(solved.items.iter()) {
             if let Some(amount) = *amount {
-                self.push_item(&cx, &header, item, amount, pools)?;
+                self.push_item(cx, header, item, amount, pools)?;
             }
         }
         Ok(())

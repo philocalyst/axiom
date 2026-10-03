@@ -16,9 +16,9 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Arena, Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field, FlowCodes, Func,
-    Holder, Law, NodeId, Object, Op, Param, Purposed, RuntimeDetail, RuntimeFlow, SelectKey, StepKind, Subject, Text,
-    Ty, Value, Var, Window,
+    self, Amount, Asset, BinOp, Book, Commodity, Derived, Dir, Effect as LawEffect, Entity, Fault, Field, FlowCodes,
+    Func, Holder, Law, NodeId, Object, Op, Param, Purposed, RuntimeDetail, RuntimeFlow, SelectKey, StepKind, Subject,
+    Text, Ty, Value, Var, Window,
 };
 
 use crate::assets::PartId;
@@ -268,6 +268,8 @@ pub(crate) enum Outcome {
     Consume { step: u32, amount: Amount },
     /// A disallowed loss that the asset monitor carries to a matching part.
     Carry { step: u32, amount: Amount, unit: Id<Commodity>, within: Span },
+    /// A flow the law makes: what it is, and how much.
+    Derive { step: u32, template: Id<Derived>, amount: Amount },
 }
 
 /// Runs `law`'s steps in order. Returns whether it ran to the end rather than
@@ -566,6 +568,11 @@ impl<'a, 's> Machine<'a, 's> {
             LawEffect::Consume { amount } => {
                 if let Some(amount) = self.nonzero_amount(step, amount) {
                     self.out.push(Outcome::Consume { step, amount });
+                }
+            }
+            LawEffect::Derive { template, amount } => {
+                if let Some(amount) = self.nonzero_amount(step, amount) {
+                    self.out.push(Outcome::Derive { step, template, amount });
                 }
             }
             LawEffect::Carry { amount, unit, within } => {

@@ -1514,6 +1514,25 @@ fn laws_take_closing_days_and_desugar_their_sources() {
     only_error("law l\n  each year closing 13-45\n", "bad-day");
 }
 
+#[test]
+fn a_law_derives_an_item_or_a_flow_and_a_repair_does_not() {
+    let src = "contract c\n  5 USD monthly from x\n  law match\n    on flow\n    when amount > 20 USD\n    derive acme -> me 5 USD #bonus\n    derive + 2% of amount #fee\n";
+    let file = parse_clean(src);
+    let law: &Law = file.iter().next().unwrap();
+    let steps = &file[law.steps];
+    assert!(matches!(steps[0].kind, StepKind::When(_)));
+    assert!(matches!(steps[1].kind, StepKind::Effect(Effect::Derive(AlsoLine::Flow(_)))));
+    assert!(matches!(steps[2].kind, StepKind::Effect(Effect::Derive(AlsoLine::Item(_)))));
+    only_error("law l\n  on flow\n  derive\n", "expected-derive");
+    // An amount names its commodity, as it does everywhere.
+    only_error("law l\n  on flow\n  derive -> me 5 #bonus\n", "expected-commodity");
+    // A repair owes, counts, consumes or carries; what a law makes is its own step.
+    only_error("law l\n  on flow\n  require amount > 0 USD else derive -> me 5 USD\n", "expected-effect");
+    // A step that does not exist suggests the one that does.
+    let near = only_error("law l\n  on flow\n  derrive -> me 5 USD\n", "unknown-step");
+    assert!(near.help.iter().any(|help| help.edit.as_ref().is_some_and(|(_, text)| text == "derive")), "{near:?}");
+}
+
 // ─── Line items, `via`, and what v3 wrote ───────────────────────────────────
 
 /// The items of the first flow or statement of `src`, as (sign, amount text, tail kinds).
@@ -2259,7 +2278,14 @@ fn children(file: &File, kind: &ExprKind) -> Vec<ExprId> {
 }
 
 fn effect_roots(effect: &Effect) -> Vec<ExprId> {
+    let mut derived = Vec::new();
     match effect {
+        Effect::Derive(AlsoLine::Item(item)) => amount_root(&item.amount, &mut derived),
+        Effect::Derive(AlsoLine::Flow(flow)) => flow_roots(flow, &mut derived),
+        _ => {}
+    }
+    match effect {
+        Effect::Derive(_) => derived,
         Effect::Owe { amount, due, .. } => [*amount].into_iter().chain(*due).collect(),
         Effect::Count { amount, .. } | Effect::Consume(amount) => vec![*amount],
         Effect::Carry { amount, to, .. } => vec![*amount, *to],

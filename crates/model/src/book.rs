@@ -67,6 +67,8 @@ pub struct Book<'s> {
     pub promises: crate::promise::Promises,
     /// `also ITEM | FLOW`: what every matching flow implies, declared once.
     pub also: Arena<Also>,
+    /// What each `derive` step makes, apart from how much: one per step of a law.
+    pub derived: Arena<Derived>,
 
     pub laws: Arena<Law>,
     pub rules: Rules,
@@ -786,6 +788,31 @@ pub enum Implied {
     /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
     /// `None` ends mean the implying flow's own ends (`issuer -> self`).
     Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: Expr },
+}
+
+/// What a `derive` step makes when its law fires (LANGUAGE §10): an item of the flow that fired it, or a flow of its own.
+/// How much is the step's own, an expression of the law; this is everything else, and what `also` lowers to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Derived {
+    pub shape: Shape,
+    pub purpose: Option<Purposed>,
+    pub description: Option<Text>,
+    /// Pooled metadata written on the derived flow.
+    pub codes: Run<Sym>,
+    pub select: Run<Select>,
+    pub detail: Option<Id<Detail>>,
+    pub waive: Option<Waive>,
+    pub loc: Loc,
+}
+
+/// How a derived flow lies against the flow that fired its law.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shape {
+    /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
+    Item(Sign),
+    /// `-> escrow 410 USD`, `lumen -> retirement 50% of …`: a flow of its own. An end that is `None` is the firing
+    /// flow's own (`self`).
+    Flow { from: Option<Id<Place>>, to: Option<Id<Place>> },
 }
 
 /// `match 50% of retirement up to 6%`.

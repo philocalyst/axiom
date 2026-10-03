@@ -468,6 +468,8 @@ pub enum Derivation {
     Claim(Id<Contract>),
     /// An `also` line: escrow, an employer's match, a card's cash back.
     Also(Id<Also>),
+    /// A `derive` step of a law, made with a promise's occurrence: escrow, an employer's match.
+    Law(Id<Law>),
     /// A deadline's `else`, when it passed (a late fee).
     Otherwise(Id<Contract>),
     /// A law's reparation (`require … else …`).

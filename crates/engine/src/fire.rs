@@ -592,6 +592,9 @@ impl Ledger<'_, '_, '_> {
                 Outcome::Carry { step, amount, unit, within } => {
                     self.carry(rule, ctx, step, amount, unit, within);
                 }
+                // A law that derives is read when an occurrence is made, and the model keeps it out of every table
+                // a posted flow fires: one that gets here is a program that is not what the model made.
+                Outcome::Derive { step, .. } => self.fault(rule, ctx, step as usize, Fault::InvalidProgram),
                 Outcome::Priced { step, name, amount, owed } => self.charge(rule, ctx, step, (name, amount, owed)),
                 Outcome::Broken { step, warn } => self.violate(rule, ctx, step, warn),
                 Outcome::Faulted { step, fault } => self.fault(rule, ctx, step as usize, fault),

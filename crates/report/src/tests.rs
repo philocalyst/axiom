@@ -587,6 +587,7 @@ pub(crate) fn household() -> Household {
         contracts: Arena::new(),
         promises: Default::default(),
         also: Arena::new(),
+        derived: Arena::new(),
         laws: records.laws,
         rules,
         budgets: Arena::new(),

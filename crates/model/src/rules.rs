@@ -303,16 +303,17 @@ fn asset_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Ve
     rules
 }
 
-/// Contract laws are kept keyed by promise identity, never by the party shared
-/// by two different contracts. The engine selects these rules from the flow's
-/// contract provenance.
+/// Contract laws are kept keyed by promise identity, never by the party shared by two different contracts. The laws
+/// that judge a flow are read as it posts, and the laws that derive one when an occurrence is made.
 fn contract_flows(book: &Book, written: &WrittenIn, auxiliary: &Set<Id<Law>>) -> Vec<(Watch, Rule)> {
     let mut rules = Vec::new();
     for contract in book.contracts.ids() {
-        for &law in written.contracts[contract].iter() {
-            if !auxiliary.contains(&law) && !matches!(book.laws[law].trigger, Trigger::Each(..) | Trigger::By(_)) {
-                rules.push((Watch::Contract(contract), always(law, Subject::Contract(contract))));
-            }
+        let flow_laws = written.contracts[contract].iter().filter(|&&law| {
+            !auxiliary.contains(&law) && !matches!(book.laws[law].trigger, Trigger::Each(..) | Trigger::By(_))
+        });
+        for &law in flow_laws {
+            let watch = if book.laws[law].derives() { Watch::Occurrence(contract) } else { Watch::Contract(contract) };
+            rules.push((watch, always(law, Subject::Contract(contract))));
         }
     }
     rules

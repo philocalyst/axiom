@@ -22,7 +22,8 @@
 
 use axiom_core::{Diagnostic, Id, Qty};
 use axiom_model::{
-    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, Place, PurposeRoot, RuntimeTxn, Select, Subject, Watch,
+    Amount, Asset, Basis, Class, Contract, Dir, Entity, Fault, Object, Place, PurposeRoot, RuntimeTxn, Select, Subject,
+    Watch,
 };
 
 use crate::eval::{Occasion, Realized};
@@ -98,6 +99,7 @@ impl Ledger<'_, '_, '_> {
         if watched {
             self.fire(book.rules.at(Watch::In(m.to)), &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
             self.fire_purpose(m, &on);
+            self.fire_contract(m, &on);
             self.fire_spend(m);
             self.fire(book.rules.at(Watch::Always(m.from)), &on);
             if m.to != m.from {
@@ -123,6 +125,24 @@ impl Ledger<'_, '_, '_> {
         }
     }
 
+    /// The contract whose promise a flow keeps: an occurrence a line wrote, or one the fold made.
+    fn contract_of(&self, m: &Motion) -> Option<Id<Contract>> {
+        let book = self.plan.book;
+        match m.txn {
+            RuntimeTxn::Journal(txn) => book.txns.get(txn.id()).and_then(|txn| txn.contract),
+            RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
+            RuntimeTxn::Adjustment { .. } => None,
+        }
+        .filter(|&contract| book.contracts.get(contract).is_some())
+    }
+
+    /// A flow of a contract's occurrence is judged by the laws written in the contract, whose `self` is the contract.
+    fn fire_contract(&mut self, m: &Motion, on: &Occasion) {
+        let Some(contract) = self.contract_of(m) else { return };
+        let rules = self.plan.book.rules.at(Watch::Contract(contract));
+        self.fire(rules, &Occasion { amount: Some(m.out), ..*on });
+    }
+
     /// Adds the flow to the totals some law reads, valuing only the sides
     /// that matter.
     fn count(&mut self, m: &Motion) {
@@ -135,13 +155,7 @@ impl Ledger<'_, '_, '_> {
         // Contract-scoped totals describe that contract's occurrences, not
         // all activity of its owner. Runtime future flows already carry their
         // contract identity; journal occurrences resolve through their Txn.
-        let contract = match m.txn {
-            RuntimeTxn::Journal(txn) => self.plan.book.txns.get(txn.id()).and_then(|txn| txn.contract),
-            RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
-            RuntimeTxn::Adjustment { .. } => None,
-        }
-        .filter(|&contract| self.plan.book.contracts.get(contract).is_some());
-        if let Some(contract) = contract {
+        if let Some(contract) = self.contract_of(m) {
             let owner = self.plan.book.contracts[contract].owner;
             let within_owner = Subject::Entity(owner);
             let (source_owned, target_owned) =

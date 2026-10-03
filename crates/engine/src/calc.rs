@@ -53,6 +53,7 @@ impl Calc<'_, '_> {
             BinOp::Add | BinOp::Sub => self.sum(op == BinOp::Sub, left, right),
             BinOp::Mul => self.product(left, right),
             BinOp::Div => self.quotient(left, right),
+            BinOp::UpTo => self.up_to(left, right),
             _ => self.compare(op, left, right).map(Value::Bool),
         };
         result.unwrap_or_else(Value::Fault)
@@ -253,6 +254,11 @@ impl Calc<'_, '_> {
             (Value::Num(a), Value::Num(b)) => Value::Num(a.checked_div(b).ok_or(Fault::DivideByZero)?),
             _ => unreachable!("{TYPED}"),
         })
+    }
+
+    /// `X up to Y`: the smaller of the two, whichever unit they are counted in (`Y` is read in `X`'s).
+    fn up_to(&self, left: Value, right: Value) -> Result<Value, Fault> {
+        Ok(if self.compare(BinOp::Le, left, right)? { left } else { right })
     }
 
     fn compare(&self, op: BinOp, left: Value, right: Value) -> Result<bool, Fault> {

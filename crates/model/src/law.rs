@@ -17,7 +17,8 @@ use axiom_core::day::days_in_month;
 use axiom_core::{Arena, Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
 use crate::book::{
-    Amount, Asset, Book, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System, Text,
+    Amount, Asset, Book, Budget, Commodity, Contract, Derived, Entity, Kind, Param, Place, Purpose, Schedule, System,
+    Text,
 };
 use crate::journal::Object;
 
@@ -101,6 +102,7 @@ mod rules_tests {
             (Watch::Spend(Id::new(1)), rule(5)),
             (Watch::Purpose(Id::new(0)), rule(6)),
             (Watch::Contract(Id::new(1)), rule(7)),
+            (Watch::Occurrence(Id::new(1)), rule(9)),
             (Watch::Timed, rule(8)),
         ];
         let rules = Rules::build(KEYS, entries.into_iter());
@@ -111,12 +113,15 @@ mod rules_tests {
         assert!(rules.at(Watch::Always(Id::new(2))).is_empty());
         assert!(rules.at(Watch::In(Id::new(0))).is_empty(), "the row before it is not its row");
         assert!(rules.at(Watch::Contract(Id::new(0))).is_empty());
+        assert!(
+            rules.at(Watch::Occurrence(Id::new(0))).is_empty() && rules.at(Watch::Occurrence(Id::new(1))) == [rule(9)]
+        );
         assert!(rules.at(Watch::Spend(Id::new(9))).is_empty(), "past the end of its key space is nothing");
         assert_eq!(rules.table(Table::Out), [rule(1), rule(2)]);
         assert_eq!(rules.table(Table::Always), []);
         assert_eq!(rules.timed(), [rule(8)]);
-        assert_eq!(rules.all().len(), 9);
-        assert_eq!(rules.lists().count(), 3 * 5 + 2 + 2 + 2 + 1);
+        assert_eq!(rules.all().len(), 10);
+        assert_eq!(rules.lists().count(), 3 * 5 + 2 + 2 + 2 + 2 + 1);
     }
 
     #[test]
@@ -152,6 +157,11 @@ mod rank_tests {
 }
 
 impl Law {
+    /// Whether the law makes flows (it has a `derive` step) rather than judging them.
+    pub fn derives(&self) -> bool {
+        self.steps.iter().any(|step| matches!(step.kind, StepKind::Effect(Effect::Derive { .. })))
+    }
+
     /// The nodes of `root`'s expression, in evaluation order: `first..=root`.
     pub fn range(&self, root: NodeId) -> std::ops::RangeInclusive<usize> {
         self.nodes[root].first.index()..=root.index()
@@ -303,6 +313,8 @@ pub enum Effect {
     /// acquisition of `unit` within the span `within`, before or after (a wash
     /// sale).
     Carry { amount: NodeId, unit: NodeId, within: NodeId },
+    /// Makes a flow: `template` says what it is and `amount` how much.
+    Derive { template: Id<Derived>, amount: NodeId },
 }
 
 /// Index of a node in its law's arena.
@@ -668,9 +680,11 @@ pub enum Table {
     Spend,
     /// A flow of a purpose or of one beneath it, ancestors' laws included.
     Purpose,
-    /// An occurrence of a contract, keyed by the contract and never by its party, so that two promises with one party
-    /// keep independent scope and accounting.
+    /// A flow of a contract's occurrence, keyed by the contract and never by its party, so that two promises with one
+    /// party keep independent scope and accounting: the laws that judge it.
     Contract,
+    /// An occurrence of a contract being made: the laws that derive flows for it.
+    Occurrence,
     /// The end of a period, or a date the journal reaches: one row, which no occasion looks up.
     Timed,
 }
@@ -685,9 +699,10 @@ impl Table {
         Table::Spend,
         Table::Purpose,
         Table::Contract,
+        Table::Occurrence,
         Table::Timed,
     ];
-    const COUNT: usize = 9;
+    const COUNT: usize = 10;
     /// The tables that watch a place for what happens to it, in the order a flow fires them.
     pub const PLACE: [Table; 4] = [Table::In, Table::Out, Table::Gain, Table::Always];
 }
@@ -703,6 +718,7 @@ pub enum Watch {
     Spend(Id<Entity>),
     Purpose(Id<Purpose>),
     Contract(Id<Contract>),
+    Occurrence(Id<Contract>),
     /// `each` and `by` laws, once per subject they govern.
     Timed,
 }
@@ -718,6 +734,7 @@ impl Watch {
             Watch::Spend(_) => Table::Spend,
             Watch::Purpose(_) => Table::Purpose,
             Watch::Contract(_) => Table::Contract,
+            Watch::Occurrence(_) => Table::Occurrence,
             Watch::Timed => Table::Timed,
         }
     }
@@ -733,6 +750,7 @@ impl Watch {
             Table::Spend => Watch::Spend(Id::new(key)),
             Table::Purpose => Watch::Purpose(Id::new(key)),
             Table::Contract => Watch::Contract(Id::new(key)),
+            Table::Occurrence => Watch::Occurrence(Id::new(key)),
             Table::Timed => Watch::Timed,
         }
     }
@@ -743,7 +761,7 @@ impl Watch {
             Watch::In(at) | Watch::Out(at) | Watch::Gain(at) | Watch::Always(at) | Watch::About(at) => at.index(),
             Watch::Spend(at) => at.index(),
             Watch::Purpose(at) => at.index(),
-            Watch::Contract(at) => at.index(),
+            Watch::Contract(at) | Watch::Occurrence(at) => at.index(),
             Watch::Timed => 0,
         }
     }
@@ -774,7 +792,7 @@ impl Keys {
             Table::In | Table::Out | Table::Gain | Table::Always | Table::About => self.places,
             Table::Spend => self.entities,
             Table::Purpose => self.purposes,
-            Table::Contract => self.contracts,
+            Table::Contract | Table::Occurrence => self.contracts,
             Table::Timed => 1,
         }
     }

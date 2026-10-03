@@ -241,26 +241,30 @@ impl<'s> Parser<'s> {
     /// `also ITEM | FLOW [when EXPR]`
     pub fn also(&mut self, line: &Line<'s>) -> Parse<Ref<Also<'s>>> {
         self.bump();
-        let scope = Scope::Undated;
-        if self.at_eol() {
-            return Err(self.expected(
-                "expected-also",
-                "an item or a flow to add: `+ 2% of amount #fee` or `-> escrow 410 USD #escrow`",
-            ));
-        }
-        let added = if self.at_item() {
-            AlsoLine::Item(self.item_body(None, self.peek().loc.start as usize, scope)?)
-        } else {
-            let clauses = self.mark::<Clause>();
-            let from = self.side(scope)?;
-            AlsoLine::Flow(self.flow_head(from, scope, clauses)?.0)
-        };
+        let added = self.derived_line("expected-also")?;
         let when = match self.eat_word("when") {
             Some(_) => Some(self.expression()?),
             None => None,
         };
         self.expect_eol()?;
         Ok(self.push(Also { line: added, when, loc: self.loc_from(line.body) }))
+    }
+
+    /// What an `also` or a `derive` makes: an item of the flow that implies it, or a flow of its own. `code` is the
+    /// error's code when there is nothing after the keyword.
+    pub fn derived_line(&mut self, code: &'static str) -> Parse<AlsoLine<'s>> {
+        let scope = Scope::Undated;
+        if self.at_eol() {
+            return Err(
+                self.expected(code, "an item or a flow to add: `+ 2% of amount #fee` or `-> escrow 410 USD #escrow`")
+            );
+        }
+        if self.at_item() {
+            return Ok(AlsoLine::Item(self.item_body(None, self.peek().loc.start as usize, scope)?));
+        }
+        let clauses = self.mark::<Clause>();
+        let from = self.side(scope)?;
+        Ok(AlsoLine::Flow(self.flow_head(from, scope, clauses)?.0))
     }
 
     /// `daily`, `weekly`, `monthly`, `quarterly`, `yearly`, `twice monthly` or `every SPAN`.

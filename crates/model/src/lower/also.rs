@@ -5,7 +5,7 @@ use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
 use super::tail::{Reach, written_purpose, written_waive};
-use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Text};
+use crate::book::{Also, AlsoOn, Amount, Commodity, Implied, Input, Place, Shape, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
@@ -121,13 +121,13 @@ enum PendingAmount {
     Computed(usize),
 }
 
-/// What an `also` implies, read: the item or flow (its amount still to come), the clauses after it, and the
-/// selectors an implied flow narrows its source by.
-struct Line<'s> {
-    what: Implied,
-    amount: PendingAmount,
-    clauses: ast::Many<ast::Clause<'s>>,
-    selectors: Option<ast::Many<ast::Select<'s>>>,
+/// What a line that derives, an `also` or a `derive`, says, read: how it lies against the flow that fires it, its
+/// amount as written, the clauses after it, and the selectors it narrows its source by.
+pub(crate) struct Said<'s> {
+    pub shape: Shape,
+    pub amount: ast::Amount<'s>,
+    pub clauses: ast::Many<ast::Clause<'s>>,
+    pub selectors: Option<ast::Many<ast::Select<'s>>>,
 }
 
 /// Lowers `also` clauses shared by declaration and contract lowering.
@@ -153,9 +153,12 @@ fn lower_also<'s>(
         roots.push((when, Ty::Bool));
         roots.len() - 1
     });
-    let Line { mut what, amount, clauses, selectors } = match &also.line {
-        ast::AlsoLine::Item(item) => implied_item(world, cx, item, &mut roots, diags)?,
-        ast::AlsoLine::Flow(flow) => implied_flow(world, cx, flow, also.loc, &mut roots, diags)?,
+    let Said { shape, amount, clauses, selectors } = read_line(world, cx.home, cx.file, &also.line, also.loc, diags)?;
+    let amount = pending_amount(world, cx.file, amount, cx.currency, &mut roots, diags)?;
+    let zero = Expr::Literal(Amount::zero(cx.currency));
+    let mut what = match shape {
+        Shape::Item(sign) => Implied::Item { sign, amount: zero },
+        Shape::Flow { from, to } => Implied::Flow { from, to, amount: zero },
     };
     let metadata_errors = diags.len();
     let metadata = tail(world, home, file, clauses, diags);
@@ -190,34 +193,40 @@ fn lower_also<'s>(
     }))
 }
 
-/// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow that implies it.
-fn implied_item<'s>(
+/// What `line` says, or nothing after what is wrong with it has been said.
+pub(crate) fn read_line<'s>(
     world: &World<'s>,
-    cx: &AlsoCx<'_, 's>,
-    item: &ast::LineItem<'s>,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
+    home: Home,
+    file: &ast::File<'s>,
+    line: &ast::AlsoLine<'s>,
+    at: Loc,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Line<'s>> {
-    let amount = pending_amount(world, cx.file, item.amount, cx.currency, roots, diags)?;
+) -> Option<Said<'s>> {
+    match line {
+        ast::AlsoLine::Item(item) => Some(implied_item(item)),
+        ast::AlsoLine::Flow(flow) => implied_flow(world, home, file, flow, at, diags),
+    }
+}
+
+/// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow that implies it.
+fn implied_item<'s>(item: &ast::LineItem<'s>) -> Said<'s> {
     let sign = match item.sign {
         ast::Sign::Carve => Sign::Carve,
         ast::Sign::Add => Sign::Add,
         ast::Sign::Less => Sign::Less,
     };
-    let what = Implied::Item { sign, amount: Expr::Literal(Amount::zero(cx.currency)) };
-    Some(Line { what, amount, clauses: item.tail, selectors: None })
+    Said { shape: Shape::Item(sign), amount: item.amount, clauses: item.tail, selectors: None }
 }
 
 /// `-> escrow 410 USD`: a flow of its own, whose ends are the implying flow's own where it names none (`self`).
 fn implied_flow<'s>(
     world: &World<'s>,
-    cx: &AlsoCx<'_, 's>,
+    home: Home,
+    file: &ast::File<'s>,
     flow: &ast::Flow<'s>,
     also_loc: Loc,
-    roots: &mut Vec<(ast::ExprId, Ty)>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Line<'s>> {
-    let file = cx.file;
+) -> Option<Said<'s>> {
     if !file[flow.body.legs].is_empty() || !file[flow.body.items].is_empty() {
         diags.push(
             Diagnostic::error("also-flow-body", "a declaration `also` flow cannot have split legs or items")
@@ -236,10 +245,8 @@ fn implied_flow<'s>(
         return None;
     }
     // Both ends are looked up before either failure stops the line, so both are said.
-    let (from, to) = (
-        implied_end(world, cx.home, file, flow.from.end, diags),
-        implied_end(world, cx.home, file, flow.to.end, diags),
-    );
+    let (from, to) =
+        (implied_end(world, home, file, flow.from.end, diags), implied_end(world, home, file, flow.to.end, diags));
     let (from, to) = (from?, to?);
     let from_amount = implied_amount(file, flow.from.amount, also_loc, diags)?;
     let to_amount = implied_amount(file, flow.to.amount, also_loc, diags)?;
@@ -260,9 +267,8 @@ fn implied_flow<'s>(
             return None;
         }
     };
-    let amount = pending_amount(world, file, amount, cx.currency, roots, diags)?;
-    let what = Implied::Flow { from, to, amount: Expr::Literal(Amount::zero(cx.currency)) };
-    Some(Line { what, amount, clauses: flow.tail, selectors: flow.from.end.map(|end| end.select) })
+    let selectors = flow.from.end.map(|end| end.select);
+    Some(Said { shape: Shape::Flow { from, to }, amount, clauses: flow.tail, selectors })
 }
 
 /// The place an end of an implied flow names: none for `self` or no end, and nothing at all, after it is said,
@@ -352,7 +358,7 @@ fn compile_also<'s>(
     Some((world.book.laws.push(law), roots))
 }
 
-fn lower_selectors<'s>(
+pub(crate) fn lower_selectors<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
