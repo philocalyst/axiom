@@ -74,6 +74,8 @@ mod claim_tests;
 #[cfg(test)]
 mod fixture;
 #[cfg(test)]
+mod payment_tests;
+#[cfg(test)]
 mod source_tests;
 #[cfg(test)]
 mod split_tests;
