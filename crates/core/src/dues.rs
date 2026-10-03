@@ -174,7 +174,13 @@ impl<'a> Dues<'a> {
     /// The due days in `within`, in order.
     pub fn days(&self, within: Days) -> Window<'a> {
         match self.shape {
-            Shape::Walked => Window::Walked(self.walked_in(within).into_iter()),
+            Shape::Walked => Window::Walked {
+                dues: *self,
+                from: Some(within.first()),
+                last: within.last(),
+                reach: 64,
+                found: Vec::new().into_iter(),
+            },
             _ => {
                 let first = self.before(within.first());
                 Window::Counted { dues: *self, next: Some(first), last: within.last() }
@@ -251,10 +257,24 @@ fn block(anchor: Day, step: Span, on: &[On], n: u64) -> Block {
     block
 }
 
-/// The days of a window, as [`Dues::days`] gives them.
+/// The days of a window, as [`Dues::days`] gives them: counted one at a time, or, for a walked schedule, walked a stretch
+/// at a time, each twice the last, so that asking for the first few of a window that runs to the end of the calendar walks
+/// a few days and not four billion.
 pub enum Window<'a> {
-    Counted { dues: Dues<'a>, next: Option<u32>, last: Day },
-    Walked(std::vec::IntoIter<Day>),
+    Counted {
+        dues: Dues<'a>,
+        next: Option<u32>,
+        last: Day,
+    },
+    Walked {
+        dues: Dues<'a>,
+        /// Where the next stretch begins: none when the window is walked to its end.
+        from: Option<Day>,
+        last: Day,
+        /// How many days the next stretch is.
+        reach: i64,
+        found: std::vec::IntoIter<Day>,
+    },
 }
 
 impl Iterator for Window<'_> {
@@ -262,7 +282,16 @@ impl Iterator for Window<'_> {
 
     fn next(&mut self) -> Option<Day> {
         match self {
-            Window::Walked(days) => days.next(),
+            Window::Walked { dues, from, last, reach, found } => loop {
+                if let Some(day) = found.next() {
+                    return Some(day);
+                }
+                let first = (*from)?;
+                let end = Day(i32::try_from(i64::from(first.0) + *reach - 1).unwrap_or(i32::MAX).min(last.0));
+                *found = dues.walked_in(Days::new(first, end)?).into_iter();
+                *from = end.0.checked_add(1).filter(|_| end < *last).map(Day);
+                *reach = reach.saturating_mul(2);
+            },
             Window::Counted { dues, next, last } => {
                 let index = (*next)?;
                 let day = dues.nth(index).filter(|day| day <= last)?;

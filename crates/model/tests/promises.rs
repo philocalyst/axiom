@@ -212,6 +212,19 @@ contract rent with greystar
 }
 
 #[test]
+fn a_grace_is_carried_though_nothing_reads_it() {
+    let text = "\
+contract rent with greystar
+  1_000 USD monthly on 1 into checking
+  from 2026-01-01
+  grace 3d
+";
+    with_book(text, |book| {
+        assert_eq!(book.promises.of(book.contract("rent").unwrap()).grace, Some(axiom_core::Span::days(3)));
+    });
+}
+
+#[test]
 fn the_types_are_small() {
     assert!(size_of::<Term>() <= 16, "{}", size_of::<Term>());
     assert!(size_of::<Residual>() <= 24, "{}", size_of::<Residual>());

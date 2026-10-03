@@ -90,6 +90,9 @@ pub struct Promise {
     pub life: Days,
     /// How far from a due day a line may be dated and still keep it.
     pub reach: i32,
+    /// `grace SPAN`: written, checked and, as in `Terms`, read by nothing: the matching's reach is a cadence, and the
+    /// language says it is this. K5b decides.
+    pub grace: Option<Span>,
     pub regular: Option<Stream>,
     pub standing: Option<Stream>,
 }
@@ -219,7 +222,11 @@ impl Promises {
             &[only] => only,
             _ => self.all(&everys),
         };
-        Promise { root, life: contract.days, reach: reach(contract), regular, standing }
+        let grace = [&contract.terms, &contract.standing]
+            .into_iter()
+            .flatten()
+            .find_map(|timeline| timeline.at(Day::MIN).grace);
+        Promise { root, life: contract.days, reach: reach(contract), grace, regular, standing }
     }
 
     fn all(&mut self, children: &[TermId]) -> TermId {
