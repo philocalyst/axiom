@@ -88,8 +88,8 @@ impl Annuity {
         Some(Paid { interest, principal, open: open - principal })
     }
 
-    /// What is owed after `payments` payments have been made, one after another. Zero once it is paid off, and for a
-    /// payment that cannot be worked out.
+    /// What is owed after `payments` payments have been made, one after another. Zero once it is paid off (the last
+    /// payment of a loan is what is left, so the `periods`th leaves nothing), and for a payment that cannot be worked out.
     pub fn owed_after(&self, payments: u32) -> Qty {
         let mut open = self.principal.qty;
         for index in 0..payments.min(self.periods) {
@@ -98,7 +98,7 @@ impl Annuity {
                 break;
             }
         }
-        if payments >= self.periods { Qty::ZERO } else { open }
+        open
     }
 }
 
