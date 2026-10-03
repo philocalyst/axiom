@@ -33,7 +33,7 @@ use crate::motion::{Motion, Moves};
 use crate::plan::Plan;
 use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
 use crate::scope::{is_money, stays_with_owner};
-use crate::settle::Claiming;
+use crate::settle::{Claiming, Relief};
 use crate::state::Missing;
 use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, show};
 
@@ -69,33 +69,17 @@ fn restarts_basis(plan: &Plan, m: &Motion) -> bool {
 impl Ledger<'_, '_, '_> {
     /// Applies a flow: moves its value and fires every law that watches it.
     pub(crate) fn post(&mut self, m: &Motion) {
-        let book = self.plan.book;
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
-        // A `!` on an assertion accepts its gap: it is never unused.
-        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), true, Some(waive)) =
-            (m.cause, watched, m.waive)
-        {
-            self.record.waivers.entry(waive.loc).or_insert(false);
-        }
-        // What a flow counts as depends on the claims it settled (or, run backwards, opened), which relief of the tab or
-        // of the claim place it came out of decides.
-        let mut claiming = self.settle_claims(m);
-        let from_claims = self.plan.traits.place(m.from).claim && m.source.class.holds_parcels();
-        if from_claims {
-            self.relieve(m, Qty::ZERO);
-            claiming = self.relieved_claims(m);
-        }
+        self.accept_waiver(m);
+        let (claiming, relief) = self.deal_with_claims(m);
         let paid = claiming.as_ref().map_or(Qty::ZERO, Claiming::paid);
         if watched {
-            self.count(m);
-            self.count_purposes(m, claiming.as_ref());
-            self.sample_temporal(m.day);
-            self.fire(&book.rules.on_out[m.from], &Occasion { amount: Some(m.out), skip_internal: true, ..on });
+            self.count_leaving(m, claiming.as_ref(), &on);
         }
         if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
-            if !from_claims {
+            if relief == Relief::Pending {
                 self.relieve(m, paid);
             }
             let keeps = self.price(m);
@@ -110,16 +94,53 @@ impl Ledger<'_, '_, '_> {
         self.record_capital_outflow(m);
         self.sample_temporal(m.day);
         if watched {
-            self.fire(&book.rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
-            self.fire_purpose(m, &on);
-            self.fire_spend(m);
-            self.fire(&book.rules.always[m.from], &on);
-            if m.to != m.from {
-                self.fire(&book.rules.always[m.to], &on);
-            }
+            self.fire_arrival(m, &on);
         }
         if self.is_asset_sale(m) {
             self.dispose_sold_asset(m);
+        }
+    }
+
+    /// A `!` on an assertion accepts its gap: it is never unused.
+    fn accept_waiver(&mut self, m: &Motion) {
+        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), false, Some(waive)) =
+            (m.cause, m.opening, m.waive)
+        {
+            self.record.waivers.entry(waive.loc).or_insert(false);
+        }
+    }
+
+    /// What a flow counts as depends on the claims it settled (or, run backwards, opened), which relief of the tab or of
+    /// the claim place it came out of decides. A claim place is relieved here, first: the claims it gave up are what the
+    /// flow settled. Says whether the source has been relieved.
+    fn deal_with_claims(&mut self, m: &Motion) -> (Option<Claiming>, Relief) {
+        let claiming = self.settle_claims(m);
+        if !(self.plan.traits.place(m.from).claim && m.source.class.holds_parcels()) {
+            return (claiming, Relief::Pending);
+        }
+        self.relieve(m, Qty::ZERO);
+        (self.relieved_claims(m), Relief::Done)
+    }
+
+    /// Counts a flow toward what laws read, and fires the laws that watch what leaves its source.
+    fn count_leaving(&mut self, m: &Motion, claiming: Option<&Claiming>, on: &Occasion) {
+        self.count(m);
+        self.count_purposes(m, claiming);
+        self.sample_temporal(m.day);
+        let leaving = Occasion { amount: Some(m.out), skip_internal: true, ..*on };
+        self.fire(&self.plan.book.rules.on_out[m.from], &leaving);
+    }
+
+    /// Fires the laws that watch what arrives, the purposes and the spending a flow is for, and the laws that watch
+    /// every flow of either place.
+    fn fire_arrival(&mut self, m: &Motion, on: &Occasion) {
+        let rules = &self.plan.book.rules;
+        self.fire(&rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..*on });
+        self.fire_purpose(m, on);
+        self.fire_spend(m);
+        self.fire(&rules.always[m.from], on);
+        if m.to != m.from {
+            self.fire(&rules.always[m.to], on);
         }
     }
 

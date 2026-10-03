@@ -44,6 +44,15 @@ impl Claiming {
     }
 }
 
+/// Whether the source of a flow has been relieved by the time its claims are dealt with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Relief {
+    /// Not yet: the flow relieves it as it always did, after what it counts is counted.
+    Pending,
+    /// A claim place is relieved first, because the claims it gave up are what the flow settled.
+    Done,
+}
+
 /// What a flow out of a party's place settles against, once it is known to be part of a payment.
 #[derive(Clone, Copy)]
 struct Payment {
