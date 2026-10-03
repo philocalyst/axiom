@@ -189,6 +189,8 @@ pub(crate) struct Candidate {
     /// The transaction that made it; plain money has none.
     pub txn: Option<RuntimeTxn>,
     pub tied: Option<Id<Entity>>,
+    /// What the claim it belongs to holds: its own quantity, until `Exact` adds up the lines of one transaction.
+    claim: Qty,
     identity: Identity,
 }
 
@@ -216,7 +218,7 @@ pub(crate) struct Request<'a> {
 
 /// What a parcel's tie says about when relief takes it. The variants are in
 /// the order relief takes them.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 enum Colour {
     /// Tied to the entity the flow is written out of.
     Own,
@@ -531,14 +533,27 @@ impl Slot {
         }
     }
 
-    /// The oldest lot `keep` admits that holds exactly what was asked, as far as `left` goes: the claim a payment is the
-    /// size of, which is settled before an older one that is not.
+    /// The oldest claim `keep` admits that holds exactly what was asked, as far as `left` goes: the claim a payment is the
+    /// size of, which is settled before an older one that is not. A claim is the lots of one transaction, which land
+    /// together (an invoice's lines), so it is a run of lots.
     fn take_exact(&mut self, left: &mut Qty, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
-        let exact = self.holding.lots[self.first..].iter().position(|lot| lot.qty == req.need && keep(lot));
-        if let Some(found) = exact {
-            let qty = req.need.min(*left);
-            self.take(Source::Lot(self.first + found), qty, req, out);
-            *left -= qty;
+        let mut at = self.first;
+        while at < self.holding.lots.len() {
+            let lots = &self.holding.lots[at..];
+            let end = at + lots.iter().take_while(|lot| lot.txn == lots[0].txn).count();
+            let held: Qty = self.holding.lots[at..end].iter().filter(|&lot| keep(lot)).map(|lot| lot.qty).sum();
+            if held == req.need {
+                for line in at..end {
+                    let lot = &self.holding.lots[line];
+                    let qty = lot.qty.min(*left);
+                    if keep(lot) && !qty.is_zero() {
+                        self.take(Source::Lot(line), qty, req, out);
+                        *left -= qty;
+                    }
+                }
+                return;
+            }
+            at = end;
         }
     }
 
@@ -606,6 +621,9 @@ impl Slot {
         self.gather(req.money, selection, &mut candidates);
         let colour = |c: &Candidate| req.colour(c.tied);
         candidates.retain(|c| req.allows(colour(c)));
+        if policy == Some(Policy::Exact) {
+            whole_claims(&mut candidates, colour);
+        }
         candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, req.need, a, b)));
 
         let mut plan = std::mem::take(&mut out.plan);
@@ -647,6 +665,7 @@ impl Slot {
                 acquired: Day::MIN,
                 txn: None,
                 tied: None,
+                claim: plain,
                 identity: if money {
                     Identity::Money { tied: None, basis, qty: plain, part: None, wash_matched: false }
                 } else {
@@ -819,19 +838,32 @@ fn carries(lot: &Parcel, code: Sym, pool: &Arena<Sym>) -> bool {
 impl Candidate {
     fn new(source: Source, parcel: &Parcel, money: bool) -> Candidate {
         let (qty, basis, acquired, tied) = (parcel.qty, parcel.basis, parcel.acquired, parcel.tied);
-        Candidate { source, qty, basis, acquired, txn: Some(parcel.txn), tied, identity: identity(parcel, money) }
+        let txn = Some(parcel.txn);
+        Candidate { source, qty, basis, acquired, txn, tied, claim: qty, identity: identity(parcel, money) }
+    }
+}
+
+/// Gives each candidate what its whole claim holds: the candidates of one transaction and one colour, which are the
+/// lines of an invoice, add up.
+fn whole_claims(candidates: &mut [Candidate], colour: impl Fn(&Candidate) -> Colour) {
+    let mut held: axiom_core::Map<(Option<RuntimeTxn>, Colour), Qty> = axiom_core::Map::default();
+    for c in candidates.iter() {
+        *held.entry((c.txn, colour(c))).or_default() += c.qty;
+    }
+    for c in candidates.iter_mut() {
+        c.claim = held[&(c.txn, colour(c))];
     }
 }
 
 /// Candidates in the order the policy consumes them. Storage order is oldest
 /// first, so FIFO is the identity, and it also orders "no policy", pro-rata
 /// (whose order does not matter) and ties in the others. `Exact` puts the
-/// candidates of exactly `need` first, oldest of them first.
+/// candidates of a claim that holds exactly `need` first, oldest of them first.
 fn by_policy(policy: Option<Policy>, need: Qty, a: &Candidate, b: &Candidate) -> Ordering {
     match policy {
         Some(Policy::Lifo) => b.source.cmp(&a.source),
         Some(Policy::Hifo) => basis_per_unit(b, a).then(a.source.cmp(&b.source)),
-        Some(Policy::Exact) => (b.qty == need).cmp(&(a.qty == need)).then(a.source.cmp(&b.source)),
+        Some(Policy::Exact) => (b.claim == need).cmp(&(a.claim == need)).then(a.source.cmp(&b.source)),
         _ => a.source.cmp(&b.source),
     }
 }
@@ -1485,6 +1517,32 @@ mod tests {
     }
 
     #[test]
+    fn exact_takes_a_claim_whose_lines_add_up_to_the_size_asked() {
+        // An invoice of two lines, 150 and 250, made by one transaction beside two claims of 300.
+        let line = |qty, ordinal| Parcel { part: Some(PartId { origin: journal(2), ordinal }), ..lot(qty, qty, 2) };
+        let base = slot_of(1, 0, &[lot(300, 300, 1), line(150, 0), line(250, 1), lot(300, 300, 3)], false);
+        assert_eq!(base.holding.lots.len(), 4, "the lines stay lots of their own");
+        let exact = Ask { policy: Some(Policy::Exact), ..PLAIN };
+        let mut held = base.clone();
+        assert_eq!(
+            taken(&relieve(&mut held, 400, &exact)),
+            [(150, 150), (250, 250)],
+            "the whole invoice, not 300 and 100"
+        );
+        assert_eq!(lots(&held), [(300, 300), (300, 300)]);
+        let admit_all = [Select::Range(Days::ALWAYS)];
+        let scanning = Ask { policy: Some(Policy::Exact), selectors: &admit_all, ..PLAIN };
+        let mut held = base.clone();
+        assert_eq!(taken(&relieve(&mut held, 400, &scanning)), [(150, 150), (250, 250)]);
+        let mut held = base;
+        assert_eq!(
+            taken(&relieve(&mut held, 150, &exact)),
+            [(150, 150)],
+            "a line is no claim of its own: 150 is the oldest"
+        );
+    }
+
+    #[test]
     fn exact_among_the_lots_a_selector_admits_and_among_the_colours_of_a_tie() {
         let entity = Id::new(3);
         let tied = |qty, acquired| Parcel { tied: Some(entity), ..lot(qty, qty, acquired) };
@@ -1914,7 +1972,9 @@ mod tests {
                 if roll(3) < 2 {
                     let (day, qty) = (step / 3 + roll(3) as i32, 1 + roll(9) as i64);
                     let tied = (roll(6) == 0).then(|| Id::new(3));
-                    let parcel = Parcel { tied, ..lot(qty, qty * (50 + roll(100) as i64), day) };
+                    // Lots of one day are the lines of one transaction, unless a part id tells them apart.
+                    let part = Some(PartId { origin: journal(day as u32), ordinal: roll(3) as u32 });
+                    let parcel = Parcel { tied, part, ..lot(qty, qty * (50 + roll(100) as i64), day) };
                     fast.land(parcel, false);
                     slow.land(parcel, false);
                 } else {

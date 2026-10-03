@@ -16,20 +16,13 @@ use crate::ledger::Ledger;
 use crate::lots::Request;
 
 impl Ledger<'_, '_, '_> {
-    /// Forgives what is still open of the claim `Book::claim_changes[at]` names, wherever the transaction made it.
+    /// Forgives what is still open of the claim `Book::claim_changes[at]` names, wherever the transaction made it: the
+    /// first line of an itemized claim takes all its parcels, and the others find nothing left.
     pub(crate) fn write_off(&mut self, at: u32) {
         let book = self.plan.book;
         let change = book.claim_changes[at as usize];
         let made = book.flows[book.txns[change.target].flows].iter().filter(|flow| book.makes_claim(flow));
-        let mut claims: Vec<(Id<Place>, Id<Commodity>, Id<Place>)> = Vec::new();
-        for flow in made {
-            let claim = (flow.to, flow.arrive.unit, flow.from);
-            if !claims.contains(&claim) {
-                claims.push(claim);
-            }
-        }
-        let forgiven =
-            claims.iter().map(|&(place, unit, back)| self.forgive(at, &change, place, unit, back)).sum::<usize>();
+        let forgiven: usize = made.map(|flow| self.forgive(at, &change, flow.to, flow.arrive.unit, flow.from)).sum();
         if forgiven == 0 {
             self.record.report(explain::empty_write_off(book, &change));
         }

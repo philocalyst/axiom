@@ -178,9 +178,18 @@ fn a_code_that_names_no_claim_is_only_a_label() {
 /// The selector the author wrote is the more explicit: it is a filter, and the flow's code is left a label.
 #[test]
 fn a_written_selector_beats_the_flows_own_code() {
-    let lines = format!("{THREE}2026-01-20 owed[^i1] -> checking 200 USD ^i3\n");
+    let lines = format!("{THREE}2026-01-20 owed[^i3] -> checking 200 USD ^i1\n");
     with_run(&lines, |book, run| {
-        assert_eq!(open(book, run, "assets/owed"), claims(&[("i1", 100_00), ("i2", 200_00), ("i3", 300_00)]));
+        assert_eq!(open(book, run, "assets/owed"), claims(&[("i1", 300_00), ("i2", 200_00), ("i3", 100_00)]));
+    });
+}
+
+/// The same for a day: `[2026-01-04]` is `^i3`, and the code on the line, `^i1`, does not widen it.
+#[test]
+fn a_written_day_beats_the_flows_own_code() {
+    let lines = format!("{THREE}2026-01-20 owed[2026-01-04] -> checking 200 USD ^i1\n");
+    with_run(&lines, |book, run| {
+        assert_eq!(open(book, run, "assets/owed"), claims(&[("i1", 300_00), ("i2", 200_00), ("i3", 100_00)]));
     });
 }
 
