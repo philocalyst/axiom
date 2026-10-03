@@ -40,6 +40,7 @@ mod assets_runtime;
 mod budget;
 mod calc;
 mod checkpoint;
+mod claims;
 mod eval;
 mod events;
 mod explain;
@@ -172,6 +173,8 @@ pub struct Run {
     pub monitor_complete: bool,
     /// Basis the laws moved: consumed (depreciation) or carried (wash sales).
     pub adjustments: Vec<Adjustment>,
+    /// The claims `waived` statements forgave, one row for each parcel that was still open.
+    pub written_off: Vec<WriteOff>,
     /// Carry losses whose statutory replacement window is still open at the
     /// run horizon. Matched and expired requests are removed from this list.
     pub pending_carries: Vec<PendingCarry>,
@@ -250,6 +253,19 @@ impl OpenClaim {
     pub fn source_txn(&self) -> Option<Id<Txn>> {
         self.origin.source_txn()
     }
+}
+
+/// A claim parcel a `waived` statement forgave: what was still open of it. The statement, with its day, its
+/// description and the transaction it names, is `Book::claim_changes[change]`.
+#[derive(Clone, Copy, Debug)]
+pub struct WriteOff {
+    pub change: u32,
+    pub place: Id<Place>,
+    pub unit: Id<Commodity>,
+    pub qty: Qty,
+    /// What had been accounted for in it, base-currency quanta.
+    pub basis: Qty,
+    pub acquired: Day,
 }
 
 /// Basis a law moved.

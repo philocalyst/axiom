@@ -23,7 +23,7 @@ use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
 use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
-use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation};
+use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation, WriteOff};
 
 #[derive(Clone)]
 pub(crate) struct World {
@@ -74,6 +74,8 @@ pub(crate) struct Record {
     pub effects: Vec<Effect>,
     /// Basis changes caused by timed asset laws and deferred-loss matching.
     pub adjustments: Vec<Adjustment>,
+    /// The claim parcels forgiven by `waived` statements.
+    pub written_off: Vec<WriteOff>,
     pub violations: Vec<Violation>,
     pub pads: Vec<Pad>,
     pub diagnostics: Vec<Diagnostic>,

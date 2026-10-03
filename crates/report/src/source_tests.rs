@@ -1807,7 +1807,6 @@ account checking : bank
 
 /// A claim that is written off is no longer owed: `claims` lists what is left, and so does `balance`.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn a_written_off_claim_is_not_listed_as_owed_or_counted_in_the_balance() {
     with_std(WRITTEN_OFF, day(2026, 3, 1), |book, run| {
         let owed = rows(book, run, Query::Claims { at: None });
@@ -1824,5 +1823,16 @@ fn a_claim_is_owed_until_the_day_it_is_written_off() {
     with_std(WRITTEN_OFF, day(2026, 2, 14), |book, run| {
         let owed = rows(book, run, Query::Claims { at: None });
         assert!(owed.iter().any(|row| row.contains("^i1") && row.contains("300.00 USD")), "{owed:?}");
+    });
+}
+
+/// `why ^code` lists what happened to the claim, and a waiver is one of the events.
+#[test]
+fn why_a_claims_code_says_the_day_it_was_waived_and_what_was_forgiven() {
+    with_std(WRITTEN_OFF, day(2026, 3, 1), |book, run| {
+        let report = crate::report(book, run, &Query::Why { target: "^i1" }, None).expect("the code names a claim");
+        let events = lines(&report.sections[1]);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(events[0].contains("2026-02-15") && events[0].contains("waived, 300.00 USD forgiven"), "{events:?}");
     });
 }

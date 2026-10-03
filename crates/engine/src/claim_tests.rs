@@ -238,7 +238,6 @@ const OWES: &str = "\
 /// "A claim `waived` is forgiven": what it still owed is gone, the other claim is not touched, and nothing is overdue
 /// for it.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn a_write_off_forgives_what_the_claim_still_owed_and_nothing_else() {
     let lines = format!("{OWES}2026-02-15 ^i1 waived \"not collected\"\n");
     with_run(&lines, |book, run| {
@@ -249,9 +248,23 @@ fn a_write_off_forgives_what_the_claim_still_owed_and_nothing_else() {
     });
 }
 
+/// The write-off is recorded: which statement, where, and what was open of the claim.
+#[test]
+fn a_write_off_is_recorded_with_the_statement_and_what_was_forgiven() {
+    let lines = format!("{OWES}2026-02-15 ^i1 waived \"not collected\"\n");
+    with_run(&lines, |book, run| {
+        let [off] = run.written_off[..] else { panic!("one parcel was open: {:?}", run.written_off) };
+        assert_eq!((off.qty.0, off.basis.0, off.acquired), (300_00, 300_00, day(2026, 1, 2)));
+        let change = book.claim_changes[off.change as usize];
+        assert_eq!(
+            (change.day, change.description.map(|text| book.text(text))),
+            (day(2026, 2, 15), Some("not collected"))
+        );
+    });
+}
+
 /// The forgiven value leaves the owner: checking is as it was and the claim was part of net worth.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn a_write_off_lowers_what_the_owner_holds_by_what_was_forgiven() {
     let lines = format!("{OWES}2026-02-15 ^i1 waived\n");
     with_run(&lines, |book, run| {
@@ -267,7 +280,6 @@ fn a_write_off_lowers_what_the_owner_holds_by_what_was_forgiven() {
 
 /// A claim made on the day it is forgiven exists when the statement runs: movements come first.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn a_claim_is_forgiven_on_the_day_it_was_made() {
     let lines = "2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1\n2026-01-02 ^i1 waived\n";
     with_run(lines, |book, run| {
@@ -278,7 +290,6 @@ fn a_claim_is_forgiven_on_the_day_it_was_made() {
 
 /// A payment of the day relieves first, so the write-off forgives what is left of it, and no more.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange; a claim place that is not a tab cannot be waived"]
 fn a_write_off_forgives_what_a_payment_of_the_same_day_left() {
     let lines = "\
 2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
@@ -295,7 +306,6 @@ fn a_write_off_forgives_what_a_payment_of_the_same_day_left() {
 
 /// Two claims of one amount from one party on one day are told apart by their transaction.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn a_write_off_forgives_the_claim_it_names_and_not_one_of_the_same_amount() {
     let lines = "\
 2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
@@ -309,7 +319,6 @@ fn a_write_off_forgives_the_claim_it_names_and_not_one_of_the_same_amount() {
 
 /// An itemized claim is one transaction with a parcel for each line: all of it is forgiven.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn an_itemized_claim_is_forgiven_whole() {
     let lines = "\
 2026-01-02 ann owes me due 2026-02-01 ^i1
@@ -324,7 +333,6 @@ fn an_itemized_claim_is_forgiven_whole() {
 
 /// A write-off that finds nothing open forgives nothing, and says so, as a `!` that waives nothing does.
 #[test]
-#[ignore = "K3c: the fold does nothing with a ClaimChange"]
 fn a_write_off_of_a_claim_that_is_settled_says_it_forgave_nothing() {
     let lines = "\
 2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1

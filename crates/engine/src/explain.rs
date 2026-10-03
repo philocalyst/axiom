@@ -15,8 +15,9 @@
 
 use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Budget, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op,
-    Param, Place, Program, Purpose, RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive, Window,
+    Amount, Assert, BinOp, Book, Budget, ClaimChange, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow,
+    Law, NodeId, Op, Param, Place, Program, Purpose, RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive,
+    Window,
 };
 
 use crate::calc::Calc;
@@ -943,6 +944,14 @@ pub(crate) fn overdue(
             .note(format!("open for {} since it was made", today.since(lot.acquired)))
             .help("if it has been paid, record the payment `for` the claim's code"),
     )
+}
+
+/// A write-off of a claim that has nothing open on its day: settled before, or the code names another claim.
+pub(crate) fn empty_write_off(book: &Book, change: &ClaimChange) -> Diagnostic {
+    Diagnostic::warning("claim-writeoff-empty", "this write-off forgives nothing: the claim has nothing open")
+        .label(change.loc, "everything the claim made was settled before this day")
+        .context(book.txns[change.target].loc, "the claim is made here")
+        .help("delete the line, or check that the code is the claim's")
 }
 
 /// A `!` on a transaction none of whose flows raised anything.

@@ -1,10 +1,11 @@
-//! `why ^CODE`: the flows a code marks and the events that changed their state.
+//! `why ^CODE`: the flows a code marks and the events that changed their state: a check cleared, a claim waived.
 
 use std::collections::BTreeSet;
 
 use axiom_core::glob::glob;
 use axiom_core::{Diagnostic, Sym};
 use axiom_engine::Run;
+use axiom_model::Amount;
 
 use super::{event_words, flows_table};
 use crate::history::postings;
@@ -29,6 +30,25 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
         Section::new([Column::left("Date"), Column::left("Event"), Column::left("From")]).headed("Events");
     for event in book.events.iter().filter(|event| event_visible(event.code) && marked(event.code)) {
         happened.push(Row::new([Cell::Day(event.day), Cell::text(event_words(event.state)), Cell::Source(event.loc)]));
+    }
+
+    for (at, change) in book.claim_changes.iter().enumerate() {
+        let codes = book.codes[book.txns[change.target].codes].iter().copied();
+        if !codes.clone().any(|code| event_visible(code) && marked(code)) {
+            continue;
+        }
+        let forgiven: Vec<String> = run
+            .written_off
+            .iter()
+            .filter(|off| off.change as usize == at)
+            .map(|off| book.show(Amount::new(off.qty, off.unit)).to_string())
+            .collect();
+        let said = if forgiven.is_empty() {
+            "waived, nothing was open".to_string()
+        } else {
+            format!("waived, {} forgiven", forgiven.join(", "))
+        };
+        happened.push(Row::new([Cell::Day(change.day), Cell::text(said), Cell::Source(change.loc)]));
     }
 
     if flows.is_empty() && happened.rows.is_empty() {

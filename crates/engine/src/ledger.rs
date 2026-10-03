@@ -1051,6 +1051,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             gains: record.gains,
             effects: record.effects,
             adjustments: record.adjustments,
+            written_off: record.written_off,
             pending_carries,
             violations: record.violations,
             headroom,
@@ -1095,7 +1096,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             }
             Fact::Source(_, SourceFact::Flow(id)) => self.post_journal(id, moment.day, false),
             Fact::Source(_, SourceFact::Occurrence(txn)) => self.post_written_occurrence(txn, moment.day),
-            Fact::ClaimChange(_) => {}
+            Fact::ClaimChange(at) => self.write_off(at),
             // A settlement lands a pending flow; a return runs an actual one backwards.
             Fact::Settle(id) => {
                 let returned = matches!(self.plan.events.state(id, &self.plan.book.flows[id]), State::Returned(_));

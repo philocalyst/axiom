@@ -802,10 +802,12 @@ impl Selection<'_> {
     pub fn admits(&self, lot: &Parcel) -> bool {
         let ranges = self.selectors.iter().filter_map(|s| if let Select::Range(days) = *s { Some(days) } else { None });
         let codes = self.selectors.iter().filter_map(|s| if let Select::Code(c) = *s { Some(c) } else { None });
-        let (mut ranges, mut codes) = (ranges.peekable(), codes.peekable());
+        let made = self.selectors.iter().filter_map(|s| if let Select::Txn(txn) = *s { Some(txn) } else { None });
+        let (mut ranges, mut codes, mut made) = (ranges.peekable(), codes.peekable(), made.peekable());
         let in_range = ranges.peek().is_none() || ranges.any(|days| days.contains(lot.acquired));
         let marked = codes.peek().is_none() || codes.any(|code| carries(lot, code, self.codes));
-        in_range && marked
+        let by = made.peek().is_none() || made.any(|txn| lot.txn.source_txn() == Some(txn));
+        in_range && marked && by
     }
 }
 
