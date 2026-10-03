@@ -17,7 +17,7 @@ pub(crate) fn day(year: i32, month: u32, day: u32) -> Day {
 }
 
 /// Compiles `text` as a project of one file, which must have no errors.
-fn with_book<R>(text: &str, then: impl FnOnce(&Book) -> R) -> R {
+pub(crate) fn with_book<R>(text: &str, then: impl FnOnce(&Book) -> R) -> R {
     let (file, parsed) = axiom_syntax::parse(FileId(0), text, Folder::default());
     assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
     let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);

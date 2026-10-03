@@ -37,7 +37,7 @@ pub use reckon::{Proration, Reckoning, Recognition};
 pub use residual::Residual;
 pub use schedule::{Keep, Nearest, Sched, Schedule, Skip};
 
-use axiom_core::{Arena, Cadence, Day, DaySet, Days, Dues, Id, On, Run, Span};
+use axiom_core::{Arena, Cadence, DaySet, Days, Dues, Id, On, Run, Span};
 
 use crate::book::{Book, Contract, Entity, ScheduleKind, Terms};
 use crate::split::FlowSide;
@@ -79,6 +79,17 @@ impl Blame {
         match self {
             Blame::Party => contract.party,
             Blame::Owner => contract.owner,
+        }
+    }
+}
+
+impl Terms {
+    /// Who is blamed when what the terms promise is not kept: the party when the header leaves the party's place, and the
+    /// owner when it leaves the owner's.
+    pub fn blame(&self) -> Blame {
+        match self.template.first().map(|group| group.side) {
+            Some(FlowSide::Out) => Blame::Party,
+            _ => Blame::Owner,
         }
     }
 }
@@ -203,6 +214,21 @@ impl Promises {
         }
     }
 
+    /// Who a body's deadline blames, if it has one, however a loan wraps it.
+    pub fn blame_of(&self, body: TermId) -> Option<Blame> {
+        match self.term(body) {
+            Term::Due { blame, .. } => Some(blame),
+            Term::Annuity { body, .. } => self.blame_of(body),
+            _ => None,
+        }
+    }
+
+    /// Who is blamed when an occurrence of a contract's stream is missed, if the stream has a deadline.
+    pub fn blame(&self, contract: Id<Contract>, kind: ScheduleKind) -> Option<Blame> {
+        let Term::Every { body, .. } = self.term(self.get(contract)?.stream(kind)?.every) else { return None };
+        self.blame_of(body)
+    }
+
     /// How long after its due day a body is owed, if it has a deadline, however a loan wraps it.
     pub fn deadline_of(&self, body: TermId) -> Option<Span> {
         match self.term(body) {
@@ -223,39 +249,6 @@ impl Promises {
         let stream = self.get(contract)?.regular?;
         let Term::Every { body, .. } = self.term(stream.every) else { return None };
         self.annuity_of(body).map(|annuity| self.annuity(annuity))
-    }
-
-    /// The occurrences a stream expects in `window`, each with its ordinal: the days it owes there, and of a loan's
-    /// stream only its payments, from the first after the loan was made to the last.
-    pub fn expected(
-        &self,
-        contract: Id<Contract>,
-        kind: ScheduleKind,
-        window: Days,
-    ) -> impl Iterator<Item = (u32, Day)> + '_ {
-        let schedule = self.schedule(contract, kind);
-        let payments = schedule.map_or(0..0, |schedule| self.payments(contract, &schedule));
-        let first = schedule
-            .zip(window.intersect(self.of_life(contract)))
-            .map(|(schedule, window)| (schedule.before(window.first()), schedule, window));
-        let days = first.into_iter().flat_map(|(from, schedule, window)| (from..).zip(schedule.days(window)));
-        days.skip_while(move |(ordinal, _)| *ordinal < payments.start)
-            .take_while(move |(ordinal, _)| *ordinal < payments.end)
-    }
-
-    /// The ordinals a contract's regular schedule owes: all of them, or a loan's payments.
-    fn payments(&self, contract: Id<Contract>, schedule: &schedule::Sched<'_>) -> std::ops::Range<u32> {
-        match self.loan(contract).filter(|_| schedule.kind() == ScheduleKind::Regular) {
-            Some(loan) => {
-                let began = schedule.before(Day(loan.begins().0.saturating_add(1)));
-                began..began.saturating_add(loan.periods())
-            }
-            None => 0..u32::MAX,
-        }
-    }
-
-    fn of_life(&self, contract: Id<Contract>) -> Days {
-        self.get(contract).map_or(Days::on(Day::MIN), |promise| promise.life)
     }
 
     fn promise(&mut self, contract: &Contract) -> Promise {
@@ -302,11 +295,7 @@ impl Promises {
             body = self.terms.push(Term::Annuity { annuity, body });
         }
         if let Some(deadline) = &terms.due {
-            let blame = match terms.template.first().map(|group| group.side) {
-                Some(FlowSide::Out) => Blame::Party,
-                _ => Blame::Owner,
-            };
-            body = self.terms.push(Term::Due { after: deadline.after, blame, body });
+            body = self.terms.push(Term::Due { after: deadline.after, blame: terms.blame(), body });
         }
         body
     }

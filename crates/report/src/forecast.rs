@@ -7,20 +7,20 @@
 
 mod bands;
 mod expected;
-mod projection;
 mod recurrence;
+mod trace;
 mod variable;
 
 use std::iter;
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Arena, Day, Days, Id, Map, Qty, Set, Span};
-use axiom_engine::{Checkpoint, Effect, Plan, Run, Violation};
-use axiom_model::{Amount, Book, Contract, Law, Period, RuntimeDetail, RuntimeFlow, ScheduleKind, Subject};
+use axiom_core::{Day, Id, Map, Qty, Span};
+use axiom_engine::{Checkpoint, Effect, Options, Planned, Recorded, Run, Violation};
+use axiom_model::{Amount, Book, Contract, Flow, Law, Period, Subject};
 
 use self::bands::{Bands, Share};
 use self::expected::{Expectation, Origin, covered_by_contract, covered_on, expected};
-use self::projection::{Trace, project_runtime, project_runtime_from};
+use self::trace::Trace;
 use self::variable::Variable;
 use crate::calendar::Periods;
 use crate::closings;
@@ -35,36 +35,30 @@ const SEED: u64 = 0x5EED_0A11_CE00_0001;
 /// Bootstrapping needs a past to draw from.
 const MIN_HISTORY_MONTHS: usize = 3;
 
-/// Forecasts using the plan and pre-closing checkpoint paired with this run.
-pub fn view_from<'p, 'b, 's>(
-    plan: &'p Plan<'b, 's>,
-    checkpoint: &Checkpoint,
-    run: &Run,
-    historical_effects: &[Effect],
-    lens: Lens<'b, 's, '_, '_>,
-    relaxed: bool,
-    until: Option<Day>,
-    paths: u32,
-) -> Report<'b> {
-    view_with(plan, Some(checkpoint), Some(historical_effects), run, lens, relaxed, until, paths)
+/// What a forecast goes on from: the fold the run came from.
+pub(crate) enum Past<'a> {
+    /// The checkpoint paired with the run, standing on its day before that day's closings, and the effects the run had
+    /// recorded by then: the checkpoint forgets what happened, and a forecast reads what it caused and these.
+    Checkpoint { at: &'a Checkpoint, effects: &'a [Effect] },
+    /// The journal, which the forecast folds itself.
+    Journal,
 }
 
-pub(crate) fn view_with_lens<'b, 's>(
-    lens: Lens<'b, 's, '_, '_>,
-    run: &axiom_engine::Run,
-    until: Option<Day>,
-    paths: u32,
-) -> Report<'b> {
-    view_with(lens.plan(), None, None, run, lens, lens.book().relaxed, until, paths)
+impl<'a> Past<'a> {
+    fn effects(&self) -> Option<&'a [Effect]> {
+        match *self {
+            Past::Checkpoint { effects, .. } => Some(effects),
+            Past::Journal => None,
+        }
+    }
 }
 
-fn view_with<'p, 'b, 's>(
-    plan: &'p Plan<'b, 's>,
-    checkpoint: Option<&Checkpoint>,
-    historical_effects: Option<&[Effect]>,
+/// The forecast of the lens's owners to `until` (default: a year ahead), with `paths` simulated futures around it.
+pub(crate) fn view<'b, 's, 'p>(
+    past: Past<'_>,
     run: &Run,
-    lens: Lens<'b, 's, '_, '_>,
-    relaxed: bool,
+    lens: Lens<'b, 's, '_, 'p>,
+    options: Options,
     until: Option<Day>,
     paths: u32,
 ) -> Report<'b> {
@@ -73,26 +67,12 @@ fn view_with<'p, 'b, 's>(
     let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
 
     let expected = expected(lens, run);
-    let mut flows: Vec<RuntimeFlow> = expected
-        .iter()
-        .flat_map(|expectation| expectation.flows(today, until))
-        .filter(|flow| !covered_by_contract(book, flow))
-        .map(RuntimeFlow::source)
-        .collect();
-    flows.sort_by_key(|flow| flow.flow.day);
-    let (contract_flows, runtime_details, contract_rows, contract_issues) =
-        contract_forecasts(plan, checkpoint, lens, &flows, today, until, relaxed);
-    flows.extend(contract_flows);
-    flows.sort_by_key(|flow| flow.flow.day);
+    let habits = habit_flows(book, &expected, today, until);
     let checkpoints = checkpoints(today, until);
-    let trace = match checkpoint {
-        Some(checkpoint) => {
-            project_runtime_from(plan, checkpoint, lens, today, relaxed, flows, &runtime_details, &checkpoints)
-        }
-        None => project_runtime(plan, lens, today, flows, &runtime_details, &checkpoints),
-    };
+    let trace = Trace::run(lens, &past, options, habits, &checkpoints);
+    let (contract_rows, contract_issues) = contract_rows(lens, trace.ledger.recorded());
 
-    let due = coming_due(&trace, historical_effects, lens.whose, today);
+    let due = coming_due(&trace, past.effects(), lens.whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
     let variable = Variable::from_history(lens, run, |flow| {
         expected.iter().any(|expectation| expectation.covers(flow)) || covered_by_contract(book, flow)
@@ -100,14 +80,8 @@ fn view_with<'p, 'b, 's>(
     let bands = simulate(&checkpoints, &committed, &variable, paths);
 
     let mut outlook = outlook_section(book, &checkpoints, &committed, &trace.worth, bands.as_ref());
-    for note in method_notes(book, bands.as_ref(), variable.months, paths) {
+    for note in outlook_notes(book, bands.as_ref(), variable.months, paths, contract_issues.len()) {
         outlook.note(note);
-    }
-    if !contract_issues.is_empty() {
-        outlook.note(format!(
-            "Projection is incomplete: {} contract(s) were omitted. See Contract occurrences for details.",
-            contract_issues.len()
-        ));
     }
 
     let mut report =
@@ -116,6 +90,29 @@ fn view_with<'p, 'b, 's>(
         report = report.with(contract_section(book, &contract_rows, &contract_issues));
     }
     report.with(owed_section(book, &due)).with(problems_section(book, &trace, today))
+}
+
+/// The flows the habits the journal shows expect after today, up to the horizon, in date order, less the ones a contract
+/// already promises.
+fn habit_flows(book: &Book, expected: &[Expectation], today: Day, until: Day) -> Vec<Flow> {
+    let mut flows: Vec<_> = expected
+        .iter()
+        .flat_map(|expectation| expectation.flows(today, until))
+        .filter(|flow| !covered_by_contract(book, flow))
+        .collect();
+    flows.sort_by_key(|flow| flow.day);
+    flows
+}
+
+/// How the outlook was worked out, and that it is not whole if a contract could not be forecast.
+fn outlook_notes(book: &Book, bands: Option<&Bands>, months: usize, paths: u32, issues: usize) -> Vec<String> {
+    let mut notes = method_notes(book, bands, months, paths).to_vec();
+    if issues > 0 {
+        notes.push(format!(
+            "Projection is incomplete: {issues} contract(s) were omitted. See Contract occurrences for details."
+        ));
+    }
+    notes
 }
 
 /// A return that closes within this long after the default horizon is looked
@@ -319,165 +316,53 @@ struct ContractRow {
     amount: Option<Amount>,
 }
 
-/// Stream model-native contract occurrences into the shared projection. If any
-/// occurrence cannot be derived, discard that contract's partial flows and
-/// retain the typed error for the report instead of forecasting a partial leg set.
-fn contract_forecasts<'s>(
-    plan: &Plan<'_, 's>,
-    checkpoint: Option<&Checkpoint>,
-    lens: Lens<'s, '_, '_, '_>,
-    expected_flows: &[RuntimeFlow],
-    today: Day,
-    until: Day,
-    relaxed: bool,
-) -> (Vec<RuntimeFlow>, Arena<RuntimeDetail>, Vec<ContractRow>, Vec<(Id<Contract>, String)>) {
+/// A row of "Contract occurrences" for each occurrence the ledger promised, and what could not be forecast: an occurrence
+/// that could not be made, and the inputs an occurrence needs that nothing says. The promised occurrences are in the
+/// order they fell due, which is the order of the rows.
+fn contract_rows(lens: Lens, recorded: Recorded) -> (Vec<ContractRow>, Vec<(Id<Contract>, String)>) {
     let book = lens.book();
-    let mut flows = Vec::new();
-    let mut details = Arena::new();
-    let mut missing_inputs = Vec::new();
-    let mut rows = Vec::new();
-    let mut issues = Vec::new();
-    let written: Set<_> = book
-        .txns
-        .iter()
-        .filter_map(|(_, txn)| {
-            let (contract, schedule, written) = (txn.contract?, txn.contract_schedule?, txn.occurrence?);
-            let occurrence = book.written_occurrences.get(written)?;
-            Some((contract, schedule, occurrence.due))
-        })
-        .collect();
-    let Some(window) = Days::new(today.add_days(1), until) else {
-        return (flows, details, rows, issues);
-    };
-
-    // Preserve the query's source flows while deriving contract occurrences:
-    // computed roots at a later due date must see earlier forecast postings.
-    let options = axiom_engine::Options { today: until, relaxed };
-    let mut ledger = match checkpoint {
-        Some(checkpoint) => plan.resume(checkpoint, options),
-        None => plan.start(options),
-    };
-    ledger.advance(today);
-
-    #[derive(Clone, Copy)]
-    struct Scheduled {
-        day: Day,
-        contract: Id<Contract>,
-        schedule: axiom_model::ScheduleKind,
-        ordinal: u32,
-    }
-
-    let mut scheduled = Vec::new();
-    for (id, contract) in book.contracts.iter() {
-        if !lens.owns_entity(contract.owner) {
-            continue;
-        }
-        for schedule in [ScheduleKind::Regular, ScheduleKind::Standing] {
-            for (ordinal, day) in book.promises.expected(id, schedule, window) {
-                // A written occurrence is already part of the ledger's journal
-                // fold, including when it was recorded after its due day.
-                if !written.contains(&(id, schedule, day)) {
-                    scheduled.push(Scheduled { day, contract: id, schedule, ordinal });
-                }
+    let (mut rows, mut issues) = (Vec::new(), Vec::new());
+    for planned in recorded.planned {
+        let made = match planned.made {
+            Ok(made) => made,
+            Err(error) => {
+                issues.push((planned.contract, format!("{error:?}")));
+                continue;
             }
-        }
-    }
-    scheduled.sort_by_key(|occurrence| {
-        (
-            occurrence.day,
-            occurrence.contract,
-            match occurrence.schedule {
-                ScheduleKind::Regular => 0,
-                ScheduleKind::Standing => 1,
-            },
-            occurrence.ordinal,
-        )
-    });
-
-    let mut source = 0;
-    let mut occurrence = 0;
-    while source < expected_flows.len() || occurrence < scheduled.len() {
-        let flow_day = expected_flows.get(source).map(|flow| flow.flow.day);
-        let due_day = scheduled.get(occurrence).map(|item| item.day);
-        let day = match (flow_day, due_day) {
-            (Some(flow), Some(due)) => flow.min(due),
-            (Some(flow), None) => flow,
-            (None, Some(due)) => due,
-            (None, None) => break,
         };
-        ledger.advance_to_closing(day);
-
-        while expected_flows.get(source).is_some_and(|flow| flow.flow.day == day) {
-            let flow = &expected_flows[source];
-            ledger.apply_runtime(flow, &details);
-            source += 1;
+        let flows = made.flows(recorded.promised_flows).unwrap_or_default();
+        rows.push(contract_row(lens, planned, flows));
+        let missing = made.missing(recorded.promised_inputs).unwrap_or_default();
+        if !missing.is_empty() {
+            let terms = book.contracts[planned.contract].terms_of(planned.schedule);
+            let inputs =
+                terms.into_iter().flat_map(|terms| missing.iter().filter_map(|&at| terms.inputs.get(at as usize)));
+            let names = inputs.map(|input| book.name(input.name)).collect::<Vec<_>>().join(", ");
+            issues.push((planned.contract, format!("required input(s) are missing: {names}")));
         }
-
-        while scheduled.get(occurrence).is_some_and(|item| item.day == day) {
-            let item = scheduled[occurrence];
-            occurrence += 1;
-            let contract = &book.contracts[item.contract];
-            let (flow_start, detail_start, missing_start) = (flows.len(), details.len(), missing_inputs.len());
-            let made = match ledger.instantiate_occurrence(
-                item.contract,
-                item.schedule,
-                item.day,
-                item.ordinal,
-                None,
-                &mut flows,
-                &mut details,
-                &mut missing_inputs,
-            ) {
-                Ok(made) => made,
-                Err(error) => {
-                    // Keep prior complete occurrences, but roll back every
-                    // flow/detail/input added for this incomplete occurrence.
-                    flows.truncate(flow_start);
-                    details.truncate(detail_start);
-                    missing_inputs.truncate(missing_start);
-                    issues.push((item.contract, format!("{error:?}")));
-                    continue;
-                }
-            };
-            let contract_flows = made.flows(&flows).unwrap_or_default();
-            let missing = made.missing(&missing_inputs).unwrap_or_default();
-            let main = contract_flows
-                .iter()
-                .filter(|flow| flow.flow.day == item.day)
-                .max_by_key(|flow| flow.flow.out.qty.abs());
-            let amount = main.map(|main| {
-                let qty = contract_flows
-                    .iter()
-                    .filter(|flow| flow.flow.day == item.day && flow.flow.out.unit == main.flow.out.unit)
-                    .map(|flow| crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty))
-                    .sum();
-                Amount::new(qty, main.flow.out.unit)
-            });
-            let what = main.map_or_else(|| book.name(contract.name).to_string(), |flow| route(book, &flow.flow));
-            let cadence = contract
-                .terms_of(item.schedule)
-                .map(|terms| describe_contract(terms.every))
-                .unwrap_or_else(|| "scheduled".to_string());
-            rows.push(ContractRow { contract: item.contract, every: cadence, what, next: item.day, amount });
-            for flow in contract_flows {
-                ledger.apply_runtime(flow, &details);
-            }
-            if !missing.is_empty() {
-                let names = contract
-                    .terms_of(item.schedule)
-                    .into_iter()
-                    .flat_map(|terms| missing.iter().filter_map(|&index| terms.inputs.get(index as usize)))
-                    .map(|input| book.name(input.name))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                issues.push((item.contract, format!("required input(s) are missing: {names}")));
-            }
-        }
-        ledger.advance(day);
     }
+    (rows, issues)
+}
 
-    rows.sort_by_key(|row| (row.next, row.contract));
-    (flows, details, rows, issues)
+/// One occurrence as a row: what it is (its biggest flow's route), how often, and what it comes to.
+fn contract_row(lens: Lens, planned: &Planned, flows: &[axiom_model::RuntimeFlow]) -> ContractRow {
+    let (book, contract) = (lens.book(), &lens.book().contracts[planned.contract]);
+    let main = flows.iter().filter(|flow| flow.flow.day == planned.due).max_by_key(|flow| flow.flow.out.qty.abs());
+    let amount = main.map(|main| {
+        let same_unit =
+            |flow: &&axiom_model::RuntimeFlow| flow.flow.day == planned.due && flow.flow.out.unit == main.flow.out.unit;
+        let qty = flows
+            .iter()
+            .filter(same_unit)
+            .map(|flow| crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty))
+            .sum();
+        Amount::new(qty, main.flow.out.unit)
+    });
+    let what = main.map_or_else(|| book.name(contract.name).to_string(), |flow| route(book, &flow.flow));
+    let every = contract
+        .terms_of(planned.schedule)
+        .map_or_else(|| "scheduled".to_string(), |terms| describe_contract(terms.every));
+    ContractRow { contract: planned.contract, every, what, next: planned.due, amount }
 }
 
 fn describe_contract(every: axiom_model::Cadence) -> String {
@@ -638,6 +523,32 @@ mod tests {
         );
     }
 
+    /// Two habits in a journal, one on the 5th and one on the 20th: each expects a flow every month, and what the report applies
+    /// is all of them in date order, not one habit's and then the other's.
+    #[test]
+    fn the_flows_habits_expect_come_in_date_order() {
+        let mut text =
+            String::from("base USD\ncommodity USD\n  precision 2\nentity landlord\nentity gym\naccount checking\n");
+        text += "opening 2025-10-01\n  checking 10_000.00 USD\n";
+        for (year, month) in [(2025, 11), (2025, 12), (2026, 1), (2026, 2)] {
+            text += &format!("{year}-{month:02}-05 checking -> landlord 500.00 USD\n");
+            text += &format!("{year}-{month:02}-20 checking -> gym 30.00 USD\n");
+        }
+        crate::source_tests::with_run(&text, day(2026, 3, 1), |book, run| {
+            let plan = axiom_engine::Plan::new(book);
+            let whose = Whose::default();
+            let lens = Lens::new(&plan, &whose, day(2026, 3, 1));
+            let habits = expected(lens, run);
+            let (today, until) = (day(2026, 3, 1), day(2026, 6, 30));
+            let apart: Vec<_> =
+                habits.iter().flat_map(|habit| habit.flows(today, until)).map(|flow| flow.day).collect();
+            assert!(apart.windows(2).any(|pair| pair[0] > pair[1]), "one habit and then the other: {apart:?}");
+            let together: Vec<_> = habit_flows(book, &habits, today, until).iter().map(|flow| flow.day).collect();
+            assert_eq!(together.len(), apart.len());
+            assert!(together.windows(2).all(|pair| pair[0] <= pair[1]), "in date order: {together:?}");
+        });
+    }
+
     const RENT: &str = "\
 base USD
 commodity USD
@@ -676,6 +587,49 @@ contract rent with landlord
                     .iter()
                     .all(|note| { !crate::tests::cell(note).contains("did not finish the native occurrence monitor") })
             );
+        });
+    }
+
+    /// `--for` takes the contracts of one owner and leaves the others out, as the laws, the balances and the tallies of
+    /// the forecast never see them.
+    #[test]
+    fn a_forecast_for_one_owner_promises_only_that_owners_contracts() {
+        let text = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity jordan
+entity landlord
+account assets/mine
+  owner me
+account assets/theirs
+  owner jordan
+opening 2026-01-01
+  mine 1_000.00 USD
+  theirs 1_000.00 USD
+contract mine-rent with landlord
+  100.00 USD monthly on 15 from mine
+  from 2026-01-15
+contract theirs-rent with landlord
+  200.00 USD monthly on 15 from theirs
+  from 2026-01-15
+";
+        crate::source_tests::with_run(text, day(2026, 2, 1), |book, run| {
+            let rows = |whose| {
+                let query = crate::Query::Forecast { until: Some(day(2026, 4, 30)), paths: 0 };
+                let report = crate::report(book, run, &query, whose).unwrap();
+                let section = report
+                    .sections
+                    .iter()
+                    .find(|section| crate::tests::heading(section) == Some("Contract occurrences"))
+                    .unwrap();
+                section.rows.iter().map(|row| crate::tests::cell(&row.cells[0])).collect::<Vec<_>>()
+            };
+            let mine = rows(Some("me"));
+            assert_eq!(mine.len(), 3);
+            assert!(mine.iter().all(|row| row.starts_with("mine-rent")), "{mine:?}");
+            assert_eq!(rows(None).len(), 6);
         });
     }
 

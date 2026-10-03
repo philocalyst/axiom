@@ -1,16 +1,18 @@
-//! Running the forecast: expected flows, folded through a ledger.
+//! Running the forecast: the fold continued past today, and the position read at each month end.
 //!
-//! The projection is a real fold, not arithmetic beside one. Every expected
-//! flow is applied to the ledger in date order, so laws run on the future
-//! exactly as they run on the past: a limit that will be crossed in November,
-//! or a deadline that will pass, is recorded by the same rules.
+//! The ledger the forecast goes on from is the one the run came from, resumed at its checkpoint (or folded from the journal
+//! when there is none), made to promise what the contracts promise and run to the horizon. What it posts of the contracts
+//! is the engine's: this module applies the flows of the habits the journal shows (`Ledger::apply`, as a flow nobody wrote
+//! is always applied) and reads. So the laws judge the future the way they judge the past: a limit that will be crossed in
+//! November, or a deadline that will pass, is recorded by the same rules.
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Arena, Day, Id, Qty, Ratio};
-use axiom_engine::{Checkpoint, Holding, Ledger, Options, Plan};
-use axiom_model::{Book, Class, Commodity, Flow, Place, RuntimeDetail, RuntimeFlow};
+use axiom_core::{Day, Id, Qty, Ratio};
+use axiom_engine::{Holding, Ledger, Options};
+use axiom_model::{Book, Class, Commodity, Flow, Place};
 
+use super::Past;
 use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};
 
@@ -21,9 +23,9 @@ pub struct Overdraft {
     pub lowest: Qty,
 }
 
-/// What running the expected flows produced.
+/// What running the forecast produced.
 pub struct Trace<'p, 'b, 's> {
-    /// Everything the ledger recorded, history and projection alike.
+    /// Everything the ledger recorded after the day it was resumed on: what it promised, and what the laws made of it.
     pub ledger: Ledger<'p, 'b, 's>,
     /// Money in hand less the debts with no term, at each checkpoint.
     pub liquid: Vec<Qty>,
@@ -33,117 +35,78 @@ pub struct Trace<'p, 'b, 's> {
     pub overdrafts: Vec<Overdraft>,
 }
 
-/// Applies `flows` (in date order) to a ledger standing at `today`, reading
-/// the position at each checkpoint. Laws with deadlines fire all the way to
-/// the last checkpoint.
-pub fn project<'p, 'b, 's>(
-    plan: &'p Plan<'b, 's>,
-    lens: Lens<'b, 's, '_, '_>,
-    today: Day,
-    flows: Vec<Flow>,
-    checkpoints: &[Day],
-) -> Trace<'p, 'b, 's> {
-    let details = Arena::default();
-    project_runtime(plan, lens, today, flows.into_iter().map(RuntimeFlow::source).collect(), &details, checkpoints)
-}
-
-/// Projects typed runtime flows using the detail arena that owns their
-/// overrides. The ledger consumes the same representation as contract
-/// occurrences and never treats a runtime transaction as a Book index.
-pub(crate) fn project_runtime<'p, 'b, 's>(
-    plan: &'p Plan<'b, 's>,
-    lens: Lens<'b, 's, '_, '_>,
-    today: Day,
-    flows: Vec<RuntimeFlow>,
-    details: &Arena<RuntimeDetail>,
-    checkpoints: &[Day],
-) -> Trace<'p, 'b, 's> {
-    let book = lens.book();
-    let horizon = checkpoints.last().copied().unwrap_or(today);
-    let mut ledger = plan.start(Options { today: horizon, relaxed: book.relaxed });
-    ledger.advance(today);
-
-    trace_from(ledger, lens, today, flows, details, checkpoints)
-}
-
-/// Projects from the view checkpoint paired with `plan` and `lens`.
-///
-/// The checkpoint is the journal state before its day's closings. Advancing to
-/// `today` closes that boundary before the forecast starts, matching
-/// [`project`]; expected flows are then judged against the same ledger state
-/// without folding the book a second time. `relaxed` is explicit because a
-/// client may run a relaxed view even when the serialized book's default is
-/// strict.
-pub(crate) fn project_from<'p, 'b, 's>(
-    plan: &'p Plan<'b, 's>,
-    checkpoint: &Checkpoint,
-    lens: Lens<'b, 's, '_, '_>,
-    today: Day,
-    relaxed: bool,
-    flows: Vec<Flow>,
-    checkpoints: &[Day],
-) -> Trace<'p, 'b, 's> {
-    let details = Arena::default();
-    project_runtime_from(
-        plan,
-        checkpoint,
-        lens,
-        today,
-        relaxed,
-        flows.into_iter().map(RuntimeFlow::source).collect(),
-        &details,
-        checkpoints,
-    )
-}
-
-/// Resumes from a prepared checkpoint and folds engine-materialized future
-/// occurrences through the same runtime flow path used by the canonical run.
-pub(crate) fn project_runtime_from<'p, 'b, 's>(
-    plan: &'p Plan<'b, 's>,
-    checkpoint: &Checkpoint,
-    lens: Lens<'b, 's, '_, '_>,
-    today: Day,
-    relaxed: bool,
-    flows: Vec<RuntimeFlow>,
-    details: &Arena<RuntimeDetail>,
-    checkpoints: &[Day],
-) -> Trace<'p, 'b, 's> {
-    debug_assert!(checkpoint.day() <= today, "projection cannot rewind its view checkpoint");
-    let horizon = checkpoints.last().copied().unwrap_or(today);
-    let options = Options { today: horizon, relaxed };
-    let mut ledger = plan.resume(checkpoint, options);
-    ledger.advance(today);
-
-    trace_from(ledger, lens, today, flows, details, checkpoints)
-}
-
-/// The shared forecast fold once a ledger has reached the end of `today`.
-fn trace_from<'p, 'b, 's>(
-    mut ledger: Ledger<'p, 'b, 's>,
-    lens: Lens<'b, 's, '_, '_>,
-    today: Day,
-    flows: Vec<RuntimeFlow>,
-    details: &Arena<RuntimeDetail>,
-    checkpoints: &[Day],
-) -> Trace<'p, 'b, 's> {
-    let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
-    let (mut liquid, mut worth) = (Vec::new(), Vec::new());
-    let mut coming = flows.into_iter().peekable();
-    for &checkpoint in checkpoints {
-        while let Some(flow) = coming.next_if(|flow| flow.flow.day <= checkpoint) {
-            let Some(flow) = within_means(lens, &ledger, flow) else {
-                continue;
-            };
-            ledger.apply_runtime(&flow, details);
-            note_overdrafts(lens, &ledger, &flow.flow, &mut overdrawn);
+impl<'p, 'b, 's> Trace<'p, 'b, 's> {
+    /// Goes on from `past` to the last of `checkpoints`, the first being the day the run stands on, applying `habits` (in
+    /// date order) as they fall due and reading the position at each checkpoint. Laws with deadlines fire all the way to
+    /// the last checkpoint.
+    pub fn run(
+        lens: Lens<'b, 's, '_, 'p>,
+        past: &Past<'_>,
+        options: Options,
+        habits: Vec<Flow>,
+        checkpoints: &[Day],
+    ) -> Trace<'p, 'b, 's> {
+        let today = checkpoints[0];
+        let mut ledger = promising(lens, past, options, checkpoints);
+        let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
+        let (mut liquid, mut worth) = (Vec::new(), Vec::new());
+        let mut coming = habits.into_iter().peekable();
+        for &checkpoint in checkpoints {
+            while let Some(flow) = coming.next_if(|flow| flow.day <= checkpoint) {
+                apply_habit(lens, &mut ledger, flow, &mut overdrawn);
+            }
+            note_promised(lens, &mut ledger, checkpoint, &mut overdrawn);
+            ledger.advance(checkpoint);
+            let months = checkpoint.since(today).months;
+            let position = |pick: &dyn Fn(&Holding) -> Qty| grown(lens, months, &ledger, pick);
+            liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
+            worth.push(position(&|holding| holding.qty()));
         }
-        ledger.advance(checkpoint);
-        let months = checkpoint.since(today).months;
-        let position = |pick: &dyn Fn(&Holding) -> Qty| grown(lens, months, &ledger, pick);
-        liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
-        worth.push(position(&|holding| holding.qty()));
+        Trace { ledger, liquid, worth, overdrafts: overdrawn.into_values().collect() }
     }
-    Trace { ledger, liquid, worth, overdrafts: overdrawn.into_values().collect() }
+}
+
+/// The ledger a forecast goes on with: the run's fold, resumed from its checkpoint or folded from the journal, closed
+/// through today, made to reach the last checkpoint and to promise the contracts of the lens's owners.
+fn promising<'p, 'b, 's>(
+    lens: Lens<'b, 's, '_, 'p>,
+    past: &Past<'_>,
+    options: Options,
+    checkpoints: &[Day],
+) -> Ledger<'p, 'b, 's> {
+    let (plan, book) = (lens.plan(), lens.book());
+    let (today, horizon) = (options.today, checkpoints[checkpoints.len() - 1]);
+    debug_assert_eq!(today, checkpoints[0], "the forecast begins on the day the run stands on");
+    let mut ledger = match past {
+        Past::Checkpoint { at, .. } => {
+            debug_assert!(at.day() <= today, "a forecast cannot rewind the checkpoint it goes on from");
+            plan.resume(at, options)
+        }
+        Past::Journal => plan.start(options),
+    };
+    ledger.advance(today);
+    ledger.reach(horizon);
+    ledger.promise(|contract| lens.owns_entity(book.contracts[contract].owner));
+    ledger
+}
+
+/// Applies a flow a habit expects, after every occurrence the contracts promise by its day, unless the means to make it are
+/// not there.
+fn apply_habit(lens: Lens, ledger: &mut Ledger, flow: Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+    note_promised(lens, ledger, flow.day, overdrawn);
+    let Some(flow) = within_means(lens, ledger, flow) else { return };
+    ledger.apply(&flow);
+    note_overdrafts(lens, ledger, &flow, overdrawn);
+}
+
+/// Takes every occurrence the contracts promise by `day`, one at a time, and notes where each left a cash place.
+fn note_promised(lens: Lens, ledger: &mut Ledger, day: Day, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+    while let Some(planned) = ledger.promise_through(day) {
+        let Ok(made) = planned.made else { continue };
+        for flow in made.flows(ledger.recorded().promised_flows).unwrap_or_default() {
+            note_overdrafts(lens, ledger, &flow.flow, overdrawn);
+        }
+    }
 }
 
 /// What a holding adds to what can be spent: its free money, less what is
@@ -179,8 +142,8 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
 /// A flow that cannot move more than its ends hold: what leaves an account
 /// that is not cash is limited by what it holds, and a payment into a debt by
 /// what is owed. `None` when there is nothing to move.
-fn within_means(lens: Lens, ledger: &Ledger, mut flow: RuntimeFlow) -> Option<RuntimeFlow> {
-    let movement = &flow.flow;
+fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
+    let movement = &flow;
     let (from, to, out_unit, arrive_unit, exchange, amount) =
         (movement.from, movement.to, movement.out.unit, movement.arrive.unit, movement.is_exchange(), movement.out.qty);
     // Slow holdings and claims cannot move more than they currently hold.
@@ -197,8 +160,8 @@ fn within_means(lens: Lens, ledger: &Ledger, mut flow: RuntimeFlow) -> Option<Ru
             if room <= Qty::ZERO {
                 None
             } else {
-                flow.flow.out.qty = room;
-                flow.flow.arrive.qty = room;
+                flow.out.qty = room;
+                flow.arrive.qty = room;
                 Some(flow)
             }
         }
@@ -233,6 +196,7 @@ mod tests {
     use super::*;
     use crate::tests::household;
     use axiom_core::Days;
+    use axiom_engine::Plan;
     use axiom_model::Amount;
 
     #[test]
@@ -277,8 +241,15 @@ mod tests {
 
         let whose = crate::lens::Whose::default();
         let lens = Lens::new(&plan, &whose, tomorrow);
-        let resumed = project_from(&plan, &checkpoint, lens, tomorrow, false, Vec::new(), &[tomorrow]);
-        let folded = project(&plan, lens, tomorrow, Vec::new(), &[tomorrow]);
+        let resumed = Trace::run(
+            lens,
+            &Past::Checkpoint { at: &checkpoint, effects: &[] },
+            Options { today: tomorrow, relaxed: false },
+            Vec::new(),
+            &[tomorrow],
+        );
+        let folded =
+            Trace::run(lens, &Past::Journal, Options { today: tomorrow, relaxed: false }, Vec::new(), &[tomorrow]);
 
         assert_eq!(resumed.liquid[0] - folded.liquid[0], Qty(1_000));
         assert_eq!(resumed.worth[0] - folded.worth[0], Qty(1_000));
@@ -311,7 +282,8 @@ opening 2026-01-01
             let forecast_for = |name| {
                 let whose = crate::lens::Whose::of(book, owner(name));
                 let lens = Lens::new(&plan, &whose, run.today);
-                project(&plan, lens, run.today, Vec::new(), &[run.today]).worth[0]
+                Trace::run(lens, &Past::Journal, Options { today: run.today, relaxed: false }, Vec::new(), &[run.today])
+                    .worth[0]
             };
 
             assert_eq!(forecast_for("me"), Qty(6_000));
@@ -319,7 +291,17 @@ opening 2026-01-01
 
             let everyone = crate::lens::Whose::default();
             let lens = Lens::new(&plan, &everyone, run.today);
-            assert_eq!(project(&plan, lens, run.today, Vec::new(), &[run.today]).worth[0], Qty(10_000));
+            assert_eq!(
+                Trace::run(
+                    lens,
+                    &Past::Journal,
+                    Options { today: run.today, relaxed: false },
+                    Vec::new(),
+                    &[run.today]
+                )
+                .worth[0],
+                Qty(10_000)
+            );
             assert_eq!(plan.allocate(place, Qty(10_000)).map(|(_, amount)| amount).sum::<Qty>(), Qty(10_000));
         });
     }

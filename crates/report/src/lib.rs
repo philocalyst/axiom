@@ -41,7 +41,7 @@ mod tests;
 use std::borrow::Cow;
 
 use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
-use axiom_engine::{Plan, Run};
+use axiom_engine::{Options, Plan, Run};
 use axiom_model::{Amount, Book, Period, Place, Trigger};
 
 use crate::history::Snapshots;
@@ -313,7 +313,10 @@ fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Rep
             let holdings = claims::holdings_at(book, run, at);
             Ok(lots::view_from(lens.on(at), scope, holdings.iter()))
         }
-        Query::Forecast { until, paths } => Ok(forecast::view_with_lens(lens, run, *until, *paths)),
+        Query::Forecast { until, paths } => {
+            let options = Options { today: run.today, relaxed: book.relaxed };
+            Ok(forecast::view(forecast::Past::Journal, run, lens, options, *until, *paths))
+        }
         Query::Why { target } => why::target_with_lens(lens, run, target),
         Query::Line { loc } => Ok(why::line_with_lens(lens, run, *loc)),
     }

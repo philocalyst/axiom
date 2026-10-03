@@ -71,15 +71,15 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
             if left.is_zero() {
                 return None;
             }
-            let made = lot.txn.source_txn().and_then(|txn| book.paid_into(txn, holding.place));
+            let made = book.claim_of(lot.txn, holding.place);
             Some(Claim {
                 mine: true,
                 place: holding.place,
                 txn: lot.txn,
                 left: Amount::new(left, holding.unit),
                 made: lot.acquired,
-                payee: made.and_then(|flow| flow.payee),
-                due: made.and_then(|flow| book.flow_view(flow).detail().due),
+                payee: made.and_then(|claim| claim.payee),
+                due: made.and_then(|claim| claim.due),
             })
         })
     });
@@ -161,6 +161,24 @@ pub(crate) fn view_from<'h, 's>(
     }
 }
 
+/// What a claim is: its codes and doc, or where it was written when it has neither (a claim the monitor made says the
+/// contract's line).
+fn what_of<'s>(book: &'s Book<'_>, claim: &Claim) -> Cell<'s> {
+    let txn = claim.txn.source_txn().and_then(|id| book.txns.get(id));
+    let named: Vec<_> = txn
+        .map(|txn| {
+            code_labels(book, book.codes[txn.codes].iter().copied())
+                .chain(doc_headline(book, txn.doc).map(Cell::text))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !named.is_empty() {
+        return Cell::list(" · ", named);
+    }
+    let wrote = txn.map(|txn| txn.loc).or_else(|| book.claim_of(claim.txn, claim.place).map(|made| made.loc));
+    wrote.map_or(Cell::Blank, Cell::Source)
+}
+
 /// Claims with what each is, when it was made and how old it is, when it is due
 /// and whether it is late, and what they come to.
 pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Claim]) -> Section<'s> {
@@ -170,20 +188,6 @@ pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Clai
     let mut section = Section::new(columns).headed(Cell::text(heading));
     let (mut total, mut unpriced) = (Qty::ZERO, 0);
     for claim in claims {
-        let txn = claim.txn.source_txn().and_then(|id| book.txns.get(id));
-        let what = txn
-            .map(|txn| {
-                code_labels(book, book.codes[txn.codes].iter().copied())
-                    .chain(doc_headline(book, txn.doc).map(Cell::text))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        // What it is: its codes and doc, or where it was written when it has neither.
-        let what = if what.is_empty() {
-            txn.map_or(Cell::Blank, |txn| Cell::Source(txn.loc))
-        } else {
-            Cell::list(" · ", what)
-        };
         let days_left = claim.due.map(|due| due.0 - at.0);
         let status = days_left.map(|days| if days < 0 { format!("overdue {}d", -days) } else { format!("in {days}d") });
         match lens.value(claim.left) {
@@ -192,7 +196,7 @@ pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Clai
         }
         let cells = [
             Cell::text(claim.counterparty(book)),
-            what,
+            what_of(book, claim),
             Cell::amount(book, claim.left),
             Cell::Day(claim.made),
             Cell::text(at.since(claim.made).to_string()),

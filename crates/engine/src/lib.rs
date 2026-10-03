@@ -56,6 +56,7 @@ mod occurrence;
 mod owners;
 mod plan;
 mod post;
+mod promising;
 mod reconcile;
 mod scope;
 mod settle;
@@ -205,6 +206,8 @@ pub struct Promise {
     pub kept: Option<(Day, Id<Txn>)>,
     /// The contract occurrence was explicitly waived by the active terms.
     pub waived: bool,
+    /// The party owed it, nothing kept it, and what it owed was posted as a claim.
+    pub claimed: bool,
     /// Runtime flow and omitted-input ranges in the parent Run's pools.
     pub flows: PromisedFlows,
     pub missing_inputs: OmittedInputs,
@@ -216,6 +219,18 @@ impl Promise {
         let seen = self.kept.map_or(horizon, |(day, _)| day);
         (seen.0 - self.due.0).max(0)
     }
+}
+
+/// One occurrence a forecast posted as it fell due: what it made, or why it could not be made. The ranges are those of
+/// [`Recorded::promised_flows`] and [`Recorded::promised_inputs`] on the ledger that promised it.
+#[derive(Clone, Copy, Debug)]
+pub struct Planned {
+    pub contract: Id<Contract>,
+    pub schedule: ScheduleKind,
+    /// The occurrence's index in its schedule: the one a line that kept it would have.
+    pub ordinal: u32,
+    pub due: Day,
+    pub made: Result<OccurrenceOutput, TemplateError>,
 }
 
 impl Run {
@@ -590,6 +605,14 @@ pub struct Recorded<'a> {
     pub adjustments: &'a [Adjustment],
     pub violations: &'a [Violation],
     pub diagnostics: &'a [Diagnostic],
+    /// The occurrences lines kept and the ones nothing kept and nothing can now, in the order they were found.
+    pub promises: &'a [Promise],
+    /// The occurrences a forecast ledger promised, in the order they fell due.
+    pub planned: &'a [Planned],
+    /// What the occurrences kept and promised made: the flows, the inputs they left out, and the details of the flows.
+    pub promised_flows: &'a [RuntimeFlow],
+    pub promised_inputs: &'a [u16],
+    pub promised_details: &'a Arena<RuntimeDetail>,
 }
 
 /// What one applied flow caused: ranges into the ledger's records. The

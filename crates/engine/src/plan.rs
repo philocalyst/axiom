@@ -10,8 +10,10 @@
 //! records, and any number of threads can fold from it at once.
 
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
+use axiom_model::promise::Blame;
 use axiom_model::{
-    Asset, Book, Commodity, Entity, Field, Flow, Func, Kind, Op, Place, Rule, Subject, Txn, Ty, Value, Var,
+    Asset, Book, Commodity, Contract, Entity, Field, Flow, Func, Kind, Op, Place, Rule, ScheduleKind, Subject, Txn, Ty,
+    Value, Var,
 };
 
 use crate::events::{self, Events};
@@ -267,6 +269,15 @@ impl<'b, 's> Plan<'b, 's> {
     /// fact at all, the day the fold is run for.
     pub(crate) fn watch_from(&self, today: Day) -> Day {
         self.first_fact.unwrap_or(today)
+    }
+
+    /// The tab a missed occurrence of a stream is claimed in: the one the owner keeps with the party, when the party is the
+    /// one the promise blames. A debt of the owner is not claimed: it is a plain balance, and nothing settles it.
+    pub(crate) fn claim_tab(&self, contract: Id<Contract>, schedule: ScheduleKind) -> Option<Id<Place>> {
+        let book = self.book;
+        (book.promises.blame(contract, schedule)? == Blame::Party).then_some(())?;
+        let contract = &book.contracts[contract];
+        self.traits.tab_of(book.entities[contract.party].place?, contract.owner)
     }
 
     /// The problems solving found, for a ledger's record to begin with.

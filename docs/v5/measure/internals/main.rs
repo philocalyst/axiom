@@ -1,7 +1,7 @@
 //! A scratch dump of what the engine materializes for each promise, kept and forecast, to compare two builds.
-use axiom_core::{Arena, Day, Days, FileId};
+use axiom_core::{Day, FileId};
 use axiom_engine::{Options, Plan};
-use axiom_model::{RuntimeDetail, ScheduleKind, Source};
+use axiom_model::Source;
 use axiom_syntax::Folder;
 
 fn main() {
@@ -44,29 +44,24 @@ fn main() {
     for d in &run.diagnostics {
         println!("diagnostic {} {}", d.code, d.message);
     }
-    // the forecast's way: each occurrence the contracts expect, with nothing written
+    // the forecast's way: the fold to today, promising every contract to the end of 2027
     let plan = Plan::new(&book);
+    let until = Day::from_ymd(2027, 6, 30).unwrap();
     let mut ledger = plan.start(options);
-    for (id, contract) in book.contracts.iter() {
-        let first = contract.days.first().max(Day::from_ymd(2026, 1, 1).unwrap());
-        let Some(window) = Days::new(first, Day::from_ymd(2027, 6, 30).unwrap()) else { continue };
-        let mut occurrences: Vec<_> = [ScheduleKind::Regular, ScheduleKind::Standing]
-            .into_iter()
-            .flat_map(|schedule| book.promises.expected(id, schedule, window).map(move |(ordinal, day)| (day, schedule, ordinal)))
-            .collect();
-        occurrences.sort_by_key(|&(day, schedule, _)| (day, schedule == ScheduleKind::Standing));
-        for (day, schedule, ordinal) in occurrences {
-            let (mut flows, mut details, mut missing) = (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
-            let made =
-                ledger.instantiate_occurrence(id, schedule, day, ordinal, None, &mut flows, &mut details, &mut missing);
-            println!("forecast {:?} {:?} {:?} -> {:?}", id, schedule, day, made);
-            for flow in &flows {
-                println!("  flow {flow:?}");
-                if let Some(detail) = flow.detail {
-                    println!("  detail {:?}", details[detail]);
-                }
+    ledger.advance(today);
+    ledger.reach(until);
+    ledger.promise(|_| true);
+    ledger.advance(until);
+    let recorded = ledger.recorded();
+    for planned in recorded.planned {
+        println!("forecast {:?} {:?} {:?} {} -> {:?}", planned.contract, planned.schedule, planned.due, planned.ordinal, planned.made);
+        let Ok(made) = planned.made else { continue };
+        for flow in made.flows(recorded.promised_flows).unwrap_or_default() {
+            println!("  flow {flow:?}");
+            if let Some(detail) = flow.detail {
+                println!("  detail {:?}", recorded.promised_details[detail]);
             }
-            println!("  missing {missing:?}");
         }
+        println!("  missing {:?}", made.missing(recorded.promised_inputs).unwrap_or_default());
     }
 }

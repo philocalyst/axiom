@@ -1160,6 +1160,100 @@ law pad-fee
     );
 }
 
+/// What the test above means, in a book whose law closes the year it is in: `closing 12-31` closes the 2026 year on
+/// 2027-12-31 (LANGUAGE §8), so no forecast to 2027-03-01 can include its tax. `each year` closes it on today's own
+/// closing, which the resumed ledger takes once, after the obligations the run already had before it.
+#[test]
+fn a_context_forecast_takes_the_closing_of_the_day_it_stands_on_once() {
+    let system = "\
+system context-return
+use std
+
+entity me : person
+  filing single
+  lives context-return
+entity employer
+entity treasury : government
+
+law year-end-tax
+  each year
+  owe tally(pay) * 10% to treasury by date(year + 1, 1, 15) as year-end-tax
+";
+    let source = "\
+base USD
+use context-return
+entity reserve
+entity grocer
+purpose salary : income
+  law count-pay
+    on flow
+    count amount as pay
+account checking : bank
+
+law historical-fee
+  on out
+  when from is checking
+  require amount < empty else owe 5 USD to treasury by date(2027, 2, 15) as historical-fee
+
+law pad-fee
+  on in
+  when from is reserve
+  owe 2 USD to treasury by date(2027, 3, 1) as pad-fee
+
+2026-01-05 employer -> checking 100 USD #salary
+2026-02-01 checking -> grocer 10 USD #food
+2026-12-31 checking = 100 USD via reserve
+";
+    with_sources(
+        &[("systems/std.ax", STD), ("systems/context-return.ax", system), ("axiom.ax", source)],
+        day(2026, 12, 31),
+        |book, run| {
+            let context = crate::Context::new(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
+            let query = Query::Forecast { until: Some(day(2027, 3, 1)), paths: 0 };
+            let shared = context.report(&query).unwrap();
+            let old = crate::report(book, context.run(), &query, None).unwrap();
+            assert_eq!(show(&shared), show(&old));
+            let owed = shared
+                .sections
+                .iter()
+                .find(|section| crate::tests::heading(section) == Some("Obligations coming due"))
+                .unwrap();
+            assert_eq!(
+                lines(owed),
+                [
+                    "2027-01-15 | year-end-tax | treasury | 10.00 USD",
+                    "2027-02-15 | historical-fee | treasury | 5.00 USD",
+                    "2027-03-01 | pad-fee | treasury | 2.00 USD",
+                ]
+            );
+        },
+    );
+}
+
+/// A party that was to pay by a deadline and did not owes it: `claims` lists what it owes, with the day it was due and the
+/// contract's own line for what it is.
+#[test]
+fn a_due_day_nothing_kept_is_listed_as_a_claim_on_the_party() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+entity tenant
+account checking
+opening 2026-01-01
+  checking 10_000 USD
+contract lease with tenant
+  1_000 USD monthly on 1 into checking
+  from 2026-02-01
+  due 5d
+";
+    with_run(text, day(2026, 3, 10), |book, run| {
+        let claims = rows(book, run, Query::Claims { at: None });
+        assert_eq!(claims.len(), 2, "one claim and the total: {claims:?}");
+        assert_eq!(claims[0], "!tenant | @1 | 1,000.00 USD | 2026-02-17 | 21d | 2026-02-01 | overdue 37d");
+    });
+}
+
 #[test]
 fn a_context_checkpoint_keeps_same_day_closings_pending_for_a_withdrawal() {
     with_run(YEAR_END_RETURN, day(2026, 6, 1), |book, run| {

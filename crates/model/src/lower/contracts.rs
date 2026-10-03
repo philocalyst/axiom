@@ -21,6 +21,7 @@ use crate::journal::{Flow, Infer, Mode, Origin, Program, Provenance, Purposed, S
 use crate::law::{Owner, Ty};
 use crate::laws::Placement;
 use crate::problem::{self, Noun};
+use crate::promise::Blame;
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
@@ -241,7 +242,17 @@ fn lower_contract<'a, 's>(
     if let (Some(schedule), Some((program, ids))) = (node.standing, standing) {
         contract.standing = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
+    owed_by_party(world, &contract);
     Some(contract)
+}
+
+/// A party that is to pay the owner by a deadline can fail to, and what it then owes is a claim, held in the tab the owner
+/// keeps with that party. The fold finds the tab by the two of them, so a contract that can make one asks for it here.
+fn owed_by_party(world: &mut World<'_>, contract: &Contract) {
+    let deadline = |terms: &Terms| terms.due.is_some() && terms.blame() == Blame::Party;
+    if contract.terms.iter().chain(&contract.standing).any(deadline) {
+        world.tab(contract.party, contract.owner, Class::Asset, contract.loc);
+    }
 }
 
 /// The purpose a contract is written for, with the object it is of: the purpose is the contract's, and nothing

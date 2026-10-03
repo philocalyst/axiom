@@ -21,17 +21,17 @@ use axiom_model::{
     RuntimeDetail, RuntimeFlow, RuntimeTxn,
 };
 
+use crate::Promise;
 use crate::checkpoint::CheckpointPhase;
 use crate::monitor;
 use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
+use crate::promising::Promising;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::statement::is_exchange_cost;
 use crate::timeline::{Fact, Moment, SourceFact, Timeline};
-use crate::{
-    Applied, Cause, Holding, OmittedInputs, Options, Posted, Promise, PromisedFlows, Recorded, Run, State, explain,
-};
+use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
 
 /// The book's state as of some day. Cheap to clone relative to a replay.
 #[derive(Clone)]
@@ -40,9 +40,11 @@ pub struct Ledger<'p, 'b, 's> {
     pub(crate) options: Options,
     /// The last day whose deadlines fire: `options.today`, or the journal's
     /// last fact if that is later.
-    horizon: Day,
+    pub(crate) horizon: Day,
     pub(crate) clock: Clock,
     pub(crate) world: World,
+    /// What a forecast still has to promise: nothing, until [`promise`](Ledger::promise) says what.
+    pub(crate) promising: Promising,
     pub(crate) record: Record,
     pub(crate) scratch: Scratch,
 }
@@ -58,6 +60,23 @@ pub(crate) struct Clock {
     /// retains changes sparsely, so this cursor is needed to resume daily
     /// date-dependent queries without replaying old days.
     pub temporal_through: Option<Day>,
+}
+
+/// What the fold does next.
+#[derive(Clone, Copy)]
+pub(crate) enum Upcoming {
+    /// A fact the journal holds.
+    Fact(Moment),
+    /// An occurrence a forecast promises, at the moment a line that kept it would have: after every flow of its day.
+    Promised(Moment),
+}
+
+impl Upcoming {
+    pub fn at(self) -> Moment {
+        match self {
+            Upcoming::Fact(moment) | Upcoming::Promised(moment) => moment,
+        }
+    }
 }
 
 impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
@@ -89,6 +108,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             horizon: plan.horizon(options.today),
             clock,
             world,
+            promising: Promising::default(),
             record,
             scratch: Scratch::default(),
         }
@@ -110,6 +130,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             horizon: self.horizon,
             clock: self.clock.clone(),
             world: self.world.clone(),
+            promising: self.promising.clone(),
             record: self.record.forked(),
             scratch: Scratch::default(),
         }
@@ -263,13 +284,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         txn: axiom_model::RuntimeTxn,
         flow_ordinal: u32,
     ) -> Applied {
-        let (was, before) = (self.clock.day, self.clock.phase);
         let day = flow.day.max(self.clock.day);
-        self.advance_through(Moment::after_flows(day));
-        self.clock.day = day;
-        self.clock.phase =
-            if day > was { CheckpointPhase::AfterFlows } else { before.max(CheckpointPhase::AfterFlows) };
-        self.enter(day);
+        self.advance_to_flows(day);
         let marks = self.record.marks();
         let number = self.clock.applied;
         self.clock.applied += 1;
@@ -278,6 +294,17 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         self.sample_temporal(day);
         self.world.holdings.tidy();
         self.record.since(marks)
+    }
+
+    /// Folds the journal's facts and the occurrences a forecast promises through the flows of `day`, and stands where a flow
+    /// applied on `day` takes its place: after them, before that day's claim changes, assertions and closings.
+    pub(crate) fn advance_to_flows(&mut self, day: Day) {
+        let (was, before) = (self.clock.day, self.clock.phase);
+        self.advance_through(Moment::after_flows(day));
+        self.clock.day = day;
+        self.clock.phase =
+            if day > was { CheckpointPhase::AfterFlows } else { before.max(CheckpointPhase::AfterFlows) };
+        self.enter(day);
     }
 
     /// What `place` alone holds of `unit`, in quanta.
@@ -302,6 +329,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             adjustments: &record.adjustments,
             violations: &record.violations,
             diagnostics: &record.diagnostics,
+            promises: &record.promises,
+            planned: &record.planned,
+            promised_flows: &record.promised_flows,
+            promised_inputs: &record.promise_missing_inputs,
+            promised_details: &record.promise_runtime_details,
         }
     }
 
@@ -355,32 +387,63 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         }
     }
 
-    /// Consumes every moment up to and including `limit`, and no deadline
-    /// beyond the horizon.
+    /// Consumes every moment up to and including `limit`, and no deadline beyond the horizon.
     pub(crate) fn advance_through(&mut self, limit: Moment) {
         let limit = limit.min(Moment::end_of(self.horizon));
-        loop {
-            let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else {
-                break;
-            };
-            self.miss_through(moment.day);
-            self.sample_temporal_through(moment.day);
-            self.clock.timeline.consume(moment, self.plan);
-            self.clock.day = moment.day;
-            self.enter(moment.day);
-            self.sample_temporal(moment.day);
-            self.step(moment);
-            self.sample_temporal(moment.day);
+        while let Some(next) = self.upcoming().filter(|next| next.at() <= limit) {
+            self.take(next);
         }
         self.miss_through(limit.day);
         self.sample_temporal_through(limit.day);
     }
 
+    /// What the fold does next: the journal's next fact, or the next occurrence a forecast promises, whichever is first.
+    pub(crate) fn upcoming(&self) -> Option<Upcoming> {
+        let fact = self.clock.timeline.peek().map(Upcoming::Fact);
+        let promised = self.promising.next_due().map(|due| Upcoming::Promised(Moment::after_flows(due)));
+        match (fact, promised) {
+            (Some(fact), Some(promised)) if promised.at() < fact.at() => Some(promised),
+            (fact, promised) => fact.or(promised),
+        }
+    }
+
+    /// Does what `next` is, which must be the one [`upcoming`](Ledger::upcoming) returned.
+    pub(crate) fn take(&mut self, next: Upcoming) {
+        match next {
+            Upcoming::Fact(moment) => {
+                self.clock.timeline.consume(moment, self.plan);
+                self.on_day(moment.day, |ledger| ledger.step(moment));
+            }
+            Upcoming::Promised(moment) => self.on_day(moment.day.max(self.clock.day), Ledger::fall_due),
+        }
+    }
+
+    /// Stands on `day` and does one fact of it, in the order every fact is done: what can no longer be kept is missed
+    /// first (a line dated this day is out of its reach), and the temporal state is sampled before and after.
+    fn on_day(&mut self, day: Day, fact: impl FnOnce(&mut Self)) {
+        self.miss_through(day);
+        self.sample_temporal_through(day);
+        self.clock.day = day;
+        self.enter(day);
+        self.sample_temporal(day);
+        fact(self);
+        self.sample_temporal(day);
+    }
+
     /// Records the occurrences that can no longer be kept as of `day`: each comes before the facts of the day it is
     /// missed on, since a line dated that day is out of its reach.
     fn miss_through(&mut self, day: Day) {
-        let (promises, record) = (&self.plan.book.promises, &mut self.record);
-        self.world.monitor.miss_through(promises, day, |missed| record.promises.push(missed));
+        let mut missed = Vec::new();
+        self.world.monitor.miss_through(&self.plan.book.promises, day, |promise, found| missed.push((promise, found)));
+        self.record_missed(missed);
+    }
+
+    /// Records occurrences nothing kept, each with the day it was found missed, and claims what a party owed.
+    pub(crate) fn record_missed(&mut self, missed: Vec<(Promise, Day)>) {
+        for (promise, found) in missed {
+            let claimed = self.claim_missed(promise, found);
+            self.record.promises.push(Promise { claimed, ..promise });
+        }
     }
 
     fn step(&mut self, moment: Moment) {
@@ -400,131 +463,6 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             Fact::Assert(index) => self.reconcile(index as usize),
             Fact::Deadline(rule, period) => self.deadline(rule as usize, moment.day, period),
         }
-    }
-
-    /// Posts a written contract occurrence through the canonical materializer.
-    /// The occurrence transaction's flows are metadata overlays, not journal
-    /// movements; only the runtime flows produced here are posted.
-    fn post_written_occurrence(&mut self, txn_id: Id<axiom_model::Txn>, day: Day) {
-        let book = self.plan.book;
-        let Some(txn) = book.txns.get(txn_id) else { return };
-        let (Some(contract_id), Some(schedule), Some(written_id)) =
-            (txn.contract, txn.contract_schedule, txn.occurrence)
-        else {
-            self.record.report(
-                Diagnostic::error(
-                    "contract-occurrence-source",
-                    "this transaction does not identify a complete contract occurrence",
-                )
-                .label(txn.loc, "the occurrence cannot be materialized"),
-            );
-            return;
-        };
-        let Some(written) = book.written_occurrences.get(written_id) else {
-            self.record.report(
-                Diagnostic::error(
-                    "contract-occurrence-source",
-                    "this transaction points at a missing occurrence record",
-                )
-                .label(txn.loc, "the occurrence cannot be materialized"),
-            );
-            return;
-        };
-        let due = written.due;
-        if book.contracts.get(contract_id).is_none() {
-            self.record.report(
-                Diagnostic::error("contract-occurrence-source", "this occurrence points at a missing contract")
-                    .label(txn.loc, "the occurrence cannot be materialized"),
-            );
-            return;
-        }
-        let ordinal = book.promises.schedule(contract_id, schedule).and_then(|schedule| schedule.ordinal(due));
-        let Some(ordinal) = ordinal else {
-            self.record.report(
-                Diagnostic::error("contract-occurrence-source", "this occurrence is not part of its contract schedule")
-                    .label(txn.loc, "the occurrence cannot be materialized"),
-            );
-            return;
-        };
-
-        // Reuse pools between source occurrences. Taking them from Scratch
-        // keeps the materializer borrow disjoint from the mutable posting path.
-        let mut flows = std::mem::take(&mut self.scratch.runtime_flows);
-        let mut details = std::mem::take(&mut self.scratch.runtime_details);
-        let mut missing = std::mem::take(&mut self.scratch.missing_inputs);
-        flows.clear();
-        details.truncate(0);
-        missing.clear();
-        let made = self.instantiate_occurrence(
-            contract_id,
-            schedule,
-            due,
-            ordinal,
-            Some(txn_id),
-            &mut flows,
-            &mut details,
-            &mut missing,
-        );
-        let made = match made {
-            Ok(made) => made,
-            Err(error) => {
-                self.record.report(
-                    Diagnostic::error(
-                        "contract-occurrence-materialization",
-                        format!("could not materialize this occurrence: {error:?}"),
-                    )
-                    .label(txn.loc, "this written occurrence could not be applied"),
-                );
-                self.scratch.runtime_flows = flows;
-                self.scratch.runtime_details = details;
-                self.scratch.missing_inputs = missing;
-                return;
-            }
-        };
-
-        let flow_start = self.record.promised_flows.len();
-        let missing_start = self.record.promise_missing_inputs.len();
-        let output_flows = made.flows(&flows).unwrap_or_default();
-        let output_missing = made.missing(&missing).unwrap_or_default();
-        for runtime in output_flows {
-            let mut retained = runtime.clone();
-            if let Some(detail_id) = runtime.detail {
-                if let Some(detail) = details.get(detail_id).copied() {
-                    retained.detail = Some(self.record.promise_runtime_details.push(detail));
-                }
-            }
-            self.record.promised_flows.push(retained);
-            let view = book.runtime_flow_view(runtime, &details);
-            let amounts = Amounts::written(&runtime.flow);
-            let motion = Motion::from_view_at(
-                book,
-                view,
-                runtime.txn,
-                Cause::Transaction(txn_id),
-                day,
-                amounts,
-                runtime.ordinal,
-            );
-            self.post(&motion);
-        }
-        self.record.promise_missing_inputs.extend_from_slice(output_missing);
-        let record = &mut self.record;
-        self.world
-            .monitor
-            .settle(&book.promises, contract_id, schedule, ordinal, |missed| record.promises.push(missed));
-        self.record.promises.push(Promise {
-            contract: contract_id,
-            schedule,
-            ordinal,
-            due,
-            kept: Some((day, txn_id)),
-            waived: false,
-            flows: PromisedFlows::of(flow_start..self.record.promised_flows.len()),
-            missing_inputs: OmittedInputs::of(missing_start..self.record.promise_missing_inputs.len()),
-        });
-        self.scratch.runtime_flows = flows;
-        self.scratch.runtime_details = details;
-        self.scratch.missing_inputs = missing;
     }
 
     /// A journal flow as it moves on `day`, its quantities solved.

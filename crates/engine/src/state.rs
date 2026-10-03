@@ -119,6 +119,8 @@ pub(crate) struct Record {
     pub missing: Set<Missing>,
     /// Native contract occurrences already kept by a journal transaction.
     pub promises: Vec<crate::Promise>,
+    /// The occurrences a forecast ledger posted as they fell due.
+    pub planned: Vec<crate::Planned>,
     /// Shared item-level flows for the kept promise ranges.
     pub promised_flows: Vec<RuntimeFlow>,
     /// Runtime detail overrides referenced by `promised_flows`.
@@ -227,6 +229,26 @@ pub(crate) struct Scratch {
     pub runtime_flows: Vec<RuntimeFlow>,
     pub runtime_details: Arena<RuntimeDetail>,
     pub missing_inputs: Vec<u16>,
+}
+
+impl Scratch {
+    /// The pools an occurrence is made into, emptied: they are lent for one occurrence and given back, so that the
+    /// materializer's borrow is apart from the mutable posting path.
+    pub fn take_pools(&mut self) -> (Vec<RuntimeFlow>, Arena<RuntimeDetail>, Vec<u16>) {
+        let (mut flows, mut details, mut missing) = (
+            std::mem::take(&mut self.runtime_flows),
+            std::mem::take(&mut self.runtime_details),
+            std::mem::take(&mut self.missing_inputs),
+        );
+        flows.clear();
+        details.truncate(0);
+        missing.clear();
+        (flows, details, missing)
+    }
+
+    pub fn give_pools(&mut self, flows: Vec<RuntimeFlow>, details: Arena<RuntimeDetail>, missing: Vec<u16>) {
+        (self.runtime_flows, self.runtime_details, self.missing_inputs) = (flows, details, missing);
+    }
 }
 
 impl Clone for Scratch {

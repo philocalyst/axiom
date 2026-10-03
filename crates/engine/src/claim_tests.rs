@@ -53,12 +53,17 @@ fn day(year: i32, month: u32, day: u32) -> Day {
 
 /// Folds the standard book and `lines` through the first of March.
 fn with_run<R>(lines: &str, then: impl FnOnce(&Book, &Run) -> R) -> R {
+    with_run_on(day(2026, 3, 1), lines, then)
+}
+
+/// Folds the standard book and `lines` through `today`.
+fn with_run_on<R>(today: Day, lines: &str, then: impl FnOnce(&Book, &Run) -> R) -> R {
     let text = format!("{BOOK}{lines}");
     let (file, parsed) = axiom_syntax::parse(FileId(0), &text, Folder::default());
     assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
     let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
     assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");
-    then(&book, &crate::run(&book, Options { today: day(2026, 3, 1), relaxed: false }))
+    then(&book, &crate::run(&book, Options { today, relaxed: false }))
 }
 
 /// The model's diagnostics for the standard book and `lines`.
@@ -475,4 +480,132 @@ fn a_claim_place_funded_by_the_owners_own_money_is_not_a_claim_on_a_party() {
     let diagnostics = built("2026-01-02 checking -> owed 300 USD due 2026-02-01 ^i1\n2026-02-15 ^i1 waived\n");
     let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).map(|d| &*d.code).collect();
     assert_eq!(errors, ["claim-writeoff-target"], "{diagnostics:?}");
+}
+
+// ─── A due day past its deadline that nothing kept is a claim on whoever is blamed ───
+
+/// A tenant pays `rent` on the first of each month, five days after it falls due at the latest.
+const RENT: &str = "\
+contract rent with ann
+  1_000 USD monthly on 1 into checking
+  from 2026-01-01
+  due 5d
+";
+
+fn tabs(book: &Book) -> usize {
+    book.places.iter().filter(|(_, place)| matches!(place.role, Role::Tab(_))).count()
+}
+
+fn tab_parcels(book: &Book, run: &Run) -> usize {
+    let tab = book.places.iter().find_map(|(id, place)| matches!(place.role, Role::Tab(_)).then_some(id));
+    tab.map_or(0, |tab| parcels(book, run, tab).len())
+}
+
+/// The party was to pay and did not: what it owed is claimed, once for each due day, in the tab the owner keeps with it.
+#[test]
+fn a_due_day_nothing_kept_is_a_claim_on_the_party() {
+    with_run(RENT, |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("", 1_000_00), ("", 1_000_00)]), "January and February");
+        assert!(said(run, "missed-occurrence").is_empty(), "a claim is said as overdue, not as missed as well");
+    });
+}
+
+/// A line that kept the due day made the payment, so nothing is owed for it.
+#[test]
+fn a_due_day_a_line_kept_is_no_claim() {
+    let lines = format!("{RENT}2026-01-03 rent\n");
+    with_run(&lines, |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("", 1_000_00)]), "only February");
+    });
+}
+
+/// The claim is made on the day the due day is missed: past the reach of its schedule, which for a month is half a month,
+/// and not before.
+#[test]
+fn the_claim_is_made_the_day_the_due_day_is_missed() {
+    let text = "contract rent with ann\n  1_000 USD monthly on 1 into checking\n  from 2026-02-01\n  due 5d\n";
+    with_run_on(day(2026, 2, 16), text, |book, run| assert_eq!(tab_parcels(book, run), 0));
+    with_run_on(day(2026, 2, 17), text, |book, run| assert_eq!(tab_parcels(book, run), 1));
+}
+
+/// What the tab holds is made on the day each due day was missed, and not on the day it fell due or the day the fold is run to.
+#[test]
+fn a_claim_is_dated_the_day_it_was_made() {
+    with_run(RENT, |book, run| {
+        let tab = book.places.iter().find_map(|(id, place)| matches!(place.role, Role::Tab(_)).then_some(id)).unwrap();
+        let made: Vec<_> =
+            run.holdings.iter().filter(|holding| holding.place == tab).flat_map(|holding| &holding.lots).collect();
+        let days: Vec<_> = made.iter().map(|lot| lot.acquired.to_string()).collect();
+        assert_eq!(days, ["2026-01-17", "2026-02-17"]);
+    });
+}
+
+/// A deadline longer than the reach is the later of the two: it is not missed while the party may still pay.
+#[test]
+fn a_deadline_longer_than_the_reach_delays_the_claim() {
+    let text = "contract rent with ann\n  1_000 USD monthly on 1 into checking\n  from 2026-02-01\n  due 30d\n";
+    with_run_on(day(2026, 3, 3), text, |book, run| assert_eq!(tab_parcels(book, run), 0));
+    with_run_on(day(2026, 3, 4), text, |book, run| assert_eq!(tab_parcels(book, run), 1));
+}
+
+/// A later payment from the party settles what it owes as any payment does: the oldest claim, when none is exact.
+#[test]
+fn a_later_payment_from_the_party_settles_the_claim() {
+    let lines = format!("{RENT}2026-02-20 ann -> checking 600 USD\n");
+    with_run(&lines, |book, run| {
+        assert_eq!(tab(book, run, "ann"), claims(&[("", 400_00), ("", 1_000_00)]), "January, less what was paid");
+    });
+}
+
+/// A contract that gives no deadline has no day on which it fails: it is missed, and warned of, and nothing is claimed.
+#[test]
+fn a_contract_with_no_deadline_makes_no_claim() {
+    let text = "contract rent with ann\n  1_000 USD monthly on 1 into checking\n  from 2026-01-01\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 0);
+        assert_eq!(tabs(book), 0, "nor is a tab asked for");
+        assert_eq!(said(run, "missed-occurrence").len(), 1);
+    });
+}
+
+/// An occurrence that cannot be made owes nothing that can be said, so it is warned of as missed, as it was before a miss
+/// could be a claim.
+#[test]
+fn an_occurrence_that_cannot_be_made_is_warned_of_and_claims_nothing() {
+    let text = "param cpi\n  2026-12-01 100\ncontract rent with ann\n  1_000 USD monthly on 1 into checking\n  from 2026-01-01\n  indexed to cpi yearly\n  due 5d\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 0);
+        assert_eq!(said(run, "missed-occurrence").len(), 1);
+    });
+}
+
+/// A claim the monitor made has no purpose: it recognizes nothing and no law that counts a purpose's flows counts it, as
+/// nothing reads `books cash|accrual` yet to say whether it should.
+#[test]
+fn a_claim_the_monitor_made_has_no_purpose_for_a_law_to_count() {
+    let text = "purpose gigs : income\n  law per-flow\n    on flow\n    owe 1 USD to treasury by date(2026, 12, 31) as per-flow\nentity treasury\ncontract rent with ann\n  1_000 USD monthly on 1 into checking #gigs\n  from 2026-01-01\n  due 5d\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 2, "January and February");
+        assert!(run.effects.is_empty(), "no law counted a claim: {:?}", run.effects);
+    });
+}
+
+/// A header that is no amount owes nothing, so there is nothing to claim of it: it is warned of as missed.
+#[test]
+fn an_occurrence_of_no_amount_is_warned_of_and_claims_nothing() {
+    let text = "contract rent with ann\n  0 USD monthly on 1 into checking\n  from 2026-01-01\n  due 5d\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 0);
+        assert_eq!(said(run, "missed-occurrence").len(), 1);
+    });
+}
+
+/// What the owner was to pay is not a claim of the owner's: a debt is a plain balance and no payment to the party settles it.
+#[test]
+fn what_the_owner_failed_to_pay_is_not_claimed() {
+    let text = "contract rent with ann\n  1_000 USD monthly on 1 from checking\n  from 2026-01-01\n  due 5d\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 0);
+        assert_eq!(said(run, "missed-occurrence").len(), 1);
+    });
 }

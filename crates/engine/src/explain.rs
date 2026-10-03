@@ -933,8 +933,8 @@ pub(crate) fn overdue(
     lot: &Parcel,
     today: Day,
 ) -> Option<Diagnostic> {
-    let claim = book.paid_into(lot.txn.source_txn()?, place)?;
-    let due = book.flow_view(claim).detail().due.filter(|&due| due <= today)?;
+    let claim = book.claim_of(lot.txn, place)?;
+    let due = claim.due.filter(|&due| due <= today)?;
     let who = claim.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
     let owed = book.show(Amount::new(lot.qty, unit));
     let late = today.0 - due.0;
