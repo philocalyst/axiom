@@ -1134,17 +1134,6 @@ warning[overdue]: brightwave still owes 3,200.00 USD, 288 days past its due day 
   = note: open for 10m14d since it was made
   = help: if it has been paid, record the payment `for` the claim's code
 
-warning[overdue]: delta-rugs still owes 3,800.00 USD, 288 days past its due day 2025-07-02
-  ╭─[journal/2025/06.ax:9:3]
-  │
-8 │ 2025-06-02 delta-rugs owes me due 30d ^inv-2025-d1
-9 │   3_800 USD #design
-  │   ────────┬────────
-  │           ╰── claimed on 2025-06-02, due 2025-07-02
-  │
-  = note: open for 10m14d since it was made
-  = help: if it has been paid, record the payment `for` the claim's code
-
 warning[overdue]: brightwave still owes 3,200.00 USD, 259 days past its due day 2025-07-31
   ╭─[journal/2025/07.ax:2:3]
   │
@@ -1244,6 +1233,17 @@ warning[overdue]: brightwave still owes 3,200.00 USD, 134 days past its due day 
   = note: open for 5m13d since it was made
   = help: if it has been paid, record the payment `for` the claim's code
 
-… 9 more diagnostics not shown (9 warnings); `--all` shows every one
+warning[overdue]: fernhill still owes 3,100.00 USD, 125 days past its due day 2025-12-12
+   ╭─[journal/2025/11.ax:18:3]
+   │
+17 │ 2025-11-12 fernhill owes me due 30d ^inv-2025-f4
+18 │   3_100 USD #design
+   │   ────────┬────────
+   │           ╰── claimed on 2025-11-12, due 2025-12-12
+   │
+   = note: open for 5m4d since it was made
+   = help: if it has been paid, record the payment `for` the claim's code
 
-✗ 203 errors · 28 warnings
+… 8 more diagnostics not shown (8 warnings); `--all` shows every one
+
+✗ 203 errors · 27 warnings

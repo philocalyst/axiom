@@ -1052,7 +1052,6 @@ Owed to you
   brightwave    ^inv-2025-b05    3,200.00 USD  2025-05-01  11m15d   2025-05-31  overdue 320d
   fernhill      ^inv-2025-f2     2,800.00 USD  2025-05-09  11m7d    2025-06-08  overdue 312d
   brightwave    ^inv-2025-b06    3,200.00 USD  2025-06-02  10m14d   2025-07-02  overdue 288d
-  delta-rugs    ^inv-2025-d1     3,800.00 USD  2025-06-02  10m14d   2025-07-02  overdue 288d
   brightwave    ^inv-2025-b07    3,200.00 USD  2025-07-01  9m15d    2025-07-31  overdue 259d
   northpeak     ^inv-2025-n1     7,400.00 USD  2025-07-07  9m9d     2025-08-06  overdue 253d
   brightwave    ^inv-2025-b08    3,200.00 USD  2025-08-01  8m15d    2025-08-31  overdue 228d
@@ -1072,4 +1071,4 @@ Owed to you
   orbit-labs    ^inv-2026-o1     6,000.00 USD  2026-03-10  1m6d     2026-04-09  overdue 7d
   brightwave    ^inv-2026-b04    3,200.00 USD  2026-04-01  15d      2026-05-01  in 15d
   ──────────────────────────────────────────────────────────────────────────────────────────
-  Total                        108,000.00 USD
+  Total                        104,200.00 USD
