@@ -39,6 +39,11 @@ impl SourceFile {
         SourceFile { id, path, text, embedded, starts: OnceLock::new() }
     }
 
+    /// The same file, as it reads after an edit: the same number and path, and a text of its own.
+    pub(crate) fn reading(&self, text: String) -> SourceFile {
+        SourceFile::new(self.id, self.path.clone(), Cow::Owned(text), false)
+    }
+
     fn starts(&self) -> &[usize] {
         self.starts.get_or_init(|| {
             let newlines = memchr::memchr_iter(b'\n', self.text.as_bytes()).map(|at| at + 1);
@@ -147,6 +152,11 @@ impl<'t> Sources<'t> {
         self.files.get(index).or_else(|| self.auxiliary.get(index.checked_sub(self.files.len())?)).copied()
     }
 
+    /// The Axiom source of this number: not a data file appended after them.
+    pub fn axiom_file(&self, id: FileId) -> Option<&'t SourceFile> {
+        self.files.get(usize::from(id.0)).copied()
+    }
+
     /// The Axiom sources, in `FileId` order: the project's, then the embedded systems.
     pub fn files(&self) -> impl Iterator<Item = &'t SourceFile> + '_ {
         self.files.iter().copied()
@@ -166,6 +176,17 @@ impl<'t> Sources<'t> {
         let file = SourceFile::new(FileId(index), Cow::Owned(path), Cow::Owned(text), false);
         self.auxiliary.push(self.texts.keep(file));
         Ok(FileId(index))
+    }
+
+    /// These sources with `file` standing for the one of its number: what the book reads after an edit, while the
+    /// others are still the ones the book before it read.
+    pub(crate) fn with<'x>(&self, file: &'x SourceFile) -> Sources<'x>
+    where
+        't: 'x,
+    {
+        let mut next: Sources<'x> = self.clone();
+        next.files[usize::from(file.id.0)] = file;
+        next
     }
 
     /// The relative paths of project-owned `.ax` files, in parse order. Embedded standard systems are
@@ -317,5 +338,17 @@ mod tests {
         let (parsed, diagnostics) = sources.parse();
         assert_eq!(parsed.len(), 1);
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn a_table_cloned_for_a_hypothesis_leaves_the_original_alone() {
+        let texts = Texts::default();
+        let sources = Sources::in_memory(&texts, &[("a.ax", "one\n"), ("b.ax", "two\n")], &[]);
+        let edited = sources.get(FileId(1)).unwrap().reading("three\n".to_string());
+        let hypothesis = sources.with(&edited);
+        assert_eq!(&*hypothesis.get(FileId(1)).unwrap().text, "three\n");
+        assert_eq!(&*hypothesis.get(FileId(0)).unwrap().text, "one\n");
+        assert_eq!(&*sources.get(FileId(1)).unwrap().text, "two\n");
+        assert_eq!(hypothesis.get(FileId(1)).unwrap().path, "b.ax", "an edited file keeps its path and its number");
     }
 }

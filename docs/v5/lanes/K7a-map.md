@@ -174,7 +174,7 @@ What the borrow checker then guarantees (these are the doc tests):
   read from**, and the compiler says so (`E0502`).
 - `what_if<R>(&self, edit, ask: impl FnOnce(&Session<'_>) -> R) -> Result<R, Refused>`: the hypothetical session is a local of
   `what_if`; `ask` is higher-ranked over its lifetime and `R` cannot mention it, so **a report of a state that is gone cannot be
-  returned** (`E0521`/`E0597`). Nothing is added to the arena by a hypothesis.
+  returned** (rustc: "lifetime may not live long enough", no error code). Nothing is added to the arena by a hypothesis.
 - `apply` builds the next session as a *new value* from the edited table and replaces `*self` only on success: a refusal returns
   before anything is assigned, so there is no half-applied state to guard against.
 
