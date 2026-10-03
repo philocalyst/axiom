@@ -706,6 +706,14 @@ impl Env for Reads<'_, '_, '_, '_> {
         }
     }
 
+    /// An `=` leg moves the gap to its balance, which is what it takes from the header; an `all` or a `?` is left the
+    /// marker it is.
+    fn lands(&mut self, at: Line, marker: &Resolved) -> Result<Option<Amount>, TemplateError> {
+        let (Line::Leg(index), Infer::Target { end, balance }) = (at, marker.infer) else { return Ok(None) };
+        let flow = &self.legs[index].flow;
+        Ok(Some(Amount::new(self.lent.gap(flow, end, balance), flow.amount_at(end).unit)))
+    }
+
     fn payment(&mut self, at: Line) -> Result<Answer, TemplateError> {
         let reading = self.site(at).0;
         let contract = &self.lent.plan.book.contracts[reading.contract];
@@ -1180,6 +1188,7 @@ contract rent with landlord
         let due = book.txns[written].day;
         let plan = Plan::new(&book);
         let mut ledger = plan.start(Options { today: due, relaxed: false });
+        ledger.advance(Day(due.0 - 1));
         let (mut flows, mut details, mut missing) = (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
         let occurrence = book.written_occurrences[book.txns[written].occurrence.unwrap()].due;
         let made = ledger
@@ -1229,6 +1238,29 @@ contract rent with landlord
                 ("reserve".to_owned(), 2_000, 3)
             ]
         );
+    }
+
+    #[test]
+    fn a_target_leg_takes_the_gap_to_its_balance_from_the_header_and_not_the_balance() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+account checking
+account savings
+entity landlord
+opening 2026-01-01
+  checking 5_000 USD
+  savings 500 USD
+contract rent with landlord
+  100 USD monthly on 1 from checking
+  savings = 530 USD
+  from 2026-01-01
+2026-02-01 rent
+";
+        let rows = kept_rent(source, Day::from_ymd(2026, 2, 1).unwrap());
+        // savings holds 500.00, so the leg moves 30.00 and the landlord is paid what is left of the 100.00
+        assert_eq!(rows, [("landlord".to_owned(), 7_000, 0), ("savings".to_owned(), 3_000, 1)]);
     }
 
     #[test]

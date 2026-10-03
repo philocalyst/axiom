@@ -5,8 +5,8 @@
 //! given, and in what they make of a fault, and each of those is the caller's: what this module does once is the
 //! reading itself, so that the three cannot drift into three ways of building a motion, an occasion and a context.
 
-use axiom_core::Day;
-use axiom_model::{Amount, Flow, NodeId, Program, RuntimeTxn, Subject, Value};
+use axiom_core::{Day, Qty};
+use axiom_model::{Amount, End, Flow, NodeId, Program, RuntimeTxn, Subject, Value};
 
 use crate::Cause;
 use crate::eval;
@@ -46,6 +46,19 @@ pub(crate) struct Lent<'a, 'p, 'b, 's> {
 }
 
 impl Lent<'_, '_, '_, '_> {
+    /// What leaves the source or arrives at the target of `flow` so that the place holds `balance` afterwards, as the
+    /// world stands: the gap an `=` leg moves. Nothing when the place is already past it (the fold says so when the
+    /// flow lands).
+    pub fn gap(&self, flow: &Flow, end: End, balance: Qty) -> Qty {
+        let (place, unit) = match end {
+            End::From => (flow.from, flow.out.unit),
+            End::To => (flow.to, flow.arrive.unit),
+        };
+        let (held, target) = (self.world.holdings.qty(place, unit), self.plan.sides.display(place, balance));
+        let gap = if end == End::From { held - target } else { target - held };
+        if gap.is_negative() { Qty::ZERO } else { gap }
+    }
+
     /// What the node `root` of `reading.program` computes for `flow`.
     pub fn value(&mut self, flow: &Flow, root: NodeId, reading: &Evaluating<'_>) -> Value {
         let book = self.plan.book;

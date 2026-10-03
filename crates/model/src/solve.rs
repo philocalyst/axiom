@@ -652,8 +652,8 @@ mod tests {
     }
 
     #[test]
-    fn a_target_leg_carves_its_balance_from_the_header_as_though_it_were_an_amount() {
-        // What the fold does today, kept: the stand-in of `= 90_000 USD` is its balance.
+    fn a_target_leg_nothing_reads_the_book_for_carves_its_balance_as_the_amount_it_stands_in_for() {
+        // With an environment that does not read the book, the stand-in of `= 90_000 USD` is its balance.
         let target = pays(Part::Of(Quantity::Target(Expr::Literal(usd(90_000)))));
         let solved = literal(transfer(1_000), &[pays(of(usd(200))), target, pays(Part::Rest)], &[]).unwrap();
         assert_eq!(amounts(&solved), [200, 90_000, -89_200]);
