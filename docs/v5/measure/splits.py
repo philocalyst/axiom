@@ -1013,7 +1013,7 @@ def exchanged(rng, day, forms):
     total = rng.choice(range(800, 1201, 20))
     fees = [rng.randint(1, 30) for _ in range(rng.choice([1, 1, 2]))]
     left = total - sum(fees)
-    euros = left * rng.choice([85, 90, 92]) // 100
+    euros = min(left * rng.choice([85, 90, 92]) // 100, 990)  # checking holds 1,000 EURX
     ends = rng.sample(["shop", "acme", "buyer"], len(fees))
     forms["exchange:" + ("from" if from_side else "to")] += 1
     forms["exchange:fees:%d" % len(fees)] += 1
