@@ -1041,17 +1041,10 @@ error[assertion]: personal-checking holds 40,485.76 USD, not 4,406.81 USD
 Claims on 2026-04-16
 
 Owed to you
-  Counterparty  What                    Left  Made        Age      Due         Status
-  ─────────────────────────────────────────────────────────────────────────────────────────
-  fernhill      ^inv-2025-f1      130.80 USD  2025-02-14  1y2m2d   2025-03-16  overdue 396d
-  orbit-labs    ^inv-2025-o1       30.00 USD  2025-03-03  1y1m13d  2025-04-02  overdue 379d
-  fernhill      ^inv-2025-f2       81.50 USD  2025-05-09  11m7d    2025-06-08  overdue 312d
-  fernhill      ^inv-2025-f3      180.10 USD  2025-08-18  7m29d    2025-09-17  overdue 211d
-  orbit-labs    ^inv-2025-o2       15.00 USD  2025-09-22  6m25d    2025-10-22  overdue 176d
-  fernhill      ^inv-2025-f4       90.20 USD  2025-11-12  5m4d     2025-12-12  overdue 125d
-  northpeak     ^inv-2025-n3    2,600.00 USD  2025-12-01  4m15d    2025-12-31  overdue 106d
-  fernhill      ^inv-2026-f1      139.50 USD  2026-02-20  1m27d    2026-03-22  overdue 25d
-  orbit-labs    ^inv-2026-o1    6,000.00 USD  2026-03-10  1m6d     2026-04-09  overdue 7d
-  brightwave    ^inv-2026-b04   3,200.00 USD  2026-04-01  15d      2026-05-01  in 15d
-  ─────────────────────────────────────────────────────────────────────────────────────────
-  Total                        12,467.10 USD
+  Counterparty  What                    Left  Made        Age    Due         Status
+  ───────────────────────────────────────────────────────────────────────────────────────
+  northpeak     ^inv-2025-n3    2,600.00 USD  2025-12-01  4m15d  2025-12-31  overdue 106d
+  orbit-labs    ^inv-2026-o1    6,000.00 USD  2026-03-10  1m6d   2026-04-09  overdue 7d
+  brightwave    ^inv-2026-b04   3,200.00 USD  2026-04-01  15d    2026-05-01  in 15d
+  ───────────────────────────────────────────────────────────────────────────────────────
+  Total                        11,800.00 USD

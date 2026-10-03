@@ -4,8 +4,8 @@
 //! driver writes a Cargo.toml with path dependencies on the crates of the tree) and runs it over generated projects. It
 //! says, for a project folded to 2026-06-30: every holding with every field of every parcel (the claim parcels among
 //! them, each with the codes of the transaction that made it), the gains, the adjustments the laws made, the parts of every
-//! asset and what disposed it, the wash-sale carries still waiting, every diagnostic, and with the `new` feature the claims
-//! a `waived` statement forgave. The reports are compared by the driver through the CLI, so this is the engine's own state.
+//! asset and what disposed it, the wash-sale carries still waiting, what each law counted (`effects`), every diagnostic, and with
+//! the `new` feature the claims a `waived` statement forgave. The reports are compared by the driver through the CLI, so this is the engine's own state.
 
 use axiom_core::{Day, FileId};
 use axiom_engine::{Options, Parcel, Run};
@@ -57,6 +57,10 @@ fn main() {
     println!("== posted {}", run.posted.len());
     for posted in run.posted.iter() {
         println!("posted {posted:?}");
+    }
+    println!("== effects {}", run.effects.len());
+    for effect in &run.effects {
+        println!("effect {} {} {}", book.name(effect.name), effect.day, effect.amount.qty.0);
     }
     println!("== diagnostics {}", run.diagnostics.len());
     for d in &run.diagnostics {

@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity fernhill : org
+entity stripe : org
+account business-checking : bank
+purpose design : income
+purpose business-fees : spending
+2026-01-01 market -> business-checking 1_000 USD
+2026-01-02 fernhill owes me 3_100 USD due 2026-02-01 #design ^i1
+2026-01-20 fernhill -> 3_100 USD #design ^i1
+  business-checking 3_009.80 USD
+  stripe 90.20 USD #business-fees

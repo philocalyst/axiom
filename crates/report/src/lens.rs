@@ -168,19 +168,6 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
             .sum()
     }
 
-    pub fn purpose_direction(
-        self,
-        from: Id<Place>,
-        to: Id<Place>,
-        root: axiom_model::PurposeRoot,
-    ) -> Option<axiom_model::Dir> {
-        axiom_engine::purpose_direction(
-            self.book().places[from].class != Class::Outside && self.owns(from),
-            self.book().places[to].class != Class::Outside && self.owns(to),
-            root,
-        )
-    }
-
     pub(crate) fn plan(self) -> &'p Plan<'b, 's> {
         self.plan
     }

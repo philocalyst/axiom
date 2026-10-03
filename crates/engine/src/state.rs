@@ -22,9 +22,10 @@ use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
 use crate::monitor::Monitor;
 use crate::motion::Amounts;
+use crate::recognition::{Piece, Settlement};
 use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
-use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Parcel, Violation, WriteOff};
+use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation, WriteOff};
 
 #[derive(Clone)]
 pub(crate) struct World {
@@ -48,14 +49,6 @@ impl World {
             temporal: TemporalHistory::default(),
         }
     }
-}
-
-/// What a payment from a party settled: the claims it took out of the tab that held them.
-#[derive(Clone, Hash)]
-pub(crate) struct Settled {
-    pub tab: Id<Place>,
-    pub unit: Id<Commodity>,
-    pub parcels: Box<[Parcel]>,
 }
 
 /// Where the assertions on one place and commodity left off.
@@ -85,7 +78,10 @@ pub(crate) struct Record {
     /// Statements whose split could not be solved when its first flow landed: said once, and none of its flows posts.
     pub unsolved: Set<Id<axiom_model::Txn>>,
     /// The claims each flow from a party settled, as the parcels they were: a flow that is returned puts them back.
-    pub settled: Map<Id<Flow>, Settled>,
+    pub settled: Map<Id<Flow>, Settlement>,
+    /// What each journal flow settled, in the order the fold did it, and kept after a return forgets it from `settled`:
+    /// the readers of a day before the return see the flow as it was.
+    pub settlements: Vec<(Id<Flow>, Settlement)>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     /// Basis changes caused by timed asset laws and deferred-loss matching.
@@ -217,6 +213,8 @@ pub(crate) struct Scratch {
     pub permits: Vec<(Id<Entity>, bool)>,
     /// What a flow out of a claim place selects: its written selectors and the claims its own codes name.
     pub selectors: Vec<Select>,
+    /// What the flow being posted counts toward which purposes (`recognition`), for the laws that fire on each.
+    pub pieces: Vec<Piece>,
     /// What each amount of the flow being posted is worth in the base currency
     /// on its day: the totals, the proceeds and the fee each ask, and a price
     /// is looked up once.

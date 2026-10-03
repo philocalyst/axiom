@@ -12,8 +12,8 @@
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
 use axiom_model::promise::Blame;
 use axiom_model::{
-    Asset, Book, Commodity, Contract, Entity, Field, Flow, Func, Kind, Op, Place, Rule, ScheduleKind, Subject, Txn, Ty,
-    Value, Var,
+    Asset, Book, Class, Commodity, Contract, Entity, Field, Flow, Func, Kind, Op, Place, Rule, ScheduleKind, Subject,
+    Txn, Ty, Value, Var,
 };
 
 use crate::events::{self, Events};
@@ -201,6 +201,17 @@ impl<'b, 's> Plan<'b, 's> {
     }
 
     /// The names looked up by spelling, resolved once.
+    /// Whether a flow between these places makes a claim, or takes one back: value between a party and a place that holds
+    /// what is owed. What it counts as is `recognition`'s to say.
+    pub fn makes_claim(&self, from: Id<Place>, to: Id<Place>) -> bool {
+        let (book, traits) = (self.book, &self.traits);
+        let outside = |place: Id<Place>| book.places[place].class == Class::Outside;
+        // The traits of a place are compact, and nearly no place is a claim place: ask them before the places.
+        let made = traits.place(to).claim && outside(from);
+        let unmade = traits.place(from).claim && outside(to) && book.places[from].class == Class::Asset;
+        made || unmade
+    }
+
     pub fn known(&self) -> Known {
         self.known
     }

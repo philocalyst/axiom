@@ -358,7 +358,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let mut headroom = std::mem::take(&mut self.record.passed);
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading));
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
-        let Ledger { plan, options, horizon, mut world, record, .. } = self;
+        let Ledger { plan, options, horizon, mut world, mut record, .. } = self;
+        record.settlements.sort_unstable_by_key(|&(flow, _)| flow);
         world.assets.expire_carries_through(horizon);
         let (assets, pending_carries) = world.assets.into_run_parts();
         Run {
@@ -370,6 +371,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             effects: record.effects,
             adjustments: record.adjustments,
             written_off: record.written_off,
+            settlements: record.settlements.into(),
             pending_carries,
             violations: record.violations,
             headroom,
@@ -573,7 +575,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// the plan's; `=` and `all` depend on the balance and are resolved now,
     /// once, and remembered (a reversal must undo exactly what was done).
     pub(crate) fn amounts(&mut self, flow: &Flow, id: Option<Id<Flow>>) -> Amounts {
-        if let Some(done) = id.and_then(|id| settled(self.plan, &self.record, id, flow)) {
+        if let Some(done) = id.and_then(|id| solved(self.plan, &self.record, id, flow)) {
             return done;
         }
         let written = Amounts::written(flow);
@@ -638,7 +640,7 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
     let mut all = Vec::with_capacity(book.flows.len());
     let post = |id: Id<Flow>| {
         let flow = &book.flows[id];
-        let amounts = settled(plan, record, id, flow).unwrap_or_else(|| Amounts::written(flow));
+        let amounts = solved(plan, record, id, flow).unwrap_or_else(|| Amounts::written(flow));
         Posted { out: amounts.out, arrive: amounts.arrive, state: plan.events.state(id, flow) }
     };
     let stretch = |&first: &usize| {
@@ -649,10 +651,10 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
     all.into()
 }
 
-/// A flow's quantities where they are already settled: as written, as the
+/// A flow's quantities where they are already solved: as written, as the
 /// plan solved a `?`, or as the fold resolved an `=` or `all`. Only the last
 /// depends on the fold, and only it is looked up in the record.
-fn settled(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
+pub(crate) fn solved(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
     match flow.infer {
         Infer::Known => Some(record.resolved.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),
         Infer::Unknown => Some(plan.amounts.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),

@@ -179,7 +179,8 @@ mod tests {
                 (flow, Posted { out: Qty(150_000), arrive: Qty(quanta), state: State::Actual })
             })
             .into();
-        let group: Vec<Posting> = buys.iter().map(|(flow, posted)| Posting { id: template, flow, posted }).collect();
+        let group: Vec<Posting> =
+            buys.iter().map(|(flow, posted)| Posting { id: template, flow, posted, settlement: None }).collect();
         // The last buy fetched 5.400 shares for 1,500.00: the projection buys the same 1,500.00
         // at that price, not the median share count at some other cost.
         let habit = habit(&house.book, &group, day(2026, 4, 20)).expect("a monthly standing order");

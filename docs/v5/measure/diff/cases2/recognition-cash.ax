@@ -1,0 +1,15 @@
+use std
+base USD
+entity me : person
+  books cash
+entity ann : org
+account checking : bank
+purpose design : income
+  law seen
+    on flow
+    count amount as receipts
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 ann owes me 300 USD due 2026-02-01 #design ^i1
+2026-01-03 ann owes me 200 USD due 2026-02-01 #design ^i2
+2026-01-20 ann -> checking 400 USD ^i1
+2026-02-15 ^i2 waived "not collected"

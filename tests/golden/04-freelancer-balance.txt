@@ -1054,15 +1054,13 @@ Balances at 2026-04-16
   ────────────────────────────────
   brightwave          3,200.00 USD
   ────────────────────────────────
-  fernhill              622.10 USD
-  ────────────────────────────────
   northpeak           2,600.00 USD
   ────────────────────────────────
-  orbit-labs          6,045.00 USD
+  orbit-labs          6,000.00 USD
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       109,378.22 USD
+  Assets       108,711.12 USD
   Liabilities   -3,909.03 USD
   ───────────────────────────
-  Net worth    113,287.25 USD
+  Net worth    112,620.15 USD

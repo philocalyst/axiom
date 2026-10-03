@@ -8,11 +8,13 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Days, Id, Map, Qty, spread};
-use axiom_engine::Run;
-use axiom_model::{Action, Amount, Book, Class, Commodity, Entity, Object, Period, Place, Purpose, PurposeRoot};
+use axiom_engine::{Counting, Counts, Piece, Posted, Run, Share};
+use axiom_model::{
+    Action, Amount, Book, Class, Commodity, Dir, Entity, Flow, Object, Period, Place, Purpose, PurposeRoot, Purposed,
+};
 
 use crate::calendar::Periods;
-use crate::history::{Posting, postings};
+use crate::history::postings;
 use crate::lens::Lens;
 use crate::places::path;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
@@ -74,12 +76,6 @@ impl Grid {
             self.cells[into * self.width + period] += value;
         }
     }
-}
-
-/// The postings that stand on the lens's day and moved money its owner holds.
-fn owned_postings<'a>(lens: Lens<'a, '_, '_, '_>, run: &'a Run) -> impl Iterator<Item = Posting<'a>> {
-    postings(lens.book(), run)
-        .filter(move |posting| posting.is_real_on(lens.day) && lens.owns(movement_place(lens, posting.flow)))
 }
 
 /// The periods a flow report covers: from the day asked for, else from the first activity, the last twelve.
@@ -151,25 +147,24 @@ impl PartyTotals {
     fn of(lens: Lens<'_, '_, '_, '_>, run: &Run, periods: Periods) -> PartyTotals {
         let book = lens.book();
         let mut totals = PartyTotals { rows: Map::default(), grid: Grid::new(periods.len()), unpriced: 0 };
-        let mut shares = MovementShares::default();
-        for posting in owned_postings(lens, run) {
-            let flow = posting.flow;
-            let Some(purpose) = flow.purpose else { continue };
+        let classified = |_: &Flow, piece: &Piece| piece.purpose.is_some();
+        for_each_counted(lens, run, lens.day, classified, |counted| {
+            let Counted { flow, purpose: Some(purpose), recognized, amount, .. } = counted else { return };
             let root = book.purposes[purpose.purpose].root;
-            let Some(amount) = movement_in_base_with(lens, posting, Some(root), &mut shares) else {
+            let Some(amount) = amount else {
                 totals.unpriced += 1;
-                continue;
+                return;
             };
             // The end that is not the book's own: where the money came from, or went.
             let other = if book.places[flow.from].class == Class::Outside { flow.from } else { flow.to };
             let party = flow.payee.map_or(Party::Place(other), Party::Entity);
             let mut row = None;
-            spread_over(periods, flow.recognized, lens.day, amount, |period, part| {
+            spread_over(periods, recognized, lens.day, amount, |period, part| {
                 let at =
                     *row.get_or_insert_with(|| *totals.rows.entry((root, party)).or_insert_with(|| totals.grid.push()));
                 totals.grid.row_mut(at)[period] += part;
             });
-        }
+        });
         totals
     }
 
@@ -280,26 +275,22 @@ impl<'s> PurposeTotals<'s> {
             unpriced: 0,
             spread: false,
         };
-        let mut shares = MovementShares::default();
-        for posting in owned_postings(lens, run) {
-            totals.add(lens, periods, posting, &mut shares);
-        }
+        for_each_counted(lens, run, lens.day, |_, _| true, |counted| totals.add(lens, periods, counted));
         totals
     }
 
-    /// Adds one posting to the purpose it is for, and the object of that, or to those with no purpose.
-    fn add(&mut self, lens: Lens<'s, '_, '_, '_>, periods: Periods, posting: Posting<'_>, shares: &mut MovementShares) {
-        let (book, flow) = (lens.book(), posting.flow);
-        self.spread |= flow.recognized.last() > flow.day;
-        let root = flow.purpose.map(|purpose| book.purposes[purpose.purpose].root);
-        let Some(amount) = movement_in_base_with(lens, posting, root, shares) else {
+    /// Adds what one posting counts to the purpose it is for, and the object of that, or to those with no purpose.
+    fn add(&mut self, lens: Lens<'s, '_, '_, '_>, periods: Periods, counted: Counted<'_>) {
+        let (book, Counted { flow, purpose, day, recognized, amount }) = (lens.book(), counted);
+        self.spread |= recognized.last() > day;
+        let Some(amount) = amount else {
             self.unpriced += 1;
             return;
         };
-        let touches = periods.overlapping(flow.recognized.first(), flow.recognized.last()).next().is_some();
+        let touches = periods.overlapping(recognized.first(), recognized.last()).next().is_some();
         let moved = touches && !amount.is_zero();
-        let spreading = |row: &mut [Qty]| add_recognized(row, periods, flow.recognized, lens.day, amount);
-        match flow.purpose {
+        let spreading = |row: &mut [Qty]| add_recognized(row, periods, recognized, lens.day, amount);
+        match purpose {
             Some(purpose) => {
                 spreading(self.purposes.row_mut(purpose.purpose.index()));
                 self.active[purpose.purpose.index()] |= moved;
@@ -550,14 +541,6 @@ fn push_measures<'s>(
     }
 }
 
-pub(crate) fn movement_in_base(
-    lens: Lens<'_, '_, '_, '_>,
-    posting: Posting<'_>,
-    root: Option<PurposeRoot>,
-) -> Option<Qty> {
-    movement_in_base_with(lens, posting, root, &mut MovementShares::default())
-}
-
 /// Carries rounding boundaries across postings at each physical endpoint.
 /// This makes statement rows conserve the same cents as the corresponding
 /// register balance when many small movements share one place.
@@ -583,43 +566,134 @@ impl MovementShares {
     }
 }
 
-pub(crate) fn movement_in_base_with(
+/// What one posting counts toward one purpose, or what a written-off claim took back, as the run says.
+pub(crate) struct Counted<'a> {
+    /// The flow it is of: whose payee and description say whom and what it was for.
+    pub flow: &'a Flow,
+    pub purpose: Option<Purposed>,
+    /// The day it counts on: the flow's own, or the day the claim was forgiven.
+    pub day: Day,
+    pub recognized: Days,
+    /// Its value on that day in the base currency, signed by the root of its purpose (income in is positive, spending and
+    /// capital out are negative, a transfer or what has no purpose is its size); `None` where a price is missing.
+    pub amount: Option<Qty>,
+}
+
+/// Calls `each` for everything the postings real on `cutoff` count, in the order of the journal, and then for what the
+/// claims written off by then took back, as the lens owns it and `wanted` asks for it. What a posting counts is
+/// `recognition`'s rule, the one the fold counts the totals and the laws by, so that what a report says of a purpose is
+/// what a limit, a law and the forecast say.
+pub(crate) fn for_each_counted<'a>(
+    lens: Lens<'a, '_, '_, '_>,
+    run: &'a Run,
+    cutoff: Day,
+    wanted: impl Fn(&Flow, &Piece) -> bool,
+    mut each: impl FnMut(Counted<'a>),
+) {
+    let (book, plan) = (lens.book(), lens.plan());
+    let (mut shares, mut pieces) = (MovementShares::default(), Vec::new());
+    for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
+        let (flow, posted) = (posting.flow, posting.posted);
+        Counting::posted(plan, flow, posted, posting.settlement).pieces(book, &mut pieces);
+        for piece in pieces.iter().filter(|piece| wanted(flow, piece)) {
+            let (place, signed) = counted_at(book, flow, posted, piece);
+            if !lens.owns(place) {
+                continue;
+            }
+            let amount = signed.and_then(|signed| priced(lens, flow.day, place, signed, piece, &mut shares));
+            each(Counted { flow, purpose: piece.purpose, day: flow.day, recognized: piece.recognized, amount });
+        }
+    }
+    for Forgiven { day, claim, tab, unit, qty } in forgiven_by(run, book, cutoff) {
+        let flow = &book.flows[claim];
+        Counting::forgiving(plan, flow, day, qty).pieces(book, &mut pieces);
+        for piece in pieces.iter().filter(|piece| wanted(flow, piece) && lens.owns(tab)) {
+            let Share::Part(taken) = piece.share else { continue };
+            let signed = Amount::new(Qty(-taken.0), unit);
+            let amount = priced(lens, day, tab, signed, piece, &mut shares);
+            each(Counted { flow, purpose: piece.purpose, day, recognized: piece.recognized, amount });
+        }
+    }
+}
+
+/// A line of a claim that was forgiven, all its parcels that were open added up: the fold takes it back once.
+struct Forgiven {
+    day: Day,
+    claim: Id<Flow>,
+    tab: Id<Place>,
+    unit: Id<Commodity>,
+    qty: Qty,
+}
+
+/// The claims forgiven by `cutoff`, a line at a time.
+fn forgiven_by(run: &Run, book: &Book<'_>, cutoff: Day) -> Vec<Forgiven> {
+    let mut lines: Vec<Forgiven> = Vec::new();
+    for off in &run.written_off {
+        let day = book.claim_changes[off.change as usize].day;
+        if day > cutoff {
+            continue;
+        }
+        match lines.iter_mut().find(|line| (line.day, line.claim) == (day, off.claim)) {
+            Some(line) => line.qty += off.qty,
+            None => lines.push(Forgiven { day, claim: off.claim, tab: off.place, unit: off.unit, qty: off.qty }),
+        }
+    }
+    lines
+}
+
+/// Where a piece of a posting counts and what of it: the end the flow's ownership moves money through, and its quantity
+/// signed by the way it counts (in is positive); or, for a piece that is a claim settled, the tab that held it. `None` if
+/// the quantity cannot be negated.
+fn counted_at(book: &Book<'_>, flow: &Flow, posted: &Posted, piece: &Piece) -> (Id<Place>, Option<Amount>) {
+    let inbound = book.places[flow.from].class == Class::Outside && book.places[flow.to].class != Class::Outside;
+    let (place, dir) = match piece.counts {
+        Counts::Claim { tab, dir } => (tab, dir),
+        Counts::Flow if inbound => (flow.to, Dir::In),
+        Counts::Flow => (flow.from, Dir::Out),
+    };
+    let side = match dir {
+        Dir::In => Amount::new(posted.arrive, flow.arrive.unit),
+        Dir::Out => Amount::new(posted.out, flow.out.unit),
+    };
+    let qty = match piece.share {
+        Share::Whole => side.qty,
+        Share::Part(qty) => qty,
+    };
+    let signed = match dir {
+        Dir::In => Some(qty),
+        Dir::Out => qty.0.checked_neg().map(Qty),
+    };
+    (place, signed.map(|qty| Amount::new(qty, side.unit)))
+}
+
+/// `signed` at `place` in the base currency on `day`, by the root of the piece's purpose. A flow's declared owner is only
+/// the primary owner: the physical end it moves through carries the effective ownership shares, so the quantity is scoped
+/// there before it is priced. That also keeps a foreign-currency movement's displayed share aligned with the unit posted.
+fn priced(
     lens: Lens<'_, '_, '_, '_>,
-    posting: Posting<'_>,
-    root: Option<PurposeRoot>,
+    day: Day,
+    place: Id<Place>,
+    signed: Amount,
+    piece: &Piece,
     shares: &mut MovementShares,
 ) -> Option<Qty> {
-    let flow = posting.flow;
-    let from_outside = lens.book().places[flow.from].class == Class::Outside;
-    let to_outside = lens.book().places[flow.to].class == Class::Outside;
-    let inbound = from_outside && !to_outside;
-    let (place, amount, signed_qty) = if inbound {
-        let amount = posting.arrive();
-        (flow.to, amount, amount.qty)
-    } else {
-        let amount = posting.out();
-        let signed = Qty(amount.qty.0.checked_neg()?);
-        (flow.from, amount, signed)
-    };
-    // A flow's declared owner is only the primary owner. The physical end it
-    // moves through carries the effective ownership shares, so scope the
-    // quantity there before pricing it. This also keeps a foreign-currency
-    // movement's displayed share aligned with the unit actually posted.
-    let amount = axiom_model::Amount::new(
-        shares.split(lens, place, axiom_model::Amount::new(signed_qty, amount.unit)),
-        amount.unit,
-    );
-    let amount = lens.on(flow.day).value(amount)?;
-    match root {
-        Some(PurposeRoot::Income) => Some(amount),
-        Some(PurposeRoot::Spending | PurposeRoot::Capital) => Some(Qty(amount.0.checked_neg()?)),
-        Some(PurposeRoot::Transfer) | None => Some(Qty(amount.0.checked_abs()?)),
+    let book = lens.book();
+    let amount = Amount::new(shares.split(lens, place, signed), signed.unit);
+    let value = lens.on(day).value(amount)?;
+    match piece.purpose.map(|purpose| book.purposes[purpose.purpose].root) {
+        Some(PurposeRoot::Income) => Some(value),
+        Some(PurposeRoot::Spending | PurposeRoot::Capital) => Some(Qty(value.0.checked_neg()?)),
+        // What passes through counts as the volume it was in either direction, but a claim taken back is not more of it.
+        Some(PurposeRoot::Transfer) | None => {
+            let volume = value.0.checked_abs()?;
+            Some(Qty(if piece.takes_back() { -volume } else { volume }))
+        }
     }
 }
 
 /// The physical endpoint whose amount is used by income/spending reports.
 /// Incoming flows use what reached the owned end; all other flows use what
-/// left the source, matching `movement_in_base`'s direction convention.
+/// left the source, which is the end `counted_at` counts a flow's own pieces at.
 pub(crate) fn movement_place(lens: Lens<'_, '_, '_, '_>, flow: &axiom_model::Flow) -> Id<Place> {
     let book = lens.book();
     if book.places[flow.from].class == Class::Outside && book.places[flow.to].class != Class::Outside {

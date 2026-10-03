@@ -7,7 +7,7 @@
 //! entity and one by commodity, which the fold then reads as it reads a place's class.
 
 use axiom_core::Id;
-use axiom_model::{Basis, Book, Class, Commodity, Entity, Place, Policy, Role};
+use axiom_model::{Basis, Book, Books, Class, Commodity, Entity, Place, Policy, Role};
 
 /// What the fold asks of a place.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,6 +33,8 @@ pub(crate) struct EntityTraits {
     pub restricted: bool,
     /// What it counts in.
     pub currency: Id<Commodity>,
+    /// When its claims count as income or spending.
+    pub books: Books,
 }
 
 /// The traits of every place and entity, and how each commodity relieves parcels.
@@ -57,6 +59,7 @@ impl Traits {
             member: book.member(entity),
             restricted: book.is_restricted(entity),
             currency: book.currency(entity),
+            books: book.books(entity),
         });
         let units = book.commodities.ids().map(|unit| book.select(unit));
         let owed = book.places.iter().filter(|(_, tab)| tab.class == Class::Asset);
@@ -73,6 +76,13 @@ impl Traits {
             units: units.collect(),
             claims: claims.into_boxed_slice(),
         }
+    }
+
+    /// Whether the party whose place this is owes any owner anything on record: a flow out of a place that does not has
+    /// no claim to settle, and nothing about its statement is looked up.
+    pub fn owes(&self, party: Id<Place>) -> bool {
+        let at = self.claims.partition_point(|&(found, ..)| found < party);
+        self.claims.get(at).is_some_and(|&(found, ..)| found == party)
     }
 
     /// The tab that holds what the party whose place this is owes `owner`, if the party owes it anything on record.

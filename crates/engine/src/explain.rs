@@ -13,7 +13,7 @@
 //! commodity was asserted, or a flow is missing, and puts the likeliest in a
 //! note before it offers to accept the gap.
 
-use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
+use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Map, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Budget, ClaimChange, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow,
     Law, NodeId, Op, Param, Place, Program, Purpose, RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive,
@@ -27,8 +27,9 @@ use crate::facts::{Follows, LawFacts, Reads};
 use crate::lots::Candidate;
 use crate::motion::Motion;
 use crate::plan::Plan;
+use crate::recognition::{Counting, Counts, KEEPS_FLOW_DAYS, Piece, Share};
 use crate::show;
-use crate::{Cause, Effect, Owed, Parcel, Waiver};
+use crate::{Cause, Effect, Owed, Parcel, Posted, Settlement, Waiver};
 
 /// The most flows an assertion's explanation draws.
 const SHOWN: usize = 8;
@@ -44,6 +45,8 @@ pub(crate) struct Frame<'a, 'b, 's> {
     pub values: &'a [Value],
     /// What laws recorded so far: which flows counted into a tally.
     pub effects: &'a [Effect],
+    /// The claims the flows from a party settled, as they stand: which flows count as the claims' purposes.
+    pub settled: &'a Map<Id<Flow>, Settlement>,
 }
 
 impl<'a, 'b, 's> Frame<'a, 'b, 's> {
@@ -249,8 +252,9 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
         current: Option<Id<Flow>>,
     ) -> Vec<Id<Flow>> {
         let mut counted: Vec<(Day, Id<Flow>)> = Vec::with_capacity(3);
+        let mut pieces = Vec::new();
         for (id, flow) in self.book().flows.iter() {
-            if !self.counts_toward(id, flow, scopes, read_days, current) {
+            if !self.counts_toward(id, flow, (scopes, read_days, current), &mut pieces) {
                 continue;
             }
             let key = (flow.day, id);
@@ -263,23 +267,51 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
         counted.into_iter().rev().map(|(_, id)| id).collect()
     }
 
-    /// Whether a flow before the current one, real on the day and recognized in the days read, is of one of the
-    /// purposes and moves money that the owner has a share of.
+    /// Whether a flow before the current one, real on the day, counts toward one of the purposes in the days read, in a
+    /// piece of it (`recognition`: the claims a payment settled are counted as the claims' purposes in cash books) that
+    /// moves money the owner has a share of.
     fn counts_toward(
         &self,
         id: Id<Flow>,
         flow: &Flow,
-        scopes: &[Id<Purpose>],
-        read_days: Days,
-        current: Option<Id<Flow>>,
+        (scopes, read_days, current): (&[Id<Purpose>], Days, Option<Id<Flow>>),
+        pieces: &mut Vec<Piece>,
     ) -> bool {
-        let (book, ctx) = (self.book(), self.ctx);
+        let ctx = self.ctx;
         let before = current.map_or(flow.day <= ctx.day, |current| id < current);
-        if !before || !flow.recognized.overlaps(read_days) || !self.plan.events.state(id, flow).is_real_on(ctx.day) {
+        // Most flows are of other days, or of other purposes and settle nothing, and are not worth building the pieces of.
+        let of_other_days = KEEPS_FLOW_DAYS && !flow.recognized.overlaps(read_days);
+        let of_scopes = || flow.purpose.is_some_and(|purposed| self.in_scopes(purposed.purpose, scopes));
+        if !before || of_other_days || !(of_scopes() || self.settled.contains_key(&id)) {
             return false;
         }
-        let Some(actual) = flow.purpose.map(|purpose| purpose.purpose) else { return false };
-        if !scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted)) {
+        let state = self.plan.events.state(id, flow);
+        if !state.is_real_on(ctx.day) {
+            return false;
+        }
+        let amounts = self.plan.amounts.get(&id);
+        let posted = Posted {
+            out: amounts.map_or(flow.out.qty, |amounts| amounts.out),
+            arrive: amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive),
+            state,
+        };
+        Counting::posted(self.plan, flow, &posted, self.settled.get(&id)).pieces(self.book(), pieces);
+        let counted =
+            |piece: &Piece| piece.recognized.overlaps(read_days) && self.piece_counts(flow, &posted, piece, scopes);
+        pieces.iter().any(counted)
+    }
+
+    /// Whether `purpose` is one of `scopes` or inside one.
+    fn in_scopes(&self, purpose: Id<Purpose>, scopes: &[Id<Purpose>]) -> bool {
+        let purposes = &self.book().purposes;
+        scopes.iter().any(|&wanted| purposes.covers(wanted, purpose))
+    }
+
+    /// Whether a piece of a flow is of one of the purposes, and moves money that the owner has a share of.
+    fn piece_counts(&self, flow: &Flow, posted: &Posted, piece: &Piece, scopes: &[Id<Purpose>]) -> bool {
+        let (book, ctx) = (self.book(), self.ctx);
+        let Some(actual) = piece.purpose.map(|purpose| purpose.purpose) else { return false };
+        if !self.in_scopes(actual, scopes) {
             return false;
         }
         let owns = |place| {
@@ -287,15 +319,19 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
             details.class != Class::Outside
                 && self.plan.owners_of(place).iter().any(|share| share.owner == ctx.owner && !share.share.is_zero())
         };
-        let direction = crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
-        let Some(direction) = direction else { return false };
-        let amounts = self.plan.amounts.get(&id);
-        let (amount, place) = match direction {
-            Dir::Out => (Amount::new(amounts.map_or(flow.out.qty, |amounts| amounts.out), flow.out.unit), flow.from),
-            Dir::In => {
-                (Amount::new(amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive), flow.arrive.unit), flow.to)
+        let (place, direction) = match piece.counts {
+            Counts::Claim { tab, dir } => (tab, dir),
+            Counts::Flow => {
+                let direction = crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
+                let Some(direction) = direction else { return false };
+                (if direction == Dir::Out { flow.from } else { flow.to }, direction)
             }
         };
+        let side = match direction {
+            Dir::Out => Amount::new(posted.out, flow.out.unit),
+            Dir::In => Amount::new(posted.arrive, flow.arrive.unit),
+        };
+        let amount = Amount::new(if let Share::Part(qty) = piece.share { qty } else { side.qty }, side.unit);
         let Ok(amount) = (Calc { book, day: flow.day }).convert(amount, book.base) else { return false };
         self.plan.allocate(place, amount.qty).any(|(owner, qty)| owner.owner == ctx.owner && !qty.is_zero())
     }

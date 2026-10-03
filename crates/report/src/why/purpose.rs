@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 
 use axiom_core::{Day, Days, Id, Qty, spread};
-use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, Book, Law, Limit, Period, Purpose, PurposeRoot};
+use axiom_engine::{Headroom, Piece, Run};
+use axiom_model::{Amount, Book, Flow, Law, Limit, Period, Purpose, PurposeRoot};
 
 use crate::calendar::Periods;
+use crate::flow::{Counted, for_each_counted};
 use crate::headroom::{current, latest, room, window_words};
-use crate::history::postings;
 use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
@@ -205,35 +205,22 @@ fn totals<'s>(
     let mut total = Qty::ZERO;
     let mut parties: HashMap<&'s str, Qty> = HashMap::new();
     let mut unpriced = 0;
-    let mut shares = super::super::flow::MovementShares::default();
-    let wanted_root = book.purposes[purpose].root;
-    for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
-        let flow = posting.flow;
-        let Some(purpose_on_flow) = flow.purpose else {
-            continue;
-        };
-        if !book.purposes.covers(purpose, purpose_on_flow.purpose)
-            || !lens.owns(super::super::flow::movement_place(lens, flow))
-        {
-            continue;
-        }
-        let Some(amount) = super::super::flow::movement_in_base_with(lens, posting, Some(wanted_root), &mut shares)
-        else {
+    let of_purpose =
+        |_: &Flow, piece: &Piece| piece.purpose.is_some_and(|counted| book.purposes.covers(purpose, counted.purpose));
+    for_each_counted(lens, run, cutoff, of_purpose, |counted| {
+        let Counted { flow, amount, recognized, .. } = counted;
+        let Some(amount) = amount else {
             unpriced += 1;
-            continue;
+            return;
         };
-        let Some(happened) = Days::new(
-            periods.window(0).days().first().max(flow.recognized.first()),
-            cutoff.min(flow.recognized.last()),
-        ) else {
-            continue;
-        };
-        let amount = spread(amount, flow.recognized, happened);
+        let first = periods.window(0).days().first().max(recognized.first());
+        let Some(happened) = Days::new(first, cutoff.min(recognized.last())) else { return };
+        let amount = spread(amount, recognized, happened);
         total += amount;
         let other = if book.places[flow.from].class == axiom_model::Class::Outside { flow.from } else { flow.to };
         let name = flow.payee.map_or_else(|| path(book, other), |entity| book.name(book.entities[entity].path));
         *parties.entry(name).or_default() += amount;
-    }
+    });
     let mut parties = parties.into_iter().collect::<Vec<_>>();
     parties.sort_by(|(left_name, left), (right_name, right)| {
         i128::from(right.0).abs().cmp(&i128::from(left.0).abs()).then_with(|| left_name.cmp(right_name))

@@ -629,6 +629,7 @@ pub(crate) fn household() -> Household {
         pads: Vec::new(),
         assets: Vec::new(),
         written_off: Vec::new(),
+        settlements: Box::default(),
         pending_carries: Vec::new(),
         promises: Vec::new(),
         adjustments: Vec::new(),

@@ -75,7 +75,7 @@ fn built(lines: &str) -> Vec<axiom_core::Diagnostic> {
 }
 
 /// What `place` holds, oldest first: each parcel's codes and what is left of it, in quanta.
-fn parcels(book: &Book, run: &Run, place: Id<Place>) -> Vec<(String, i64)> {
+pub(crate) fn parcels(book: &Book, run: &Run, place: Id<Place>) -> Vec<(String, i64)> {
     let mut left = Vec::new();
     for holding in run.holdings.iter().filter(|holding| holding.place == place) {
         for lot in holding.lots.iter().filter(|lot| lot.qty.0 != 0) {
@@ -93,7 +93,7 @@ fn open(book: &Book, run: &Run, place: &str) -> Vec<(String, i64)> {
 }
 
 /// What the tab with `party` holds: a tab has no name, so it is found by whom it is with.
-fn tab(book: &Book, run: &Run, party: &str) -> Vec<(String, i64)> {
+pub(crate) fn tab(book: &Book, run: &Run, party: &str) -> Vec<(String, i64)> {
     let tab = book.places.iter().find_map(|(id, place)| match place.role {
         Role::Tab(entity) if book.name(book.entities[entity].path) == party => Some(id),
         _ => None,
@@ -101,11 +101,11 @@ fn tab(book: &Book, run: &Run, party: &str) -> Vec<(String, i64)> {
     parcels(book, run, tab.expect("the party has a tab"))
 }
 
-fn claims(left: &[(&str, i64)]) -> Vec<(String, i64)> {
+pub(crate) fn claims(left: &[(&str, i64)]) -> Vec<(String, i64)> {
     left.iter().map(|&(code, qty)| (code.to_string(), qty)).collect()
 }
 
-fn said(run: &Run, code: &str) -> Vec<String> {
+pub(crate) fn said(run: &Run, code: &str) -> Vec<String> {
     run.diagnostics.iter().filter(|d| &*d.code == code).map(|d| d.message.clone()).collect()
 }
 
