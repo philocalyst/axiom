@@ -26,6 +26,7 @@ pub mod json;
 mod lens;
 mod limits;
 mod lots;
+mod pivot;
 mod places;
 mod register;
 mod resolve;
