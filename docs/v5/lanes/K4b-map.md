@@ -426,8 +426,9 @@ build (10-budgeter on 2026-02-14: checking 6,597.01 by hand, 679.92 before, 13,2
 The new numbers are further from the READMEs than the old, with the dropped statements between. Section 11.3 is what shows the
 semantics right: a split is the plain transfers it says, on 5,000 generated books.
 
-The goldens were **not** regenerated or committed: the lane's rule is that they do not change, and they do. `sh tests/golden.sh`
-and `sh tests/mistakes/run.sh` write the new outputs; `git diff tests/` is the 19 files above.
+The goldens are regenerated and committed on their own, in `tests: goldens after K4b` (the orchestrator asked to review that diff
+alone): the integration branch at 92e80c1 reproduces its committed goldens and mistakes byte for byte, so the 19 files are the statement
+path's and no other lane's. `git revert` of that commit puts the old ones back.
 
 ### 11.2 Every behaviour change
 
