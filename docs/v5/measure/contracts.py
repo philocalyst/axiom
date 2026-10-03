@@ -11,7 +11,6 @@
     contracts.py check BINARY DIR [JOBS] [--slow]
                                               the dump's own verdict over every project
     contracts.py reproduce DIR A B            whether dump A (the frozen old one) is what dump B rebuilds of the old walkers
-    contracts.py classify DIR A B             how the keep lines of two dumps differ, and whether only in the ways the reach says
     contracts.py cover DIR [TAG]              what the projects hold, and what the dumps asked of them
     contracts.py mutate TREE WORK DIR [N,M..] the mutants of the code under test: each is built and must make the verdict fail
 
@@ -21,9 +20,15 @@ it and deleted the walkers, so what judges it now is **a reference**: the plaine
 walked from the contract's first day with the days taken once, the waived ones left out and the nearest day within the
 reach LANGUAGE section 7 says (the `grace`, else half a cadence of the schedule's own). The verdict (`check`) asks the
 fold the same questions and equals the reference on every one: the days due in a window, an ordinal, the line each day
-keeps, every occurrence a line kept, and every occurrence the monitor says was missed (and no other). What the old
-walkers said of a factor, a recognition window and a loan's payment is a **frozen dump** (`dump.old.txt`, made from
-the tree before K5b), which `compare` holds the new dump to.
+keeps, every occurrence a line kept, and every occurrence the monitor says was missed (and no other). The old walkers are
+gone, and what they said is kept two ways. The old rule for the days, the ordinals and the line a day keeps is **rebuilt**
+from `calendar::due` as they asked it, and `reproduce` holds the rebuild to a **frozen dump** (`dump.old.txt`, made from the
+tree before K5b); the verdict then says, of every question the fold answers otherwise than the rebuilt rule did, why: the
+reach (a line a whole cadence away kept a due day, and a schedule's own reach says no), a day the old walk lost (`on last`
+after a waiver), days it found twice or out of order (`weekly on 15`, `monthly on 1, monday`), or a walk with no first day
+(counted from 1970 now, from the beginning of time then: not compared). Any other difference is a failure. What the old
+walkers said of a factor, a recognition window and a loan's payment has no second implementation: the frozen dump is what
+`compare` holds the new dump to.
 
 Each project is one to three contracts written by a seeded random generator (deterministic: the same SEED and N write the
 same books), each a spec drawn from the forms a promise can take:
@@ -615,82 +620,6 @@ def compare(directory, a, b, show=3):
     return len(different)
 
 
-def keep_days(lines):
-    """What each probe day keeps, from the `keep A..B : answer` lines of a dump: the days are runs."""
-    answers = {}
-    for line in lines:
-        head, _, answer = line.partition(" : ")
-        first, _, last = head.split(" ")[1].partition("..")
-        for day in range(datetime.date.fromisoformat(first).toordinal(), datetime.date.fromisoformat(last).toordinal() + 1):
-            answers[day] = answer
-    return answers
-
-
-def due_days(lines):
-    """The days, each with the schedule it is a day of, that the `due` lines of a dump list in full (a window of more
-    than forty days is only counted)."""
-    found = set()
-    for line in lines:
-        head, _, days = line.partition(" : ")
-        if days.startswith("n ") or not days.strip():
-            continue
-        for item in days.split():
-            day, _, schedule = item.partition("/")
-            try:
-                found.add((datetime.date.fromisoformat(day).toordinal(), schedule))
-            except ValueError:
-                pass  # a day past year 9999, in a window that runs to the end of the calendar
-    return found
-
-
-def classify(directory, a, b):
-    """Of the keep lines two dumps differ in: whether every day that differs differs only as it may.
-
-    * the reach: with a shorter reach a day that kept a due day keeps none, and a day that was equally near two
-      schedules, one of them within a longer reach than the other's, keeps the one in reach;
-    * a day the nearer schedule keeps no longer, being out of that schedule's own reach, keeps the other schedule's;
-    * a due day the old walk lost (`on last` after a waiver, K5a 7j): the new answer is a due day the old `due` lines
-      never list, and it is one the new ones do.
-
-    Anything else is unexplained."""
-    seen, unexplained = Counter(), []
-    for path in projects(directory):
-        kinds_a, kinds_b = kinds_of(path, a), kinds_of(path, b)
-        before, after = kinds_a.get("keep", []), kinds_b.get("keep", [])
-        if before == after:
-            continue
-        try:
-            old, new = keep_days(before), keep_days(after)
-        except ValueError:
-            unexplained.append((path, "a keep line that does not read"))
-            continue
-        lost = due_days(kinds_b.get("due", [])) - due_days(kinds_a.get("due", []))
-        for day in sorted(set(old) | set(new)):
-            was, is_ = old.get(day, "?"), new.get(day, "?")
-            if was == is_:
-                continue
-            words = is_.split(" ")
-            schedules = {"regular": ["r"], "standing": ["s"], "ambiguous": ["r", "s"]}.get(words[0], [])
-            named = [(datetime.date.fromisoformat(word).toordinal(), schedule) for word, schedule in zip(words[1:], schedules)]
-            if any(day in lost for day in named):
-                seen["the old walk lost the due day"] += 1
-            elif is_ == "none" and was not in ("none", "?") and not was.startswith("ambiguous"):
-                seen["a kept day is out of reach"] += 1
-            elif was.startswith("ambiguous") and not is_.startswith("ambiguous") and is_ != "none":
-                seen["an ambiguous day is in the reach of one schedule"] += 1
-            elif was.startswith("ambiguous") and is_ == "none":
-                seen["an ambiguous day is out of both reaches"] += 1
-            elif was[0] in "rs" and is_[0] in "rs" and was[0] != is_[0]:
-                seen["the nearer schedule's day is out of its own reach"] += 1
-            else:
-                unexplained.append((path, f"{datetime.date.fromordinal(day)}: {was} -> {is_}"))
-    for what, count in sorted(seen.items()):
-        print(f"  {what}: {count} days")
-    for path, line in unexplained[:10]:
-        print(f"UNEXPLAINED {os.path.basename(path)} {line}")
-    print(f"{len(unexplained)} days unexplained")
-    return len(unexplained)
-
 
 # ─── Mutants of the code under test ──────────────────────────────────────────────────────────────────────────
 
@@ -983,8 +912,6 @@ def main(argv):
         return 1 if compare(argv[2], argv[3], argv[4]) else 0
     if len(argv) >= 5 and argv[1] == "reproduce":
         return 1 if reproduce(argv[2], argv[3], argv[4]) else 0
-    if len(argv) >= 5 and argv[1] == "classify":
-        return 1 if classify(argv[2], argv[3], argv[4]) else 0
     if len(argv) >= 5 and argv[1] == "mutate":
         only = {int(n) for n in argv[5].split(",")} if len(argv) > 5 else None
         mutate(argv[2], argv[3], argv[4], only)
