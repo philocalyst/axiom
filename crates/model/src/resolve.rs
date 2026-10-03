@@ -200,6 +200,7 @@ impl<'s> World<'s> {
         }
     }
 
+    /// Several accounts answer to the word by its suffix, and nothing tells them apart.
     fn ambiguous_place(&self, word: Word, ids: &[Id<Place>]) -> Diagnostic {
         let (places, table) = (&self.book.places, &self.book.lookup.places);
         let candidates = problem::shortest(&self.book.names, table, ids, |id| places[id].path, |id| places[id].loc);
@@ -294,7 +295,7 @@ impl<'s> World<'s> {
             if let Some(end) = spelled.then(|| self.address_end(home, word, day, Reached::Several)).flatten() {
                 return Some(end);
             }
-            return Some(Err(self.seek_place(word).expect_err("multiple visible places must be ambiguous")));
+            return Some(Err(self.ambiguous_place(word, places)));
         }
         if several && places.is_empty() {
             return Some(Err(self.seek_entity(home, word).expect_err("multiple visible entities must be ambiguous")));

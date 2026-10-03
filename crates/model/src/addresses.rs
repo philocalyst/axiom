@@ -214,16 +214,6 @@ impl Addresses {
         self.fills[entity].iter().map(|&place| Id::new(place)).collect()
     }
 
-    /// Whether some account is called `name`.
-    pub fn is_called(&self, name: Sym) -> bool {
-        !self.called[Id::new(name.index() as u32)].is_empty()
-    }
-
-    /// Whether an entity fills a slot of some account.
-    pub fn fills_any(&self, entity: Id<Entity>) -> bool {
-        !self.fills[entity].is_empty()
-    }
-
     /// The shortest reference that `means_it` says is this account and no other: the fewest of its fillers, the leftmost
     /// among equals, then its name. The whole address, if nothing shorter does.
     pub fn shortest_that(&self, place: Id<Place>, means_it: impl Fn(&[Id<Entity>], Sym) -> bool) -> Vec<Part> {

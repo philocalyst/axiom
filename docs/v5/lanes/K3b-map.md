@@ -232,8 +232,8 @@ For a flow end (`World::end_on(home, word, day)`) and a setting (`World::end(hom
    resolved before resolves to the same thing**, and nothing declared later changes it.
 2. If `found_end` says several places, and any of them is address-spelled, or, **in a book that writes some account as an
    address** (section 8.7), finds nothing and the path has two words or
-   more and it begins with a filler (an entity some account has in a slot) or ends in the name of an account (a
-   misspelt first word of `jordan/bluefin/401k` is still an attempt at it): the **address resolution**: resolve the
+   more (the party pass of 8.5 has already made a party of each such mention that is not meant as an address, so what no
+   table knows is an address that nothing has): the **address resolution**: resolve the
    words as entities in the line's home, intersect their posting lists with the name's, filter by order and by open on the
    day. One account: the answer. Several: **`ambiguous-address`** with each candidate's full address and its
    **shortest unique address** as the edit. None: **`unknown-address`**, with the closest address of what the leading words

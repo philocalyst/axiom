@@ -2,9 +2,10 @@
 //!
 //! The names every account has (its path and each suffix of it) are tried first and unchanged: a reference that meant one
 //! account before means it still, and nothing declared later changes it. The index of [`Addresses`] is asked in two
-//! cases only. Those names found **several** accounts and one of them is spelled, so the line's day may tell them apart,
-//! or they found **nothing**, and the reference has two words or more and begins with an entity that fills a slot of some
-//! account, so it was meant as an address and not as a party that the journal brings into being.
+//! cases only, and only in a book that writes some account as an address. Those names found **several** accounts and one
+//! of them is spelled, so the line's day may tell them apart, or they found **nothing**, and the reference has two words
+//! or more: the party pass has made a party of every such mention that is not meant as an address (see
+//! `declare/parties.rs`), so one that no table knows is an address that nothing has.
 //!
 //! Nothing here changes the world: like the rest of `resolve`, it reads the book, so the journal can be elaborated from
 //! every thread.
@@ -57,10 +58,13 @@ impl World<'_> {
         day: Option<Day>,
         reached: Reached,
     ) -> Option<Result<End, Diagnostic>> {
-        if !self.book.lookup.addresses.is_used() {
+        // A word alone that no name answers to is for the party and commodity tables, and so is any in a book that
+        // writes no account as an address.
+        let alone = reached == Reached::Nothing && !word.text.contains('/');
+        if alone || !self.book.lookup.addresses.is_used() {
             return None;
         }
-        if let Some(place) = self.settled(home, word, reached) {
+        if let Some(place) = self.settled(home, word) {
             return Some(Ok(End { place, entity: None }));
         }
         let (leading, name) = word.text.rsplit_once('/').map_or(("", word.text), |(leading, name)| (leading, name));
@@ -76,13 +80,11 @@ impl World<'_> {
         })
     }
 
-    /// The account the text means on every day, if it was worked out once.
-    fn settled(&self, home: Home, word: Word, reached: Reached) -> Option<Id<Place>> {
-        let settled = home == Home::Project && reached == Reached::Nothing;
-        settled
-            .then(|| self.book.names.get(word.text))
-            .flatten()
-            .and_then(|text| self.book.lookup.addresses.settled(text))
+    /// The account the text means on every day, if it was worked out once. Only a reference that no name answers to was
+    /// (see `settle_addresses`), so one that the names found several accounts of is never in it.
+    fn settled(&self, home: Home, word: Word) -> Option<Id<Place>> {
+        let text = (home == Home::Project).then(|| self.book.names.get(word.text)).flatten()?;
+        self.book.lookup.addresses.settled(text)
     }
 
     /// Works out, once, what each reference of two words or more that the sources write means, wherever no line's day and
@@ -110,9 +112,9 @@ impl World<'_> {
         self.book.lookup.addresses.settle(once);
     }
 
-    /// The entities the words before the name are. None if the reference is not an attempt at an address: it is one
-    /// when the names every account has found several, when it begins with an entity that fills a slot, and when it ends
-    /// in the name of an account; a word that is no entity, in an attempt, is a mistake in the address.
+    /// The entities the words before the name are. None if the names found several accounts and a word is no entity: the
+    /// reference stays ambiguous as it was. Otherwise the reference is an attempt at an address (the party pass has made
+    /// a party of every mention that is not one), and a word that is no entity is a mistake in it.
     fn fillers(
         &self,
         home: Home,
@@ -121,23 +123,16 @@ impl World<'_> {
         reached: Reached,
     ) -> Result<Option<Vec<Id<Entity>>>, Diagnostic> {
         let (book, scope) = (&self.book, self.scopes.of(home));
-        let addresses = &book.lookup.addresses;
-        let name = word.text.rsplit('/').next().and_then(|name| book.names.get(name));
-        let called = name.is_some_and(|name| addresses.is_called(name));
-        let attempt =
-            |fillers: &[Id<Entity>]| called || fillers.first().is_some_and(|&first| addresses.fills_any(first));
         let mut fillers = Vec::new();
         for text in leading.split('/').filter(|text| !text.is_empty()) {
             match book.lookup.entities.find(&book.names, scope, text) {
                 Found::One(entity) => fillers.push(entity),
-                Found::Nothing if reached == Reached::Nothing && attempt(&fillers) => {
-                    return Err(self.unknown_address(word, &fillers, None));
-                }
+                Found::Nothing if reached == Reached::Nothing => return Err(self.unknown_address(word, &fillers, None)),
                 Found::Nothing => return Ok(None),
                 Found::Several(ids) => return Err(self.ambiguous_entity(Word { text, loc: word.loc }, &ids)),
             }
         }
-        Ok((reached == Reached::Several || attempt(&fillers)).then_some(fillers))
+        Ok(Some(fillers))
     }
 
     /// Whether the reference of `fillers` and `name` is read as this account on `day`: by the names every account has if

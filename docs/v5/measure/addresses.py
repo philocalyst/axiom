@@ -198,7 +198,8 @@ def flat_name(base, index):
 
 # Who may fill each slot in a book of a few entities that stand in every slot, so that two accounts of one name have
 # the same entities in different slots (`acme` owns one and sponsors another): the order of an address is told apart.
-TIGHT = {"owner": ["acme", "ann", "kai"], "sponsor": ["acme"], "beneficiary": ["ann", "kai"], "names": ["plan", "gift"]}
+TIGHT = {"owner": ["acme", "ann", "kai"], "sponsor": ["acme"], "beneficiary": ["ann", "kai"],
+         "names": ["plan", "gift", "529"]}
 WIDE = {"owner": SAVERS + KIDS + HOUSEHOLDS + FIRMS[:1], "sponsor": FIRMS, "beneficiary": SAVERS + KIDS, "names": NAMES}
 
 
@@ -656,17 +657,15 @@ MUTANTS = [
     ("a name that found several accounts is final", "resolve.rs", "let spelled = places.iter().any(|&place| self.book.is_spelled(place));", "let spelled = false;"),
     ("the index is never asked", "resolve.rs", "if let Some(end) = self.address_end(home, word, day, Reached::Nothing) {", "if let Some(end) = None::<Result<End, Diagnostic>> {"),
     ("a word of an address that is no entity is a party", "reference.rs", "Found::Nothing if reached == Reached::Nothing && attempt(&fillers) => {", "Found::Nothing if false => {"),
-    ("an entity that fills nothing begins an address", "reference.rs", "fillers.first().is_some_and(|&first| addresses.fills_any(first))", "!fillers.is_empty()"),
     ("no entity begins an address", "reference.rs", "fillers.first().is_some_and(|&first| addresses.fills_any(first))", "false"),
-    ("a name no account has ends an address", "reference.rs", "|fillers: &[Id<Entity>]| called ||", "|fillers: &[Id<Entity>]| true ||"),
     ("an account's name does not make a reference an address", "reference.rs", "|fillers: &[Id<Entity>]| called ||", "|fillers: &[Id<Entity>]| false ||"),
     ("the journal makes a party of an address that ends in an account's name", "declare/parties.rs", "|| path.rsplit_once('/').is_some_and(|(_, last)| self.names.contains(last))", "|| false"),
     ("the journal makes a party of an address that begins with a filler", "declare/parties.rs", "path.split_once('/').is_some_and(|(first, _)| self.fillers.contains(first))", "false"),
     ("a settled reference ignores the days", "reference.rs", "if self.book.lookup.addresses.is_always_open(place) {", "if true {"),
-    ("a settled reference is read when several accounts were found", "reference.rs", "let settled = home == Home::Project && reached == Reached::Nothing;", "let settled = home == Home::Project;"),
     ("a suggestion is no number's", "reference.rs", "if !text.contains('/') && numeric(&text) {", "if false {"),
     ("a suggestion ignores the names every account has", "reference.rs", "[only] => *only == place,", "[_] => true,"),
-    ("a report's target ignores addresses", "book.rs", "Found::One(place) => return Ok(place),\n            Found::Several(places) => return Err(Miss::Ambiguous(places.into())),", "Found::One(_) => {}\n            Found::Several(_) => {}"),
+    ("a word alone that no name answers to is an address attempt", "reference.rs", "reached == Reached::Nothing && !word.text.contains('/');", "false;"),
+    ("a report's target ignores addresses", "book.rs", "match by_address.then(|| self.address_place(text)).unwrap_or(Found::Nothing) {", "match Found::<Place>::Nothing {"),
     # Placing the words before the name
     ("every word goes in the first slot", "spelled.rs", "Placed::Forced(slot) => fills[usize::from(slot)].push(word),", "Placed::Forced(_) => fills[0].push(word),"),
     ("a word that could go two ways is placed too", "spelled.rs", "Placed::Ambiguous(set) => {\n                diags.push(spelling.ambiguous(&world.book, word, set));", "Placed::Ambiguous(set) => {\n                fills[set.trailing_zeros() as usize].push(word);\n                diags.push(spelling.ambiguous(&world.book, word, set));"),
