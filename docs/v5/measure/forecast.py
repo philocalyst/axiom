@@ -133,7 +133,7 @@ def project_cli(binary, source, until, work):
     return ("ok" if not differences else "differ"), differences
 
 
-def cli(binary, directory, jobs=4, until=UNTIL):
+def cli(binary, directory, jobs=4, until=UNTIL, quiet=False):
     projects = sorted(p for p in os.listdir(directory) if re.fullmatch(r"p\d+", p))
     results = {}
     with tempfile.TemporaryDirectory() as scratch, ThreadPoolExecutor(jobs) as pool:
@@ -142,12 +142,13 @@ def cli(binary, directory, jobs=4, until=UNTIL):
         for name, result in pool.map(one, projects):
             results[name] = result
     tally = Counter(status for status, _ in results.values())
-    print(f"{len(results)} projects: " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
-    shown = 0
-    for name, (status, details) in sorted(results.items()):
-        if status == "differ" and shown < 12:
-            shown += 1
-            print(f"  {name}: " + "; ".join(details[:3]))
+    if not quiet:
+        print(f"{len(results)} projects: " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
+        shown = 0
+        for name, (status, details) in sorted(results.items()):
+            if status == "differ" and shown < 12:
+                shown += 1
+                print(f"  {name}: " + "; ".join(details[:3]))
     return 1 if tally["differ"] else 0
 
 
@@ -247,7 +248,7 @@ def compare(forecast, history):
     return ("ok" if not differences else "differ"), differences
 
 
-def dump_all(binary, directory, jobs=4, until=UNTIL):
+def dump_all(binary, directory, jobs=4, until=UNTIL, quiet=False):
     projects = sorted(p for p in os.listdir(directory) if re.fullmatch(r"p\d+", p))
     results = {}
     with tempfile.TemporaryDirectory() as scratch, ThreadPoolExecutor(jobs) as pool:
@@ -256,15 +257,16 @@ def dump_all(binary, directory, jobs=4, until=UNTIL):
         for name, result in pool.map(one, projects):
             results[name] = result
     tally = Counter(status for status, _ in results.values())
-    print(f"{len(results)} projects: " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
-    print("compared, forecast against history, in the projects that agree: " +
-          ", ".join(f"{COVERED[k]} {k}" for k in ("planned", "holding", "effect", "violation", "gain", "missed")))
-    shown = 0
-    for name, (status, details) in sorted(results.items()):
-        if status in ("differ", "no-dump") and shown < 12:
-            shown += 1
-            print(f"  {name} {status}: " + "; ".join(details[:3]))
-    return 1 if tally["differ"] or tally["no-dump"] else 0
+    if not quiet:
+        print(f"{len(results)} projects: " + ", ".join(f"{k} {v}" for k, v in sorted(tally.items())))
+        print("compared, forecast against history, in the projects that agree: " +
+              ", ".join(f"{COVERED[k]} {k}" for k in ("planned", "holding", "effect", "violation", "gain", "missed")))
+        shown = 0
+        for name, (status, details) in sorted(results.items()):
+            if status in ("differ", "no-dump") and shown < 12:
+                shown += 1
+                print(f"  {name} {status}: " + "; ".join(details[:3]))
+    return 1 if tally["differ"] or tally["no-dump"] or tally["unwritable"] else 0
 
 
 # What the laws of a book make of the flows of a forecast: a penalty on an outflow of the checking account, one on a small
@@ -288,14 +290,152 @@ law year-note
 """
 
 
+# A law that reads the balance of the account when a month closes, so that the order of what a forecast posts on a month's
+# last day and what the closing reads is something the comparison can tell.
+MONTH_END = """account checking : bank
+  law month-end-fee
+    each month
+    owe self.balance * 1% to treasury by date(year + 1, 2, 1) as balance-fee
+"""
+
+
 def gen(directory, count, seed):
     """Projects of promises, a half of them with the laws above, so that the laws the fold knows are asked of the forecast."""
     import splits
     splits.gen(directory, count, seed, "promises")
     for index in range(count):
         if index % 2:
-            with open(os.path.join(directory, f"p{index:04d}", "main.ax"), "a") as out:
-                out.write(LAWS)
+            path = os.path.join(directory, f"p{index:04d}", "main.ax")
+            text = open(path).read()
+            assert text.count("account checking : bank\n") == 1
+            with open(path, "w") as out:
+                out.write(text.replace("account checking : bank\n", MONTH_END) + LAWS)
+
+
+# ─── mutants ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+PROMISING = "crates/engine/src/promising.rs"
+LEDGER = "crates/engine/src/ledger.rs"
+TRACE = "crates/report/src/forecast/trace.rs"
+FORECAST = "crates/report/src/forecast.rs"
+CLAIMS = "crates/engine/src/claims.rs"
+PLAN = "crates/engine/src/plan.rs"
+MONITOR = "crates/engine/src/monitor.rs"
+LOWER = "crates/model/src/lower/contracts.rs"
+BOOK = "crates/model/src/book.rs"
+
+# (file, the text, what it becomes, what it is, which layer is to say). Each text occurs once in its file.
+MUTANTS = [
+    (PROMISING, "after.add_days(1)", "after", "a forecast promises the day it stands on too", "engine"),
+    (PROMISING, "after.add_days(1)", "after.add_days(2)", "a forecast leaves out the day after it", "engine"),
+    (PROMISING, "binary_search(&(stream_key(*contract, *schedule), due)).is_err()",
+     "binary_search(&(stream_key(*contract, *schedule), due)).is_ok()", "it promises only what a line wrote", "engine"),
+    (PROMISING, "Some((stream_key(txn.contract?, written.schedule), written.due))",
+     "Some((stream_key(txn.contract?, ScheduleKind::Regular), written.due))", "a written standing day is looked up as a regular one", "engine"),
+    (PROMISING, "ordinal: ahead.residual.ordinal(), due }", "ordinal: ahead.residual.ordinal() + 1, due }", "an ordinal one too many", "engine"),
+    (PROMISING, "        if made.is_ok() {\n            self.settle(occurrence);",
+     "        if made.is_err() {\n            self.settle(occurrence);", "the monitor is told of a failure and not of a success", "engine"),
+    (PROMISING, "self.post_occurrence(occurrence, None, self.clock.day)",
+     "self.post_occurrence(occurrence, None, occurrence.due.add_days(1))", "an occurrence is posted a day late", "engine"),
+    (PROMISING, "let mut written: Vec<_> = kept.collect();", "let mut written: Vec<_> = kept.take(0).collect();",
+     "what a line wrote ahead of today is promised again", "engine"),
+    (PROMISING, "falling.push(Reverse((due, at as u32)));", "falling.push(Reverse((due, u32::MAX - at as u32)));",
+     "streams due on one day come in the wrong order", "engine"),
+    (PROMISING, "self.promising.next_due().filter(|&due| due <= day.min(self.horizon))?;",
+     "self.promising.next_due().filter(|&due| due <= day)?;", "a step goes past the horizon", "tests"),
+    (LEDGER, "(Some(fact), Some(promised)) if promised.at() < fact.at() => Some(promised),",
+     "(Some(fact), Some(promised)) if true => Some(promised),", "a promise comes before the journal's facts of earlier days", "engine"),
+    (LEDGER, "Upcoming::Promised(Moment::after_flows(due))", "Upcoming::Promised(Moment::end_of(due))",
+     "a promise falls due after the closings of its day", "engine"),
+    (LEDGER, "        self.miss_through(day);\n        self.sample_temporal_through(day);\n        self.clock.day = day;",
+     "        self.sample_temporal_through(day);\n        self.clock.day = day;", "a day's facts do not miss what is out of reach first", "engine"),
+    (LEDGER, "let limit = limit.min(Moment::end_of(self.horizon));", "let limit = limit;",
+     "the fold goes past its horizon", "tests"),
+    (TRACE, "    ledger.reach(horizon);\n", "", "the forecast's horizon is the day it stands on", "cli"),
+    (TRACE, "ledger.promise(|contract| lens.owns_entity(book.contracts[contract].owner));", "ledger.promise(|_| true);",
+     "a forecast for one owner promises everyone's contracts", "tests"),
+    (TRACE, "    ledger.advance(today);\n    ledger.reach", "    ledger.reach", "today is not closed before the forecast begins", "tests"),
+    (TRACE, "while let Some(planned) = ledger.promise_through(day) {",
+     "while let Some(planned) = ledger.promise_through(day).filter(|_| false) {", "the report does not see each promised occurrence", "tests"),
+    (FORECAST, "flows.sort_by_key(|flow| flow.day);", "", "the habits are applied out of date order", "tests"),
+    # Item 3, a missed day is a claim: what the corpus has no deadline-and-party books for, the tests of claims say.
+    (CLAIMS, "header.flow.to = tab;", "header.flow.to = header.flow.to;", "a claim is paid where the occurrence would have paid", "tests"),
+    (CLAIMS, "header.flow.purpose = None;", "", "a claim recognizes what the contract's purpose says", "tests"),
+    (CLAIMS, "let day = found.max(self.clock.day);", "let day = due;", "a claim is dated the day it fell due", "tests"),
+    (CLAIMS, "header.flow.out.qty > Qty::ZERO", "true", "a header that is no amount is claimed", "tests"),
+    (PLAN, "== Blame::Party).then_some(())?;", "== Blame::Owner).then_some(())?;", "the owner's debts are claimed, and the party's are not", "tests"),
+    (MONITOR, ".chain(deadline).max()", ".chain(deadline).min()", "a day is missed at the earlier of its reach and its deadline", "tests"),
+    (MONITOR, "day.checked_add(1)).map(Day);", "day.checked_add(0)).map(Day);", "a day is missed a day early", "tests"),
+    (MONITOR, "!promise.claimed", "true", "what became a claim is warned of as missed too", "tests"),
+    (LEDGER, "let claimed = self.claim_missed(promise, found);", "self.claim_missed(promise, found);\n            let claimed = true;",
+     "a day is said to be claimed whether or not it was", "tests"),
+    (LOWER, "terms.due.is_some() && terms.blame() == Blame::Party", "terms.blame() == Blame::Party",
+     "a tab is asked for by every contract the party pays the owner by", "tests"),
+    (BOOK, "due: Some(day),\n", "due: None,\n", "a claim the monitor made has no due day", "tests"),
+]
+
+
+def own_tests_fail(source, work):
+    """Whether the unit tests of the crate that holds a mutant fail in SOURCE: what the corpus cannot say (the horizon a step
+    stops at, whose contracts a forecast takes, what the report sees of each occurrence)."""
+    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
+    for package, targets in (("axiom-engine", ["--lib"]), ("axiom-report", ["--lib"])):
+        run = subprocess.run(["cargo", "test", "--release", "--offline", "-p", package, *targets], cwd=source, env=env,
+                             capture_output=True, text=True)
+        if run.returncode:
+            return True
+    return False
+
+
+def build_cli(source, work):
+    target = os.path.join(work, "cli-target")
+    done = subprocess.run(["cargo", "build", "--release", "-q", "--offline", "-p", "axiom-cli"], cwd=source,
+                          env=dict(os.environ, CARGO_TARGET_DIR=target), capture_output=True, text=True)
+    if done.returncode:
+        raise SystemExit(done.stderr[-2000:])
+    return os.path.join(target, "release", "axiom")
+
+
+def mutate(tree, work, directory, only=None):
+    """Each mutant is built and must be caught: by the engine layer (the dump), by the CLI layer, or by the unit tests of its
+    crate (which say what the corpus cannot). A mutant that is not is listed as SURVIVED: equivalent, or the corpus too weak."""
+    from contracts import leave_out
+    work = os.path.abspath(work)
+    source = os.path.join(work, "tree")
+    if not os.path.isdir(source):
+        os.makedirs(work, exist_ok=True)
+        shutil.copytree(os.path.abspath(tree), source, ignore=lambda at, names: leave_out(tree, at, names))
+    out = os.path.join(work, "build")
+    binary = build(source, out)
+    cli_binary = build_cli(source, work)
+    assert dump_all(binary, directory, 4, quiet=True) == 0, "the baseline fails its own comparison"
+    assert cli(cli_binary, directory, 4, quiet=True) == 0, "the baseline's CLI fails its own comparison"
+    results = []
+    for number, (path, old, replacement, what, layer) in enumerate(MUTANTS):
+        if only is not None and number not in only:
+            continue
+        target = os.path.join(source, path)
+        original = open(target).read()
+        assert original.count(old) == 1, f"mutant {number}: the text occurs {original.count(old)} times in {path}"
+        open(target, "w").write(original.replace(old, replacement))
+        try:
+            COVERED.clear()
+            outcome = "killed by the dump" if layer == "engine" and dump_all(build(source, out), directory, 4, quiet=True) else None
+            if outcome is None and layer in ("engine", "cli"):
+                outcome = "killed by the CLI layer" if cli(build_cli(source, work), directory, 4, quiet=True) else None
+            if outcome is None:
+                outcome = "killed by the tests" if own_tests_fail(source, work) else "SURVIVED"
+        except SystemExit:
+            outcome = "does not build"
+        finally:
+            open(target, "w").write(original)
+        results.append((number, outcome, what))
+        print(f"mutant {number:02d} {outcome:<24} {what}", flush=True)
+    summary = Counter(outcome for _, outcome, _ in results)
+    print(f"{len(results)} mutants: " + ", ".join(f"{count} {outcome}" for outcome, count in sorted(summary.items())))
+    with open(os.path.join(work, "mutants.txt"), "w") as handle:
+        for number, outcome, what in results:
+            handle.write(f"{number:02d} {outcome} {what}\n")
 
 
 def main(argv):
@@ -306,6 +446,8 @@ def main(argv):
         return cli(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 4, argv[5] if len(argv) > 5 else UNTIL)
     if len(argv) >= 4 and argv[1] == "dump":
         return dump_all(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 4, argv[5] if len(argv) > 5 else UNTIL)
+    if len(argv) >= 5 and argv[1] == "mutate":
+        return mutate(argv[2], argv[3], argv[4], {int(n) for n in argv[5].split(",")} if len(argv) > 5 else None) or 0
     if len(argv) >= 4 and argv[1] == "build":
         print(build(argv[2], argv[3]))
         return 0
