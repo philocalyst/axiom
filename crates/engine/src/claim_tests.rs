@@ -573,6 +573,17 @@ fn an_occurrence_that_cannot_be_made_is_warned_of_and_claims_nothing() {
     });
 }
 
+/// A claim the monitor made has no purpose: it recognizes nothing and no law that counts a purpose's flows counts it, as
+/// nothing reads `books cash|accrual` yet to say whether it should.
+#[test]
+fn a_claim_the_monitor_made_has_no_purpose_for_a_law_to_count() {
+    let text = "purpose gigs : income\n  law per-flow\n    on flow\n    owe 1 USD to treasury by date(2026, 12, 31) as per-flow\nentity treasury\ncontract rent with ann\n  1_000 USD monthly on 1 into checking #gigs\n  from 2026-01-01\n  due 5d\n";
+    with_run(text, |book, run| {
+        assert_eq!(tab_parcels(book, run), 2, "January and February");
+        assert!(run.effects.is_empty(), "no law counted a claim: {:?}", run.effects);
+    });
+}
+
 /// What the owner was to pay is not a claim of the owner's: a debt is a plain balance and no payment to the party settles it.
 #[test]
 fn what_the_owner_failed_to_pay_is_not_claimed() {

@@ -1231,20 +1231,19 @@ law pad-fee
 }
 
 /// A party that was to pay by a deadline and did not owes it: `claims` lists what it owes, with the day it was due and the
-/// contract's own line for what it is, and `flow` shows no income, for what was not paid is not earned until the books say so.
+/// contract's own line for what it is.
 #[test]
-fn a_due_day_nothing_kept_is_a_claim_on_the_party_and_recognizes_no_income() {
+fn a_due_day_nothing_kept_is_listed_as_a_claim_on_the_party() {
     let text = "\
 base USD
 commodity USD
   precision 2
-purpose wages : income
 entity tenant
 account checking
 opening 2026-01-01
   checking 10_000 USD
 contract lease with tenant
-  1_000 USD monthly on 1 into checking #wages
+  1_000 USD monthly on 1 into checking
   from 2026-02-01
   due 5d
 ";
@@ -1252,10 +1251,6 @@ contract lease with tenant
         let claims = rows(book, run, Query::Claims { at: None });
         assert_eq!(claims.len(), 2, "one claim and the total: {claims:?}");
         assert_eq!(claims[0], "!tenant | @1 | 1,000.00 USD | 2026-02-17 | 21d | 2026-02-01 | overdue 37d");
-        let income =
-            Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None };
-        let flow = rows(book, run, income);
-        assert!(flow.iter().all(|row| !row.contains("wages")), "nothing was earned: {flow:?}");
     });
 }
 
