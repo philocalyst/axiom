@@ -1,5 +1,5 @@
-//! What each command does: load the project, build the book, run it, and show
-//! what was asked for.
+//! What each command does: load the project, open a session on it, and show what
+//! was asked for.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -8,11 +8,10 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axiom_core::{Day, Diagnostic, FileId};
-use axiom_engine::{Options, Run};
 use axiom_model::{Book, sync::Fetch};
 use axiom_report::json::{JsonRenderer, string as json_string};
-use axiom_report::{Context, Query, ReportRenderer, Summary};
-use axiom_session::{Sources, Texts};
+use axiom_report::{Report, ReportRenderer, Summary};
+use axiom_session::{Options, Session, Sources, Texts};
 use axiom_sync::{Change, PlanOutcome, SourceFailure, SourceResult};
 
 use crate::args::{Command, Invocation};
@@ -33,17 +32,12 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     }
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
     let texts = Texts::default();
-    let mut sources = project.load(&texts)?;
+    let sources = project.load(&texts)?;
     if let Command::Fmt { files, check } = command {
         return Ok(crate::fmt::execute(&sources, &project.root, files, *check, terminals.out));
     }
-    let (parsed, mut diagnostics) = sources.parse();
-    let (book, built) = axiom_model::build(&parsed);
-    // The syntax trees are done with; the book borrows only the source text.
-    drop(parsed);
-    diagnostics.extend(built);
-
     let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
+    let session = Session::open(sources, options);
     let shown = Shown {
         terminals,
         limit: if invocation.all { Limit::Every } else { Limit::Capped },
@@ -51,35 +45,30 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     };
     match command {
         Command::Sync { names, dry } => {
-            let run = axiom_engine::run(&book, options);
-            let planned = sync::plan(&book, &run, &project, options.today, names, &mut sources)?;
-            diagnostics.extend(run.diagnostics);
-            let fate = if *dry { Fate::Shown } else { Fate::apply(&diagnostics, &project.root, &planned.changes) };
-            Ok(render_sync(planned, fate, &sources, terminals, &diagnostics))
+            // What a sync reads and prints is registered with a copy of the sources, so that the session is untouched.
+            let mut sources = session.sources().clone();
+            let planned = sync::plan(session.book(), session.run(), &project, options.today, names, &mut sources)?;
+            let fate =
+                if *dry { Fate::Shown } else { Fate::apply(session.diagnostics(), &project.root, &planned.changes) };
+            Ok(render_sync(planned, fate, &sources, terminals, session.diagnostics()))
         }
-        Command::Report(query, whose) => match Context::new(&book, options, *whose) {
-            Ok(context) => {
-                Ok(Session::new(&book, context.run(), &sources, &diagnostics, shown).report(&context, query))
-            }
-            Err(problem) => {
-                // Owner resolution failed before the context could make its run, whose diagnostics are still shown.
-                let run = axiom_engine::run(&book, options);
-                Ok(Session::new(&book, &run, &sources, &diagnostics, shown).refuse(&problem))
-            }
-        },
-        _ => {
-            // `check` needs only the final run summary; constructing a report context
-            // would also retain the pre-close checkpoint that no check view uses.
-            let run = axiom_engine::run(&book, options);
-            let (reader_diagnostics, suggestions) = if matches!(command, Command::Check) {
-                check_memos(&book, &project, &mut sources)
-            } else {
-                (Vec::new(), Vec::new())
-            };
-            diagnostics.extend(reader_diagnostics);
-            Ok(Session::new(&book, &run, &sources, &diagnostics, shown).check(&suggestions))
+        Command::Report(query, whose) => {
+            // The query comes first: it makes the fold with the plan it builds, and the diagnostics then read it.
+            let report = session.query(query, *whose);
+            let presenter = Presenter::new(&session, session.sources(), session.diagnostics().collect(), shown);
+            Ok(presenter.report(report))
         }
+        _ => Ok(check(&session, &project, shown)),
     }
+}
+
+/// `check`: every diagnostic, with the ones found reading the data files a `read` source names between the book's and
+/// the run's, and what nothing recognized in them.
+fn check(session: &Session<'_>, project: &Project, shown: Shown) -> Outcome {
+    let mut sources = session.sources().clone();
+    let (reader, suggestions) = check_memos(session.book(), project, &mut sources);
+    let found = session.book_diagnostics().iter().chain(&reader).chain(session.run_diagnostics()).collect();
+    Presenter::new(session, &sources, found, shown).check(&suggestions)
 }
 
 /// Reads only declared local `read` sources for check's unknown-memo hints.
@@ -236,8 +225,8 @@ enum Fate {
 
 impl Fate {
     /// `changes` are written under the project at `root`, unless the book's `diagnostics` hold an error.
-    fn apply(diagnostics: &[Diagnostic], root: &Path, changes: &[Change]) -> Fate {
-        if diagnostics.iter().any(Diagnostic::is_error) {
+    fn apply<'d>(diagnostics: impl IntoIterator<Item = &'d Diagnostic>, root: &Path, changes: &[Change]) -> Fate {
+        if diagnostics.into_iter().any(Diagnostic::is_error) {
             Fate::Blocked
         } else {
             Fate::Applied(axiom_sync::apply(root, changes))
@@ -253,14 +242,15 @@ impl Fate {
 }
 
 /// Presents a sync plan, and what became of its changes.
-fn render_sync(
+fn render_sync<'d>(
     planned: PlanOutcome,
     fate: Fate,
     sources: &Sources<'_>,
     terminals: Terminals,
-    prior: &[Diagnostic],
+    prior: impl IntoIterator<Item = &'d Diagnostic>,
 ) -> Outcome {
-    let mut diagnostics: Vec<&Diagnostic> = prior.iter().chain(&planned.problems).collect();
+    let mut diagnostics: Vec<&Diagnostic> = prior.into_iter().collect();
+    diagnostics.extend(&planned.problems);
     diagnostics.extend(
         planned.sources.iter().filter_map(|source| source.failure.as_ref()).flat_map(SourceFailure::diagnostics),
     );
@@ -394,26 +384,24 @@ enum Form {
     Json,
 }
 
-/// A book that has been run, and everything found on the way.
-struct Session<'a, 's> {
-    book: &'a Book<'s>,
-    run: &'a Run,
-    sources: &'a Sources<'a>,
-    /// From parsing, building, and running.
+/// What a session found, drawn for the command that asked.
+struct Presenter<'a, 't> {
+    session: &'a Session<'t>,
+    /// The files the diagnostics point into: the session's, and any data a command read beside them.
+    sources: &'a Sources<'t>,
+    /// From parsing, building, and running, in the order they are shown.
     diagnostics: Vec<&'a Diagnostic>,
     shown: Shown,
 }
 
-impl<'a, 's> Session<'a, 's> {
-    /// The book as run, with what was found before the run and by it.
+impl<'a, 't> Presenter<'a, 't> {
     fn new(
-        book: &'a Book<'s>,
-        run: &'a Run,
-        sources: &'a Sources<'a>,
-        before: &'a [Diagnostic],
+        session: &'a Session<'t>,
+        sources: &'a Sources<'t>,
+        diagnostics: Vec<&'a Diagnostic>,
         shown: Shown,
-    ) -> Session<'a, 's> {
-        Session { book, run, sources, diagnostics: before.iter().chain(&run.diagnostics).collect(), shown }
+    ) -> Presenter<'a, 't> {
+        Presenter { session, sources, diagnostics, shown }
     }
 
     /// Every diagnostic; and if none is an error, the book in one line.
@@ -429,8 +417,8 @@ impl<'a, 's> Session<'a, 's> {
             diagnostics.push_str(&self.suggestions(suggestions, self.shown.terminals.err));
             return Outcome { answer: String::new(), diagnostics, failed: true };
         }
-        let summary = axiom_report::summary(self.book, self.run);
-        let mut answer = self.shown.terminals.out.painter.paint(&[summary_line(self.book, &summary)]);
+        let summary = self.session.summary();
+        let mut answer = self.shown.terminals.out.painter.paint(&[summary_line(self.session.book(), &summary)]);
         answer.push_str(&self.suggestions(suggestions, self.shown.terminals.out));
         Outcome { answer, diagnostics, failed: false }
     }
@@ -446,8 +434,8 @@ impl<'a, 's> Session<'a, 's> {
 
     /// The errors, and the report. A report runs whatever the book's errors, so
     /// that a reader can investigate them; it says at its head what it rests on.
-    fn report(&self, context: &Context<'_, '_>, query: &Query<'_>) -> Outcome {
-        match context.report_with_sources(query, self.sources) {
+    fn report(&self, report: Result<Report<'_>, Diagnostic>) -> Outcome {
+        match report {
             Ok(report) => self.answer(&report),
             Err(problem) => self.refuse(&problem),
         }
@@ -466,7 +454,7 @@ impl<'a, 's> Session<'a, 's> {
     }
 
     /// The report, and the errors it rests on.
-    fn answer(&self, report: &axiom_report::Report<'_>) -> Outcome {
+    fn answer(&self, report: &Report<'_>) -> Outcome {
         let (diagnostics, tally) = self.show(&self.errors());
         if self.shown.form == Form::Json {
             return Outcome {
