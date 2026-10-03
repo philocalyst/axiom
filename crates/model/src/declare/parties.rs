@@ -33,9 +33,6 @@ pub(super) struct Parties<'a, 's> {
     implied: Map<&'s str, Loc>,
     /// The names some account, entity or asset is owned by.
     pub owner_names: Set<&'s str>,
-    /// The names of two words or more that a journal or a contract writes as an end, in the order they sort: what a
-    /// reference may be an address of.
-    pub references: Vec<&'s str>,
 }
 
 /// The entities, in the tree they are in for good, and how a name finds one.
@@ -54,14 +51,16 @@ pub(super) struct Entities<'s> {
     pub purposes: Vec<(Id<Entity>, At<Id<Purpose>>)>,
 }
 
-/// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones.
+/// The entities written, those the journal and the contracts name that nothing declares, and the built-in ones; and the
+/// names of two words or more that a journal or a contract writes as an end, in the order they sort: what a reference
+/// may be an address of.
 pub(super) fn find<'a, 's>(
     said: Said<'_, 'a, 's>,
     resolving: &Resolving<'_>,
     commodities: &Commodities<'s>,
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
-) -> Parties<'a, 's> {
+) -> (Parties<'a, 's>, Vec<&'s str>) {
     let (written, first_paths, owner_names) = written_entities(said.collected, names, diags);
     let (implied, references) = implied_parties(said, resolving, commodities, names, &written);
     // A written suffix such as `acme` can resolve to one implied path such as `vendors/acme`; a second `acme`
@@ -83,7 +82,7 @@ pub(super) fn find<'a, 's>(
             drafts.push(EntityDraft { path, home: Home::Builtin });
         }
     }
-    Parties { drafts, written, implied, owner_names, references }
+    (Parties { drafts, written, implied, owner_names }, references)
 }
 
 /// The entities written, each once (a repeat is said), in the order written, and the names things are owned by.
@@ -228,7 +227,7 @@ pub(super) fn declare<'a, 's>(
     names: &mut Interner<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> Entities<'s> {
-    let Parties { drafts, written, implied, owner_names, .. } = parties;
+    let Parties { drafts, written, implied, owner_names } = parties;
     let home_of: Map<&str, Home> = drafts.iter().map(|draft| (draft.path, draft.home)).collect();
     let mut purposes: Vec<(&str, At<Id<Purpose>>)> = Vec::new();
     let (mut tree, ids) = crate::paths::build(drafts.iter().map(|draft| draft.path), |path| {

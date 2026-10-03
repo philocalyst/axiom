@@ -46,16 +46,7 @@ pub(super) fn declare_accounts<'a, 's>(
         let scope = resolving.seeing.scopes.of(written.home());
         let fillers = leading(&entities.index, &entities.tree, names, scope, path);
         let kind = resolving.account_kind(names, written, fillers.as_deref(), diags);
-        let class = match resolving.kinds.tree[kind].sort {
-            Sort::Place(class) => class,
-            found => {
-                diags.push(
-                    axiom_core::Diagnostic::error("account-kind-sort", "an account needs a place kind")
-                        .label(file.loc(path), format!("this kind classifies {found:?}")),
-                );
-                Class::Asset
-            }
-        };
+        let class = class_of(resolving, kind, file.loc(path), diags);
         let shares = resolving.owners(names, written, &entities.index, &entities.tree, entities.me, diags);
         let owner = shares.first().map_or_else(
             || {
@@ -89,6 +80,20 @@ pub(super) fn declare_accounts<'a, 's>(
         });
     }
     drafts
+}
+
+/// The class of places an account's kind classifies; an account needs a place kind, and is an asset when it has none.
+fn class_of(resolving: &Resolving<'_>, kind: Id<Kind>, loc: Loc, diags: &mut Vec<Diagnostic>) -> Class {
+    match resolving.kinds.tree[kind].sort {
+        Sort::Place(class) => class,
+        found => {
+            diags.push(
+                Diagnostic::error("account-kind-sort", "an account needs a place kind")
+                    .label(loc, format!("this kind classifies {found:?}")),
+            );
+            Class::Asset
+        }
+    }
 }
 
 /// The assets written, each with the commodity that counts it.

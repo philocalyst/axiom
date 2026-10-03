@@ -430,8 +430,7 @@ pub(crate) fn declare<'a, 's>(
     let resolving = Resolving { seeing, kinds: &native_kinds, kind_roots, purposes: &native_purposes };
 
     let mut commodities = commodities::declare(collected, settings, &resolving, &mut names, diags);
-    let mut parties = parties::find(said, &resolving, &commodities, &mut names, diags);
-    let references = std::mem::take(&mut parties.references);
+    let (parties, references) = parties::find(said, &resolving, &commodities, &mut names, diags);
     let mut entities = parties::declare(collected, parties, &resolving, &mut names, diags);
     let accounts = holdings::declare_accounts(collected, &resolving, &entities, &names, diags);
     let mut assets = holdings::declare_assets(collected, &resolving, &entities, &mut commodities, &mut names, diags);
