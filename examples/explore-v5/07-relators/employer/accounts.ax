@@ -1,0 +1,7 @@
+account payroll : deposit at chase
+  owner acme
+
+entity chase : org
+
+purpose payroll-tax : spending
+purpose state-disability : tax-paid

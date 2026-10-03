@@ -1,0 +1,18 @@
+/// The same, with the employer's half written where it is Acme's: a leg of the contract, from the account it pays from.
+contract alex-pay with alex
+  5_750 USD twice monthly on 15, last from payroll #wages
+  from 2026-01-01
+  irs 692 USD #federal-tax
+  ftb 285 USD #state-tax
+  ssa 388.56 USD #payroll-tax
+  edd 60.95 USD #state-disability
+  also payroll -> irs 7.65% of amount #payroll-tax
+
+contract alex-bonus with alex
+  12_000 USD yearly on 03-14 from payroll #wages
+  from 2026-03-14
+  irs 2_640 USD #federal-tax
+  ftb 1_227.60 USD #state-tax
+  ssa 918 USD #payroll-tax
+  edd 144 USD #state-disability
+  also payroll -> irs 7.65% of amount #payroll-tax

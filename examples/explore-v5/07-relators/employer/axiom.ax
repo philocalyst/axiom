@@ -1,0 +1,15 @@
+// Acme's book: the employment of `kinds.ax`, from the employer's side. Acme owns `payroll` and pays Alex out of it; Alex is a
+// party here, as Acme is in the household's book (05-family), and the same kind says what follows.
+//
+// The employer's half of the payroll tax is in this book and not in the household's. Where the household's `alex-pay` is
+// paid `into joint-checking`, this one is paid `from payroll`, and what the kind says of `employer` stands at `payroll`.
+
+use std
+use us
+use us/ca
+
+base USD
+
+entity acme : employer
+entity alex : person
+  born   1988-02-10
