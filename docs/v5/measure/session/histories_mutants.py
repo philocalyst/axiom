@@ -13,6 +13,7 @@ COMMANDS = [
     ["test", "--release", "-p", "axiom-engine", "--lib", "histories"],
     ["test", "--release", "-p", "axiom-session", "--test", "histories"],
     ["test", "--release", "-p", "axiom-report", "--lib"],
+    ["test", "--release", "-p", "axiom-session", "--lib"],
 ]
 # Fail on the integration branch with no mutant at all (STATUS, "Waiting on you" 10): they kill nothing.
 KNOWN = ["a_context_forecast_keeps_historical_and_same_day_obligations_once", "a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot"]
@@ -47,6 +48,8 @@ MUTANTS = [
     ("balances-column-offset", REPORT + "balances.rs", "&self.cells[column * self.histories.len()..]", "&self.cells[..]"),
     ("unpriced-excludes-the-first-day", REPORT + "balance.rs", "days.partition_point(|&day| day < start)", "days.partition_point(|&day| day <= start)"),
     ("unpriced-counts-the-day-it-ended", REPORT + "balance.rs", ".is_some_and(|&day| day < past)", ".is_some_and(|&day| day <= past)"),
-    ("unpriced-ignores-the-sheet", REPORT + "balance.rs", "lens.owns(place) && !on_balance_sheet(book.places[place].class)", "lens.owns(place)"),
-    ("unpriced-ignores-prices", REPORT + "balance.rs", "&& on_its_day.value(moved).is_none())", "&& true)"),
+    ("unpriced-ignores-the-sheet", REPORT + "balance.rs", "if !on_balance_sheet(book.places[place].class) && on_its_day.value(moved).is_none() {", "if on_its_day.value(moved).is_none() {"),
+    ("unpriced-ignores-prices", REPORT + "balance.rs", "if !on_balance_sheet(book.places[place].class) && on_its_day.value(moved).is_none() {", "if !on_balance_sheet(book.places[place].class) {"),
+    ("unpriced-ignores-the-owner", REPORT + "balance.rs", "stands(end) && lens.owns(end.2)", "stands(end)"),
+    ("unpriced-is-what-the-first-asker-owns", REPORT + "balance.rs", "if !on_balance_sheet(book.places[place].class) && on_its_day.value(moved).is_none() {", "if lens.owns(place) && !on_balance_sheet(book.places[place].class) && on_its_day.value(moved).is_none() {"),
 ]
