@@ -35,7 +35,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **L1** the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | **merged** (`aeb624b`; the model check `error[junction-subject]` is its own last commit `9d375c8`, one `git revert`) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written); lane U's plan may take them in (they delete model lines) |
 | D the user's decisions | the small behaviour changes decided above: prorata R1, the exchange fee, the monitor's one warning, the claim's purpose, mortgage interest, `match` out, the examples | **merged** (`96f3e09`): items 1 to 7, 9 and 10; item 8 (the books: `07-landlord` `grace 30d`, `03-violations`, `11-sam`, porting `08`/`09`/`10`) **merged** (`Merge lane D, the books`): `03-violations`, `07-landlord` (`grace 30d`), `11-sam` corrected; `08-expat`, `09-shared`, `10-budgeter` ported to v5 |
-| **U unification** | **the pass that brings the tree to the ceiling: one formulation per concept, every behaviour kept.** Plan `UNIFY.md` (49 unifications, C1 to C6, a second round C7). **C1 merged** (`48519a6`: -1,019 of -2,450 planned, 42%) and **C2 merged** (`f1baf39`: -214 of -1,450, 14%; `Diagnostic` behind one pointer takes clippy from 277 to 58 warnings): 57,109 to 55,938 lines. Lane U's own verdict (`UNIFY.md` section 13): **unification ends near 52,000; under 40,000 is a choice of features** (about 12,000 lines of sync, why/explain, the forecast, the v3/v4 readers, relators/addresses, diagnostics quality); under 27,000 removes user-written laws, contracts and loans, lots and basis too. **Running in parallel: lane U (Opus) C3 in `model`; lane U-E (Opus, `lane-unify-c4`) C4 in `engine`; lane U-C6 (Sonnet, `lane-unify-c6`) the report/cli/sync/core entries of C6 (K7c = U35, the view site, rows of flows, the cell writer, sync's memos)** | running |
+| **U unification** | **the pass that brings the tree toward the ceiling: one formulation per concept, every behaviour kept.** Plan `UNIFY.md` (49 unifications). **C1 to C4 merged** (C1 -1,019 of -2,450 planned; C2 -214 of -1,450; C3 -168 of -1,190; **C4 -1,085 of -1,295**), with lane U-C6's report/cli/core entries (-669 of -1,675): 57,109 to 54,016 lines at the end of the pass. **Verdict: 27,000 is not reachable with the features kept** (see Decisions, "the gap", and the end-of-pass section). Remaining ledger and L2/L3 (design written, `L2L3-map.md`): see Outstanding | **paused at the end of the pass** |
 
 Test baseline before any lane: 734 passed, 4 failed, 8 ignored. Lane C on top: 777 passed, the same 4 failed, 13
 ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAINING.md` names.
@@ -95,6 +95,57 @@ needs whole features (sync, the forecast, budgets, loans beyond a fixed schedule
 
 Lane D is one Sonnet lane of small, separate commits (`docs/v5/lanes/lane-D-decisions.md`). Lane U is one Opus lane in
 phases, each ending in a merge (`docs/v5/lanes/lane-U-unify.md`).
+
+## Where things stand at the end of the pass (2026-10-04)
+
+**Merged into `claude/great-wozniak-pnqn7x-v5` and verified** (fmt, the workspace tests, the 60 goldens, the mistakes corpus):
+every kernel lane (C, K0a, K0b, C2, C3, K12, K4a, K3a, K4b, K5a, K3c, K5b, K3b, K5c, K3d, K6, K6b, K7a, K7b, K5d, K5e, K3f, L1),
+lane D (the user's decisions, and the books), and lane U's checkpoints C1 to C4: C1 to C3 (`UNIFY.md` sections 11 to 14),
+**lane U-C6** (`report`, `cli`, `core`: K7c's output unifications that the user decided, `View` holding the run, one cell writer for
+the report and the CLI, one search of a schedule's steps: -669 of -1,675 planned), **lane U-E** (C4, `engine`: relief as one ranking with
+one take, a parcel is like another by its fields, the second store of an asset part's basis and its six guards gone, what leaves
+realized once: **-1,085 of -1,295 planned**, no output changed, the sale-heavy books 22% fewer instructions), and lane U's
+L2/L3 design (`lanes/L2L3-map.md`, docs only).
+
+**The count** (`quality.py`, code lines): **54,016** (cli 2,320, core 3,448, engine 11,778, model 18,710, report 6,468, session 501,
+sync 4,339, syntax 6,438, systems 14), from 55,367 at the start of the day (the restated baseline) through +1,750 of new features
+(K6b, K3f, L1, lane D, the loan lanes) and about -3,100 of unification. The ceiling is 27,000. **It is not reachable with the
+features kept** (`UNIFY.md` sections 13 to 15): unification ends near 53,000, under 40,000 takes about 12,000 lines of features
+(sync, why/explain, the forecast, the v3/v4 readers, relators and addresses, part of the diagnostics' quality), under 27,000 also
+removes user-written laws, contracts and loans, and lots and basis. **That choice is the user's.**
+
+**Outstanding, in the order I would take it**
+1. **Decide features or the number** (above), and the **eleven design questions of `lanes/L2L3-map.md` section 10** (every party
+   declared; a flow with no counterparty goes to `?`; income and spending as directions; retiring `fmt --upgrade`; ...), each with a
+   recommendation. L2/L3 are the one place the language itself can shrink the code (about -270, of which -340 is the mentions walk),
+   and the books shrink far more than the code. Five build steps; steps 1 to 3 can start now.
+2. **Wire the `rates` policy** (Decision 18): `Book::convert_for` and its 177 lines are called only by tests; the law evaluation
+   and `on gain` should ask the owner's system rates (the IRS yearly rate for foreign income). Output changes only for a book that
+   sets `rates param`, none today.
+3. **The rest of lane U's ledger** (about -1,900 at the delivered ratio): C5 (`FlowRef` and K4b's list, one recognized series and
+   one temporal reading of a history, **U30 about -200, needs a temporal oracle first**, streams, the habit forecast as a source of
+   flows U36), C6's leftovers (U40 words as a trait: report half about -30 and model half about -40; U47/U48 sync memos behind an
+   error policy; `report/json.rs` as a field writer about -100; a shorthand for the 40 hand-built `Section::new` column lists about
+   -55), a second round C7. **U23 was not taken** (two records of two different things), U37, U41, U42, U44, U45 did not pay.
+4. **K4c (flows in columns) and K3e's parcel columns**: lane U-E measured that columns are not needed (relief is 2.5% to 4% of the
+   sale-heavy books; the cost was the identity comparison, now cheaper); K4c's layout (RSS down a quarter) is a performance lane
+   to take only if memory matters.
+5. **What the engine builds less of than LANGUAGE says** (lane D's six gaps): `-> party due` makes no claim; a tab cannot be
+   asserted; a write-off is whole only; `#loan` is not built in; a paystub written as a split through the owner counts as wages only
+   what lands in an account (L2/L3 decision 6); a contract paid `from` a fund is not capped at what the fund holds (10-budgeter's
+   `Committed` moves 500.00 where its README says 1,500.00).
+6. **Small, found on the way**: `bench/nativeize.py` books exit 1 with 1,022 errors and write `purpose pN-edu` on grants;
+   `02-household` and `03-violations` write `purpose education` on a grant (the std property is `grant-purpose`, and a warning now
+   says so); `examples/verify/verify11.py` fails; `10-budgeter`'s `check` warns 297.01 for October fun where `budget` says 323.02 (the
+   window total counted twice: U29); `07-landlord` has 5 assertion errors (`deposit`, which is not built: K3f Part B); `11-sam` has
+   9 errors; `claims.py mutate` cannot run on the head (its unmutated verdict fails on several projects: the references drifted);
+   `splits.py`'s `quiet()` strips v4 syntax from one side only; `Slot::tidy` does not recount `ties`; `tests/mistakes/constraints.sh`
+   is stale; `DateLayout` cannot move out of `core` (the model reads it).
+7. **Only the user can give**: `fearless_simd` source access (the registry source stays unreadable to the lanes; nothing waits on it).
+
+**Branches** (all pushed; the merged ones are kept for the record): integration `claude/great-wozniak-pnqn7x-v5`; lanes
+`-v5-unify` (U: C1 to C3, the L2/L3 map), `-v5-unify-c4` (U-E), `-v5-unify-c6` (U-C6), `-v5-d`, and the earlier `-v5-k*`, `-v5-l1`.
+`cutover/promote-workspace` and every branch outside this family were never touched.
 
 ## The questions the lanes asked
 
