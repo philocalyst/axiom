@@ -5,7 +5,7 @@ use axiom_engine::Run;
 use axiom_model::Flow;
 
 use super::flows_table;
-use crate::history::postings;
+use crate::history::{Posting, postings};
 use crate::lens::Lens;
 use crate::{Cell, Column, Report, Row, Section};
 
@@ -29,5 +29,6 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, description: &str, ids:
         };
         matches.push(Row::new([Cell::Day(flow.day), Cell::Text(book.text(text).into()), Cell::Source(flow.loc)]));
     }
-    Report::new(format!("Why \"{description}\"")).with(matches).with(flows_table(lens, run, ids, "Flows"))
+    let flows = ids.iter().map(|&id| Posting::at(book, run, id));
+    Report::new(format!("Why \"{description}\"")).with(matches).with(flows_table(lens, flows, "Flows"))
 }

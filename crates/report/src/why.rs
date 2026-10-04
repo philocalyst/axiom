@@ -42,8 +42,12 @@ fn recent<T>(items: &[T]) -> (&[T], usize) {
     (&items[left_out..], left_out)
 }
 
-/// Flows, dated, with where each stands.
-fn flows_table<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
+/// Flows, dated, with where each stands: the latest of them, and how many earlier ones are not shown.
+fn flows_table<'s, 'a>(
+    lens: Lens<'s, '_, '_, '_>,
+    postings: impl IntoIterator<Item = Posting<'a>>,
+    heading: &str,
+) -> Section<'s> {
     let book = lens.book();
     let columns = [
         Column::left("Date"),
@@ -53,17 +57,14 @@ fn flows_table<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ids: &[Id<Flow>], head
         Column::left("From"),
     ];
     let mut section = Section::new(columns).headed(Cell::Said(Cow::Owned(heading.to_owned())));
-    let (shown, left_out) = recent(ids);
-    for &id in shown {
-        let posting = Posting::at(book, run, id);
-        let flow = posting.flow;
+    let postings: Vec<Posting> = postings.into_iter().collect();
+    let (shown, left_out) = recent(&postings);
+    for posting in shown {
+        let (flow, out) = (posting.flow, posting.out());
         let cells = [
             Cell::Day(flow.day),
             Cell::text(route(book, flow)),
-            Cell::amount(
-                book,
-                Amount::new(crate::flow::scoped_movement_qty(lens, flow, posting.out().qty), posting.out().unit),
-            ),
+            Cell::amount(book, Amount::new(crate::flow::scoped_movement_qty(lens, flow, out.qty), out.unit)),
             Cell::text(state_words(posting.posted.state)),
             Cell::Source(flow.loc),
         ];

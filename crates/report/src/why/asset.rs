@@ -4,8 +4,9 @@ use axiom_core::{Id, Qty};
 use axiom_engine::{AdjustmentKind, AssetState, Part, PartKind, Run};
 use axiom_model::{Amount, Asset, Object};
 
+use super::flows_table;
+use crate::history::all_postings;
 use crate::lens::Lens;
-use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section};
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) -> Report<'s> {
@@ -19,10 +20,15 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
         )));
     }
     let state = run.assets.iter().find(|state| state.asset == asset_id);
+    // The flows whose purpose is about the asset.
+    let about = all_postings(book, run).filter(|posting| {
+        lens.owns(crate::flow::movement_place(lens, posting.flow))
+            && posting.flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
+    });
     Report::new(format!("Why {name}"))
         .with(overview(lens, asset, state))
         .with(parts(lens, run, asset_id, state))
-        .with(about(lens, run, asset_id))
+        .with(flows_table(lens, about, "Flows about it"))
 }
 
 /// Who owns it, what it is part of, and what it is worth and cost.
@@ -97,40 +103,4 @@ fn part_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>, part
         Cell::base_or_blank(book, lens.entity_qty(owner, consumed)),
         source,
     ])
-}
-
-/// The flows whose purpose is about the asset.
-fn about<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) -> Section<'s> {
-    let book = lens.book();
-    let mut about = Section::new([
-        Column::left("Date"),
-        Column::left("Purpose"),
-        Column::left("Flow"),
-        Column::right("Amount"),
-        Column::left("From"),
-    ])
-    .headed("Flows about it");
-    let about_it = crate::history::all_postings(book, run).filter(|posting| {
-        lens.owns(crate::flow::movement_place(lens, posting.flow))
-            && posting.flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
-    });
-    for posting in about_it {
-        let (flow, out) = (posting.flow, posting.out());
-        let amount = crate::flow::scoped_movement_qty(lens, flow, out.qty);
-        if amount.is_zero() {
-            continue;
-        }
-        let purpose = flow.purpose.map(|purpose| book.name(book.purposes[purpose.purpose].name)).unwrap_or("");
-        about.push(Row::new([
-            Cell::Day(flow.day),
-            Cell::Purpose(purpose),
-            Cell::text(route(book, flow)),
-            Cell::amount(book, Amount::new(amount, out.unit)),
-            Cell::Source(flow.loc),
-        ]));
-    }
-    if about.rows.is_empty() {
-        about.note("No flows name this asset as their purpose's object.");
-    }
-    about
 }

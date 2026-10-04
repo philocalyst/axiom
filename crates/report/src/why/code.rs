@@ -22,7 +22,6 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
             lens.owns(crate::flow::movement_place(lens, posting.flow))
                 && book.flow_view(posting.flow).codes().any(marked)
         })
-        .filter_map(|posting| posting.id.journal())
         .collect();
     let visible_codes = super::line::scoped_codes(book, lens);
     let event_visible = |code| lens.whose.is_everyone() || visible_codes.contains(&code);
@@ -44,7 +43,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
         let known: BTreeSet<&str> = visible_codes.iter().copied().chain(events).map(|code| book.name(code)).collect();
         return Err(resolve::nothing_named("code", pattern, known));
     }
-    Ok(Report::new(format!("Why ^{pattern}")).with(flows_table(lens, run, &flows, "Flows")).with(happened))
+    Ok(Report::new(format!("Why ^{pattern}")).with(flows_table(lens, flows, "Flows")).with(happened))
 }
 
 /// A claim written off: the day it was said, and what it forgave.

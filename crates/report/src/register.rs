@@ -234,21 +234,6 @@ fn entry_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, cutoff: Day, day: Day, s
     Row::new(cells).style(if counts { Style::Normal } else { Style::Muted })
 }
 
-/// What a contract's flow is, in a word: the occurrence it wrote, or what it derived.
-pub(crate) fn contract_flow_word(origin: Origin) -> &'static str {
-    match origin {
-        Origin::Occurrence(_) => "occurrence",
-        Origin::Derived(Derivation::Interest(_)) => "interest",
-        Origin::Derived(Derivation::Principal(_)) => "principal",
-        Origin::Derived(Derivation::Opening(_)) => "opening",
-        Origin::Derived(Derivation::Claim(_)) => "claim",
-        Origin::Derived(Derivation::Otherwise(_)) => "late fee",
-        Origin::Derived(Derivation::Refund(_)) => "refund",
-        Origin::Derived(_) => "derived",
-        Origin::Written => "flow",
-    }
-}
-
 /// Whether a flow is one the contract wrote or derived.
 pub(crate) fn contract_flow(origin: Origin, contract: Id<Contract>) -> bool {
     match origin {

@@ -8,6 +8,7 @@ use axiom_model::Flow;
 use super::{effects_table, flows_table};
 use crate::Report;
 use crate::gains;
+use crate::history::Posting;
 use crate::lens::Lens;
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, name: &str) -> Report<'s> {
@@ -28,5 +29,6 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, name: &str) -> Report<'
         tallied.note("Effects from a period ending were computed from the tallies counted during it.");
     }
     let gains = gains::section(book, &sold).headed("Gains realized");
-    Report::new(format!("Why {name}")).with(tallied).with(flows_table(lens, run, &flows, "Flows behind it")).with(gains)
+    let behind = flows.iter().map(|&id| Posting::at(book, run, id));
+    Report::new(format!("Why {name}")).with(tallied).with(flows_table(lens, behind, "Flows behind it")).with(gains)
 }

@@ -5,8 +5,9 @@ use axiom_engine::Run;
 use axiom_model::promise::{Entry, Kind};
 use axiom_model::{Amount, Contract};
 
+use super::flows_table;
+use crate::history::all_postings;
 use crate::lens::Lens;
-use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contract>) -> Report<'s> {
@@ -19,11 +20,16 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contrac
             book.name(book.entities[contract.owner].path)
         )));
     }
+    // The flows the contract derived, or that its occurrences wrote.
+    let derived = all_postings(book, run).filter(|posting| {
+        lens.owns(crate::flow::movement_place(lens, posting.flow))
+            && crate::register::contract_flow(posting.flow.origin, contract_id)
+    });
     let report = Report::new(format!("Why {name}"))
         .with(about_section(lens, contract))
         .with(terms_section(lens, contract))
         .with(promises_section(lens, run, contract_id))
-        .with(derived_section(lens, contract_id));
+        .with(flows_table(lens, derived, "Derived flows"));
     schedule_section(lens, run, contract_id).into_iter().fold(report, Report::with)
 }
 
@@ -171,31 +177,4 @@ fn entry_state(run: &Run, contract_id: Id<Contract>, entry: &Entry) -> &'static 
         (Kind::Pay, None) if entry.day > run.today => "ahead",
         (Kind::Pay, None) => "not written",
     }
-}
-
-/// The flows the contract derived, or that its occurrences wrote.
-fn derived_section<'s>(lens: Lens<'s, '_, '_, '_>, contract_id: Id<Contract>) -> Section<'s> {
-    let book = lens.book();
-    let mut derived = Section::new([
-        Column::left("Date"),
-        Column::left("What it derived"),
-        Column::left("Flow"),
-        Column::left("From"),
-    ])
-    .headed("Derived flows");
-    let flows = book.flows.values().filter(|flow| {
-        lens.owns(crate::flow::movement_place(lens, flow)) && crate::register::contract_flow(flow.origin, contract_id)
-    });
-    for flow in flows {
-        derived.push(Row::new([
-            Cell::Day(flow.day),
-            Cell::Word(crate::register::contract_flow_word(flow.origin)),
-            Cell::text(route(book, flow)),
-            Cell::Source(flow.loc),
-        ]));
-    }
-    if derived.rows.is_empty() {
-        derived.note("No flow from this contract appears in the book.");
-    }
-    derived
 }
