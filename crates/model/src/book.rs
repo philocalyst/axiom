@@ -1333,11 +1333,16 @@ impl<'s> Book<'s> {
     /// `amount` in `unit` at the latest prices on or before `day`, rounded to
     /// `unit`'s precision. `None` without a price path.
     pub fn convert(&self, amount: Amount, unit: Id<Commodity>, day: Day) -> Option<Amount> {
-        if amount.unit == unit {
-            return Some(amount);
+        self.convert_at_rate(amount, unit, self.rate(amount.unit, unit, day)?)
+    }
+
+    /// Whole `to` units per whole `from` unit at the latest prices on or before `day`: a quote between the two, or
+    /// else through the base currency.
+    pub fn rate(&self, from: Id<Commodity>, to: Id<Commodity>, day: Day) -> Option<Ratio> {
+        if from == to {
+            return Some(Ratio::ONE);
         }
-        let rate = self.prices.rate(amount.unit, unit, day, self.base)?;
-        self.convert_at_rate(amount, unit, rate)
+        self.conversion_path(from, to, day, RatePolicy::Spot).map(|(rate, _)| rate)
     }
 
     /// Applies an already selected exchange rate using the book's commodity
@@ -1446,8 +1451,8 @@ impl<'s> Book<'s> {
     }
 
     fn spot_rate_use(&self, from: Id<Commodity>, to: Id<Commodity>, day: Day) -> Option<RateUse> {
-        let forward = self.latest_quote(from, to, day);
-        let reverse = self.latest_quote(to, from, day).and_then(|quote| Some((quote, quote.rate.recip()?)));
+        let forward = self.prices.latest(from, to, day);
+        let reverse = self.prices.latest(to, from, day).and_then(|quote| Some((quote, quote.rate.recip()?)));
         let (quote, rate, inverted) = match (forward, reverse) {
             (Some(forward), Some((reverse, inverted))) if reverse.day > forward.day => (reverse, inverted, true),
             (Some(forward), _) => (forward, forward.rate, false),
@@ -1469,36 +1474,22 @@ impl<'s> Book<'s> {
         })
     }
 
-    fn latest_quote(&self, from: Id<Commodity>, to: Id<Commodity>, day: Day) -> Option<&crate::journal::Quote> {
-        let upto = self.prices.quotes.partition_point(|quote| (quote.unit, quote.quote, quote.day) <= (from, to, day));
-        self.prices.quotes[..upto].last().filter(|quote| quote.unit == from && quote.quote == to)
-    }
-
-    fn param_rate_use(&self, id: Id<Param>, from: Id<Commodity>, to: Id<Commodity>, day: Day) -> Option<RateUse> {
-        let param = &self.params[id];
-        let from_name = self.commodities[from].symbol;
-        let to_name = self.commodities[to].symbol;
-        let direct_unit = Some(Dim::Per(to, from));
-        let inverse_unit = Some(Dim::Per(from, to));
-        if (param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == direct_unit)
-            && let Some((row, value)) = param.row_index(day, &[from_name, to_name])
-            && let Value::Num(rate) = value.value
-            && rate.num() > 0
-        {
-            let source = RateSource::Param { param: id, row, since: value.since, inverted: false, loc: value.loc };
-            return Some(RateUse { from, to, rate, source });
-        }
-        if (param.unit.is_none() || param.unit == Some(Dim::Number) || param.unit == inverse_unit)
-            && let Some((row, value)) = param.row_index(day, &[to_name, from_name])
-            && let Value::Num(rate) = value.value
-        {
-            let rate = rate.recip()?;
-            if rate.num() > 0 {
-                let source = RateSource::Param { param: id, row, since: value.since, inverted: true, loc: value.loc };
-                return Some(RateUse { from, to, rate, source });
+    /// A param's rate: its row for `from` and `to` if that is positive, or else the inverse of its row for `to` and
+    /// `from`.
+    fn param_rate_use(&self, param: Id<Param>, from: Id<Commodity>, to: Id<Commodity>, day: Day) -> Option<RateUse> {
+        let table = &self.params[param];
+        let symbol = |unit: Id<Commodity>| self.commodities[unit].symbol;
+        let rows = [(from, to, false), (to, from, true)];
+        rows.into_iter().find_map(|(of, per, inverted)| {
+            if !(table.unit.is_none() || table.unit == Some(Dim::Number) || table.unit == Some(Dim::Per(per, of))) {
+                return None;
             }
-        }
-        None
+            let (row, value) = table.row_index(day, &[symbol(of), symbol(per)])?;
+            let Value::Num(rate) = value.value else { return None };
+            let rate = if inverted { rate.recip()? } else { rate };
+            let source = RateSource::Param { param, row, since: value.since, inverted, loc: value.loc };
+            (rate.num() > 0).then_some(RateUse { from, to, rate, source })
+        })
     }
 
     /// Borrows a flow with the metadata its compact ranges name.

@@ -9,6 +9,7 @@
 //!
 //! One builder serves every such tree. What differs between them is data and a few words, which a [`Node`] gives.
 
+use axiom_core::tree::cycles;
 use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind};
 
@@ -232,39 +233,6 @@ impl<'a, 's, T: Node> Drafts<'a, 's, T> {
             tree,
         }
     }
-}
-
-/// Each cycle of parents, as the nodes on it in the order each inherits from the next. Nodes that only hang beneath
-/// a cycle are not on it.
-fn cycles(parents: &[Option<usize>]) -> Vec<Vec<usize>> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum State {
-        Unseen,
-        OnPath,
-        Done,
-    }
-    let mut state = vec![State::Unseen; parents.len()];
-    let mut found = Vec::new();
-    for start in 0..parents.len() {
-        let (mut path, mut at) = (Vec::new(), Some(start));
-        while let Some(node) = at {
-            match state[node] {
-                State::Unseen => {
-                    state[node] = State::OnPath;
-                    path.push(node);
-                    at = parents[node];
-                }
-                State::OnPath => {
-                    let from = path.iter().position(|&member| member == node).expect("on the path being walked");
-                    found.push(path[from..].to_vec());
-                    break;
-                }
-                State::Done => break,
-            }
-        }
-        path.iter().for_each(|&node| state[node] = State::Done);
-    }
-    found
 }
 
 #[cfg(test)]

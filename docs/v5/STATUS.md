@@ -223,6 +223,20 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 
 ## Lane U, in numbers
 
+C3, names, laws, values and diagnostics: **55,770**, −168 from the v5 head `f1baf39` (55,938); model 18,710 (−198), core
+3,532 (+30: the cycle finder moved there), report one line changed. Built where an entry deletes about 40 lines or a concept:
+U13 −225/**−113** (one `Compiler` constructor; the owner's currency read once; `Window::named`; a budget's computed limit
+compiled onto its law's arena, so the offset copy and `BudgetLimit` go), U14 −105/**−30** (one spot lookup of the quotes:
+`Book::rate`, which `convert` and `Lens::exact` ask), U15 −85/**−25** (one cycle finder, `core::tree::cycles`). Not built,
+with their map counts (UNIFY §14): U11 −310/0, U12 −60/0, U16 −250/0, U17 −150/0, U18 −5/0: **−168 of −1,190** (14%).
+Diagnostics as rows prototyped on `problem.rs`: the family grows by 35 lines, so not built, and section 13's −500 is withdrawn.
+The evaluator read closely: `eval.rs`'s `Machine` is already the one walk (`fire.rs` is policy, `totals.rs` the window store
+of U29, `calc.rs` arithmetic), so section 13's −400 is withdrawn too. Found: `Book::convert_for` and its five types (a
+system's `rates` policy, 177 code lines) are called only by `model`'s tests; a decision. Byte-identical to `f1baf39` in
+`diff/` (868 outputs), all 577 Books, goldens, mistakes and the declared-lines corpus, and in two books written for the
+budget formula and the asset cycles; the release suite green; clippy 58 warnings (as at C2's end; `core` clean). With C1 and C2, 28% of plan: the tree
+lands near **53,500**; distance to 27,000: **28,770**.
+
 C2, one lowering of a line that moves value: **55,938**, −205 from the v5 head `9590f36` (56,143); model 18,908 (−212), core
 3,502 (+8), session 501 (−1). Planned against delivered: the `Diagnostic` behind one `Box` (first, the coordinator's) +9,
 clippy 277 to 58 warnings; U7 −1,130/**−198** (`Recording`, the context of a dated record, with its skeleton and its steps as

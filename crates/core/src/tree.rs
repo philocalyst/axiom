@@ -161,6 +161,39 @@ impl<T> Tree<T> {
     }
 }
 
+/// Each cycle of `parents` (each item's parent, as [`Tree::build`] takes them), as the items on it, each the child of
+/// the next. Items that only hang beneath a cycle are not on it.
+pub fn cycles(parents: &[Option<usize>]) -> Vec<Vec<usize>> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum State {
+        Unseen,
+        OnPath,
+        Done,
+    }
+    let mut state = vec![State::Unseen; parents.len()];
+    let mut found = Vec::new();
+    for start in 0..parents.len() {
+        let (mut path, mut at) = (Vec::new(), Some(start));
+        while let Some(node) = at {
+            match state[node] {
+                State::Unseen => {
+                    state[node] = State::OnPath;
+                    path.push(node);
+                    at = parents[node];
+                }
+                State::OnPath => {
+                    let from = path.iter().position(|&member| member == node).expect("on the path being walked");
+                    found.push(path[from..].to_vec());
+                    break;
+                }
+                State::Done => break,
+            }
+        }
+        path.iter().for_each(|&node| state[node] = State::Done);
+    }
+    found
+}
+
 impl<T> Default for Tree<T> {
     fn default() -> Tree<T> {
         Tree { items: Vec::new(), links: Vec::new() }

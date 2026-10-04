@@ -804,44 +804,18 @@ fn diagnose_asset_cycles(
     names: &axiom_core::Interner<'_>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let mut state = vec![0u8; assets.len()];
-    let ids: Vec<_> = assets.ids().collect();
-    for start in ids {
-        let mut path = Vec::new();
-        let mut current = Some(start);
-        while let Some(id) = current {
-            match state[id.index()] {
-                0 => {
-                    state[id.index()] = 1;
-                    path.push(id);
-                    current = assets[id].part_of.map(|parent| parent.value);
-                }
-                1 => {
-                    let from = path.iter().position(|&member| member == id).unwrap_or(0);
-                    let members = &path[from..];
-                    let route = members
-                        .iter()
-                        .chain(members.first())
-                        .map(|member| names.name(assets[*member].name))
-                        .collect::<Vec<_>>();
-                    let edge = *path.last().expect("a cycle has a preceding edge");
-                    let part = assets[edge].part_of.take();
-                    let mut diagnostic =
-                        Diagnostic::error("asset-part-cycle", format!("asset `{}` is part of itself", route[0]))
-                            .note(format!("the chain is {}", route.join(" -> ")))
-                            .help("make one asset a whole, outside this part-of chain");
-                    if let Some(part) = part {
-                        diagnostic = diagnostic.label(part.loc, "this part-of relationship closes the cycle");
-                    }
-                    diags.push(diagnostic);
-                    break;
-                }
-                _ => break,
-            }
+    let parents: Vec<_> = assets.iter().map(|(_, asset)| asset.part_of.map(|whole| whole.value.index())).collect();
+    for cycle in axiom_core::tree::cycles(&parents) {
+        let asset = |at: usize| Id::<Asset>::new(at as u32);
+        let route: Vec<_> = cycle.iter().chain(cycle.first()).map(|&at| names.name(assets[asset(at)].name)).collect();
+        let mut diagnostic = Diagnostic::error("asset-part-cycle", format!("asset `{}` is part of itself", route[0]))
+            .note(format!("the chain is {}", route.join(" -> ")))
+            .help("make one asset a whole, outside this part-of chain");
+        let closing = *cycle.last().expect("a cycle has a member");
+        if let Some(part) = assets[asset(closing)].part_of.take() {
+            diagnostic = diagnostic.label(part.loc, "this part-of relationship closes the cycle");
         }
-        for id in path {
-            state[id.index()] = 2;
-        }
+        diags.push(diagnostic);
     }
 }
 

@@ -39,30 +39,8 @@ impl Prices {
         Prices { quotes }
     }
 
-    /// Whole `quote` units per whole `unit` on `day`: the latest quote at or
-    /// before it, used directly, inverted, or through `via` (the base).
-    pub fn rate(&self, unit: Id<Commodity>, quote: Id<Commodity>, day: Day, via: Id<Commodity>) -> Option<Ratio> {
-        if unit == quote {
-            return Some(Ratio::ONE);
-        }
-        self.direct(unit, quote, day).or_else(|| {
-            let (to_via, from_via) = (self.direct(unit, via, day)?, self.direct(via, quote, day)?);
-            to_via.checked_mul(from_via)
-        })
-    }
-
-    /// The latest quote between the pair on or before `day`, in either
-    /// direction; the more recent of the two when both exist.
-    fn direct(&self, unit: Id<Commodity>, quote: Id<Commodity>, day: Day) -> Option<Ratio> {
-        let forward = self.latest(unit, quote, day).map(|found| (found.day, found.rate));
-        let backward = self.latest(quote, unit, day).and_then(|found| Some((found.day, found.rate.recip()?)));
-        match (forward, backward) {
-            (Some(a), Some(b)) => Some(if b.0 > a.0 { b.1 } else { a.1 }),
-            (a, b) => a.or(b).map(|found| found.1),
-        }
-    }
-
-    fn latest(&self, unit: Id<Commodity>, quote: Id<Commodity>, day: Day) -> Option<&Quote> {
+    /// The latest quote of `unit` in `quote` on or before `day`.
+    pub(crate) fn latest(&self, unit: Id<Commodity>, quote: Id<Commodity>, day: Day) -> Option<&Quote> {
         let upto = self.quotes.partition_point(|q| (q.unit, q.quote, q.day) <= (unit, quote, day));
         self.quotes[..upto].last().filter(|found| found.unit == unit && found.quote == quote)
     }
