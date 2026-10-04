@@ -26,7 +26,8 @@ purpose wages : income
 
 fn parsed_source<'s>(id: u16, path: &'s str, text: &'s str, embedded: bool) -> Source<'s> {
     let (file, diagnostics) = parse(FileId(id), text, Folder::default());
-    assert!(diagnostics.is_empty(), "{path} should parse: {diagnostics:?}");
+    // A text that says a line is written the v4 way is read all the same, and says so once.
+    assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{path} should parse: {diagnostics:?}");
     Source { path, file, embedded }
 }
 
@@ -635,7 +636,9 @@ account savings : bank
     ] {
         let (book, diagnostics) = build_project(project);
 
-        assert_eq!(codes(&diagnostics), ["unknown-purpose"], "{diagnostics:?}");
+        // An amount before the arrow, with only legs after it, is the v4 spelling and says so once.
+        let found: Vec<_> = codes(&diagnostics).into_iter().filter(|code| *code != "v4-syntax").collect();
+        assert_eq!(found, ["unknown-purpose"], "{diagnostics:?}");
         assert_eq!(book.flows.len(), 2, "the leg lowered before the failure is taken back");
         let kept: Vec<_> = book.codes.values().map(|&code| book.name(code)).collect();
         assert_eq!(kept, ["first", "third"]);
@@ -924,7 +927,8 @@ account brokerage : bank
 ",
     ] {
         let (book, diagnostics) = build_project(project);
-        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        // The text with both amounts is the v4 spelling, and says so once.
+        assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{diagnostics:?}");
         let vti = book.commodity("VTI").unwrap();
         let usd = book.commodity("USD").unwrap();
         let day = Day::from_ymd(2026, 2, 10).unwrap();
@@ -970,7 +974,8 @@ account brokerage : bank
 ",
     ] {
         let (book, diagnostics) = build_project(project);
-        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        // The text with both amounts is the v4 spelling, and says so once.
+        assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{diagnostics:?}");
         let vti = book.commodity("VTI").unwrap();
         let usd = book.commodity("USD").unwrap();
         let day = Day::from_ymd(2026, 2, 10).unwrap();

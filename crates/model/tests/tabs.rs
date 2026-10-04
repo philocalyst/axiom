@@ -118,7 +118,7 @@ fn a_party_a_flow_mentions_with_due_for_or_via_has_no_tab_until_a_claim_asks_for
 #[test]
 fn a_template_may_name_a_loan_declared_after_it_and_its_name_stands_for_the_debt_tab() {
     let contracts =
-        "contract plan with jo\n  100 USD monthly on 2 from checking\n  from 2026-02-01\n  mortgage 20 USD\n";
+        "contract plan with jo\n  100 USD monthly on 2 from checking\n  from 2026-02-01\n  -> mortgage 20 USD\n";
     with_book(&format!("{PARTIES}{contracts}{LOAN}"), |book| {
         let debt = book.contracts[book.contract("mortgage").unwrap()].loan.expect("a loan").debt;
         let plan = &book.contracts[book.contract("plan").unwrap()];

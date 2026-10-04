@@ -6,6 +6,7 @@ use std::mem::discriminant;
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
+use crate::legacy::Form;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported, Scope};
@@ -425,6 +426,27 @@ impl<'s> Parser<'s> {
             (Some(_), Some(_), true) => self.settle_through(flow, arrow),
             (_, _, true) => self.settle_split(flow),
             _ => self.settle_exchange(flow, arrow),
+        }?;
+        self.note_old(flow, arrow);
+        Ok(())
+    }
+
+    /// Notes a header that is spelled the way v4 spelled it: an amount on each side of two named ends, an amount before an
+    /// arrow that has only legs after it, or no subject. What the upgrade can move or drop is a written amount: a marker,
+    /// a share or an `all` has no other spelling yet, and an exchange that names one end is no spelling of anything v4
+    /// read.
+    fn note_old(&mut self, flow: &Flow<'s>, arrow: Loc) {
+        let legs = !flow.body.legs.is_empty();
+        let written = |side: &Side<'s>| side.amount.and_then(Quantity::literal).is_some();
+        let ends = flow.from.end.is_some() && flow.to.end.is_some();
+        let form = match (written(&flow.from), written(&flow.to), legs) {
+            (true, true, _) if ends => Some(Form::TwoAmounts),
+            (true, false, true) => Some(Form::DanglingAmount),
+            _ => (flow.junction == Junction::Out && flow.from.end.is_none() && flow.through.is_none())
+                .then_some(Form::NoSubject),
+        };
+        if let Some(form) = form {
+            self.old.note(form, arrow, 1);
         }
     }
 
@@ -482,7 +504,17 @@ impl<'s> Parser<'s> {
     /// told it need not still has to point the right way.
     pub fn legs_point(&mut self, legs: Many<Leg<'s>>, arrows: Arrows) -> Parse<()> {
         let problem = self.slice(legs).iter().find_map(|leg| self.arrow_problem(leg, arrows));
-        problem.map_or(Ok(()), |diag| self.fail(diag))
+        if let Some(diag) = problem {
+            return self.fail(diag);
+        }
+        if let Arrows::Tolerated(_) = arrows {
+            let mut bare = self.slice(legs).iter().filter(|leg| leg.arrow.is_none()).map(|leg| leg.loc);
+            if let Some(first) = bare.next() {
+                let more = bare.count();
+                self.old.note(Form::BareLeg, first, 1 + more as u32);
+            }
+        }
+        Ok(())
     }
 
     fn arrow_problem(&self, leg: &Leg<'s>, arrows: Arrows) -> Option<Diagnostic> {

@@ -19,7 +19,8 @@ pub(crate) fn day(year: i32, month: u32, day: u32) -> Day {
 /// Compiles `text` as a project of one file, which must have no errors.
 pub(crate) fn with_book<R>(text: &str, then: impl FnOnce(&Book) -> R) -> R {
     let (file, parsed) = axiom_syntax::parse(FileId(0), text, Folder::default());
-    assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
+    // A line written the v4 way, which some of these tests are about, says so once and nothing else.
+    assert!(parsed.iter().all(|found| found.code == "v4-syntax"), "the source does not parse: {parsed:?}");
     let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
     assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");
     then(&book)
@@ -54,7 +55,7 @@ fn with_run_sources<'s, R>(
         .enumerate()
         .map(|(index, &(path, text, embedded))| {
             let (file, parsed) = axiom_syntax::parse(FileId(index as u16), text, Folder::of(path));
-            assert!(parsed.is_empty(), "{path} does not parse: {parsed:?}");
+            assert!(parsed.iter().all(|found| found.code == "v4-syntax"), "{path} does not parse: {parsed:?}");
             Source { path, file, embedded }
         })
         .collect();

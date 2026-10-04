@@ -34,6 +34,7 @@ mod decl;
 mod expr;
 mod flow;
 mod law;
+mod legacy;
 mod lex;
 mod lines;
 mod malformed;
@@ -45,6 +46,8 @@ mod structure;
 mod style;
 mod upgrade;
 
+#[cfg(test)]
+mod legacy_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -61,6 +64,7 @@ use axiom_core::{Diagnostic, FileId, Loc, par};
 use memchr::{memchr, memchr_iter, memrchr};
 
 use crate::ast::Piece;
+use crate::legacy::Old;
 use crate::lines::{Tabs, unattached_doc};
 use crate::parser::Parser;
 use crate::refs::{MAX_LOCAL_NODES, MAX_PIECES};
@@ -136,17 +140,19 @@ pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -
     // Keep only the piece tables after each ordered result has been folded in;
     // `map_each` would also retain a full `Vec<Parsed>` until every piece ends.
     let mut pieces = Vec::with_capacity(jobs.len());
-    let (mut diags, mut tabs) = (Vec::new(), Tabs::default());
+    let (mut diags, mut tabs, mut old) = (Vec::new(), Tabs::default(), Old::default());
     par::map_each_ordered(
         &jobs,
         |job| parse_piece(file, src, job),
-        |(piece, more, more_tabs)| {
+        |(piece, more, more_tabs, more_old)| {
             pieces.push(piece);
             diags.extend(more);
             tabs.merge(more_tabs);
+            old.merge(more_old);
         },
     );
     diags.extend(tabs.diagnostic());
+    diags.extend(old.diagnostic());
     diags.sort_by_key(|diag| diag.anchor().map(|loc| loc.start));
     (File::new(file, src, pieces), diags)
 }
@@ -165,8 +171,8 @@ fn first_item(bytes: &[u8], range: &Range<usize>) -> usize {
     range.start
 }
 
-/// A parsed piece, what it found wrong, and its lines that were indented with tabs.
-type Parsed<'s> = (Piece<'s>, Vec<Diagnostic>, Tabs);
+/// A parsed piece, what it found wrong, its lines that were indented with tabs, and its lines written the v4 way.
+type Parsed<'s> = (Piece<'s>, Vec<Diagnostic>, Tabs, Old);
 
 /// One piece of the file to parse: which, where, what its dates start out as,
 /// and what a first look at it found.
@@ -183,9 +189,9 @@ fn parse_piece<'s>(file: FileId, src: &'s str, job: &Job) -> Parsed<'s> {
     parser.items.reserve(job.scan.items);
     parser.reserve::<Txn>(job.scan.dated);
     parser.items(job.number == 0);
-    let (piece, mut diags, lines) = parser.finish();
+    let (piece, mut diags, lines, old) = parser.finish();
     diags.extend(lines.stray_doc.map(unattached_doc));
-    (piece, diags, lines.tabs)
+    (piece, diags, lines.tabs, old)
 }
 
 /// What one pass over a piece's lines finds: room for the tables, so they

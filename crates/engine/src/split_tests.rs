@@ -47,7 +47,8 @@ fn day(year: i32, month: u32, day: u32) -> Day {
 fn built(lines: &str) -> Vec<axiom_core::Diagnostic> {
     let text = format!("{BOOK}{lines}");
     let (file, parsed) = axiom_syntax::parse(FileId(0), &text, Folder::default());
-    assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
+    // A line written the v4 way, which some of these tests are about, says so once and nothing else.
+    assert!(parsed.iter().all(|found| found.code == "v4-syntax"), "the source does not parse: {parsed:?}");
     axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]).1
 }
 
@@ -55,7 +56,8 @@ fn built(lines: &str) -> Vec<axiom_core::Diagnostic> {
 fn with_run<R>(lines: &str, then: impl FnOnce(&Book, &Run) -> R) -> R {
     let text = format!("{BOOK}{lines}");
     let (file, parsed) = axiom_syntax::parse(FileId(0), &text, Folder::default());
-    assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
+    // A line written the v4 way, which some of these tests are about, says so once and nothing else.
+    assert!(parsed.iter().all(|found| found.code == "v4-syntax"), "the source does not parse: {parsed:?}");
     let (book, diagnostics) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
     assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {diagnostics:?}");
     then(&book, &crate::run(&book, Options { today: day(2026, 3, 31), relaxed: false }))

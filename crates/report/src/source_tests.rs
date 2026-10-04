@@ -37,7 +37,10 @@ fn with_sources<R>(texts: &[(&str, &str)], today: Day, then: impl FnOnce(&Book, 
         syntax_diagnostics.extend(parsed);
         parsed_files.push(file);
     }
-    assert!(syntax_diagnostics.is_empty(), "the source does not parse: {syntax_diagnostics:?}");
+    assert!(
+        syntax_diagnostics.iter().all(|found| found.code == "v4-syntax"),
+        "the source does not parse: {syntax_diagnostics:?}"
+    );
     let sources: Vec<_> =
         texts.iter().zip(parsed_files).map(|((path, _), file)| Source { path, file, embedded: false }).collect();
     let (book, built) = axiom_model::build(&sources);

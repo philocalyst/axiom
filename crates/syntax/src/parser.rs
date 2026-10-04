@@ -17,6 +17,7 @@ use axiom_core::{Day, Diagnostic, FileId, Loc};
 
 use crate::ast::*;
 use crate::ast::{Piece, locate};
+use crate::legacy::Old;
 use crate::lex::{Lexer, Punct, Tok, Token};
 use crate::lines::{Line, Lines};
 use crate::malformed::{clip, diagnose};
@@ -78,6 +79,8 @@ pub(crate) struct Parser<'s> {
     /// The piece's number, which every index it makes says.
     piece: usize,
     pub lines: Lines<'s>,
+    /// The lines written the way v4 did, which the file reports once.
+    pub old: Old,
     /// Tokens of the line being parsed.
     pub lexer: Lexer<'s>,
     /// How many expressions deep the parser is, so nesting can be limited.
@@ -104,6 +107,7 @@ impl<'s> Parser<'s> {
             t: Tables::default(),
             piece,
             lines: Lines::new(src, id, range),
+            old: Old::default(),
             lexer: Lexer::new(src, id),
             depth: 0,
             diags: Vec::new(),
@@ -113,8 +117,8 @@ impl<'s> Parser<'s> {
     }
 
     /// What the parser built, and what it found wrong.
-    pub fn finish(self) -> (Piece<'s>, Vec<Diagnostic>, Lines<'s>) {
-        (Piece { items: self.items, exprs: self.exprs, tables: self.t }, self.diags, self.lines)
+    pub fn finish(self) -> (Piece<'s>, Vec<Diagnostic>, Lines<'s>, Old) {
+        (Piece { items: self.items, exprs: self.exprs, tables: self.t }, self.diags, self.lines, self.old)
     }
 
     /// Starts reading the tokens of `line`.

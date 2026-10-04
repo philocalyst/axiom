@@ -473,7 +473,7 @@ contract pay with acme
   400 USD monthly on 1 into checking
   #bonus
   from 2026-01-01
-  checking 100 USD #tax-paid
+  -> checking 100 USD #tax-paid
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -553,10 +553,11 @@ account assets/brokerage
 ",
     ] {
         let (file, syntax) = parse(FileId(0), text, Folder::of(path));
-        assert!(syntax.is_empty(), "{syntax:?}");
+        // The line with both amounts is the v4 spelling, and says so once.
+        assert!(syntax.iter().all(|found| found.code == "v4-syntax"), "{syntax:?}");
 
         let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{diagnostics:?}");
         let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
         let flow = flows[0];
         let vti = book.commodity("VTI").unwrap();
@@ -596,7 +597,8 @@ account assets/brokerage
 ",
     ] {
         let (file, syntax) = parse(FileId(0), text, Folder::of(path));
-        assert!(syntax.is_empty(), "{syntax:?}");
+        // Two amounts and a price are the one way to disagree, so both texts are the v4 spelling.
+        assert!(syntax.iter().all(|found| found.code == "v4-syntax"), "{syntax:?}");
 
         let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
         assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "price-disagrees"), "{diagnostics:?}");
@@ -1022,7 +1024,7 @@ contract flat with greystar
   grace 3d
   input water USD
 2026-02-04 flat
-  water = 155 USD
+  -> water = 155 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -1341,9 +1343,9 @@ commodity USD
 account assets/checking
 contract flat with landlord
   2_900 USD monthly on 1 from checking
-  water-company 100 USD
+  -> water-company 100 USD
 2026-01-01 flat 3_000 USD
-  water-company 200 USD
+  -> water-company 200 USD
   + 25 USD \"usage fee\" ^fee
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
@@ -1386,7 +1388,7 @@ account assets/checking
 account assets/retirement
 contract job with lumen
   4_600 USD twice monthly on 15, last into checking
-  retirement 6%
+  -> retirement 6%
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -1420,10 +1422,10 @@ account assets/checking
 account assets/retirement
 contract job with lumen
   4_600 USD monthly on 15 into checking
-  retirement 6%
+  -> retirement 6%
 2026-01-15 job
-  retirement 276 USD
-  irs 498 USD
+  -> retirement 276 USD
+  -> irs        498 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -1686,7 +1688,7 @@ fn a_period_on_a_measure_and_an_until_on_a_line_of_an_occurrence_get_the_parsers
     assert!(syntax.is_empty(), "{syntax:?}");
     assert_eq!(model, ["measure-tail"]);
 
-    let occurrence = "2026-01-01 phone 100 USD\n  checking 100 USD until 2026-03-01\n";
+    let occurrence = "2026-01-01 phone 100 USD\n  -> checking 100 USD until 2026-03-01\n";
     let (syntax, model) = rejections(occurrence);
     assert!(syntax.is_empty(), "{syntax:?}");
     assert!(model.contains(&"until-position".to_string()), "{model:?}");
