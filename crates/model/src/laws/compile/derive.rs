@@ -16,11 +16,13 @@
 use axiom_core::{Arena, Diagnostic, Dim, Id, Loc, Run};
 use axiom_syntax as ast;
 
-use super::line::{Positions, lower_selectors, read_line, tail};
+use super::line::{Positions, lower_selectors, read_line};
 use super::{Compiler, Placement, When};
 use crate::book::{Amount, Derived, Shape, Share, Stand};
 use crate::declare::World;
 use crate::errors::Reported;
+use crate::journal::Detail;
+use crate::lower::tail::{Line, no_selectors, read_tail};
 use crate::law::{BinOp, Effect, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var};
 use crate::scope::Home;
 use crate::split::Sign;
@@ -58,7 +60,7 @@ pub(crate) fn share(world: &mut World<'_>, owner: Owner, home: Home, share: &Sha
         owner: Some(share.entity),
         description: None,
         codes: Run::new(Id::new(world.book.codes.len() as u32), 0),
-        select: Run::new(Id::new(world.book.selectors.len() as u32), 0),
+        select: no_selectors(world),
         detail: None,
         waive: None,
         loc,
@@ -96,10 +98,11 @@ impl<'s> Compiler<'_, '_, 's> {
         };
         let amount = self.derived_amount(said.amount)?;
         let errors = self.diags.len();
-        let metadata = tail(self.world, self.home, self.file, said.clauses, self.diags);
+        let (codes, tail) = read_tail(self.world, self.home, self.file, Line::Also, said.clauses, self.diags);
+        let detail = (tail.detail != Detail::NONE).then(|| self.world.book.details.push(tail.detail));
         let select = match said.selectors {
             Some(selectors) => lower_selectors(self.world, self.home, self.file, selectors, self.diags),
-            None => metadata.select,
+            None => no_selectors(self.world),
         };
         if self.diags.len() != errors {
             self.failed = true;
@@ -109,12 +112,12 @@ impl<'s> Compiler<'_, '_, 's> {
         let derived = Derived {
             shape: if in_contract { flows_own_ends(said.shape) } else { said.shape },
             owner: None,
-            purpose: metadata.purpose,
-            description: metadata.description,
-            codes: metadata.codes,
+            purpose: tail.purpose,
+            description: tail.description,
+            codes,
             select,
-            detail: metadata.detail,
-            waive: metadata.waive,
+            detail,
+            waive: tail.waive,
             loc,
         };
         if !in_contract && !derived.follows_a_posted_flow() {

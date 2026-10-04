@@ -11,7 +11,7 @@ use super::flow::{
 };
 use super::record::CodeIndex;
 use super::staged::Staged;
-use super::tail::{Reach, Tail, written_purpose};
+use super::tail::{Line, Tail, read_tail};
 use crate::args::Args;
 use crate::book::{
     Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, RateChange, Role,
@@ -22,7 +22,7 @@ use crate::errors::{Reported, Word};
 use crate::holders::Holder;
 use crate::journal::{
     Action, Assert, ClaimChange, ClaimChangeAction, EndEvent, EndTarget, Event, Filed, Flow, Gap, Infer, Measure, Mode,
-    Program, Purposed, Quote, Reading, Split, Txn, Waive,
+    Program, Quote, Reading, Split, Txn, Waive,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::problem::{self, CodeUse};
@@ -378,16 +378,6 @@ fn assertion_gap<'s>(world: &mut World<'s>, at: Stated<'_, '_, 's>, diags: &mut 
 
 // ─── Measures ───────────────────────────────────────────────────────────────
 
-/// What a measure's tail says.
-#[derive(Default)]
-struct MeasureTail {
-    party: Option<Id<Entity>>,
-    purpose: Option<Purposed>,
-    description: Option<crate::book::Text>,
-    codes: Vec<Sym>,
-    against: Option<Id<Txn>>,
-}
-
 /// `worked 8h` and `used 120 kWh`: time or a thing spent, by a party, an entity, a place or an asset.
 pub(super) fn lower_measure<'s>(
     world: &mut World<'s>,
@@ -412,7 +402,7 @@ pub(super) fn lower_measure<'s>(
         return;
     };
     let diagnostic_start = diags.len();
-    let tail = measure_tail(world, at, diags);
+    let (codes, tail) = read_tail(world, at.home(), at.file(), Line::Measure(at.code_index), at.statement.tail, diags);
     if diags.len() != diagnostic_start {
         return;
     }
@@ -422,39 +412,13 @@ pub(super) fn lower_measure<'s>(
         subject,
         quantity,
         owner,
-        party: tail.party,
+        party: tail.detail.hold,
         purpose: tail.purpose,
         description: tail.description,
-        codes: tail.codes.into_boxed_slice(),
-        against: tail.against,
+        codes,
+        against: tail.detail.against,
         loc: at.loc,
     });
-}
-
-fn measure_tail<'s>(world: &mut World<'s>, at: Stated<'_, '_, 's>, diags: &mut Vec<Diagnostic>) -> MeasureTail {
-    let (home, file) = (at.home(), at.file());
-    let mut tail = MeasureTail::default();
-    for clause in &file[at.statement.tail] {
-        match clause.kind {
-            ClauseKind::For(ast::For::Whom(name)) => {
-                tail.party = world.entity(home, Word::of(file, name.0)).or_report(diags).or(tail.party);
-            }
-            ClauseKind::Purpose(written) => {
-                let purposed = written_purpose(world, home, file, written, Reach::Anywhere, diags);
-                tail.purpose = purposed.or(tail.purpose);
-            }
-            ClauseKind::Description(text) => tail.description = Some(world.book.quoted_text(text.0)),
-            ClauseKind::Code(code) => tail.codes.push(world.book.names.intern(code.name())),
-            ClauseKind::Against(code) => {
-                tail.against = at.code_index.resolve(world, code, clause.at, CodeUse::Against, diags);
-            }
-            _ => diags.push(
-                Diagnostic::error("measure-tail", "this tail clause does not apply to a measure")
-                    .label(clause.at, "remove the clause or record it on a flow"),
-            ),
-        }
-    }
-    tail
 }
 
 // ─── Claims, waivers and endings ────────────────────────────────────────────
@@ -643,13 +607,8 @@ pub(super) fn lower_end<'s>(world: &mut World<'s>, at: Stated<'_, '_, 's>, diags
     let Some(target) = end_target(world, at, name, diags) else {
         return;
     };
-    let event = EndEvent {
-        day: statement.date,
-        target,
-        codes: ending_codes(world, at),
-        description: ending_description(world, at),
-        loc,
-    };
+    let (codes, tail) = read_tail(world, at.home(), at.file(), Line::Ending, statement.tail, diags);
+    let event = EndEvent { day: statement.date, target, codes, description: tail.description, loc };
     close(world, target, statement.date, loc);
     world.book.endings.push(event);
 }
@@ -679,32 +638,6 @@ fn end_target<'s>(
         Role::Asset(asset) => EndTarget::Asset(asset),
         _ => EndTarget::Place(end.place),
     })
-}
-
-/// The codes an ending carries, pushed to the pool. The parser keeps codes and one description on an ending, and
-/// nothing else.
-fn ending_codes<'s>(world: &mut World<'s>, at: Stated<'_, '_, 's>) -> Run<Sym> {
-    let start = world.book.codes.len();
-    for clause in &at.file()[at.statement.tail] {
-        match clause.kind {
-            ClauseKind::Code(code) => {
-                let symbol = world.book.names.intern(code.name());
-                world.book.codes.push(symbol);
-            }
-            ClauseKind::Description(_) => {}
-            other => unreachable!("the parser keeps {other:?} off an ending"),
-        }
-    }
-    Run::new(Id::new(start as u32), (world.book.codes.len() - start) as u32)
-}
-
-fn ending_description<'s>(world: &mut World<'s>, at: Stated<'_, '_, 's>) -> Option<crate::book::Text> {
-    let file = at.file();
-    let text = file[at.statement.tail].iter().find_map(|clause| match clause.kind {
-        ClauseKind::Description(text) => Some(text),
-        _ => None,
-    });
-    text.map(|text| world.book.quoted_text(text.0))
 }
 
 /// What an ending does to what it ends: a contract stops on that day, a place or an asset's place closes.

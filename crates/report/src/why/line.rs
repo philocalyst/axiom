@@ -207,7 +207,7 @@ pub(super) fn scoped_codes(book: &Book, lens: Lens<'_, '_, '_, '_>) -> BTreeSet<
         codes.extend(book.flow_view(flow).codes());
     }
     for (_, measure) in book.measures.iter().filter(|(_, measure)| lens.owns_entity(measure.owner)) {
-        codes.extend(measure.codes.iter().copied());
+        codes.extend(book.codes[measure.codes].iter().copied());
     }
     for (_, contract) in book.contracts.iter().filter(|(_, contract)| lens.owns_entity(contract.owner)) {
         for terms in [&contract.terms, &contract.standing].into_iter().flatten() {

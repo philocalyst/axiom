@@ -871,7 +871,8 @@ pub struct Measure {
     pub party: Option<Id<Entity>>,
     pub purpose: Option<Purposed>,
     pub description: Option<Text>,
-    pub codes: Box<[Sym]>,
+    /// In the book's pool of codes, as a flow's.
+    pub codes: Run<Sym>,
     /// The earlier transaction this work or use is about, when stated.
     pub against: Option<Id<Txn>>,
     pub loc: Loc,

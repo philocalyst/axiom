@@ -1,8 +1,8 @@
 //! What a line that derives says: the `FLOW` or `ITEM` after an `also` or a `derive`, read.
 //!
 //! The two spellings are one line (`+ 5% of amount #fee`, `lumen -> retirement 50% of ... #match`), so one reader
-//! turns it into a [`Said`] (its shape against the flow that fires it, its amount as written, its clauses) and one
-//! reader turns the clauses into the metadata a derived flow carries.
+//! turns it into a [`Said`] (its shape against the flow that fires it, its amount as written, its clauses); the
+//! clauses are read by the one tail reader, on an `also` line.
 //!
 //! A line a contract's kind writes (`also employer -> irs 7.65% of amount #payroll-tax`) has the kind's roles for
 //! ends. A role is not an entity: it is whoever fills the slot in the contract being lowered, standing where
@@ -12,13 +12,11 @@
 use axiom_core::diag::closest;
 use axiom_core::{Days, Diagnostic, Id, Loc, Run, Sym};
 use axiom_syntax as ast;
-use axiom_syntax::ClauseKind;
 
-use crate::book::{Place, Shape, Stand, Text};
+use crate::book::{Place, Shape, Stand};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Detail, Purposed, Select, Waive};
-use crate::lower::tail::{Reach, written_purpose, written_waive};
+use crate::journal::Select;
 use crate::scope::Home;
 
 /// Where each role of a contract's kind stands in the book the contract is lowered into: the place its filler is at,
@@ -49,94 +47,6 @@ impl Positions<'_> {
             None => Standing::NoRole,
         }
     }
-}
-
-/// What the clauses of a derived line say, pooled in the book.
-#[derive(Clone, Copy)]
-pub(crate) struct Metadata {
-    pub codes: Run<Sym>,
-    pub select: Run<Select>,
-    pub detail: Option<Id<Detail>>,
-    pub waive: Option<Waive>,
-    pub purpose: Option<Purposed>,
-    pub description: Option<Text>,
-}
-
-/// Resolves exactly the metadata a [`crate::book::Derived`] keeps. Its ends belong to the line, because a derived flow
-/// may take either end from the flow that fired it.
-pub(crate) fn tail<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    clauses: ast::Many<ast::Clause<'s>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Metadata {
-    let code_start = world.book.codes.len();
-    let select = Run::new(Id::new(world.book.selectors.len() as u32), 0);
-    let mut detail = Detail::NONE;
-    let (mut purpose, mut description, mut waive) = (None, None, None);
-
-    for clause in &file[clauses] {
-        match clause.kind {
-            ClauseKind::Code(code) => {
-                world.book.codes.push(world.book.names.intern(code.name()));
-            }
-            ClauseKind::Purpose(written) => {
-                // An object that names nothing has been said, and costs the purpose.
-                purpose = written_purpose(world, home, file, written, Reach::Anywhere, diags)
-                    .filter(|purposed| written.of.is_none() || purposed.of.is_some());
-            }
-            ClauseKind::Description(text) => {
-                description = Some(world.book.quoted_text(text.0));
-            }
-            ClauseKind::Waive(written) => waive = Some(written_waive(world, written)),
-            ClauseKind::For(ast::For::Whom(name)) => match world.entity(home, Word::of(file, name.0)) {
-                Ok(entity) => detail.hold = Some(entity),
-                Err(problem) => diags.push(problem),
-            },
-            ClauseKind::Since(day) => detail.since = Some(day),
-            ClauseKind::Due(ast::Due::On(day)) => detail.due = Some(day),
-            ClauseKind::Due(ast::Due::After(_)) => diags.push(
-                Diagnostic::error("also-relative-due", "a derived flow's due date must be absolute")
-                    .label(clause.at, "write `due YYYY-MM-DD` on an implied line"),
-            ),
-            ClauseKind::Basis(ast::Amount::Literal(literal)) => {
-                let Some(unit) =
-                    literal.unit().and_then(|unit| world.commodity_of(Word::of(file, unit.0)).or_report(diags))
-                else {
-                    diags.push(
-                        Diagnostic::error("basis-unit", "basis needs an explicit base-currency unit")
-                            .label(file.loc(literal.0), "write the unit"),
-                    );
-                    continue;
-                };
-                match world.amount(literal.num(), unit, file.loc(literal.0)) {
-                    Ok(amount) if amount.unit == world.book.base => detail.basis = Some(amount.qty),
-                    Ok(_) => diags.push(
-                        Diagnostic::error("basis-unit", "basis must be stated in the base currency")
-                            .label(file.loc(literal.0), "another unit is not the base currency"),
-                    ),
-                    Err(problem) => diags.push(problem),
-                }
-            }
-            ClauseKind::Basis(ast::Amount::Computed(_)) => diags.push(
-                Diagnostic::error("computed-also-basis", "an implied basis must be literal")
-                    .label(clause.at, "this metadata field has no computed root in the Book"),
-            ),
-            ClauseKind::For(ast::For::Period(..) | ast::For::Last(_))
-            | ClauseKind::Via(_)
-            | ClauseKind::Price(_)
-            | ClauseKind::Against(_)
-            | ClauseKind::Until(_) => diags.push(
-                Diagnostic::error("also-tail", "this clause is not retained on an implied line")
-                    .label(clause.at, "remove it or write the metadata on the source flow"),
-            ),
-        }
-    }
-
-    let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
-    let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
-    Metadata { codes, select, detail, waive, purpose, description }
 }
 
 /// What a line that derives, an `also` or a `derive`, says, read: how it lies against the flow that fires it, its

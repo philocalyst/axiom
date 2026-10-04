@@ -136,7 +136,7 @@ impl Carriers {
 /// the claim it settles (LANGUAGE §7), so a code is often on two transactions:
 /// the claims are indexed apart, for a write-off names the one that made the claim.
 #[derive(Default)]
-pub(super) struct CodeIndex {
+pub(crate) struct CodeIndex {
     all: Carriers,
     claims: Carriers,
 }

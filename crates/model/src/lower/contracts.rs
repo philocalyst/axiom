@@ -7,11 +7,11 @@ mod relator;
 
 use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Run, Sym, Timeline};
 use axiom_syntax as ast;
-use axiom_syntax::{ClauseKind, Direction, ExprKind, Name};
+use axiom_syntax::{Direction, ExprKind, Name};
 
 use super::flow::{written_amount, written_part};
 use super::infer::classify;
-use super::tail::{Reach, resolve_object, written_purpose, written_waive};
+use super::tail::{Line, Reach, no_selectors, read_tail, resolve_object};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
     Amount, Asset, At, Book, Commodity, Contract, Deadline, Entity, Input, Loan, Place, Role, Share, Terms, Text,
@@ -19,7 +19,7 @@ use crate::book::{
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Flow, Infer, Mode, Object, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
+use crate::journal::{Flow, Infer, Mode, Object, Origin, Program, Provenance, Purposed, TEMPLATE_TXN};
 use crate::law::{Owner, Ty};
 use crate::laws::{Placement, Positions};
 use crate::problem::{self, Noun};
@@ -443,11 +443,9 @@ fn template_legs<'a, 's>(
         let to = resolve_endpoint(world, home, file, leg.end.name, diags)?;
         let (part, amount) = template_quantity(world, file, leg.amount, roots, header.unit, diags)?;
         let mut flow = cx.flow(header.from, to, amount, header.owner, leg.loc);
-        let tail = lower_term_tail(world, home, file, leg.tail, diags);
-        flow.codes = tail.codes;
-        flow.select = tail.select;
-        flow.waive = tail.waive;
-        let written = tail.purpose.or(cx.purpose).map(|at| at.value);
+        let (codes, tail) = read_tail(world, home, file, Line::Term, leg.tail, diags);
+        (flow.codes, flow.select, flow.waive) = (codes, no_selectors(world), tail.waive);
+        let written = tail.purpose.or(cx.purpose.map(|at| at.value));
         let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
         flow.purpose = classify(world, ends.0, ends.1, written, leg.loc, diags).ok()?;
         flow.description = tail.description.or(flow.description);
@@ -563,68 +561,10 @@ fn lower_header_item<'s>(
 ) -> Option<Item<Says>> {
     let (file, home) = (cx.file, cx.written.site.home);
     let amount = written_amount(world, file, roots, item.amount, header.unit).or_report(diags)?;
-    let tail = lower_term_tail(world, home, file, item.tail, diags);
-    Some(Item {
-        sign: item.sign,
-        amount: Cut::Of(amount),
-        loc: item.loc,
-        flow: Says {
-            purpose: tail.purpose.map(|at| at.value),
-            description: tail.description,
-            codes: tail.codes,
-            select: tail.select,
-            waive: tail.waive,
-        },
-    })
-}
-
-/// What a contract's term line says about the flow it promises.
-struct TermTail {
-    codes: Run<Sym>,
-    select: Run<Select>,
-    purpose: Option<At<Purposed>>,
-    description: Option<Text>,
-    waive: Option<Waive>,
-}
-
-/// Reads the clauses a term line keeps: codes, a purpose, a description and a waiver. It takes no others: a line
-/// that promises a flow does not say what an occurrence of it says about itself (`for`, `due`, `via`, `basis`,
-/// `since`, `against`, `@` and `until`), and what is written there is left unread, as it always has been.
-fn lower_term_tail<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    tail: axiom_syntax::Many<ast::Clause<'s>>,
-    diags: &mut Vec<Diagnostic>,
-) -> TermTail {
-    let code_start = world.book.codes.len();
-    let (mut purpose, mut description, mut waive) = (None, None, None);
-    for clause in &file[tail] {
-        match clause.kind {
-            ClauseKind::Code(code) => {
-                let sym = world.book.names.intern(code.name());
-                world.book.codes.push(sym);
-            }
-            ClauseKind::Purpose(written) => {
-                if let Some(value) = written_purpose(world, home, file, written, Reach::Parties, diags) {
-                    purpose = Some(At { value, loc: clause.at });
-                }
-            }
-            ClauseKind::Description(text) => description = Some(world.book.quoted_text(text.0)),
-            ClauseKind::Waive(written) => waive = Some(written_waive(world, written)),
-            ClauseKind::Due(_)
-            | ClauseKind::For(_)
-            | ClauseKind::Via(_)
-            | ClauseKind::Basis(_)
-            | ClauseKind::Since(_)
-            | ClauseKind::Against(_)
-            | ClauseKind::Price(_)
-            | ClauseKind::Until(_) => {}
-        }
-    }
-    let codes = Run::new(Id::new(code_start as u32), (world.book.codes.len() - code_start) as u32);
-    let select = Run::new(Id::new(world.book.selectors.len() as u32), 0);
-    TermTail { codes, select, purpose, description, waive }
+    let (codes, tail) = read_tail(world, home, file, Line::Term, item.tail, diags);
+    let (purpose, description, waive) = (tail.purpose, tail.description, tail.waive);
+    let flow = Says { purpose, description, codes, select: no_selectors(world), waive };
+    Some(Item { sign: item.sign, amount: Cut::Of(amount), loc: item.loc, flow })
 }
 
 fn resolve_commodity<'s>(

@@ -46,7 +46,7 @@ pub(super) struct ResolvedQuantity {
 /// What the flows of one record are made against: where it is written, what its expressions compiled to, and
 /// which transaction they belong to.
 #[derive(Clone, Copy)]
-pub(super) struct FlowCx<'a, 's> {
+pub(crate) struct FlowCx<'a, 's> {
     pub file: &'a ast::File<'s>,
     pub home: Home,
     /// The day the record is dated, which a relative `for` and `due` count from.
