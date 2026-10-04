@@ -368,3 +368,48 @@ left as it was.
 - **Sizes:** `python3 briefs/loc.py .` before: syntax 5,632, cli 2,338, total 55,246. `docs/v5/measure/hist.py crates`: 3,546
   functions, 7 over 80 lines. `bench/run.sh 1m` on the baseline: `check` 4.337 s, `check-nolaws` 3.079 s (three runs, the
   fastest; the machine's load average was 1 to 7).
+
+## 12. What was built, and where it departs from this map
+
+The commits, in order: the map; one production for a dated line and the verb table (3512058); the junction in the AST and the
+formatter's arrow column (7035ded); `fmt --upgrade` (bb3b2cd, c213635, dd2a138); every example, fixture and generator in the
+new spelling (6d03832); the v4 warning and the diagnostics of a malformed junction (cb1c1b3, 817ce9b); the mistakes corpus
+regraded in one commit (b445296); the proof test (40f36d9); the exchange inside one end as a purchase or a sale, and the
+seeded generator with its mutants (6888cc5); `LANGUAGE.md` (a2acb5c); the measuring scripts that discount the v4 warning
+(77238b8, a202f22); the counting bench (49ae099); and the course of a flow in one word (e1e01dc).
+
+**Where it departs from sections 5 to 10.**
+
+- **D1 changed: the upgrade is in `syntax`, behind a `Registry`.** The rewrites need the AST's edits and the formatter, and
+  both are in the syntax crate; what only the book knows is five lookups (`standing`, `owner`, `keeper`, `base`, `scale`),
+  so the syntax crate has the trait and the cli's `BookRegistry` implements it over `Book`. The syntax crate still does not
+  depend on the model. The cli's part is `fmt.rs` (+115 lines of code) and the option (+22).
+- **A fourth legacy form.** A `->` with no subject (`-> checking 100 USD`) is v4's way to say what `checking <-` says, so
+  it is the fourth form the warning counts, beside the bare leg, the two amounts and the amount before an arrow that has
+  only legs after it.
+- **D8 stands, and the warning is the rest of it.** Plain `fmt` leaves a v4 line as written; the parser notes the line, and
+  `axiom check` says once for the file, with a label at the first of each form, that it is written the v4 way and which
+  command rewrites it.
+- **The refusals are two, not three.** `upgrade-owner` (no owner holds the subject, so the arrow cannot be told) and
+  `upgrade-price` (an amount that no price a person would write relates to the other; the message has the shortest price that
+  agrees and the whole v5 line). `upgrade-sides` is gone: a flow that neither end owns is left as it is written, as is an
+  exchange that names one end (the v4 book rejects it, and v5 gives it a meaning, so rewriting it would change the book's
+  errors). `upgrade-changes-the-book` is for a whole file: it is not written when the book it makes says anything else.
+- **A file is written unless it would change the book, and a refused line is left and reported.** The upgrade writes every
+  line it can place, leaves the others as they were, names each, and exits with failure; a file is refused whole only when the
+  book it would make differs from the book it was (five counts, the diagnostics by severity, code and message less the v4
+  warning, and the JSON of the balance sheet, the flows and the claims).
+- **An exchange inside one end is a purchase or a sale.** `S -> S A @ P` is `S <- A @ P`, and `S A -> S @ P` is
+  `S -> A @ P`: the price is the only thing a line says twice, and v5 says it once.
+- **Steps 4 and 5 of the map's order were swapped.** The fixtures were upgraded first, and all green; the warning came after,
+  so that no commit had a test that failed only because a fixture was in the old spelling.
+- **Tests were converted in place, with a legacy twin for a v4-spelled one.** A test whose subject is a v4 spelling keeps
+  its text and runs it and its v5 spelling in a loop (`for text in [V4, V5]`), so that no assertion was weakened and none
+  deleted. The helpers that parse a fixture accept the one `v4-syntax` warning.
+- **A flow's course is one word.** The first AST kept `junction` and `through` as two fields, and a `Txn` grew from 128 to 160
+  bytes (1,000,094 flows: 31 MB). They are a `Course`, with the owner in a table of its own, and a `Txn` is 136 bytes.
+
+**What was measured.** See the lane's report for the numbers (they are not repeated here): the proof test
+(`crates/cli/tests/upgrade.rs`), the 120 seeded books and their mutants (`docs/v5/measure/junction.py`), `fuzz.py ... diff`,
+`splits.py`, the K0a harness and the K7b session scripts; and the parser's instruction count on the counting bench
+(3,194 M before, 3,461 M after on v4 text) and on `check` of a 100,000-flow book (1,872.8 M before, 1,889.8 M after).
