@@ -27,6 +27,7 @@ use crate::declare::{MAX_SCALE, World};
 use crate::errors::{Reported, Word, article, list, suggest};
 use crate::fill::{self, Filled, Said};
 use crate::holders::Holder;
+use crate::law::Ty;
 use crate::problem;
 use crate::scope::Home;
 use crate::slots::{Range, Slot, View};
@@ -736,10 +737,38 @@ fn read_builtin_lines<'a, 's>(
             );
             continue;
         }
+        if line.name.0 == "purpose" {
+            diags.extend(purpose_of_its_own(world, &at, under, line));
+        }
         if let Err(problem) = read_line(world, pending, &at, line, under, targets) {
             diags.push(problem);
         }
     }
+}
+
+/// `purpose education` under a grant: `purpose` says what the flows with a party are for. A party whose kind has a
+/// purpose of its own to say (`grant-purpose`, what a grant's money may be spent on) and leaves it unsaid is told so.
+fn purpose_of_its_own(world: &World<'_>, at: &Lines<'_, '_>, under: NativeTarget, line: &Line<'_>) -> Option<Diagnostic> {
+    let book = &world.book;
+    let Holder::Entity(entity) = under.holder else { return None };
+    let own = |slot: &&Slot| slot.range == Range::Value(Ty::Purpose) && book.name(slot.name) != "purpose";
+    let name = book.name(book.schema.effective(&book.kinds, under.kind).find(own)?.name);
+    if at.lines.iter().any(|other| other.name.0 == name) {
+        return None;
+    }
+    let (party, kind) = (book.name(book.entities[entity].path), book.name(book.kinds[under.kind].name));
+    let value = match at.file[line.args].first().map(|&arg| &at.file.exprs[arg].kind) {
+        Some(ExprKind::Name(written)) => written.0,
+        _ => "PURPOSE",
+    };
+    let warning = Diagnostic::warning(
+        "purpose-of-its-own",
+        format!("`purpose` is what the flows with `{party}` are for, not the {kind}'s own `{name}`"),
+    );
+    let at_name = at.file.loc(line.name.0);
+    Some(warning.label(at_name, "the purpose of the flows with this party").help(format!(
+        "for the {kind}'s own, write `{name} {value}`"
+    )))
 }
 
 /// An `owner` line under anything but a kind of account: an entity, an account or an asset has its owners read where it is

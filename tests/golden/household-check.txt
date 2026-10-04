@@ -9,6 +9,16 @@ error[cannot-infer]: cannot infer the amount of this flow
    = note: the assertions on checking imply -5,238.00 USD, which runs this flow backwards; check the
            assertions or the direction
 
+warning[purpose-of-its-own]: `purpose` is what the flows with `scholarship` are for, not the grant's own `grant-purpose`
+   ╭─[accounts.ax:36:3]
+   │
+35 │ entity scholarship : grant
+36 │   purpose education
+   │   ───┬───
+   │      ╰── the purpose of the flows with this party
+   │
+   = help: for the grant's own, write `grant-purpose education`
+
 warning[food]: me: 681.00 USD in 2026-02 against a limit of 650.00 USD, over by 31.00 USD
    ╭─[journal/2026/02.ax:46:1]
    │
@@ -76,4 +86,4 @@ note[pad]: accepted a gap on cash
    │ ──────────┬──────────
    │           ╰── 85.50 USD moved from unknown into cash
 
-✗ 1 error · 1 warning · 1 priced · 1 waived
+✗ 1 error · 2 warnings · 1 priced · 1 waived

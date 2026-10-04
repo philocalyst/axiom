@@ -5,14 +5,17 @@
 # each, into OUTDIR: the examples (and their v4 text in tests/v4-syntax), the mistakes corpus, the differential
 # harness's cases (cases, cases2, cases3) and any EXTRA-PROJECT (a generated bench project, say). Run it on the commit
 # before a lowering change and on the commit after, then `diff -r` the two directories: lane U's C1 to C3 must leave
-# every Book as it was, and where one changes on purpose the commit says which and why.
+# every Book as it was, and where one changes on purpose the commit says which and why. With DUMP set to another
+# tree's book_dump binary (a baseline's), that binary reads this tree's projects, so both dumps name the same files.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
 out=$1
 shift
-(cd "$root" && CARGO_INCREMENTAL=0 cargo build --release --offline -q -p axiom-session --example book_dump 2>/dev/null)
-dump=$root/target/release/examples/book_dump
+if [ -z "${DUMP:-}" ]; then
+    (cd "$root" && CARGO_INCREMENTAL=0 cargo build --release --offline -q -p axiom-session --example book_dump 2>/dev/null)
+fi
+dump=${DUMP:-$root/target/release/examples/book_dump}
 rm -rf "$out"
 mkdir -p "$out"
 one() {
