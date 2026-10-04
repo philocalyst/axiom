@@ -2,7 +2,7 @@
 
 use axiom_core::Qty;
 use axiom_engine::{Holding, Parcel};
-use axiom_model::{Amount, Book, Place};
+use axiom_model::{Amount, Book, Class, Place};
 
 use crate::gains::Term;
 use crate::lens::Lens;
@@ -34,7 +34,8 @@ pub(crate) fn view_from<'h, 's>(
     let mut held: Vec<&Holding> = holdings
         .into_iter()
         .filter(|holding| {
-            lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
+            let held = book.places[holding.place].class == Class::Asset;
+            held && lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
         })
         .collect();
     held.sort_by_key(|holding| book.listing(holding.place));

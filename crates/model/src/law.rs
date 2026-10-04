@@ -520,6 +520,16 @@ pub enum Dir {
     Out,
 }
 
+impl Dir {
+    /// The other way.
+    pub fn reversed(self) -> Dir {
+        match self {
+            Dir::In => Dir::Out,
+            Dir::Out => Dir::In,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Window {
     Month,

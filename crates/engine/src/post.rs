@@ -30,7 +30,7 @@ use crate::eval::{Occasion, Realized};
 use crate::explain;
 use crate::ledger::Ledger;
 use crate::lots::{Origin, Request, Selection, Shares, Slice};
-use crate::motion::{Motion, Moves};
+use crate::motion::{Course, Motion, Moves};
 use crate::plan::Plan;
 use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
 use crate::scope::{is_money, stays_with_owner};
@@ -80,7 +80,7 @@ impl Ledger<'_, '_, '_> {
         if watched {
             self.count_leaving(m, claiming.as_ref(), &on);
         }
-        if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
+        if self.holds_parcels(m) || m.moves != Moves::Value {
             if relief == Relief::Pending {
                 self.relieve(m, paid);
             }
@@ -104,6 +104,17 @@ impl Ledger<'_, '_, '_> {
         self.record_balances(m.day);
     }
 
+    /// Whether either end of a flow holds parcels: an asset, or a debt place that says `claim` (what is owed is a parcel there
+    /// as well). Between places that hold none a flow is two credits.
+    fn holds_parcels(&self, m: &Motion) -> bool {
+        let holds = |end: &Place, at: Id<Place>| match end.class {
+            Class::Asset => true,
+            Class::Debt => self.plan.traits.place(at).claim,
+            Class::Outside => false,
+        };
+        holds(m.source, m.from) || holds(m.target, m.to)
+    }
+
     /// A `!` on an assertion accepts its gap: it is never unused.
     fn accept_waiver(&mut self, m: &Motion) {
         if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_) | Cause::Derived(_), false, Some(waive)) =
@@ -118,7 +129,7 @@ impl Ledger<'_, '_, '_> {
     /// flow settled. Says whether the source has been relieved.
     fn deal_with_claims(&mut self, m: &Motion) -> (Option<Claiming>, Relief) {
         let claiming = self.settle_claims(m);
-        if !(self.plan.traits.place(m.from).claim && m.source.class.holds_parcels()) {
+        if !(self.plan.traits.place(m.from).claim && m.source.class == Class::Asset) {
             return (claiming, Relief::Pending);
         }
         self.relieve(m, Qty::ZERO);
@@ -313,11 +324,14 @@ impl Ledger<'_, '_, '_> {
         self.account_for_relief(m);
     }
 
-    /// A source that holds no parcels, a debt or the outside, only a balance: the balance falls by what leaves, less
-    /// what settled a claim, and the value in flight is one fresh slice.
+    /// A source that holds no parcels to give up, a debt or the outside: the balance falls by what leaves, less what settled a
+    /// claim, and the value in flight is one fresh slice. A debt place that says `claim` owes what leaves as a bill, a parcel.
     fn relieve_balance(&mut self, m: &Motion, settled: Qty) {
         self.scratch.relief.slices.clear();
-        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
+        match m.source.class == Class::Debt && self.plan.traits.place(m.from).claim && m.course == Course::Forward {
+            true => self.owe(m),
+            false => self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty),
+        }
         let fresh = fresh_slice(m, m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn));
         self.scratch.relief.slices.push(fresh);
     }

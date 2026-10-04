@@ -12,7 +12,7 @@
 //! its reader what it cost before there was a rule.
 
 use axiom_core::{Day, Days, Id, Qty};
-use axiom_model::{Book, Books, Commodity, Dir, Flow, Place, Purposed, RuntimeTxn};
+use axiom_model::{Book, Books, Class, Commodity, Dir, Flow, Place, Purposed, RuntimeTxn};
 
 use crate::motion::Motion;
 use crate::plan::Plan;
@@ -35,6 +35,15 @@ const ACCRUAL_AT: AccrualAt = AccrualAt::Made;
 /// Whether every piece of a flow is recognized over the flow's own days, as a claim made is not when accrual books count it
 /// when it falls due. A reader that wants the pieces of one set of days may then pass over a flow of other days unbuilt.
 pub const KEEPS_FLOW_DAYS: bool = matches!(ACCRUAL_AT, AccrualAt::Made);
+
+/// The way a claim counts in its tab: what a party owes the owner is income's way in, what the owner owes spending's way out.
+/// Settling it counts that way, and taking it back (a write-off, a payment returned) the other.
+pub fn claim_dir(class: Class) -> Dir {
+    match class {
+        Class::Debt => Dir::Out,
+        Class::Asset | Class::Outside => Dir::In,
+    }
+}
 
 /// What a flow is to the claims.
 #[derive(Clone, Copy)]
@@ -90,9 +99,9 @@ impl<'a> Counting<'a> {
         Counting { books, purpose: m.purpose, day: m.day, recognized: m.recognized, due, dealing }
     }
 
-    /// A claim forgiven on `day`, `qty` of it: what its purpose took back.
-    pub fn forgiving(plan: &Plan, claim: &Flow, day: Day, qty: Qty) -> Counting<'static> {
-        let dealing = Dealing::Forgiving { tab: claim.to, qty, dir: Dir::Out };
+    /// A claim forgiven on `day`, `qty` of it in `tab`: what its purpose took back.
+    pub fn forgiving(plan: &Plan, claim: &Flow, tab: Id<Place>, day: Day, qty: Qty) -> Counting<'static> {
+        let dealing = Dealing::Forgiving { tab, qty, dir: claim_dir(plan.book.places[tab].class).reversed() };
         let books = plan.traits.entity(claim.owner).books;
         Counting { books, purpose: claim.purpose, day, recognized: Days::on(day), due: None, dealing }
     }
@@ -100,7 +109,10 @@ impl<'a> Counting<'a> {
     /// A journal flow as the run left it, with what it settled of claims, if it did.
     pub fn posted(plan: &Plan, flow: &Flow, posted: &Posted, settlement: Option<&'a Settlement>) -> Counting<'a> {
         let dealing = match settlement {
-            Some(settlement) => Dealing::Settling { settlement, dir: Dir::In, moved: posted.out },
+            Some(settlement) => {
+                let dir = claim_dir(plan.book.places[settlement.tab].class);
+                Dealing::Settling { settlement, dir, moved: posted.out }
+            }
             None if plan.makes_claim(flow.from, flow.to) => Dealing::Making,
             None => Dealing::Ordinary,
         };
@@ -139,9 +151,9 @@ pub enum Counts {
 
 impl Piece {
     /// Whether it takes back what a claim counted: a claim forgiven in accrual books, or a payment that settled one and
-    /// was returned.
-    pub fn takes_back(&self) -> bool {
-        matches!(self.counts, Counts::Claim { dir: Dir::Out, .. })
+    /// was returned, which count against the way the claim's tab counts.
+    pub fn takes_back(&self, book: &Book) -> bool {
+        matches!(self.counts, Counts::Claim { tab, dir } if dir == claim_dir(book.places[tab].class).reversed())
     }
 }
 

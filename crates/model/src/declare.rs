@@ -94,21 +94,22 @@ impl World<'_> {
         self.book.facts = self.painter.freeze();
     }
 
-    /// The place that keeps what `party` owes `owner` (an `Asset`-class tab) or what `owner` owes `party` (a `Debt`-class
-    /// tab), made the first time anything asks for it. A tab is a root that ends the tree, with no path of its own: the
-    /// party's name labels it, and nothing finds it by name. `loc` is the line that asked first.
-    pub(crate) fn tab(&mut self, party: Id<Entity>, owner: Id<Entity>, class: Class, loc: Loc) -> Id<Place> {
+    /// The place that keeps what `party` owes `owner` (a `claim` tab) or what `owner` owes `party` (a `debt-claim` tab, a bill,
+    /// or a `debt` tab, a loan's, which is a balance and no claim), made the first time anything asks for it. A tab is a root
+    /// that ends the tree, with no path of its own: the party's name labels it, and nothing finds it by name. `loc` is the line
+    /// that asked first.
+    pub(crate) fn tab(&mut self, party: Id<Entity>, owner: Id<Entity>, kind: Id<Kind>, loc: Loc) -> Id<Place> {
         debug_assert!(party != owner, "nobody owes themselves");
-        let key = (party, owner, class);
+        let key = (party, owner, kind);
         if let Some(&place) = self.tabs.get(&key) {
             return place;
         }
-        let kinds = self.book.roots.kinds;
+        let class = if kind == self.book.roots.kinds.claim { Class::Asset } else { Class::Debt };
         let tab = Place {
             path: self.book.entities[party].path,
             class,
             role: Role::Tab(party),
-            kind: if class == Class::Debt { kinds.debt_claim } else { kinds.claim },
+            kind,
             owner,
             shares: Box::default(),
             known_as: Box::default(),
@@ -393,8 +394,8 @@ fn contract_party_name_exception(a: &NameClaim<'_>, b: &NameClaim<'_>, spelling:
     contract.declared == spelling && contract.contract_party == Some(spelling) && entity.declared == spelling
 }
 
-/// The place that keeps what one party owes another, by the party, the owner and the class of the claim.
-pub(crate) type Tabs = Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>;
+/// The place that keeps what one party owes another, by the party, the owner and the kind of tab: a claim, a bill or a loan.
+pub(crate) type Tabs = Map<(Id<Entity>, Id<Entity>, Id<Kind>), Id<Place>>;
 
 /// What the sources say, two ways: in the order they are written, and by kind of item.
 #[derive(Clone, Copy)]

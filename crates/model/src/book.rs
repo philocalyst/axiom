@@ -217,8 +217,8 @@ pub enum Class {
     /// Held by an owner: parcels with basis. Accounts of `asset` kinds,
     /// owners' own holdings, assets, and claims a party owes an owner.
     Asset,
-    /// Owed by an owner: a plain balance. Accounts of `debt` kinds, and
-    /// claims a party holds on an owner.
+    /// Owed by an owner: a plain balance, or, in a place that says `claim`, parcels of what is owed (negative, as a liability's
+    /// balance is). Accounts of `debt` kinds, and claims a party holds on an owner.
     Debt,
     /// Everyone else: parties, `?`, and where openings come from. Value that
     /// reaches one has left the owners; value from one is new to them.
@@ -233,12 +233,6 @@ impl Class {
             Class::Asset | Class::Outside => 1,
             Class::Debt => -1,
         }
-    }
-
-    /// Whether a place of this class holds parcels (with basis and lots) rather
-    /// than a plain signed balance.
-    pub fn holds_parcels(self) -> bool {
-        self == Class::Asset
     }
 }
 
@@ -580,7 +574,7 @@ pub struct Deadline {
 pub struct Claim {
     pub payee: Option<Id<Entity>>,
     pub due: Option<Day>,
-    /// The place the value came from: the party's.
+    /// The party's place: where the value came from, or, for a bill, where it went.
     pub from: Id<Place>,
     pub loc: Loc,
     /// The flow of a line that made it, if a line did, and its place among the flows of its transaction.
@@ -1559,9 +1553,15 @@ impl<'s> Book<'s> {
             });
         }
         let flows = self.txns.get(txn.source_txn()?)?.flows;
-        let (id, flow) = flows.ids().map(|id| (id, &self.flows[id])).find(|(_, flow)| flow.to == place)?;
+        // A bill is made by paying out of the owner's place, a claim on a party by paying into it.
+        let (id, flow, party) = flows.ids().find_map(|id| {
+            let flow = &self.flows[id];
+            let (at, party) =
+                if self.places[place].class == Class::Debt { (flow.from, flow.to) } else { (flow.to, flow.from) };
+            (at == place).then_some((id, flow, party))
+        })?;
         let (due, ordinal) = (self.flow_view(flow).detail().due, (id.index() - flows.start().index()) as u32);
-        Some(Claim { payee: flow.payee, due, from: flow.from, loc: flow.loc, source: Some(id), ordinal })
+        Some(Claim { payee: flow.payee, due, from: party, loc: flow.loc, source: Some(id), ordinal })
     }
 
     /// The flow a written transaction made as its `ordinal`th: for a claim, the line that says what it is for.

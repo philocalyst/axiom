@@ -1,0 +1,12 @@
+use std
+base USD
+entity me : person
+entity pge : org
+account checking : bank
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 me owes pge 300 USD due 2026-02-01 ^b1
+2026-01-03 me owes pge 200 USD due 2026-02-01 ^b2
+2026-01-04 me owes pge 300 USD due 2026-02-01 ^b3
+2026-01-20 checking -> pge 200 USD ^b3
+2026-01-25 checking -> pge 200 USD
+2026-01-30 checking -> pge 100 USD

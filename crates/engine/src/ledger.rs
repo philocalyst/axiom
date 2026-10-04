@@ -17,8 +17,8 @@
 
 use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{
-    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Infer, Item, Made, Place, RuntimeDetail,
-    RuntimeFlow, RuntimeTxn,
+    Book, Class, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Infer, Item, Made, Place,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn,
 };
 
 use crate::Promise;
@@ -613,7 +613,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub(crate) fn everything(&self, flow: &Flow, written: Amounts) -> Amounts {
         let book = self.plan.book;
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
-        let qty = if book.places[flow.from].class.holds_parcels() {
+        let qty = if book.places[flow.from].class == Class::Asset {
             let money = is_money(self.plan, flow.from, flow.out.unit);
             let view = book.flow_view(flow);
             slot.map_or(Qty::ZERO, |slot| slot.admitted(money, view.select(), &book.codes))

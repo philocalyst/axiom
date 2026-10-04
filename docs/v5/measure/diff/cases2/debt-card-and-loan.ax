@@ -1,0 +1,20 @@
+use std
+base USD
+entity me : person
+entity bank : org
+entity cafe : org
+account checking : bank
+account visa : credit-card
+purpose coffee : spending
+2026-01-01 market -> checking 100_000 USD
+2026-01-03 visa -> cafe 40 USD #coffee
+2026-01-04 visa -> cafe 25 USD #coffee
+2026-01-20 checking -> visa 65 USD
+contract mortgage with bank
+  loan 12_000 USD on 2026-01-15 at 6% over 1y
+  monthly on 1 from checking
+  from 2026-02-01
+2026-01-15 mortgage
+2026-02-01 mortgage
+2026-02-10 me owes bank 70 USD due 2026-03-01 ^b1
+2026-02-20 checking -> bank 70 USD ^b1

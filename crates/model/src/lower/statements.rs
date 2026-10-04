@@ -499,18 +499,11 @@ fn claim_target<'s>(
     let (book, source) = (&world.book, &world.book.txns[target]);
     let flows = || source.flows.ids().map(|flow| &book.flows[flow]);
     if !flows().any(|flow| book.makes_claim(flow)) {
-        let (what, help) = match flows().any(|flow| book.makes_debt(flow)) {
-            true => (
-                "this transaction made a debt of yours, which has nothing to forgive",
-                "what you owe is a plain balance, not a claim of yours: only a claim on a party can be written off",
-            ),
-            false => ("this transaction did not create an open claim", "use the code on an earlier `owes` statement"),
-        };
         diags.push(
-            Diagnostic::error("claim-writeoff-target", what)
+            Diagnostic::error("claim-writeoff-target", "this transaction did not create an open claim")
                 .label(reference_loc, "the referenced transaction has no claim flow")
                 .context(source.loc, "the transaction identified by this code is here")
-                .help(help),
+                .help("use the code on an earlier `owes` statement"),
         );
         return None;
     }

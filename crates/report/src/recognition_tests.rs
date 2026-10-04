@@ -125,3 +125,53 @@ fn why_a_purpose_says_what_it_counted_in_cash_books() {
         assert!(!said.contains("300.00 USD"), "the claim made counted nothing: {said}");
     });
 }
+
+// ─── What the owner owes counts as spending, the other way ──────────────────
+
+/// A bill of 300.00 USD for `#fees`, 100.00 of it paid in February and the rest forgiven in March.
+const BILL: &str = "\
+2026-01-02 me owes stripe 300 USD due 2026-02-01 #fees ^b1
+2026-02-10 checking -> stripe 100 USD ^b1
+2026-03-15 ^b1 waived \"a credit\"
+";
+
+#[test]
+fn flow_counts_a_bill_when_it_is_paid_in_cash_books() {
+    with_run(&book("cash", BILL), day(2026, 3, 31), |book, run| {
+        let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));
+        assert_eq!(rows[0], "=spending |  | 100.00 USD |  | 100.00 USD", "{rows:#?}");
+        assert_eq!(rows[1], "  fees |  | 100.00 USD |  | 100.00 USD");
+    });
+}
+
+#[test]
+fn flow_counts_a_bill_when_it_is_made_in_accrual_books_and_takes_back_what_was_forgiven() {
+    with_run(&book("accrual", BILL), day(2026, 3, 31), |book, run| {
+        let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));
+        assert_eq!(rows[0], "=spending | 300.00 USD |  | -200.00 USD | 100.00 USD", "{rows:#?}");
+        assert_eq!(rows[1], "  fees | 300.00 USD |  | -200.00 USD | 100.00 USD");
+    });
+}
+
+/// A purpose that is money passing through counts as the volume of it, whichever way the claim counted: a bill of it that is
+/// settled is more of it, and one that is forgiven takes back what was counted and does not add more.
+#[test]
+fn flow_counts_a_bill_of_a_purpose_that_passes_through_as_volume_and_takes_back_what_was_forgiven() {
+    let bill = "\
+2026-01-02 me owes stripe due 2026-02-01 ^b1
+  300 USD #fees
+  30 USD #tax-collected
+";
+    let paid = format!("{bill}2026-02-10 checking -> stripe 330 USD ^b1\n");
+    with_run(&book("cash", &paid), day(2026, 3, 31), |book, run| {
+        let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));
+        let transfer: Vec<_> = rows.iter().filter(|row| row.contains("tax-collected")).collect();
+        assert_eq!(transfer, ["  tax-collected |  | 30.00 USD |  | 30.00 USD"], "{rows:#?}");
+    });
+    let forgiven = format!("{bill}2026-03-15 ^b1 waived \"a credit\"\n");
+    with_run(&book("accrual", &forgiven), day(2026, 3, 31), |book, run| {
+        let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));
+        let transfer: Vec<_> = rows.iter().filter(|row| row.contains("tax-collected")).collect();
+        assert_eq!(transfer, ["  tax-collected | 30.00 USD |  | -30.00 USD |"], "{rows:#?}");
+    });
+}

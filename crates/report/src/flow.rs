@@ -492,10 +492,10 @@ pub(crate) fn for_each_counted<'a>(
     }
     for Forgiven { day, claim, tab, unit, qty } in forgiven_by(run, book, cutoff) {
         let flow = &book.flows[claim];
-        Counting::forgiving(plan, flow, day, qty).pieces(book, &mut pieces);
+        Counting::forgiving(plan, flow, tab, day, qty).pieces(book, &mut pieces);
         for piece in pieces.iter().filter(|piece| wanted(flow, piece) && lens.owns(tab)) {
-            let Share::Part(taken) = piece.share else { continue };
-            let signed = Amount::new(Qty(-taken.0), unit);
+            let (Share::Part(taken), Counts::Claim { dir, .. }) = (piece.share, piece.counts) else { continue };
+            let signed = Amount::new(if dir == Dir::In { taken } else { -taken }, unit);
             let amount = priced(lens, day, tab, signed, piece, &mut shares);
             each(Counted { flow, purpose: piece.purpose, day, recognized: piece.recognized, amount });
         }
@@ -572,7 +572,7 @@ fn priced(
         // What passes through counts as the volume it was in either direction, but a claim taken back is not more of it.
         Some(PurposeRoot::Transfer) | None => {
             let volume = value.0.checked_abs()?;
-            Some(Qty(if piece.takes_back() { -volume } else { volume }))
+            Some(Qty(if piece.takes_back(book) { -volume } else { volume }))
         }
     }
 }

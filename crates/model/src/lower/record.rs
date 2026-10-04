@@ -144,10 +144,11 @@ pub(super) struct CodeIndex {
 impl CodeIndex {
     fn add(&mut self, world: &World<'_>, txn_id: Id<Txn>) {
         let (book, source) = (&world.book, &world.book.txns[txn_id]);
-        let makes_claim = source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
-        let header = source.codes.ids().map(|id| book.codes[id]);
         let flows = source.flows.ids().flat_map(|flow| book.flows[flow].codes.ids().map(|id| book.codes[id]));
-        for code in header.chain(flows) {
+        let mut codes = source.codes.ids().map(|id| book.codes[id]).chain(flows).peekable();
+        // Only a transaction with a code asks what its flows make: nearly none has one.
+        let makes_claim = codes.peek().is_some() && source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
+        for code in codes {
             self.all.note(code, txn_id, source.loc);
             if makes_claim {
                 self.claims.note(code, txn_id, source.loc);
@@ -1347,15 +1348,16 @@ fn claim_ends<'a, 's>(
     let creditor_is_owner = world.book.entities[creditor].place.is_some_and(
         |place| matches!(world.book.places[place].role, crate::book::Role::Holding(owner) if owner == creditor),
     );
-    let (party, owner, class, party_end) = if creditor_is_owner {
-        (debtor, creditor, crate::book::Class::Asset, debtor)
+    let kinds = world.book.roots.kinds;
+    let (party, owner, kind, party_end) = if creditor_is_owner {
+        (debtor, creditor, kinds.claim, debtor)
     } else if debtor_is_owner {
-        (creditor, debtor, crate::book::Class::Debt, creditor)
+        (creditor, debtor, kinds.debt_claim, creditor)
     } else {
         // Neither end is an owner: the subject owes the creditor, who holds the claim.
-        (debtor, creditor, crate::book::Class::Asset, debtor)
+        (debtor, creditor, kinds.claim, debtor)
     };
-    let tab = world.tab(party, owner, class, loc);
+    let tab = world.tab(party, owner, kind, loc);
     let Some(party_place) = world.book.entities[party_end].place else {
         diags.push(
             Diagnostic::error("claim-party-place", "the claim party has no flow endpoint")
@@ -1366,7 +1368,7 @@ fn claim_ends<'a, 's>(
     let empty = Run::new(Id::new(0), 0);
     let outside = ResolvedEnd { place: party_place, entity: Some(party_end), select: empty };
     let tab = ResolvedEnd { place: tab, entity: None, select: empty };
-    let (from, to) = if class == crate::book::Class::Asset { (outside, tab) } else { (tab, outside) };
+    let (from, to) = if kind == kinds.claim { (outside, tab) } else { (tab, outside) };
     Some((Ends { from, to }, owner))
 }
 
