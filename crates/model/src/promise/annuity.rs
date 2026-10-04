@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn a_loan_with_interest_is_owed_nothing_after_its_last_payment() {
-        for (principal, months, rate) in [(30_000_00, 36, 5), (320_000_00, 360, 6), (3_000_00, 12, 9), (99_99, 7, 4)] {
+        for (principal, months, rate) in [(3_000_000, 36, 5), (32_000_000, 360, 6), (300_000, 12, 9), (9_999, 7, 4)] {
             let annuity = annuity(principal, months, rate);
             let payments = paid_off(&annuity);
             assert_eq!(payments.len(), months as usize);
@@ -424,9 +424,9 @@ mod tests {
 
     #[test]
     fn interest_is_paid_first_and_falls_as_the_principal_does() {
-        let payments = paid_off(&annuity(100_000_00, 120, 6));
+        let payments = paid_off(&annuity(10_000_000, 120, 6));
         assert!(payments.windows(2).all(|pair| pair[1].interest <= pair[0].interest));
-        assert_eq!(payments[0].interest, Qty(100_000_00).scale(Ratio::new(1, 200).unwrap()).unwrap());
+        assert_eq!(payments[0].interest, Qty(10_000_000).scale(Ratio::new(1, 200).unwrap()).unwrap());
     }
 
     #[test]
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn a_payment_pays_interest_first_and_the_last_clears_what_is_left() {
-        let annuity = annuity(1_000_00, 3, 12);
+        let annuity = annuity(100_000, 3, 12);
         let (state, paid) = annuity.step(annuity.start(), Event::Pay);
         assert_eq!(paid.interest, Qty(1_000), "1% a period of 1,000.00");
         assert_eq!(paid.principal + paid.interest, annuity.payment().qty);
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn a_payment_that_does_not_cover_the_interest_pays_no_principal_and_owes_no_more() {
-        let annuity = annuity(1_000_00, 12, 12);
+        let annuity = annuity(100_000, 12, 12);
         let state = State { payment: Qty(10), ..annuity.start() };
         let (next, paid) = annuity.step(state, Event::Pay);
         assert_eq!(
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn a_payment_that_clears_what_is_owed_before_the_last_ends_the_loan() {
-        let annuity = annuity(1_000_00, 12, 5);
+        let annuity = annuity(100_000, 12, 5);
         let state = State { open: Qty(100), payment: Qty(5_000), remaining: 3, ..annuity.start() };
         let (next, paid) = annuity.step(state, Event::Pay);
         assert_eq!((paid.principal, paid.open, next.remaining), (Qty(100), Qty::ZERO, 0));
@@ -547,13 +547,13 @@ mod tests {
 
     #[test]
     fn a_prepayment_that_shortens_keeps_the_payment_and_ends_the_loan_sooner() {
-        let annuity = annuity(250_000_00, 360, 6);
+        let annuity = annuity(25_000_000, 360, 6);
         let mut state = annuity.start();
         for _ in 0..11 {
             state = annuity.step(state, Event::Pay).0;
         }
-        let (after, paid) = annuity.step(state, Event::Prepay(Qty(5_000_00)));
-        assert_eq!((paid.principal, paid.interest, paid.open), (Qty(5_000_00), Qty::ZERO, state.open - Qty(5_000_00)));
+        let (after, paid) = annuity.step(state, Event::Prepay(Qty(500_000)));
+        assert_eq!((paid.principal, paid.interest, paid.open), (Qty(500_000), Qty::ZERO, state.open - Qty(500_000)));
         assert_eq!(after.payment, state.payment, "the payment stays");
         assert!(
             after.remaining < state.remaining,
@@ -565,10 +565,10 @@ mod tests {
 
     #[test]
     fn a_prepayment_that_recasts_keeps_the_payments_left_and_lowers_the_payment() {
-        let mut terms = loan(250_000_00, 360, 0);
+        let mut terms = loan(25_000_000, 360, 0);
         terms.prepay = Prepay::Recasts;
         let annuity = Annuity::new(&terms, monthly(), percent(6)).unwrap();
-        let (after, _) = annuity.step(annuity.start(), Event::Prepay(Qty(50_000_00)));
+        let (after, _) = annuity.step(annuity.start(), Event::Prepay(Qty(5_000_000)));
         assert_eq!(after.remaining, 360);
         assert!(after.payment < annuity.start().payment);
         // Recasting over the whole term what is owed at the start is the first payment itself: the same call.
@@ -578,9 +578,9 @@ mod tests {
 
     #[test]
     fn a_prepayment_is_held_to_what_is_owed_and_paying_it_all_ends_the_loan() {
-        let annuity = annuity(10_000_00, 24, 5);
+        let annuity = annuity(1_000_000, 24, 5);
         let (after, paid) = annuity.step(annuity.start(), Event::Prepay(Qty(i64::MAX / 8)));
-        assert_eq!((paid.principal, after.open, after.remaining), (Qty(10_000_00), Qty::ZERO, 0));
+        assert_eq!((paid.principal, after.open, after.remaining), (Qty(1_000_000), Qty::ZERO, 0));
         let (still, paid) = annuity.step(annuity.start(), Event::Prepay(Qty(-5)));
         assert_eq!(
             (paid.principal, still),
@@ -591,7 +591,7 @@ mod tests {
 
     #[test]
     fn a_rate_refigures_the_payment_over_what_is_left_and_is_held_between_nothing_and_everything() {
-        let annuity = annuity(100_000_00, 120, 5);
+        let annuity = annuity(10_000_000, 120, 5);
         let mut state = annuity.start();
         for _ in 0..24 {
             state = annuity.step(state, Event::Pay).0;
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!((higher.open, higher.remaining), (state.open, state.remaining));
         assert!(higher.payment > state.payment);
         assert_eq!(higher.rate, Ratio::percent(8, 0).unwrap().checked_mul(annuity.per_year()).unwrap());
-        let short = self::annuity(100_000_00, 12, 5);
+        let short = self::annuity(10_000_000, 12, 5);
         let (absurd, _) = short.step(short.start(), Event::Rate(Ratio::int(40)));
         assert_eq!(absurd.rate, short.per_year(), "a rate over 100% a year is held at 100%");
         let (below, _) = short.step(short.start(), Event::Rate(Ratio::int(-1)));
@@ -611,14 +611,14 @@ mod tests {
     #[test]
     fn a_rate_whose_payment_the_factor_cannot_work_out_changes_nothing() {
         // 100% a year over 120 months leaves the 18 places the factor is worked out in: the loan stays as it was.
-        let annuity = annuity(100_000_00, 120, 5);
+        let annuity = annuity(10_000_000, 120, 5);
         let (same, paid) = annuity.step(annuity.start(), Event::Rate(Ratio::ONE));
         assert_eq!((same, paid), (annuity.start(), Paid::nothing(annuity.start().open)));
     }
 
     #[test]
     fn a_reset_is_the_index_and_the_margin_held_to_the_cap_and_to_the_life() {
-        let mut terms = loan(100_000_00, 360, 0);
+        let mut terms = loan(10_000_000, 360, 0);
         terms.resets = Some(Reset {
             every: Span::months(12),
             from: Day(1),
@@ -635,13 +635,13 @@ mod tests {
             assert_eq!(yearly(&state), Ratio::percent(want, 0).unwrap(), "index {index}%");
         }
         // A loan that does not reset ignores the event.
-        let plain = self::annuity(100_000_00, 360, 5);
+        let plain = self::annuity(10_000_000, 360, 5);
         assert_eq!(plain.step(plain.start(), Event::Reset(Ratio::ONE)).0, plain.start());
     }
 
     #[test]
     fn a_rate_the_hold_cannot_read_changes_nothing() {
-        let annuity = annuity(100_000_00, 120, 5);
+        let annuity = annuity(10_000_000, 120, 5);
         let unreadable = Ratio::new(i128::from(i64::MAX - 2), i128::from(i64::MAX)).unwrap();
         let (state, paid) = annuity.step(annuity.start(), Event::Rate(unreadable));
         assert_eq!(paid, Paid::nothing(annuity.start().open));
