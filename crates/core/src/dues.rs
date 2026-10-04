@@ -358,7 +358,7 @@ fn fall_together(distinct: &[On]) -> bool {
 }
 
 /// The first `n` for which `holds` is, if it is false before it, and true from it on: found by doubling and then halving.
-fn first_where(holds: impl Fn(u64) -> bool) -> u64 {
+pub(crate) fn first_where(holds: impl Fn(u64) -> bool) -> u64 {
     if holds(0) {
         return 0;
     }

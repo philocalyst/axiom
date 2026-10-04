@@ -8,6 +8,7 @@
 use std::fmt;
 
 use crate::day::{Day, Span, days_in_month};
+use crate::dues::first_where;
 use crate::num::Qty;
 
 /// A compiled date layout such as `MM/DD/YYYY`, used by imported records.
@@ -505,91 +506,27 @@ pub(crate) fn cadence_day(anchor: Day, step: Span, n: u64) -> Option<Day> {
     checked_add(anchor, i64::from(step.months).checked_mul(n)?, i64::from(step.days).checked_mul(n)?)
 }
 
-/// The first cadence index whose base day is on or after `target`. Positive
-/// calendar steps are monotonic, so exponential search plus binary search
-/// keeps a `Day::MIN` anchor bounded by the logarithm of the elapsed span.
+/// The first cadence index whose base day is on or after `target`; none if the steps leave the calendar before that.
+/// Positive calendar steps are monotonic, so [`first_where`] (doubling, then halving) keeps a `Day::MIN` anchor bounded
+/// by the logarithm of the elapsed span.
 fn first_cadence_at_or_after(anchor: Day, step: Span, target: Day) -> Option<u64> {
-    if anchor >= target {
-        return Some(0);
-    }
-    let (mut low, mut high) = (0u64, 1u64);
-    loop {
-        match cadence_day(anchor, step, high) {
-            Some(day) if day < target => {
-                low = high;
-                high = high.checked_mul(2)?;
-            }
-            Some(_) | None => break,
-        }
-    }
-    while high - low > 1 {
-        let middle = low + (high - low) / 2;
-        if cadence_day(anchor, step, middle).is_some_and(|day| day < target) {
-            low = middle;
-        } else {
-            high = middle;
-        }
-    }
-    cadence_day(anchor, step, high).map(|_| high)
+    let first = first_where(|n| cadence_day(anchor, step, n).is_none_or(|day| day >= target));
+    cadence_day(anchor, step, first).map(|_| first)
 }
 
+/// The days the steps of a schedule land on, one step at a time: the earliest of `on`'s landings in the step's month, year
+/// or week after the last, or the step's own day where `on` names none.
 struct Landings<'a> {
     base: Day,
     on: &'a [On],
     previous: Option<Day>,
     empty_pending: bool,
     civil: Option<(i32, u32, u32)>,
-    small: Option<SmallLandings>,
-}
-
-struct SmallLandings {
-    days: [Day; 2],
-    len: u8,
-    next: u8,
-}
-
-impl SmallLandings {
-    fn new(mut candidates: [Option<Day>; 2]) -> SmallLandings {
-        let mut days = [Day::default(); 2];
-        let mut len = 0;
-        for candidate in candidates.iter_mut().filter_map(Option::take) {
-            days[usize::from(len)] = candidate;
-            len += 1;
-        }
-        if len == 2 && days[1] < days[0] {
-            days.swap(0, 1);
-        }
-        if len == 2 && days[0] == days[1] {
-            len = 1;
-        }
-        SmallLandings { days, len, next: 0 }
-    }
-
-    fn next(&mut self) -> Option<Day> {
-        if self.next >= self.len {
-            return None;
-        }
-        let day = self.days[usize::from(self.next)];
-        self.next += 1;
-        Some(day)
-    }
 }
 
 impl<'a> Landings<'a> {
     fn new(base: Day, on: &'a [On]) -> Landings<'a> {
-        let small = match on {
-            [] => None,
-            [first] => {
-                let civil = base.ymd();
-                Some(SmallLandings::new([first.land(base, civil), None]))
-            }
-            [first, second] => {
-                let civil = base.ymd();
-                Some(SmallLandings::new([first.land(base, civil), second.land(base, civil)]))
-            }
-            _ => None,
-        };
-        Landings { base, on, previous: None, empty_pending: true, civil: None, small }
+        Landings { base, on, previous: None, empty_pending: true, civil: None }
     }
 }
 
@@ -597,9 +534,6 @@ impl<'a> Iterator for Landings<'a> {
     type Item = Day;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(small) = &mut self.small {
-            return small.next();
-        }
         if self.on.is_empty() {
             return std::mem::replace(&mut self.empty_pending, false).then_some(self.base);
         }
@@ -641,10 +575,10 @@ pub fn due<'a>(every: Cadence, on: &'a [On], anchor: Day, within: Days) -> impl 
     let target_ordinal =
         (i64::from(anchor.max(within.first()).0) - forward_landing).clamp(i64::from(i32::MIN), i64::from(i32::MAX));
     let target = Day(target_ordinal as i32);
-    let first_step = first_cadence_at_or_after(anchor, step, target).unwrap_or(u64::MAX);
+    let first_step =
+        if advances { first_cadence_at_or_after(anchor, step, target).unwrap_or(u64::MAX) } else { u64::MAX };
     let base_limit = (i64::from(within.last().0) + backward_landing).min(i64::from(i32::MAX));
     std::iter::successors(Some(first_step), |&n| n.checked_add(1))
-        .take_while(move |_| advances)
         .map_while(move |n| cadence_day(anchor, step, n))
         .take_while(move |day| i64::from(day.0) <= base_limit)
         .flat_map(move |base| Landings::new(base, on))

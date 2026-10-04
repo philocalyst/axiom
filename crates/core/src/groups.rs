@@ -9,31 +9,6 @@ use std::ops::Index;
 
 use crate::id::Id;
 
-/// A stable counting sort of `n` items into `buckets` buckets, where `key(i)`
-/// is the bucket of item `i`. Returns each bucket's offset (`buckets + 1`
-/// of them, the last being `n`) and the items' indices in bucket order: the
-/// ones in bucket `b` are `order[starts[b]..starts[b + 1]]`, in input order.
-pub(crate) fn bucket(buckets: usize, n: usize, key: impl Fn(usize) -> usize) -> (Vec<u32>, Vec<u32>) {
-    let mut starts = vec![0u32; buckets + 1];
-    for item in 0..n {
-        starts[key(item) + 1] += 1;
-    }
-    for at in 1..starts.len() {
-        starts[at] += starts[at - 1];
-    }
-    // Each bucket fills from its start, so the offsets end up one bucket late:
-    // `starts[b]` becomes where bucket `b + 1` begins, and shifts back.
-    let mut order = vec![0u32; n];
-    for item in 0..n {
-        let next = &mut starts[key(item)];
-        order[*next as usize] = item as u32;
-        *next += 1;
-    }
-    starts.copy_within(..buckets, 1);
-    starts[0] = 0;
-    (starts, order)
-}
-
 #[derive(Debug)]
 pub struct Groups<K, V> {
     starts: Vec<u32>,
@@ -135,17 +110,18 @@ mod tests {
     }
 
     #[test]
-    fn a_bucket_sort_is_stable_and_offsets_end_at_the_count() {
+    fn indices_grouped_by_key_are_a_stable_counting_sort() {
         let keys = [2, 0, 2, 1, 0];
-        let (starts, order) = bucket(4, keys.len(), |at| keys[at]);
-        assert_eq!(starts, [0, 2, 3, 5, 5]);
-        assert_eq!(order, [1, 4, 3, 0, 2]);
+        let g = Groups::<(), u32>::build(4, keys.iter().enumerate().map(|(at, &key)| (Id::new(key), at as u32)));
+        assert_eq!(g.values(), [1, 4, 3, 0, 2], "the items in the order of their keys, each key's in input order");
+        let sizes: Vec<_> = g.iter().map(|(_, row)| row.len()).collect();
+        assert_eq!(sizes, [2, 1, 2, 0]);
     }
 
     #[test]
     fn nothing_grouped_is_a_table_of_empty_keys() {
-        let (starts, order) = bucket(0, 0, |_| unreachable!("no items"));
-        assert_eq!((starts, order), (vec![0], vec![]));
+        let none = Groups::<(), u32>::build(0, [].into_iter());
+        assert_eq!((none.keys(), none.values().len()), (0, 0));
         let g = Groups::<(), char>::build(3, [].into_iter());
         assert_eq!((g.keys(), g.values().len()), (3, 0));
         assert!(g[Id::new(0)].is_empty() && g[Id::new(2)].is_empty());

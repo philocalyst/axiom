@@ -8,7 +8,7 @@
 use std::iter::FusedIterator;
 use std::ops::{Index, IndexMut};
 
-use crate::groups::bucket;
+use crate::groups::Groups;
 use crate::id::{Id, Ids, Run};
 
 const NONE: u32 = u32::MAX;
@@ -39,25 +39,23 @@ impl<T> Tree<T> {
         let n = items.len();
         assert_eq!(parents.len(), n, "one parent slot per item");
         // Children grouped by parent; roots sit under a virtual parent `n`.
-        // `kids[starts[p]..starts[p + 1]]` are p's children.
-        let (starts, kids) = bucket(n + 1, n, |child| parents[child].unwrap_or(n));
+        let pairs = (0..n).map(|child| (Id::new(parents[child].unwrap_or(n) as u32), child as u32));
+        let kids: Groups<(), u32> = Groups::build(n + 1, pairs);
 
-        // Depth-first from the virtual root. Each stack frame is a node and the
-        // cursor of its next unvisited child.
+        // Depth-first from the virtual root. Each stack frame is a node and its children not yet visited.
         let mut order = Vec::with_capacity(n);
         let mut links: Vec<Link> = Vec::with_capacity(n);
         let mut new_id = vec![NONE; n];
-        let mut stack = vec![(n, starts[n])];
-        while let Some((node, cursor)) = stack.last_mut() {
+        let mut stack = vec![(n, kids[Id::new(n as u32)].iter())];
+        while let Some((node, unvisited)) = stack.last_mut() {
             let node = *node;
-            if *cursor < starts[node + 1] {
-                let child = kids[*cursor as usize] as usize;
-                *cursor += 1;
+            if let Some(&child) = unvisited.next() {
+                let child = child as usize;
                 new_id[child] = order.len() as u32;
                 let parent = if node == n { NONE } else { new_id[node] };
                 links.push(Link { parent, end: NONE, depth: stack.len() as u32 - 1 });
                 order.push(child);
-                stack.push((child, starts[child]));
+                stack.push((child, kids[Id::new(child as u32)].iter()));
             } else {
                 stack.pop();
                 if node != n {
