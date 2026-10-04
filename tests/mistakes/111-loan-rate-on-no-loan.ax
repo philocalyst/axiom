@@ -1,0 +1,18 @@
+// MISTAKE: a rate change is written for a contract that has no loan, which has no rate to change.
+base USD
+use std
+
+entity netflix : org
+account checking : bank
+
+opening 2026-01-01
+  checking 1_000 USD
+
+contract netflix
+  15 USD monthly on 1 from checking
+  from 2026-02-01
+  until 2026-03-31
+
+2026-02-01 netflix
+2026-03-01 netflix
+2026-03-01 netflix now at 6.5%

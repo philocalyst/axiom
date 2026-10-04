@@ -1,0 +1,16 @@
+error[loan-balance]: `mortgage` owes 116,949.37 USD on 2026-02-02 by its schedule, and the statement says 118,600.00 USD
+   ╭─[106-loan-short-payment.ax:21:1]
+   │
+21 │ 2026-02-02 mortgage = 118_600.00 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── 1,650.63 USD more than the schedule
+   │
+   = note: the schedule's payment of 2026-02-01 paid 600.00 USD of interest and 3,050.63 USD of
+           principal and left 116,949.37 USD owed
+   = note: likely cause: a payment was short: 1,650.63 USD is exactly the principal that the line of
+           2026-02-01 (1,650.63 USD) left unpaid
+   = help: write what was paid with the rest, or what the lender took of it, as the amount of the
+           line
+
+✗ 1 error
+[exit status 1]

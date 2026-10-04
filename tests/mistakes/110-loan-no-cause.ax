@@ -1,0 +1,21 @@
+// MISTAKE: the lender's statement is a cent off the schedule and nothing explains a cent.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+opening 2026-01-01
+  checking 900_000 USD
+
+contract mortgage with bank
+  loan 120_000 USD on 2026-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2026-02-01
+  until 2026-02-28
+
+2026-01-15 mortgage
+
+2026-02-01 mortgage
+2026-02-28 mortgage = 116_949.38 USD

@@ -1,0 +1,21 @@
+// MISTAKE: the payment of March was never written, and the line of February states exactly that payment's principal over its own: both explain the statement to the cent, so the diagnostic does not guess.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+opening 2026-01-01
+  checking 900_000 USD
+
+contract mortgage with bank
+  loan 120_000 USD on 2026-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2026-02-01
+  until 2026-03-31
+
+2026-01-15 mortgage
+
+2026-02-01 mortgage 6_731.92 USD
+2026-03-02 mortgage = 113_868.08 USD
