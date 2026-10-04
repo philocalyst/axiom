@@ -34,6 +34,7 @@ pub mod split;
 pub mod sync;
 
 mod addresses;
+mod args;
 pub mod builtin;
 mod collect;
 mod declare;

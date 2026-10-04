@@ -3,7 +3,7 @@
 
 use axiom_core::{Day, Days, Dec, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Sym};
 use axiom_syntax as ast;
-use axiom_syntax::{ClauseKind, ExprKind, Quantity, Subject};
+use axiom_syntax::{ClauseKind, Quantity, Subject};
 
 use super::flow::{
     Codes, Ends, FlowCx, ResolvedEnd, Shape, empty_codes, keep_program, make_resolved_flow, push_flow_expressions,
@@ -12,6 +12,7 @@ use super::flow::{
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::{Reach, Tail, written_purpose};
+use crate::args::Args;
 use crate::book::{
     Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, RateChange, Role,
 };
@@ -584,20 +585,8 @@ pub(super) fn lower_rate_change<'s>(
         );
         return;
     }
-    let rate = match &at.file()[line.args] {
-        [only] => match at.file().exprs[*only].kind {
-            ExprKind::Pct(percent) => Ratio::percent(percent.mantissa as i128, percent.scale),
-            _ => None,
-        },
-        _ => None,
-    };
-    let Some(rate) = rate.filter(|rate| !rate.is_negative()) else {
-        diags.push(
-            Diagnostic::error("contract-loan-rate", "a loan rate must be a nonnegative percentage")
-                .label(line.loc, "write the new rate as a percentage, as in `now at 6.25%`"),
-        );
-        return;
-    };
+    let mut args = Args::shaped(at.file(), line, "contract-loan-rate", "now at PERCENT");
+    let Some(rate) = args.rate().and_then(|rate| args.done().map(|()| rate)).or_report(diags) else { return };
     world.book.contracts[contract_id].rates.push(RateChange { day: at.statement.date, rate, loc: at.loc });
 }
 

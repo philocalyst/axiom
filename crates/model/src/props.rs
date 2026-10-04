@@ -11,14 +11,15 @@
 //! before an amount is written against it.
 
 use std::iter;
+use std::ops::{Deref, DerefMut};
 
 use axiom_core::tagless::{Datum, Field};
-use axiom_core::{Day, Days, Diagnostic, Id, Key, Loc, Many, Map, Ratio, Set, SlotId, Span, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Key, Loc, Many, Map, Ratio, Set, SlotId, Sym};
 use axiom_syntax::{
-    Change, ClauseKind, Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line, Rates, Setting, Statement,
-    Subject, Verb,
+    Change, ClauseKind, Decl, DeclKind, ExprKind, File, Policy, Prop as Line, Rates, Setting, Statement, Subject, Verb,
 };
 
+use crate::args::Args;
 use crate::book::{Asset, At, Basis, Books, Commodity, Entity, Kind, Place, Purpose, RatePolicy, Sort, System};
 use crate::builtin::{self as slot, Coded};
 use crate::collect::{Collected, Written};
@@ -30,7 +31,6 @@ use crate::problem;
 use crate::scope::Home;
 use crate::slots::{Range, Slot, View};
 use crate::spelled;
-use crate::values::describe;
 
 /// What a property line describes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -68,7 +68,7 @@ impl Target {
 }
 
 /// How the arguments of one of the language's properties read, and what they say.
-type Reader = fn(&mut Args<'_, '_, '_>) -> Result<(), Diagnostic>;
+type Reader = fn(&mut Reading<'_, '_, '_>) -> Result<(), Diagnostic>;
 
 /// A line whose argument, as `Args::$read` reads it, is what it says of `$key`: through `$then` first, if the slot
 /// holds the word as a number.
@@ -263,22 +263,32 @@ fn paint_lives(world: &mut World<'_>, entity: Id<Entity>, residences: &[Residenc
 
 // ─── Reading ────────────────────────────────────────────────────────────────
 
-/// The arguments of one property line, read in order, and what the line is said of.
-struct Args<'w, 'a, 's> {
+/// A built-in line being read: its values, and the thing it is written under.
+struct Reading<'w, 'a, 's> {
+    args: Args<'a, 's>,
     world: &'w mut World<'s>,
     pending: &'w mut Pending,
-    file: &'a File<'s>,
-    ids: &'a [ExprId],
-    line: &'a Line<'s>,
     home: Home,
-    next: usize,
     /// The thing the line is written under.
     thing: Holder,
     /// What it says things of: the thing, or its place, for an asset's settings.
     said_of: Holder,
 }
 
-impl<'a, 's> Args<'_, 'a, 's> {
+impl<'a, 's> Deref for Reading<'_, 'a, 's> {
+    type Target = Args<'a, 's>;
+    fn deref(&self) -> &Args<'a, 's> {
+        &self.args
+    }
+}
+
+impl DerefMut for Reading<'_, '_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.args
+    }
+}
+
+impl<'s> Reading<'_, '_, 's> {
     /// The line says `value` of what it is written under.
     fn say<V: Field>(&mut self, key: Key<V>, value: V) -> Result<(), Diagnostic> {
         self.done()?;
@@ -300,112 +310,12 @@ impl<'a, 's> Args<'_, 'a, 's> {
         Ok(())
     }
 
-    fn peek(&self) -> Option<&'a Expr<'s>> {
-        self.ids.get(self.next).map(|&id| &self.file.exprs[id])
-    }
-
-    /// The next argument, which the property needs to be `wanted`.
-    fn next_id(&mut self, wanted: &str) -> Result<ExprId, Diagnostic> {
-        let Some(&id) = self.ids.get(self.next) else {
-            return Err(Diagnostic::error("property-argument", format!("`{}` needs {wanted}", self.line.name.0))
-                .label(self.line.loc, format!("{wanted} should follow here")));
-        };
-        self.next += 1;
-        Ok(id)
-    }
-
-    fn wrong(&self, expr: &Expr, wanted: &str) -> Diagnostic {
-        Diagnostic::error("property-type", format!("`{}` needs {wanted}", self.line.name.0))
-            .label(expr.loc, format!("this is {}", describe(&expr.kind)))
-    }
-
-    /// The next argument, as `pick` reads it out of the expression.
-    fn arg<T>(&mut self, wanted: &str, pick: impl FnOnce(&Expr<'s>) -> Option<T>) -> Result<T, Diagnostic> {
-        let expr = &self.file.exprs[self.next_id(wanted)?];
-        pick(expr).ok_or_else(|| self.wrong(expr, wanted))
-    }
-
-    fn done(&self) -> Result<(), Diagnostic> {
-        let Some(extra) = self.peek() else {
-            return Ok(());
-        };
-        Err(Diagnostic::error("property-argument", format!("`{}` takes no more arguments here", self.line.name.0))
-            .label(extra.loc, "unexpected"))
-    }
-
-    /// One of the `allowed` words.
-    fn word(&mut self, allowed: &[&str]) -> Result<&'s str, Diagnostic> {
-        let wanted = if allowed.len() == 1 { format!("`{}`", allowed[0]) } else { format!("one of {}", list(allowed)) };
-        let expr = &self.file.exprs[self.next_id(&wanted)?];
-        match expr.kind {
-            ExprKind::Name(name) if allowed.contains(&name.0) => Ok(name.0),
-            ExprKind::Name(name) => {
-                let error = self.wrong(expr, &wanted).label(expr.loc, format!("`{}` is not one of them", name.0));
-                Err(suggest(error, expr.loc, name.0, allowed.iter().copied()))
-            }
-            _ => Err(self.wrong(expr, &wanted)),
-        }
-    }
-
-    fn name(&mut self, wanted: &str) -> Result<Word<'s>, Diagnostic> {
-        let name = |expr: &Expr<'s>| match expr.kind {
-            ExprKind::Name(name) => Some(Word { text: name.0, loc: expr.loc }),
-            _ => None,
-        };
-        self.arg(wanted, name)
-    }
-
-    fn day(&mut self) -> Result<Day, Diagnostic> {
-        self.arg("a date", |expr| if let ExprKind::Date(day) = expr.kind { Some(day) } else { None })
-    }
-
-    fn span(&mut self) -> Result<Span, Diagnostic> {
-        let span = |expr: &Expr| {
-            if let ExprKind::Span(span) = expr.kind { Some(span) } else { None }
-        };
-        self.arg("a span such as `5d` or `1y6m`", span)
-    }
-
-    fn text(&mut self) -> Result<&'s str, Diagnostic> {
-        self.arg("text in quotes", |expr| if let ExprKind::Str(text) = expr.kind { Some(text.0) } else { None })
-    }
-
-    /// A whole number from zero to `max`.
-    fn count(&mut self, max: u8) -> Result<u8, Diagnostic> {
-        self.arg(&format!("a whole number up to {max}"), |expr| match expr.kind {
-            ExprKind::Num(number) => {
-                number.to_qty(0).ok().and_then(|qty| u8::try_from(qty.0).ok()).filter(|&n| n <= max)
-            }
-            _ => None,
-        })
-    }
-
-    fn percent(&mut self) -> Result<Ratio, Diagnostic> {
-        let percent = |expr: &Expr| match expr.kind {
-            ExprKind::Pct(number) => Ratio::percent(number.mantissa.into(), number.scale),
-            _ => None,
-        };
-        self.arg("a percentage such as `5%`", percent)
-    }
-
     fn entity(&mut self) -> Result<Id<Entity>, Diagnostic> {
-        let word = self.name("an entity")?;
-        self.world.entity(self.home, word)
+        self.args.entity(self.world, self.home)
     }
 
     fn place(&mut self) -> Result<Id<Place>, Diagnostic> {
-        let word = self.name("a place")?;
-        self.world.place(word)
-    }
-
-    /// One commodity, as a book writes it: a unit, `USD`.
-    fn unit(&mut self, wanted: &str) -> Result<Id<Commodity>, Diagnostic> {
-        let unit = |expr: &Expr<'s>| match expr.kind {
-            ExprKind::Unit(symbol) => Some(Word { text: symbol.0, loc: expr.loc }),
-            _ => None,
-        };
-        let word = self.arg(wanted, unit)?;
-        self.world.commodity_of(word)
+        self.args.place(self.world)
     }
 
     /// `person, household`: the kinds of entity that may own what a kind of account classifies.
@@ -426,14 +336,13 @@ impl<'a, 's> Args<'_, 'a, 's> {
     }
 
     fn currency(&mut self) -> Result<Id<Commodity>, Diagnostic> {
-        self.unit("a commodity such as `USD`")
+        self.args.unit(self.world, "a commodity such as `USD`")
     }
 
     fn citizens(&mut self) -> Result<Vec<Id<System>>, Diagnostic> {
         let mut systems = Vec::new();
         while self.peek().is_some() {
-            let word = self.name("a system")?;
-            systems.push(self.world.system(word)?);
+            systems.push(self.args.system(self.world)?);
         }
         if systems.is_empty() {
             Err(Diagnostic::error("property-argument", "`citizen` needs a system")
@@ -456,8 +365,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
 
     /// A purpose, and where it is written.
     fn purpose(&mut self) -> Result<(Id<Purpose>, Loc), Diagnostic> {
-        let word = self.name("a purpose")?;
-        Ok((self.world.purpose(self.home, word)?, word.loc))
+        self.args.purpose(self.world, self.home)
     }
 
     /// `60% for studio`, whose rate is checked and whose entity is the share's.
@@ -474,17 +382,13 @@ impl<'a, 's> Args<'_, 'a, 's> {
         })?;
         validate_share_rate(rate, expr.loc)?;
         self.word(&["for"])?;
-        let word = self.name("an entity")?;
-        self.world.entity(self.home, word)
+        self.entity()
     }
 
     fn part_of(&mut self) -> Result<At<Id<Asset>>, Diagnostic> {
         self.word(&["of"])?;
-        let word = self.name("an asset")?;
-        let Some(asset) = self.world.book.asset(word.text) else {
-            return Err(self.world.missing_asset(word));
-        };
-        Ok(At { value: asset, loc: word.loc })
+        let (asset, loc) = self.args.asset(self.world)?;
+        Ok(At { value: asset, loc })
     }
 
     fn policy(&mut self) -> Result<Policy, Diagnostic> {
@@ -495,13 +399,12 @@ impl<'a, 's> Args<'_, 'a, 's> {
 
     /// `holds USD, VTI`, or `holds any`.
     fn holds(&mut self) -> Result<Vec<Id<Commodity>>, Diagnostic> {
-        if matches!(self.peek().map(|expr| &expr.kind), Some(ExprKind::Name(name)) if name.0 == "any") {
-            self.word(&["any"])?;
+        if self.takes("any") {
             return Ok(Vec::new());
         }
         let mut units = Vec::new();
         while self.peek().is_some() {
-            units.push(self.unit("commodities such as `USD`, or `any`")?);
+            units.push(self.args.unit(self.world, "commodities such as `USD`, or `any`")?);
         }
         match units.is_empty() {
             true => Err(Diagnostic::error("property-argument", "`holds` needs commodities or `any`")
@@ -512,8 +415,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
 
     /// `lives us/ca`, or `lives us/ca from 2026-01-01 until 2026-06-30`.
     fn residence(&mut self) -> Result<Residence, Diagnostic> {
-        let word = self.name("a system")?;
-        let system = self.world.system(word)?;
+        let system = self.args.system(self.world)?;
         let (mut from, mut until) = (Day::MIN, Day::MAX);
         while self.peek().is_some() {
             match self.word(&["from", "until"])? {
@@ -565,20 +467,10 @@ fn read_line<'s>(
     else {
         return Err(unknown_property(world, at.file.loc(word), targets[0], under.kind, word));
     };
-    let ids = &at.file[line.args];
-    let mut args = Args {
-        world,
-        pending,
-        file: at.file,
-        ids,
-        line,
-        home: at.home,
-        next: 0,
-        thing: under.holder,
-        said_of: under.said_of,
-    };
-    (builtin.2)(&mut args)?;
-    args.done()
+    let args = Args::of(at.file, line);
+    let mut reading = Reading { args, world, pending, home: at.home, thing: under.holder, said_of: under.said_of };
+    (builtin.2)(&mut reading)?;
+    reading.done()
 }
 
 /// `benificiary` is not a property of an account of kind `529`.
