@@ -41,6 +41,7 @@ import datetime
 import json
 import os
 import random
+import re
 import resource
 import shutil
 import subprocess
@@ -837,6 +838,17 @@ def detect(source, work):
     return f"killed by the oracle: {os.path.basename(failed[0][0])}, {failed[0][1][0][:60]}" if failed else None
 
 
+def tests_that_fail(source, work):
+    """The tests of the model and the engine that fail in SOURCE, by name. An unoptimized build: a mutant is a new tree each
+    time, and the optimizing build of the tests of four crates takes minutes where this takes one."""
+    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "tests-target"))
+    run = subprocess.run(["cargo", "test", "--offline", "--no-fail-fast", "-p", "axiom-model", "-p", "axiom-engine"],
+                         cwd=source, env=env, capture_output=True, text=True)
+    if "could not compile" in run.stderr:
+        raise SystemExit("the tests do not build")
+    return set(re.findall(r"^test (\S+) \.\.\. FAILED$", run.stdout, re.M))
+
+
 def mutate(tree, work, directory, only=None, sample=300):
     """Each mutant must be caught by the oracle on the first SAMPLE projects of DIRECTORY, or by a test that fails only with it."""
     from mutation import mutate as run_mutants
@@ -848,6 +860,9 @@ def mutate(tree, work, directory, only=None, sample=300):
     for name in [os.path.basename(path) for path in projects(directory)][:sample]:
         shutil.copytree(os.path.join(directory, name), os.path.join(kept, name))
     sys.path.insert(0, HERE)
+    import mutation
+
+    mutation.failing_tests = tests_that_fail
     return run_mutants(tree, work, MUTANTS, detect, only)
 
 
