@@ -16,7 +16,7 @@ use super::statements::{
     lower_measure, lower_rate_change, lower_split, lower_value, names_a_contract,
 };
 use crate::balance::{self, Settled, Total};
-use crate::book::{Amount, Contract, Place, ScheduleKind, Terms};
+use crate::book::{Amount, Contract, Input, Place, ScheduleKind, Terms};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -756,70 +756,18 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
     };
 
     let mut input_values: Vec<Option<Amount>> = vec![None; inputs.len()];
-    let mut bound = vec![false; inputs.len()];
     let mut replaced_legs = Vec::new();
     let mut added_ends: Vec<(Id<Place>, Loc)> = Vec::new();
     let mut written_groups: Vec<Option<OccurrenceGroupDraft>> = (0..templates.len()).map(|_| None).collect();
     for leg in &file[statement.body.legs] {
         let input = inputs.iter().position(|input| rec.staged.book.name(input.name) == leg.end.name.0);
         if let Some(input_at) = input {
-            if bound[input_at] {
+            if input_values[input_at].is_some() {
                 let first = inputs[input_at].loc;
                 rec.staged.diags.push(problem::twice("input binding", leg.loc, first));
-                continue;
-            }
-            if !file[leg.tail].is_empty() {
-                rec.staged.diags.push(
-                    Diagnostic::error("contract-input-tail", "a contract input binding cannot have flow clauses")
-                        .label(leg.loc, "put clauses on the occurrence's actual flow"),
-                );
-                continue;
-            }
-            let literal = match leg.amount {
-                ast::Quantity::Amount(ast::Amount::Literal(literal))
-                | ast::Quantity::Target(ast::Amount::Literal(literal)) => literal,
-                _ => {
-                    rec.staged.diags.push(
-                        Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
-                            .label(leg.loc, "write `input-name = 155 USD`"),
-                    );
-                    continue;
-                }
-            };
-            let input_unit = inputs[input_at].unit;
-            let unit = match literal.unit() {
-                Some(unit) => match rec.staged.commodity_of(Word::of(file, unit.0)) {
-                    Ok(unit) => unit,
-                    Err(problem) => {
-                        rec.staged.diags.push(problem);
-                        continue;
-                    }
-                },
-                None => match input_unit {
-                    Some(unit) => unit,
-                    None => {
-                        rec.staged.diags.push(
-                            Diagnostic::error("contract-input-unit", "this input has no declared unit to infer")
-                                .label(leg.loc, "state the amount's commodity"),
-                        );
-                        continue;
-                    }
-                },
-            };
-            if input_unit.is_some_and(|expected| expected != unit) {
-                rec.staged.diags.push(
-                    Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
-                        .label(leg.loc, "use the unit declared by this input")
-                        .context(inputs[input_at].loc, "the input's expected unit is declared here"),
-                );
-                continue;
-            }
-            match rec.staged.amount(literal.num(), unit, leg.loc) {
-                Ok(value) => {
-                    input_values[input_at] = Some(value);
-                    bound[input_at] = true;
-                }
-                Err(problem) => rec.staged.diags.push(problem),
+            } else {
+                let value = bound_input(&rec.staged, file, &inputs[input_at], leg);
+                input_values[input_at] = value.or_report(&mut rec.staged);
             }
             continue;
         }
@@ -827,23 +775,11 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         let Some(endpoint) = rec.end(leg.end) else {
             continue;
         };
-        let mut matching = None;
-        let mut ambiguous = None;
-        for (template_at, template) in templates.iter().enumerate() {
-            for (leg_at, template_leg) in template.legs.iter().enumerate() {
-                let named_end = template_leg.flow.to;
-                if named_end == endpoint.place {
-                    if matching.is_some() {
-                        ambiguous = Some((template_at, leg_at));
-                        break;
-                    }
-                    matching = Some((template_at, leg_at));
-                }
-            }
-            if ambiguous.is_some() {
-                break;
-            }
-        }
+        let mut matches = templates.iter().enumerate().flat_map(|(template_at, template)| {
+            let legs = template.legs.iter().enumerate().filter(|(_, leg)| leg.flow.to == endpoint.place);
+            legs.map(move |(leg_at, _)| (template_at, leg_at))
+        });
+        let (matching, ambiguous) = (matches.next(), matches.next());
         if let Some((template_at, leg_at)) = ambiguous {
             let other = templates[template_at].legs[leg_at].flow.loc;
             rec.staged.diags.push(
@@ -917,15 +853,12 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
             continue;
         }
 
-        let mut out = base_flow.out;
-        let mut arrive = base_flow.arrive;
-        match side {
-            FlowSide::Out => out = quantity.amount,
-            FlowSide::Arrive => arrive = quantity.amount,
-        }
+        let (mut out, mut arrive) = match side {
+            FlowSide::Out => (quantity.amount, base_flow.arrive),
+            FlowSide::Arrive => (base_flow.out, quantity.amount),
+        };
         if out.unit == arrive.unit {
-            out = quantity.amount;
-            arrive = quantity.amount;
+            (out, arrive) = (quantity.amount, quantity.amount);
         }
         if let Some((rate, quote, priced_at)) = tail.price {
             if quantity.root().is_some() {
@@ -947,13 +880,7 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
                     );
                     continue;
                 };
-                if other_unit == quote {
-                    rec.staged.diags.push(
-                        Diagnostic::error("price-transfer", "a price cannot change a same-commodity transfer")
-                            .label(priced_at, "remove the price"),
-                    );
-                    continue;
-                }
+                // A price whose unit is on both sides is a transfer's, which `priced` refuses.
                 priced(&mut rec.staged, quantity.amount, other_unit, inverse, priced_at)
             } else if other_unit == quote {
                 priced(&mut rec.staged, quantity.amount, quote, rate, priced_at)
@@ -998,11 +925,8 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
             FlowSide::Arrive => (None, quantity.root()),
         };
         let offset = rec.push(flow, out_root, arrive_root, tail.basis_root);
-        if written_groups[template_at].is_none() {
-            let side = template_side(&rec.staged, template);
-            written_groups[template_at] = Some(occurrence_group_draft(template, side));
-        }
-        let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
+        let side = template_side(&rec.staged, template);
+        let draft = written_groups[template_at].get_or_insert_with(|| occurrence_group_draft(template, side));
         draft.legs.push(Leg { flow: offset, part: quantity.part });
     }
     if !file[statement.body.items].is_empty() {
@@ -1018,13 +942,8 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         let parent =
             Parent { ends: Ends { from, to }, mode: Mode::Actual, header_codes: codes, tail: Some(&header_tail) };
         let items = rec.items(statement.body.items, parent);
-        let template_at = 0;
-        if written_groups[template_at].is_none() {
-            written_groups[template_at] = Some(occurrence_group_draft(template, side));
-        }
-        let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
-        draft.source = Endpoint { place: common, entity: None };
-        draft.items = items;
+        let draft = written_groups[0].get_or_insert_with(|| occurrence_group_draft(template, side));
+        (draft.source, draft.items) = (Endpoint { place: common, entity: None }, items);
     }
     if rec.failed() {
         return;
@@ -1333,6 +1252,40 @@ fn lower_owes<'s>(
     let program_id = rec.keep_program(built.group);
     let txn = Txn { program: program_id, codes: header_codes, waive: header_tail.waive, ..rec.transaction() };
     rec.keep(txn);
+}
+
+/// What a line of an occurrence that names one of its contract's inputs says the input is: a literal amount, in the
+/// unit the input declares.
+fn bound_input<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    input: &Input,
+    leg: &ast::Leg<'s>,
+) -> Result<Amount, Diagnostic> {
+    if !file[leg.tail].is_empty() {
+        return Err(Diagnostic::error("contract-input-tail", "a contract input binding cannot have flow clauses")
+            .label(leg.loc, "put clauses on the occurrence's actual flow"));
+    }
+    let (ast::Quantity::Amount(ast::Amount::Literal(literal)) | ast::Quantity::Target(ast::Amount::Literal(literal))) =
+        leg.amount
+    else {
+        return Err(Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
+            .label(leg.loc, "write `input-name = 155 USD`"));
+    };
+    let unit = match (literal.unit(), input.unit) {
+        (Some(unit), _) => world.commodity_of(Word::of(file, unit.0))?,
+        (None, Some(unit)) => unit,
+        (None, None) => {
+            return Err(Diagnostic::error("contract-input-unit", "this input has no declared unit to infer")
+                .label(leg.loc, "state the amount's commodity"));
+        }
+    };
+    if input.unit.is_some_and(|expected| expected != unit) {
+        return Err(Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
+            .label(leg.loc, "use the unit declared by this input")
+            .context(input.loc, "the input's expected unit is declared here"));
+    }
+    world.amount(literal.num(), unit, leg.loc)
 }
 
 fn occurrence_amount_unit(
