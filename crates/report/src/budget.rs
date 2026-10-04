@@ -10,20 +10,34 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Option<Day>, by: Period) -> Report<'s> {
     let at = at.unwrap_or(run.today);
-    purpose_budgets(lens.on(at), run, at, by)
+    let nothing = if lens.book().budgets.is_empty() {
+        "No budgets are declared in this book."
+    } else {
+        "No budget headroom was recorded for this window."
+    };
+    let title = format!("Budgets for {}", Periods::covering(by, at, at).title(0));
+    Report::new(title).with(section(lens.on(at), run, at, by, |_| true, nothing))
 }
 
-fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Period) -> Report<'s> {
+/// The budgets `wanted` picks, each spent against its limit in the month or the year (`by`) that holds `at`. `nothing` says
+/// why the table is empty when no budget has anything to show.
+pub(crate) fn section<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    at: Day,
+    by: Period,
+    wanted: impl Fn(&Budget) -> bool,
+    nothing: &'static str,
+) -> Section<'s> {
     let book = lens.book();
     let query = Periods::covering(by, at, at).window(0).days();
     let end = query.last().min(run.horizon);
-    let title = format!("Budgets for {}", Periods::covering(by, at, at).title(0));
     let mut table = Table::new(lens, run, View { query, end, by });
     if !book.budgets.is_empty() && query.first() > end {
         table.section.note("The requested budget window is beyond the run horizon.");
-        return Report::new(title).with(table.section);
+        return table.section;
     }
-    let mut budgets: Vec<_> = book.budgets.iter().map(|(_, budget)| budget).collect();
+    let mut budgets: Vec<_> = book.budgets.values().filter(|&budget| wanted(budget)).collect();
     budgets.sort_by_key(|budget| book.name(book.purposes[budget.purpose].name));
     for budget in budgets.into_iter().filter(|budget| budget.starts <= end) {
         let name = book.name(book.purposes[budget.purpose].name);
@@ -37,14 +51,10 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
         }
     }
     if table.section.rows.is_empty() {
-        table.section.note(if book.budgets.is_empty() {
-            "No budgets are declared in this book."
-        } else {
-            "No budget headroom was recorded for this window."
-        });
+        table.section.note(nothing);
     }
     table.section.unpriced(table.unpriced, "budget total");
-    Report::new(title).with(table.section)
+    table.section
 }
 
 /// What a budget spent in one window, against its limit.
