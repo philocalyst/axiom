@@ -3,16 +3,14 @@
 //! A claim is value someone owes. Owed to you, it is a parcel in a `claim`
 //! place, and each parcel is one claim: it remembers the transaction that made
 //! it, and the flow of it that paid in has the payee and the `due` day. Owed by
-//! you, it is a debt in a `payable` place, which holds a plain balance, so it is
-//! told apart by the code on the flows that made and settled it.
+//! you, it is a parcel of a debt place (a tab of the bills you owe, or an account
+//! that says `claim`), negative as a liability is, made by the flow that paid out
+//! of it and settled the same way.
 
-use std::collections::BTreeMap;
+use axiom_core::{Day, Id, Qty};
+use axiom_engine::Holding;
+use axiom_model::{Amount, Book, Class, Entity, Place, RuntimeTxn};
 
-use axiom_core::{Day, Id, Qty, Sym};
-use axiom_engine::{Holding, Run};
-use axiom_model::{Amount, Book, Class, Entity, Flow, Place, RuntimeTxn, Select};
-
-use crate::history::Posting;
 use crate::lens::Lens;
 use crate::places::path;
 use crate::table::{code_labels, doc_headline};
@@ -46,21 +44,22 @@ impl Claim {
     }
 }
 
-/// Every claim open on the lens's day, for its owners, given the holdings on
-/// that day: soonest due first, what is owed to you before what you owe, and of two claims made and due on one day the
-/// one whose place is listed first (see `Book::listing`).
-pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
+/// Every claim open on the lens's day, for its owners, given the holdings on that day: soonest due first, what is owed to
+/// you before what you owe, and of two claims made and due on one day the one whose place is listed first (see
+/// `Book::listing`). What is owed by you is a parcel of a debt place, negative as a liability is, and is read in the sign the
+/// place is shown in.
+pub fn open<'h>(lens: Lens, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
     let book = lens.book();
     let claimed = holdings.into_iter().filter(|holding| book.is_claim(holding.place) && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
         holding.lots.iter().filter_map(move |lot| {
-            let left = lens.place_qty(holding.place, lot.qty);
+            let left = lens.plan().sides().display(holding.place, lens.place_qty(holding.place, lot.qty));
             if left.is_zero() {
                 return None;
             }
             let made = book.claim_of(lot.txn, holding.place);
             Some(Claim {
-                mine: true,
+                mine: book.places[holding.place].class == Class::Asset,
                 place: holding.place,
                 txn: lot.txn,
                 left: Amount::new(left, holding.unit),
@@ -70,73 +69,18 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
             })
         })
     });
-    let payable = book.kind("payable").ok();
-    let payables = book.places.iter().filter(|&(id, place)| {
-        place.class == Class::Debt && lens.owns(id) && payable.is_some_and(|kind| book.is_a(place.kind, kind))
-    });
-    let mut claims: Vec<Claim> = parcels.chain(payables.flat_map(|(place, _)| owed_by_you(lens, run, place))).collect();
+    let mut claims: Vec<Claim> = parcels.collect();
     claims.sort_by_key(|claim| (!claim.mine, claim.due.unwrap_or(Day::MAX), claim.made, book.listing(claim.place)));
     claims
-}
-
-/// What is owed through a payable place, netted per code: a flow out of it
-/// (a bill) names its debt by its first code, and a flow into it (a payment)
-/// settles the debts of the codes it names.
-pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim> {
-    let book = lens.book();
-    let mut debts: BTreeMap<Sym, Claim> = BTreeMap::new();
-    for &id in &book.touching[place] {
-        let posting = Posting::at(book, run, id);
-        if !posting.is_real_on(lens.day) {
-            continue;
-        }
-        let flow = posting.flow;
-        if flow.from == place {
-            let Some(code) = book.flow_view(flow).codes().next() else {
-                continue;
-            };
-            let debt = debts.entry(code).or_insert(Claim {
-                mine: false,
-                place,
-                txn: RuntimeTxn::journal(flow.txn).expect("journal flow has a real transaction"),
-                left: Amount::zero(flow.out.unit),
-                made: flow.day,
-                payee: flow.payee,
-                due: book.flow_view(flow).detail().due,
-            });
-            debt.left.qty += posting.out().qty;
-        } else if let Some(debt) =
-            settled_codes(book, flow).find(|code| debts.contains_key(code)).and_then(|code| debts.get_mut(&code))
-        {
-            debt.left.qty -= posting.arrive().qty;
-        }
-    }
-    debts
-        .into_values()
-        .map(|mut debt| {
-            debt.left.qty = lens.place_qty(place, debt.left.qty);
-            debt
-        })
-        .filter(|debt| debt.left.qty > Qty::ZERO)
-        .collect()
-}
-
-/// The codes a flow carries, and those it settles with `for #code`.
-fn settled_codes<'a>(book: &'a Book, flow: &'a Flow) -> impl Iterator<Item = Sym> + 'a {
-    let view = book.flow_view(flow);
-    let selected =
-        view.select().iter().filter_map(|select| if let Select::Code(code) = select { Some(*code) } else { None });
-    view.codes().chain(selected)
 }
 
 /// Builds a claims view from holdings supplied by a shared context ledger.
 pub(crate) fn view_from<'h, 's>(
     lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
     holdings: impl IntoIterator<Item = &'h Holding>,
 ) -> Report<'s> {
     let at = lens.day;
-    let claims = open(lens, run, holdings);
+    let claims = open(lens, holdings);
     let (mine, theirs): (Vec<&Claim>, Vec<&Claim>) = claims.iter().partition(|claim| claim.mine);
     let report = Report::new(format!("Claims on {at}")).with(section(lens, "Owed to you", &mine));
     let report = report.with(section(lens, "Owed by you", &theirs));

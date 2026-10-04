@@ -22,7 +22,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
         return Report::new(format!("Why {name}"))
             .with(Section::note_only(format!("{name} is outside this owner's scope.")));
     }
-    let open = claims::open(lens, run, run.holdings.iter());
+    let open = claims::open(lens, run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
     Report::new(format!("Why {name}"))
         .with(places_section(lens, run, entity))

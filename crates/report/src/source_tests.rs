@@ -2034,3 +2034,54 @@ opening 2026-01-01
         assert!(!named("candy"), "a flow of nothing moved nothing, and a purpose that moved nothing is no row");
     });
 }
+
+// ─── What the owner owes ────────────────────────────────────────────────────
+
+/// A repair bill of 1,200.00, made on the 5th of March and partly paid on the 12th by a payment that carries its code.
+const BILL: &str = "\
+use std
+base USD
+entity me : person
+entity landlord : org
+account checking : bank
+purpose repairs : spending
+2026-01-01 market -> checking 5_000 USD
+2026-03-05 me owes landlord 1_200 USD due 2026-04-04 #repairs ^bill-7
+2026-03-12 checking -> landlord 500 USD ^bill-7
+";
+
+/// What `claims` says the owner owes on `at`: a bill is a parcel, so it is open by what is left of it on that day, with the day it
+/// was made and the day it falls due.
+fn owed_on(book: &Book, run: &Run, at: Day) -> Vec<String> {
+    let report = crate::tests::report(book, run, &Query::Claims { at: Some(at) }, None).expect("claims are asked");
+    let owed = report
+        .sections
+        .iter()
+        .find(|section| section.heading.as_ref().is_some_and(|h| crate::tests::cell(h) == "Owed by you"));
+    owed.map_or_else(Vec::new, |section| lines(section))
+}
+
+#[test]
+fn a_bill_is_open_by_what_its_parcel_holds_on_the_day_asked() {
+    with_std(BILL, day(2026, 3, 31), |book, run| {
+        assert_eq!(
+            owed_on(book, run, day(2026, 3, 31)),
+            [
+                "landlord | ^bill-7 | 700.00 USD | 2026-03-05 | 26d | 2026-04-04 | in 4d",
+                "=Total |  | 700.00 USD |  |  |  |"
+            ]
+        );
+        let before = owed_on(book, run, day(2026, 3, 5));
+        assert!(before[0].contains("^bill-7 | 1,200.00 USD"), "on the day it was made it was owed whole: {before:?}");
+        assert!(owed_on(book, run, day(2026, 3, 4)).is_empty(), "nothing was owed before the bill was made");
+    });
+}
+
+/// A bill is not held: `lots` lists the parcels of what the owner has, and a debt is not among them.
+#[test]
+fn a_bill_is_no_lot() {
+    with_std(BILL, day(2026, 3, 31), |book, run| {
+        let lots = crate::tests::report(book, run, &Query::Lots { place: None, at: None }, None).unwrap();
+        assert!(lots.sections[0].rows.iter().all(|row| !crate::tests::cell(&row.cells[0]).contains("landlord")));
+    });
+}

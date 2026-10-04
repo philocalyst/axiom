@@ -42,9 +42,10 @@ pub(crate) struct Traits {
     places: Box<[PlaceTraits]>,
     entities: Box<[EntityTraits]>,
     units: Box<[Option<Policy>]>,
-    /// The tab that holds what a party owes an owner, by the party's place and the owner, sorted: a flow out of a party's
-    /// place finds the claims it may settle by a search over the few owners the party owes.
-    claims: Box<[(Id<Place>, Id<Entity>, Id<Place>)]>,
+    /// The tab that holds what a party owes an owner, or what an owner owes it, by the party's place, the owner and the class of
+    /// the tab, sorted: a flow out of or into a party's place finds the claims it may settle by a search over the few owners it
+    /// has a tab with.
+    claims: Box<[(Id<Place>, Id<Entity>, Class, Id<Place>)]>,
 }
 
 impl Traits {
@@ -62,10 +63,11 @@ impl Traits {
             books: book.books(entity),
         });
         let units = book.commodities.ids().map(|unit| book.select(unit));
-        let owed = book.places.iter().filter(|(_, tab)| tab.class == Class::Asset);
-        let mut claims: Vec<_> = owed
+        let mut claims: Vec<_> = book
+            .places
+            .iter()
             .filter_map(|(id, tab)| match tab.role {
-                Role::Tab(party) => Some((book.entities[party].place?, tab.owner, id)),
+                Role::Tab(party) if book.is_claim(id) => Some((book.entities[party].place?, tab.owner, tab.class, id)),
                 _ => None,
             })
             .collect();
@@ -78,17 +80,19 @@ impl Traits {
         }
     }
 
-    /// Whether the party whose place this is owes any owner anything on record: a flow out of a place that does not has
-    /// no claim to settle, and nothing about its statement is looked up.
-    pub fn owes(&self, party: Id<Place>) -> bool {
+    /// Whether the party whose place this is has a tab with any owner: a flow out of or into a place that has none has no claim
+    /// to settle, and nothing about its statement is looked up.
+    pub fn has_tab(&self, party: Id<Place>) -> bool {
         let at = self.claims.partition_point(|&(found, ..)| found < party);
         self.claims.get(at).is_some_and(|&(found, ..)| found == party)
     }
 
-    /// The tab that holds what the party whose place this is owes `owner`, if the party owes it anything on record.
-    pub fn tab_of(&self, party: Id<Place>, owner: Id<Entity>) -> Option<Id<Place>> {
-        let at = self.claims.partition_point(|&(found, by, _)| (found, by) < (party, owner));
-        self.claims.get(at).filter(|&&(found, by, _)| (found, by) == (party, owner)).map(|&(_, _, tab)| tab)
+    /// The tab of the given class that holds what the party whose place this is owes `owner` (`Asset`) or `owner` owes it
+    /// (`Debt`), if the two have one on record.
+    pub fn tab_of(&self, party: Id<Place>, owner: Id<Entity>, class: Class) -> Option<Id<Place>> {
+        let key = (party, owner, class);
+        let at = self.claims.partition_point(|&(found, by, way, _)| (found, by, way) < key);
+        self.claims.get(at).filter(|&&(found, by, way, _)| (found, by, way) == key).map(|&(.., tab)| tab)
     }
 
     pub fn entity(&self, entity: Id<Entity>) -> EntityTraits {

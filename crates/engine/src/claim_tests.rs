@@ -465,13 +465,13 @@ fn a_write_off_of_a_claim_that_is_settled_says_it_forgave_nothing() {
     });
 }
 
-/// What the owner owes is a plain balance, not parcels: there is nothing for a write-off to relieve, so it is refused
-/// where it is written.
+/// What the owner owes is a parcel, as what a party owes is, so the party can forgive it: a write-off of a bill is accepted
+/// where it is written (`debt_tests.rs` says what it does).
 #[test]
-fn a_debt_of_the_owners_cannot_be_written_off() {
+fn a_debt_of_the_owners_can_be_written_off_by_the_party() {
     let diagnostics = built("2026-01-05 me owes bob 100 USD due 2026-02-01 ^b1\n2026-02-15 ^b1 waived\n");
     let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).map(|d| &*d.code).collect();
-    assert_eq!(errors, ["claim-writeoff-target"], "{diagnostics:?}");
+    assert_eq!(errors, Vec::<&str>::new(), "{diagnostics:?}");
 }
 
 /// A transaction that moved the owner's own money into a claim place made no claim on a party: nobody to give it back to.

@@ -726,6 +726,12 @@ contract job with lumen
   purpose has no recognition to wait for. A claim `waived` is forgiven; in accrual
   books what was recognized is reversed, in the totals a purpose keeps (a law that
   counted it keeps what it counted).
+- What the owner owes is a claim of the party's, and works the same way the other way
+  round: `OWNER owes PARTY` (or a flow out of an account of a `payable` kind) makes a
+  bill, a payment from the owner's money to the party (or into that account) settles
+  bills by the same order, a bill the party forgives is `waived`, and a bill is
+  spending as an invoice is income, counted when made in accrual books and when
+  settled in cash books. A loan is not a bill: it is a balance its schedule holds.
 - `claims` lists what is open, with age, due day and whom it blames; `check` warns
   on what is past due; `available` counts claims as coming in, never as money to
   spend.

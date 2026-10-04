@@ -325,6 +325,8 @@ pub(crate) struct Slot {
     recorded: Qty,
     /// How many lots are tied to an entity: only then are there colours to weigh.
     ties: u32,
+    /// What is held is a debt: its lots are negative, the liability they are, and relief is asked in the mirror.
+    owes: bool,
     /// Lots before this one are exhausted.
     first: usize,
     /// Exhausted lots not yet swept out.
@@ -373,7 +375,17 @@ impl PartialOrd for Ranked {
 impl Slot {
     fn new(place: Id<Place>, unit: Id<Commodity>, next: u32) -> Slot {
         let holding = Holding { place, unit, plain: Qty::ZERO, lots: Vec::new() };
-        Slot { holding, qty: Qty::ZERO, recorded: Qty::ZERO, ties: 0, first: 0, dead: 0, ranked: None, next }
+        Slot {
+            holding,
+            qty: Qty::ZERO,
+            recorded: Qty::ZERO,
+            ties: 0,
+            owes: false,
+            first: 0,
+            dead: 0,
+            ranked: None,
+            next,
+        }
     }
 
     fn live(&self) -> usize {
@@ -492,11 +504,47 @@ impl Slot {
         out.slices.push(slice);
     }
 
+    /// What is owed, held as the liability it is: a negative parcel, as a place holds what flowed into it less what flowed out.
+    pub fn owe(&mut self, owed: Parcel, codes: &Arena<Sym>) {
+        self.owes = true;
+        self.land_with_codes(Parcel { qty: -owed.qty, basis: -owed.basis, ..owed }, false, codes);
+    }
+
+    /// Puts back a parcel that relief took: a debt's, as it was owed.
+    pub fn restore(&mut self, parcel: Parcel, codes: &Arena<Sym>) {
+        match self.owes {
+            true => self.owe(parcel, codes),
+            false => self.land_with_codes(parcel, false, codes),
+        }
+    }
+
+    /// Turns what is held into what is owed and back: the rules of relief are written for parcels of a positive quantity, so a
+    /// debt is relieved as seen in a mirror, where paying it is taking from it, and paying more than is owed is the shortfall that
+    /// comes out of plain value, which seen the right way round is the credit it leaves.
+    fn mirror(&mut self) {
+        self.holding.plain = -self.holding.plain;
+        self.qty = -self.qty;
+        for lot in &mut self.holding.lots {
+            (lot.qty, lot.basis) = (-lot.qty, -lot.basis);
+        }
+        self.ranked = None;
+    }
+
     /// Removes `req.need` from the holding, choosing what leaves by the
     /// request's selectors, ties and policy (in that order of precedence), and
     /// says what left. What could not be covered is `out.shortfall`, and comes
-    /// out of plain value, so a holding can go negative.
+    /// out of plain value, so a holding can go negative. A debt is paid, not
+    /// taken from: the same, in the mirror.
     pub fn relieve(&mut self, req: &Request, out: &mut Relief) {
+        if self.owes {
+            self.mirror();
+            self.relieve_held(req, out);
+            return self.mirror();
+        }
+        self.relieve_held(req, out);
+    }
+
+    fn relieve_held(&mut self, req: &Request, out: &mut Relief) {
         out.slices.clear();
         out.candidates.clear();
         out.ambiguous = false;
@@ -721,15 +769,19 @@ impl Slot {
         self.holding.lots[self.first..].iter().any(|lot| !lot.qty.is_zero() && carries(lot, code, pool))
     }
 
-    /// How much of the holding the selectors admit: what `all` means.
+    /// How much of the holding the selectors admit: what `all` means. Of a debt, how much of what is owed they reach.
     pub fn admitted(&self, money: bool, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
         let selection = Selection { selectors, codes };
         if !selection.constrains() {
-            return self.qty - self.holding.plain.min(Qty::ZERO);
+            return match self.owes {
+                true => self.holding.plain - self.qty,
+                false => self.qty - self.holding.plain.min(Qty::ZERO),
+            };
         }
         let mut found = Vec::new();
         self.gather(money, &selection, &mut found);
-        found.iter().map(|c| c.qty).sum()
+        let admitted: Qty = found.iter().map(|c| c.qty).sum();
+        if self.owes { -admitted } else { admitted }
     }
 
     /// Spreads `delta` of basis over the admitted parcels in proportion to

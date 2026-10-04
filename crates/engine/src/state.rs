@@ -80,7 +80,8 @@ pub(crate) struct Record {
     pub computed_basis: Map<Id<Flow>, Qty>,
     /// Statements whose split could not be solved when its first flow landed: said once, and none of its flows posts.
     pub unsolved: Set<Id<axiom_model::Txn>>,
-    /// The claims each flow from a party settled, as the parcels they were: a flow that is returned puts them back.
+    /// The claims each flow settled, a party's payment of what it owes or the owner's of a bill, as the parcels they were: a
+    /// flow that is returned puts them back.
     pub settled: Map<Id<Flow>, Settlement>,
     /// What each journal flow settled, in the order the fold did it, and kept after a return forgets it from `settled`:
     /// the readers of a day before the return see the flow as it was.

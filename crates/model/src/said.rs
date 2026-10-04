@@ -194,16 +194,23 @@ impl Book<'_> {
         self.fact(builtin::CLAIM, place).unwrap_or(false)
     }
 
-    /// Whether a flow is the making of a claim on a party: value from outside paid into a place that holds what is owed.
-    /// The claim is a parcel that can be forgiven, and forgiving it gives the value back to where it came from.
-    pub fn makes_claim(&self, flow: &Flow) -> bool {
-        self.is_claim(flow.to) && self.places[flow.from].class == Class::Outside
+    /// The place a flow makes a claim in, if it makes one: value from outside paid into a place that holds what a party owes,
+    /// or paid out of a `Debt` place that holds what the owner owes, to outside (a bill). The claim is a parcel that can be
+    /// forgiven, and forgiving it gives the value back to where it came from, or to where it went.
+    pub fn claim_made_in(&self, flow: &Flow) -> Option<Id<Place>> {
+        let (from, to) = (self.places[flow.from].class, self.places[flow.to].class);
+        if from == Class::Outside && self.is_claim(flow.to) {
+            Some(flow.to)
+        } else if (from, to) == (Class::Debt, Class::Outside) && self.is_claim(flow.from) {
+            Some(flow.from)
+        } else {
+            None
+        }
     }
 
-    /// Whether a flow is the making of a debt of an owner's: a claim place of the `Debt` class paying a party. What is owed
-    /// is a plain balance there, with no parcel of the debt to forgive.
-    pub fn makes_debt(&self, flow: &Flow) -> bool {
-        self.is_claim(flow.from) && self.places[flow.from].class == Class::Debt
+    /// Whether a flow makes a claim: of a party's on the owner, or of the owner's on a party.
+    pub fn makes_claim(&self, flow: &Flow) -> bool {
+        self.claim_made_in(flow).is_some()
     }
 
     fn said_of(&self, holder: u32, name: Sym, day: Day) -> Option<Value> {

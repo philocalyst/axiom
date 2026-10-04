@@ -92,7 +92,6 @@ fn everything(book: &Book, run: &Run) -> i64 {
 // ─── A bill is a parcel ─────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_is_a_parcel_the_owner_owes_and_the_party_is_credited() {
     let lines = "2026-01-05 me owes pge 142.50 USD due 2026-02-20 ^b1\n";
     cash(lines, |book, run| {
@@ -108,7 +107,6 @@ fn a_bill_is_a_parcel_the_owner_owes_and_the_party_is_credited() {
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_paid_in_full_is_settled_and_is_owed_once() {
     let lines = "2026-01-05 me owes pge 142.50 USD due 2026-02-20 ^b1\n2026-01-20 checking -> pge 142.50 USD ^b1\n";
     cash(lines, |book, run| {
@@ -121,7 +119,6 @@ fn a_bill_paid_in_full_is_settled_and_is_owed_once() {
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_paid_in_part_is_owed_what_is_left() {
     let lines = "2026-01-05 me owes pge 142.50 USD due 2026-02-20 ^b1\n2026-01-20 checking -> pge 100 USD ^b1\n";
     cash(lines, |book, run| {
@@ -133,7 +130,6 @@ fn a_bill_paid_in_part_is_owed_what_is_left() {
 
 /// "those its codes name": `^b3` is named, so 200.00 comes out of it, though `^b2` is exactly 200.00 and `^b1` is the oldest.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_that_carries_the_code_of_a_bill_settles_that_bill() {
     let lines = format!("{THREE}2026-01-20 checking -> pge 200 USD ^b3\n");
     cash(&lines, |book, run| {
@@ -143,7 +139,6 @@ fn a_payment_that_carries_the_code_of_a_bill_settles_that_bill() {
 
 /// "else the one whose open amount is exactly the flow's": 200.00 settles `^b2`, which is not the oldest.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_settles_the_bill_it_is_exactly_the_size_of_before_an_older_one() {
     let lines = format!("{THREE}2026-01-20 checking -> pge 200 USD\n");
     cash(&lines, |book, run| assert_eq!(owed(book, run, "pge"), claims(&[("b1", 300_00), ("b3", 300_00)])));
@@ -151,7 +146,6 @@ fn a_payment_settles_the_bill_it_is_exactly_the_size_of_before_an_older_one() {
 
 /// "else the oldest first": nothing is exactly 100.00, or 400.00, which settles `^b1` and takes 100.00 of `^b2`.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_that_is_exactly_no_bill_settles_the_oldest_first() {
     let lines = format!("{THREE}2026-01-20 checking -> pge 100 USD\n");
     cash(&lines, |book, run| {
@@ -163,7 +157,6 @@ fn a_payment_that_is_exactly_no_bill_settles_the_oldest_first() {
 
 /// "What remains is an ordinary flow": the party is credited what did not settle a bill, so all of it was paid.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn what_a_payment_does_not_settle_is_an_ordinary_flow() {
     let lines = format!("{THREE}2026-01-20 checking -> pge 900 USD\n");
     cash(&lines, |book, run| {
@@ -175,7 +168,6 @@ fn what_a_payment_does_not_settle_is_an_ordinary_flow() {
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_to_someone_else_settles_nothing() {
     let lines = format!("{THREE}2026-01-20 checking -> bob 300 USD\n");
     cash(&lines, |book, run| {
@@ -186,14 +178,12 @@ fn a_payment_to_someone_else_settles_nothing() {
 
 /// A payment before the bill is no payment of it: it is paid, and the bill comes after.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_before_there_is_a_bill_settles_nothing() {
     let lines = "2026-01-02 checking -> pge 300 USD\n2026-01-20 me owes pge 300 USD due 2026-03-01 ^b1\n";
     cash(lines, |book, run| assert_eq!(owed(book, run, "pge"), claims(&[("b1", 300_00)])));
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_that_is_returned_opens_the_bill_again() {
     let lines = "2026-01-05 me owes pge 300 USD due 2026-02-20 ^b1\n2026-01-20 checking -> pge 300 USD ^pay-1\n";
     cash(lines, |book, run| assert_eq!(owed(book, run, "pge"), claims(&[])));
@@ -208,7 +198,6 @@ fn a_payment_that_is_returned_opens_the_bill_again() {
 // ─── A bill forgiven ────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_the_party_forgives_is_no_longer_owed_and_the_party_is_no_longer_credited_it() {
     let lines = "\
 2026-01-05 me owes pge 300 USD due 2026-02-20 ^b1
@@ -229,7 +218,6 @@ fn a_bill_the_party_forgives_is_no_longer_owed_and_the_party_is_no_longer_credit
 
 /// `owed-to-ben` says `payable`, so it says `claim`: what is paid out of it is a bill, and what is paid into it settles one.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_declared_payable_place_holds_its_bills_and_a_payment_into_it_settles_the_one_it_names() {
     let lines = "\
 2026-01-02 owed-to-ben -> pge 300 USD due 2026-02-01 ^p1
@@ -248,7 +236,6 @@ fn a_declared_payable_place_holds_its_bills_and_a_payment_into_it_settles_the_on
 
 /// More than is owed through a declared place is a credit with the party, a positive balance: an overpayment, which is no parcel.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn an_overpayment_into_a_declared_place_is_a_credit() {
     let lines =
         "2026-01-02 owed-to-ben -> pge 300 USD due 2026-02-01 ^p1\n2026-01-20 checking -> owed-to-ben 400 USD\n";
@@ -265,7 +252,6 @@ fn an_overpayment_into_a_declared_place_is_a_credit() {
 const BILL: &str = "2026-01-02 me owes pge 300 USD due 2026-02-01 #utilities ^b1\n";
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_counts_nothing_when_it_is_made_in_cash_books_and_its_payment_counts_the_bills_purpose() {
     cash(BILL, |book, run| assert_eq!(counted(book, run, "bill-spending"), []));
     let lines = format!("{BILL}2026-01-20 checking -> pge 300 USD ^b1\n");
@@ -276,14 +262,12 @@ fn a_bill_counts_nothing_when_it_is_made_in_cash_books_and_its_payment_counts_th
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_that_says_the_bills_purpose_is_counted_once() {
     let lines = format!("{BILL}2026-01-20 checking -> pge 300 USD #utilities ^b1\n");
     cash(&lines, |book, run| assert_eq!(counted(book, run, "bill-spending"), [on("2026-01-20", 300_00)], "not 600.00"));
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_counts_when_it_is_made_in_accrual_books_and_its_payment_counts_nothing() {
     let lines = format!("{BILL}2026-01-20 checking -> pge 300 USD #utilities ^b1\n");
     with("accrual", &lines, |book, run| {
@@ -294,7 +278,6 @@ fn a_bill_counts_when_it_is_made_in_accrual_books_and_its_payment_counts_nothing
 
 /// 300.00 was recognized when the bill was made, and 200.00 of it is forgiven: the total is what was paid, and then 50.00 more.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_forgiven_is_taken_back_in_accrual_books_and_there_is_nothing_to_take_back_in_cash_books() {
     let lines = format!(
         "{BILL}2026-01-20 checking -> pge 100 USD ^b1\n2026-02-15 ^b1 waived \"a credit\"\n2026-03-01 checking -> pge 50 USD #utilities\n"
@@ -308,7 +291,6 @@ fn a_bill_forgiven_is_taken_back_in_accrual_books_and_there_is_nothing_to_take_b
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_payment_that_is_returned_takes_back_what_it_counted_in_cash_books() {
     let lines = format!(
         "{BILL}2026-01-20 checking -> pge 300 USD ^pay-1\n2026-01-25 ^pay-1 returned\n2026-02-01 checking -> pge 50 USD #utilities\n"
@@ -319,7 +301,6 @@ fn a_payment_that_is_returned_takes_back_what_it_counted_in_cash_books() {
 }
 
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_bill_with_no_purpose_has_no_recognition_to_wait_for() {
     let lines =
         "2026-01-02 me owes pge 300 USD due 2026-02-01 ^b1\n2026-01-20 checking -> pge 300 USD #utilities ^b1\n";
@@ -339,7 +320,6 @@ fn a_bill_with_no_purpose_has_no_recognition_to_wait_for() {
 /// A bill from `bank` and a loan with `bank` are two places: a tab is a bill's or a loan's by its kind. The loan's tab holds a
 /// balance and no parcel, and is not settled by what is paid to `bank`.
 #[test]
-#[ignore = "K3f: a debt is not a parcel yet"]
 fn a_loan_with_the_lender_a_bill_is_from_is_a_balance_in_a_tab_of_its_own() {
     let text = "\
 use std

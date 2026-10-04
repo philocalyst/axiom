@@ -202,13 +202,13 @@ impl<'b, 's> Plan<'b, 's> {
 
     /// The names looked up by spelling, resolved once.
     /// Whether a flow between these places makes a claim, or takes one back: value between a party and a place that holds
-    /// what is owed. What it counts as is `recognition`'s to say.
+    /// what is owed (a bill is value out of a debt place). What it counts as is `recognition`'s to say.
     pub fn makes_claim(&self, from: Id<Place>, to: Id<Place>) -> bool {
         let (book, traits) = (self.book, &self.traits);
         let outside = |place: Id<Place>| book.places[place].class == Class::Outside;
         // The traits of a place are compact, and nearly no place is a claim place: ask them before the places.
         let made = traits.place(to).claim && outside(from);
-        let unmade = traits.place(from).claim && outside(to) && book.places[from].class == Class::Asset;
+        let unmade = traits.place(from).claim && outside(to);
         made || unmade
     }
 
@@ -283,12 +283,12 @@ impl<'b, 's> Plan<'b, 's> {
     }
 
     /// The tab a missed occurrence of a stream is claimed in: the one the owner keeps with the party, when the party is the
-    /// one the promise blames. A debt of the owner is not claimed: it is a plain balance, and nothing settles it.
+    /// one the promise blames. What the owner is to pay and does not is not claimed: the monitor finds what a party owes.
     pub(crate) fn claim_tab(&self, contract: Id<Contract>, schedule: ScheduleKind) -> Option<Id<Place>> {
         let book = self.book;
         (book.promises.blame(contract, schedule)? == Blame::Party).then_some(())?;
         let contract = &book.contracts[contract];
-        self.traits.tab_of(book.entities[contract.party].place?, contract.owner)
+        self.traits.tab_of(book.entities[contract.party].place?, contract.owner, Class::Asset)
     }
 
     /// The problems solving found, for a ledger's record to begin with.

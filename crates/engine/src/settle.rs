@@ -12,16 +12,20 @@
 //! else beside a flow that does, are one payment. Each leg settles in its turn, and "exactly the flow's" is judged on
 //! what the party still pays from that leg on, so the legs of one payment find the claim the first of them chose.
 //!
+//! What the owner owes is the mirror of it. A bill is a parcel of a debt place (a tab, or a declared place that says `claim`),
+//! negative as a liability's balance is, and paying it is relief of it: by a flow into the place, or by one from the owner's
+//! money to the party's place, in the same order. What the party's place is credited is what did not settle a bill.
+//!
 //! What a flow settled is told to [`recognition`](crate::recognition), which decides what it counts as.
 
 use axiom_core::{Day, Id, Qty};
 use axiom_model::{Class, Dir, Entity, Flow, Place, Role};
 
-use crate::Cause;
 use crate::ledger::{Ledger, solved};
 use crate::lots::{Origin, Request, Slice};
-use crate::motion::{Motion, Moves};
-use crate::recognition::{Dealing, Reaches, Settlement};
+use crate::motion::{Course, Motion, Moves};
+use crate::recognition::{Dealing, Reaches, Settlement, claim_dir};
+use crate::{Cause, Parcel, PartId};
 
 /// What a flow did to claims, before it is counted: it settled them, or, run backwards, opened them again.
 pub(crate) struct Claiming {
@@ -35,12 +39,18 @@ impl Claiming {
         Dealing::Settling { settlement: &self.settlement, dir: self.dir, moved }
     }
 
-    /// What of the flow the claims paid, which the party's place is not debited: they were counted in the tab.
+    /// What of the flow the claims paid, which the party's place is not debited as the source: they were counted in the tab. A
+    /// claim that counts Out (a bill) is paid to the party, whose place is the target, and is credited less by it
+    /// ([`Ledger::credit_party`]).
     pub fn paid(&self) -> Qty {
         match self.dir {
-            Dir::In => self.settlement.parcels.iter().map(|parcel| parcel.qty).sum(),
+            Dir::In => self.settled(),
             Dir::Out => Qty::ZERO,
         }
+    }
+
+    fn settled(&self) -> Qty {
+        self.settlement.parcels.iter().map(|parcel| parcel.qty).sum()
     }
 }
 
@@ -111,20 +121,47 @@ impl Ledger<'_, '_, '_> {
         paid.filter(|_| m.target.class == Class::Outside).map(|owner| (owner, Reaches::Elsewhere))
     }
 
-    /// The payment a flow is part of, if it is one: out of a party's place, in one commodity, not an opening, to an owner
-    /// that the party owes something, or to a third party beside such a flow.
+    /// The payment a flow is part of, if it is one, in one commodity and not an opening: out of a party's place to an owner
+    /// that the party owes something, or to a third party beside such a flow; out of an owner's money into the place of a party
+    /// the owner owes; or into a place that holds what the owner owes. A flow run backwards is a payment only into a debt (a
+    /// bill that is returned), for the other two would take a returned payment for one the party made.
     fn payment_of(&self, m: &Motion) -> Option<Payment> {
-        let from_party = matches!(m.source.role, Role::Outside(Some(_)));
-        if !from_party || m.opening || m.is_exchange() || m.moves != Moves::Value || !self.plan.traits.owes(m.from) {
+        if m.opening || m.is_exchange() || m.moves != Moves::Value {
+            return None;
+        }
+        let forward = (m.course == Course::Forward).then(|| self.paid_by_party(m).or_else(|| self.paid_to_party(m)));
+        forward.flatten().or_else(|| self.paid_into_debt(m))
+    }
+
+    /// What a flow out of a party's place pays of what the party owes.
+    fn paid_by_party(&self, m: &Motion) -> Option<Payment> {
+        if !matches!(m.source.role, Role::Outside(Some(_))) || !self.plan.traits.has_tab(m.from) {
             return None;
         }
         let (owner, reaches) = self.owner_paid(m)?;
-        let tab = self.plan.traits.tab_of(m.from, owner)?;
+        let tab = self.plan.traits.tab_of(m.from, owner, Class::Asset)?;
         let rest = match m.cause {
             Cause::Flow(this) => self.legs_from(this, m.day).map(|(id, flow)| self.pays(m, id, flow, owner)).sum(),
             _ => m.out.qty,
         };
         Some(Payment { tab, rest, reaches })
+    }
+
+    /// What a flow out of an owner's money pays of the bills the owner has from the party whose place it goes to.
+    fn paid_to_party(&self, m: &Motion) -> Option<Payment> {
+        let from_owner = m.source.class == Class::Asset && !self.plan.traits.place(m.from).claim;
+        if !from_owner || !matches!(m.target.role, Role::Outside(Some(_))) || !self.plan.traits.has_tab(m.to) {
+            return None;
+        }
+        let tab = self.plan.traits.tab_of(m.to, m.source.owner, Class::Debt)?;
+        Some(Payment { tab, rest: m.out.qty, reaches: Reaches::Owner })
+    }
+
+    /// What a flow into a place that holds what the owner owes pays of it: a place of the owner's, so it is no boundary crossing
+    /// and counts nothing of its own.
+    fn paid_into_debt(&self, m: &Motion) -> Option<Payment> {
+        let debt = m.target.class == Class::Debt && self.plan.traits.place(m.to).claim;
+        debt.then_some(Payment { tab: m.to, rest: m.out.qty, reaches: Reaches::Elsewhere })
     }
 
     /// What the flow `id` pays toward the owner's claims: its own amount if it reaches the owner or goes to a third party,
@@ -143,11 +180,21 @@ impl Ledger<'_, '_, '_> {
     pub(crate) fn settle_claims(&mut self, m: &Motion) -> Option<Claiming> {
         let Some(payment) = self.payment_of(m) else { return self.returned_claims(m) };
         let claiming = self.relieve_tab(m, &payment)?;
-        if let Cause::Flow(flow) = m.cause {
+        self.credit_party(m, &claiming);
+        if let (Cause::Flow(flow), Course::Forward) = (m.cause, m.course) {
             self.record.settled.insert(flow, claiming.settlement.clone());
             self.record.settlements.push((flow, claiming.settlement.clone()));
         }
         Some(claiming)
+    }
+
+    /// The claims a flow settled were counted in their tab, so the party is not credited them again: a flow that pays a party
+    /// (a claim that counts Out) credits its place `arrive` less what settled, and one that opens the claims again, run
+    /// backwards, gives it back what it was not credited. (A claim that counts In is the other end: [`Claiming::paid`].)
+    fn credit_party(&mut self, m: &Motion, claiming: &Claiming) {
+        if claiming.dir == Dir::Out {
+            self.world.holdings.credit(m.to, claiming.settlement.unit, -claiming.settled());
+        }
     }
 
     /// Takes out of the tab what the payment settles of the claims the flow's codes and selectors reach.
@@ -167,7 +214,8 @@ impl Ledger<'_, '_, '_> {
             Request { selectors, exact: open.min(rest), ..Request::of(need, policy, &book.codes, (m.day, m.txn)) };
         self.world.holdings.relieve(tab, unit, &request, &mut self.scratch.relief);
         let parcels = self.scratch.relief.slices.iter().map(Slice::parcel).collect();
-        Some(Claiming { settlement: Settlement { tab, unit, parcels, reaches }, dir: Dir::In })
+        let dir = claim_dir(book.places[tab].class);
+        Some(Claiming { settlement: Settlement { tab, unit, parcels, reaches }, dir })
     }
 
     /// A payment that is returned runs backwards: the claims it settled are open again, and the party gives back only what
@@ -177,10 +225,30 @@ impl Ledger<'_, '_, '_> {
         let settlement = self.record.settled.remove(&flow)?;
         let slot = self.world.holdings.entry(settlement.tab, settlement.unit);
         let codes = &self.plan.book.codes;
-        settlement.parcels.iter().for_each(|&parcel| slot.land_with_codes(parcel, false, codes));
-        let reopened: Qty = settlement.parcels.iter().map(|parcel| parcel.qty).sum();
-        self.world.holdings.credit(m.to, settlement.unit, -reopened);
-        Some(Claiming { settlement, dir: Dir::Out })
+        settlement.parcels.iter().for_each(|&parcel| slot.restore(parcel, codes));
+        let dir = claim_dir(self.plan.book.places[settlement.tab].class).reversed();
+        let claiming = Claiming { settlement, dir };
+        self.credit_party(m, &claiming);
+        Some(claiming)
+    }
+
+    /// A bill: what leaves a place that says `claim` and holds what the owner owes is owed, as a parcel of the transaction that
+    /// made it, the line that did and the codes it carries.
+    pub(crate) fn owe(&mut self, m: &Motion) {
+        let day = m.detail().since.unwrap_or(m.day);
+        let part = Some(PartId { origin: m.txn, ordinal: m.flow_ordinal });
+        let bill = Parcel {
+            qty: m.out.qty,
+            basis: Qty::ZERO,
+            acquired: day,
+            held_since: day,
+            wash_matched: false,
+            txn: m.txn,
+            part,
+            codes: m.code_runs,
+            tied: None,
+        };
+        self.world.holdings.entry(m.from, m.out.unit).owe(bill, &self.plan.book.codes);
     }
 
     /// What a flow out of a claim place settled, once it has been relieved: the claims it took. They are the owner's own,

@@ -1433,7 +1433,8 @@ impl<'a, 's> Machine<'a, 's> {
                         // Claims are physical parcels, but `open(^code)` is
                         // read in one owner's currency. Allocate each parcel
                         // once using the same cent boundaries as reports.
-                        for (owner, qty) in self.env.plan.allocate(place, lot.qty) {
+                        let open = self.env.plan.sides.display(place, lot.qty);
+                        for (owner, qty) in self.env.plan.allocate(place, open) {
                             if owner.owner != self.ctx.owner || qty.is_zero() {
                                 continue;
                             }

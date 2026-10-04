@@ -51,7 +51,7 @@ pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Le
             Some(Liquidity::Claim) | None => {}
         }
     }
-    let claims = claims::open(lens, run, holdings.iter().copied());
+    let claims = claims::open(lens, holdings.iter().copied());
     let to = cash
         .iter()
         .filter(|scoped| scoped.holding.unit == book.base)
