@@ -1,64 +1,62 @@
-2025-12-01 checking -> rent 1_150 USD / landlord
-2025-12-01 checking -> transport 48 USD / metro
-2025-12-01 checking -> fun 29 USD / gym
-2025-12-03 checking -> utilities 61.84 USD / power-co
-2025-12-04 visa -> dining 27.71 USD
-2025-12-05 visa -> groceries 55.93 USD / kroger
-2025-12-06 wallet -> personal-care 35 USD / barber
-2025-12-06 checking -> savings 100 USD for car-fund
-2025-12-06 checking -> savings 100 USD for insurance-fund
-2025-12-06 checking -> savings 250 USD for trip-fund
-2025-12-06 checking -> savings 100 USD for emergency-fund
-2025-12-08 visa -> phone 40 USD / mint-mobile
-2025-12-09 visa -> transport 16.63 USD / rideshare
+2025-12-01 checking -> landlord    1_150 USD
+2025-12-01 checking -> metro       48 USD
+2025-12-01 checking -> gym         29 USD
+2025-12-03 checking -> power-co    61.84 USD
+2025-12-04 visa     -> ?           27.71 USD #dining
+2025-12-05 visa     -> kroger      55.93 USD
+2025-12-06 wallet   -> barber      35 USD
+2025-12-06 checking -> savings     100 USD   for car-fund
+2025-12-06 checking -> savings     100 USD   for insurance-fund
+2025-12-06 checking -> savings     250 USD   for trip-fund
+2025-12-06 checking -> savings     100 USD   for emergency-fund
+2025-12-08 visa     -> mint-mobile 40 USD
+2025-12-09 visa     -> rideshare   16.63 USD
 
 /// A 14.20 USD charge on the statement that I cannot place: money out to nowhere I know.
-2025-12-09 checking -> ? 14.20 USD
-2025-12-10 checking -> car 285.40 USD / carmax-finance
-2025-12-10 visa -> dining 26.42 USD
-2025-12-11 visa -> subscriptions 15.49 USD / netflix
-2025-12-12 me <- studio 2_307.69 USD
-  -> taxes/federal 226.00 USD
-  -> taxes/payroll 176.54 USD
-  -> health         60.00 USD
-  -> checking      ...
-2025-12-12 visa -> groceries 58.77 USD / kroger
+2025-12-09 checking -> ?              14.20 USD
+2025-12-10 checking -> carmax-finance 285.40 USD
+2025-12-10 visa     -> ?              26.42 USD    #dining
+2025-12-11 visa     -> netflix        15.49 USD
+2025-12-12 checking <- studio         2_307.69 USD #wages
+2025-12-12 checking -> irs            226.00 USD
+2025-12-12 checking -> ssa            176.54 USD
+2025-12-12 checking -> health-plan    60.00 USD    #pretax-premium
+2025-12-12 visa     -> kroger         58.77 USD
 
 /// The yearly car insurance premium, 1,140.00 USD, paid in December for the year that starts in January (`for 2026`): the fund I have been
 /// filling covers what it can and checking covers the rest, and the yearly envelope of 2026 sees the premium, not 2025's.
-2025-12-12 -> insurance 1_140 USD / progressive for 2026
-  insurance-fund        1_100.00 USD
-  checking              ...
-2025-12-13 wallet -> dining 4.72 USD
-2025-12-14 visa -> subscriptions 11.99 USD / spotify
+2025-12-12 me -> progressive 1_140 USD for 2026
+  <- insurance-fund 1_100.00 USD
+  <- checking       ...
+2025-12-13 wallet -> ?       4.72 USD  #dining
+2025-12-14 visa   -> spotify 11.99 USD
 
 /// Holiday gifts.
-2025-12-14 visa -> gifts 185.60 USD
-2025-12-20 visa -> gifts 200 USD
-2025-12-15 checking -> student-loan 190 USD / mohela
-2025-12-15 visa -> fun      25.18 USD
-2025-12-16 visa -> dining   32.76 USD
-2025-12-18 visa -> clothing 43.23 USD
-2025-12-19 visa -> groceries 61.73 USD / trader-joes
-2025-12-20 visa -> subscriptions 2.99 USD / apple
+2025-12-14 visa     -> ?           185.60 USD #gifts
+2025-12-20 visa     -> ?           200 USD    #gifts
+2025-12-15 checking -> mohela      190 USD
+2025-12-15 visa     -> ?           25.18 USD  #fun
+2025-12-16 visa     -> ?           32.76 USD  #dining
+2025-12-18 visa     -> ?           43.23 USD  #clothing
+2025-12-19 visa     -> trader-joes 61.73 USD
+2025-12-20 visa     -> apple       2.99 USD
 
 /// A check to the food bank, never mailed: I paid online instead. It never happened.
-2025-12-20 checking -> food-bank (75 USD) #check-1029
-2025-12-21 visa -> transport 19.43 USD / rideshare
-2025-12-21 checking -> food-bank 75 USD   // the online donation
-2025-12-22 checking -> visa      798.21 USD
-2025-12-23 visa     -> dining    45.56 USD
-2025-12-24 visa     -> fun       52.88 USD
-2025-12-24 wallet   -> dining    8.36 USD
-2025-12-26 me       <- studio    2_307.69 USD
-  -> taxes/federal 226.00 USD
-  -> taxes/payroll 176.54 USD
-  -> health         60.00 USD
-  -> checking      ...
-2025-12-26 visa -> subscriptions 22.99 USD / adobe
-2025-12-27 visa -> groceries 64.07 USD / kroger
-2025-12-28 visa     -> dining       14.47 USD
+2025-12-20 checking -> food-bank    (75 USD)     ^check-1029
+2025-12-21 visa     -> rideshare    19.43 USD
+2025-12-21 checking -> food-bank    75 USD  // the online donation
+2025-12-22 checking -> visa         798.21 USD
+2025-12-23 visa     -> ?            45.56 USD    #dining
+2025-12-24 visa     -> ?            52.88 USD    #fun
+2025-12-24 wallet   -> ?            8.36 USD     #dining
+2025-12-26 checking <- studio       2_307.69 USD #wages
+2025-12-26 checking -> irs          226.00 USD
+2025-12-26 checking -> ssa          176.54 USD
+2025-12-26 checking -> health-plan  60.00 USD    #pretax-premium
+2025-12-26 visa     -> adobe        22.99 USD
+2025-12-27 visa     -> kroger       64.07 USD
+2025-12-28 visa     -> ?            14.47 USD    #dining
 2025-12-31 visa     =  1_023.83 USD
 2025-12-31 checking =  6_603.87 USD
 2025-12-31 savings  =  4_200.00 USD
-2025-12-31 wallet   =  57.22 USD              !
+2025-12-31 wallet   =  57.22 USD                 !
