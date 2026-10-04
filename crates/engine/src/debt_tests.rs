@@ -356,7 +356,7 @@ fn a_bill_with_no_purpose_has_no_recognition_to_wait_for() {
 // ─── A loan is a balance, and a bill beside it is not ───────────────────────
 
 /// A bill from `bank` and a loan with `bank` are two places: a tab is a bill's or a loan's by its kind. The loan's tab holds a
-/// balance and no parcel, and is not settled by what is paid to `bank`.
+/// balance and no parcel, and what is paid to `bank` settles the bill and not the loan.
 #[test]
 fn a_loan_with_the_lender_a_bill_is_from_is_a_balance_in_a_tab_of_its_own() {
     let text = "\
@@ -373,6 +373,7 @@ contract mortgage with bank
 2026-01-15 mortgage
 2026-01-20 me owes bank 70 USD due 2026-03-01 ^b1
 2026-02-01 mortgage
+2026-02-10 checking -> bank 70 USD ^b1
 ";
     let sources = [("std.ax", include_str!("../../systems/src/std.ax"), true), ("main.ax", text, false)];
     let sources: Vec<_> = sources
@@ -393,5 +394,5 @@ contract mortgage with bank
     assert!(!book.is_claim(loan) && book.is_claim(tab(&book, "bank")));
     assert_eq!(parcels(&book, &run, loan), [], "a loan holds a balance and no parcel");
     assert_eq!(held(&book, &run, loan), -11_000_00, "a payment of a thousand a month, the first in February");
-    assert_eq!(owed(&book, &run, "bank"), claims(&[("b1", 70_00)]), "nothing paid to `bank` was a payment of the bill");
+    assert_eq!(owed(&book, &run, "bank"), claims(&[]), "what was paid to `bank` settled the bill, and not the loan");
 }
