@@ -863,11 +863,7 @@ impl Ledger<'_, '_, '_> {
         self.sample_temporal(m.day);
         // The queue is changed from the back, so the positions of the ones still to change hold.
         for (index, request, taken, amount) in matched.into_iter().rev() {
-            if let Err(error) =
-                self.world.assets.update_pending_carry(index, request.quantity - taken, request.amount - amount)
-            {
-                return self.report_asset_state_error(m, error);
-            }
+            self.world.assets.update_pending_carry(index, request.quantity - taken, request.amount - amount);
             let kind = crate::AdjustmentKind::Carried { from: request.from, to: Some(part) };
             self.record.adjustments.push(crate::Adjustment { day: m.day, law: request.law, kind, amount });
         }

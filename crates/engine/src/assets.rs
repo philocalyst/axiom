@@ -141,7 +141,8 @@ impl AssetState {
         self.total(|part| part.basis)
     }
 
-    fn total(&self, value: impl Fn(&Part) -> Qty) -> Result<Qty, AssetError> {
+    /// What `value` reads of every part, added up.
+    pub(crate) fn total(&self, value: impl Fn(&Part) -> Qty) -> Result<Qty, AssetError> {
         self.parts
             .iter()
             .try_fold(Qty::ZERO, |sum, part| sum.0.checked_add(value(part).0).map(Qty).ok_or(AssetError::Overflow))
@@ -240,43 +241,25 @@ impl Assets {
         if carry.within.months < 0 || carry.within.days < 0 {
             return Err(AssetError::NegativeSpan);
         }
-        if let Some(existing) = self.pending_carries.iter_mut().find(|existing| {
-            existing.law == carry.law
-                && existing.from == carry.from
-                && existing.cause == carry.cause
-                && existing.owner == carry.owner
-                && existing.unit == carry.unit
-                && existing.sold == carry.sold
-                && existing.held_since == carry.held_since
-                && existing.within == carry.within
-        }) {
-            // Preflight both arithmetic operations before changing either
-            // field. An overflow must not leave a half-merged request behind.
-            let quantity = existing.quantity.0.checked_add(carry.quantity.0).map(Qty).ok_or(AssetError::Overflow)?;
-            let amount = existing.amount.0.checked_add(carry.amount.0).map(Qty).ok_or(AssetError::Overflow)?;
-            existing.quantity = quantity;
-            existing.amount = amount;
-        } else {
+        // The same loss of the same sale, carried by the same law, waits as one carry.
+        let key = |c: &PendingCarry| (c.law, c.from, c.cause, c.owner, c.unit, c.sold, c.held_since, c.within);
+        let Some(existing) = self.pending_carries.iter_mut().find(|existing| key(existing) == key(&carry)) else {
             self.pending_carries.push(carry);
-        }
+            return Ok(());
+        };
+        // Both sums are checked before either is written: an overflow leaves no half-merged carry behind.
+        let quantity = existing.quantity.0.checked_add(carry.quantity.0).map(Qty).ok_or(AssetError::Overflow)?;
+        let amount = existing.amount.0.checked_add(carry.amount.0).map(Qty).ok_or(AssetError::Overflow)?;
+        (existing.quantity, existing.amount) = (quantity, amount);
         Ok(())
     }
 
-    pub(crate) fn update_pending_carry(&mut self, index: usize, quantity: Qty, amount: Qty) -> Result<(), AssetError> {
-        if index >= self.pending_carries.len() {
-            return Err(AssetError::UnknownPart);
+    /// Leaves the carry at `index` waiting for `quantity` and `amount`, or, when either is spent, takes it off the queue.
+    pub(crate) fn update_pending_carry(&mut self, index: usize, quantity: Qty, amount: Qty) {
+        match quantity.is_zero() || amount.is_zero() {
+            true => drop(self.pending_carries.remove(index)),
+            false => (self.pending_carries[index].quantity, self.pending_carries[index].amount) = (quantity, amount),
         }
-        if quantity.is_negative() || amount.is_negative() {
-            return Err(AssetError::NegativeAmount);
-        }
-        if quantity.is_zero() || amount.is_zero() {
-            self.pending_carries.remove(index);
-        } else {
-            let request = &mut self.pending_carries[index];
-            request.quantity = quantity;
-            request.amount = amount;
-        }
-        Ok(())
     }
 
     /// Adds a part in event order. An asset's first part must be its original

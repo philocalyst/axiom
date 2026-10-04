@@ -830,6 +830,15 @@ pub(crate) struct Holdings {
     touched: Vec<u32>,
 }
 
+/// Shares of lot `at` of slot `slot` that addition `order` of a carry matched, and the basis they held before it.
+struct Carried {
+    slot: usize,
+    at: usize,
+    order: usize,
+    shares: Parcel,
+    basis: Qty,
+}
+
 /// A wash-sale allocation to a bounded quantity of one actual acquisition.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CarryLotAddition {
@@ -950,30 +959,19 @@ impl Holdings {
     /// part is split, the matched shares landing after the parcels of their day. Every addition is checked against what
     /// the ones before it took before anything is written.
     pub fn carry(&mut self, unit: Id<Commodity>, additions: &[CarryLotAddition]) -> Result<(), AssetError> {
-        // What each matched parcel gives: (slot, lot, addition, the matched shares, the basis they leave with).
-        let mut pieces: Vec<(usize, usize, usize, Parcel, Qty)> = Vec::new();
+        let mut carried: Vec<Carried> = Vec::new();
         for (order, add) in additions.iter().enumerate() {
             if add.quantity <= Qty::ZERO || add.amount.is_negative() {
                 return Err(AssetError::NegativeAmount);
             }
-            let slots = self.slots.iter().enumerate().filter(|(_, slot)| slot.unit == unit);
-            let lots =
-                slots.flat_map(|(s, slot)| slot.holding.lots.iter().enumerate().map(move |(at, lot)| (s, at, *lot)));
-            let bought = |lot: &Parcel| lot.part == Some(add.part) && lot.acquired == add.acquired && !lot.wash_matched;
-            let left = |(s, at, lot): (usize, usize, Parcel)| {
-                let taken = pieces.iter().filter(|piece| (piece.0, piece.1) == (s, at));
-                let (qty, basis) =
-                    taken.fold((lot.qty, lot.basis), |(qty, basis), piece| (qty - piece.3.qty, basis - piece.4));
-                (s, at, Parcel { qty, basis, ..lot })
-            };
-            let matched: Vec<_> = lots.filter(|(_, _, lot)| bought(lot) && lot.qty > Qty::ZERO).map(left).collect();
-            let whole: Qty = matched.iter().map(|(_, _, lot)| lot.qty).sum();
+            let unmatched = self.unmatched(unit, add, &carried);
+            let whole: Qty = unmatched.iter().map(|(.., lot)| lot.qty).sum();
             if whole < add.quantity {
                 return Err(AssetError::ParcelBasisMismatch);
             }
             let (mut quantities, mut amounts) =
                 (Shares::new(add.quantity, whole), Shares::new(add.amount, add.quantity));
-            for (s, at, lot) in matched {
+            for (slot, at, lot) in unmatched {
                 let qty = quantities.take(lot.qty);
                 if qty.is_zero() {
                     continue;
@@ -985,15 +983,33 @@ impl Holdings {
                 };
                 let added = basis.0.checked_add(amounts.take(qty).0).map(Qty).ok_or(AssetError::Overflow)?;
                 let held_since = add.held_since.min(lot.held_since);
-                pieces.push((s, at, order, Parcel { qty, basis: added, held_since, wash_matched: true, ..lot }, basis));
+                let shares = Parcel { qty, basis: added, held_since, wash_matched: true, ..lot };
+                carried.push(Carried { slot, at, order, shares, basis });
             }
         }
         // Splitting from the last lot back keeps the positions of the ones still to split.
-        pieces.sort_by_key(|&(s, at, order, ..)| (Reverse(s), Reverse(at), order));
-        for (s, at, _, matched, basis) in pieces {
-            self.slots[s].split(at, matched, basis);
-        }
+        carried.sort_by_key(|c| (Reverse(c.slot), Reverse(c.at), c.order));
+        carried.into_iter().for_each(|c| self.slots[c.slot].split(c.at, c.shares, c.basis));
         Ok(())
+    }
+
+    /// The live parcels a carry `add` can go into, wherever they are, each as the carries before it (`carried`) left it.
+    fn unmatched(
+        &self,
+        unit: Id<Commodity>,
+        add: &CarryLotAddition,
+        carried: &[Carried],
+    ) -> Vec<(usize, usize, Parcel)> {
+        let bought = |lot: &Parcel| lot.part == Some(add.part) && lot.acquired == add.acquired && !lot.wash_matched;
+        let left = |(slot, at, lot): (usize, usize, &Parcel)| {
+            let taken = carried.iter().filter(|c| (c.slot, c.at) == (slot, at));
+            let (qty, basis) =
+                taken.fold((lot.qty, lot.basis), |(qty, basis), c| (qty - c.shares.qty, basis - c.basis));
+            (slot, at, Parcel { qty, basis, ..*lot })
+        };
+        let slots = self.slots.iter().enumerate().filter(|(_, slot)| slot.unit == unit);
+        let lots = slots.flat_map(|(s, slot)| slot.holding.lots.iter().enumerate().map(move |(at, lot)| (s, at, lot)));
+        lots.filter(|(.., lot)| bought(lot) && lot.qty > Qty::ZERO).map(left).collect()
     }
 
     /// The slots of the places whose ids lie in `places`: a subtree.

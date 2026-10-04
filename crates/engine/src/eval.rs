@@ -21,7 +21,7 @@ use axiom_model::{
     Text, Ty, Value, Var, Window,
 };
 
-use crate::assets::PartId;
+use crate::assets::{Part, PartId};
 use crate::budget::{
     carry_start as budget_carry_start, segment_end as budget_segment_end, segment_start as budget_segment_start,
     window as budget_window,
@@ -734,8 +734,8 @@ impl<'a, 's> Machine<'a, 's> {
             (Field::Balance, Value::Entity(entity)) => self.balance(Subject::Entity(entity)),
             (Field::Basis, Value::Place(place)) => self.basis(Subject::Place(place)),
             (Field::Basis, Value::Entity(entity)) => self.basis(Subject::Entity(entity)),
-            (Field::Basis, Value::Asset(asset)) => self.asset_basis(asset),
-            (Field::Cost, Value::Asset(asset)) => self.asset_cost(asset),
+            (Field::Basis, Value::Asset(asset)) => self.asset_measure(asset, |part| part.basis),
+            (Field::Cost, Value::Asset(asset)) => self.asset_measure(asset, |part| part.cost),
             (Field::InService, Value::Asset(asset)) => self.asset_in_service(asset),
             (Field::Parts, Value::Asset(asset)) => {
                 let count = self.env.world.assets.asset(asset).map_or(0, |state| state.part_count());
@@ -823,46 +823,22 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    fn asset_cost(&self, asset: Id<Asset>) -> Value {
-        let Some(state) = self.env.world.assets.asset(asset) else {
+    /// What `of` reads of an asset (its cost, its basis), in the base currency: of the part a law runs for, or of all its
+    /// parts.
+    fn asset_measure(&self, asset: Id<Asset>, of: fn(&Part) -> Qty) -> Value {
+        let assets = &self.env.world.assets;
+        let Some(state) = assets.asset(asset) else {
             return Value::Fault(Fault::InvalidProgram);
         };
-        let cost = if let Some(part) = self.ctx.asset_part {
-            let Some((owner, record)) = self.env.world.assets.part(part) else {
-                return Value::Fault(Fault::InvalidProgram);
-            };
-            if owner != asset {
-                return Value::Fault(Fault::InvalidProgram);
-            }
-            record.cost
-        } else {
-            match state.total_cost() {
-                Ok(cost) => cost,
+        let measured = match self.ctx.asset_part.map(|part| assets.part(part)) {
+            Some(Some((owner, part))) if owner == asset => of(part),
+            Some(_) => return Value::Fault(Fault::InvalidProgram),
+            None => match state.total(of) {
+                Ok(total) => total,
                 Err(_) => return Value::Fault(Fault::Overflow),
-            }
+            },
         };
-        self.base(cost)
-    }
-
-    fn asset_basis(&self, asset: Id<Asset>) -> Value {
-        let Some(state) = self.env.world.assets.asset(asset) else {
-            return Value::Fault(Fault::InvalidProgram);
-        };
-        let basis = if let Some(part) = self.ctx.asset_part {
-            let Some((owner, record)) = self.env.world.assets.part(part) else {
-                return Value::Fault(Fault::InvalidProgram);
-            };
-            if owner != asset {
-                return Value::Fault(Fault::InvalidProgram);
-            }
-            record.basis
-        } else {
-            match state.total_basis() {
-                Ok(basis) => basis,
-                Err(_) => return Value::Fault(Fault::Overflow),
-            }
-        };
-        self.base(basis)
+        self.base(measured)
     }
 
     fn asset_in_service(&self, asset: Id<Asset>) -> Value {
@@ -1624,7 +1600,7 @@ fn purpose_net(root: axiom_model::PurposeRoot, incoming: Qty, outgoing: Qty) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{EventKey, Part, PartKind};
+    use crate::assets::{EventKey, PartKind};
 
     #[test]
     fn property_reads_use_the_nearest_kind_default_and_expired_overrides_fall_through() {
@@ -1895,15 +1871,18 @@ asset house : property
             budget_values: &mut budget_values,
             out: &mut out,
         };
-        assert_eq!(machine.asset_cost(asset), Value::Amount(Amount::new(Qty(402_000), book.base)));
-        assert_eq!(machine.asset_basis(asset), Value::Amount(Amount::new(Qty(382_000), book.base)));
+        assert_eq!(machine.asset_measure(asset, |part| part.cost), Value::Amount(Amount::new(Qty(402_000), book.base)));
+        assert_eq!(
+            machine.asset_measure(asset, |part| part.basis),
+            Value::Amount(Amount::new(Qty(382_000), book.base))
+        );
         assert_eq!(machine.prop(Value::Asset(asset), land), Value::Amount(Amount::new(Qty(12_000), usd)));
         assert_eq!(machine.asset_in_service(asset), Value::Day(Day::from_ymd(2024, 3, 1).unwrap()));
 
         let improvement_context = Context::new(Subject::Asset(asset), me, &occasion).for_asset_part(improvement);
         let machine = Machine { ctx: &improvement_context, ..machine };
-        assert_eq!(machine.asset_cost(asset), Value::Amount(Amount::new(Qty(1_480), book.base)));
-        assert_eq!(machine.asset_basis(asset), Value::Amount(Amount::new(Qty(1_480), book.base)));
+        assert_eq!(machine.asset_measure(asset, |part| part.cost), Value::Amount(Amount::new(Qty(1_480), book.base)));
+        assert_eq!(machine.asset_measure(asset, |part| part.basis), Value::Amount(Amount::new(Qty(1_480), book.base)));
         assert_eq!(machine.prop(Value::Asset(asset), land), Value::Empty);
         assert_eq!(machine.asset_in_service(asset), Value::Day(Day::from_ymd(2026, 2, 2).unwrap()));
     }

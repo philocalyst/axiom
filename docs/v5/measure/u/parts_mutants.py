@@ -23,9 +23,9 @@ MUTANTS = [
     ("another-commodity-adjusted", LOTS, "                for slot in self.slots.iter_mut().filter(|slot| slot.unit == unit) {",
      "                for slot in self.slots.iter_mut() {"),
     # carry
-    ("a-carry-forgets-what-came-before", LOTS, "let taken = pieces.iter().filter(|piece| (piece.0, piece.1) == (s, at));",
-     "let taken = pieces.iter().filter(|_| false);"),
-    ("carries-split-front-first", LOTS, "(Reverse(s), Reverse(at), order)", "(s, at, order)"),
+    ("a-carry-forgets-what-came-before", LOTS, "let taken = carried.iter().filter(|c| (c.slot, c.at) == (slot, at));",
+     "let taken = carried.iter().filter(|_| false);"),
+    ("carries-split-front-first", LOTS, "(Reverse(c.slot), Reverse(c.at), c.order)", "(c.slot, c.at, c.order)"),
     ("a-carry-does-not-tack", LOTS, "let held_since = add.held_since.min(lot.held_since);", "let held_since = lot.held_since;"),
     ("a-matched-lot-carried-again", LOTS, "lot.acquired == add.acquired && !lot.wash_matched;", "lot.acquired == add.acquired;"),
     ("a-split-keeps-the-whole-basis", LOTS, "(lot.qty, lot.basis) = (lot.qty - matched.qty, lot.basis - basis);",
