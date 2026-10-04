@@ -209,6 +209,7 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
         deposit: None,
         deposit_holding: None,
         loan: None,
+        rates: Vec::new(),
         ended: None,
         laws: Box::default(),
         doc: None,

@@ -69,6 +69,11 @@ pub trait Env {
         Ok(Answer::Later)
     }
 
+    /// What the contract's own rule says of the interest in a loan's payment, held to what the header has left.
+    fn interest(&mut self, _at: Line, _left: Option<&Remaining>) -> Result<Answer, Self::Failure> {
+        Ok(Answer::Later)
+    }
+
     /// What a leg that is the book's to say will move, if this phase reads the book: the gap to an `=`, everything
     /// `all` selects, the amount the assertions solved a `?` to. `None` leaves it the marker it is, with the amount a
     /// flow carries until it lands; that is what a promise does, which is materialized before anything lands.
@@ -188,6 +193,9 @@ impl Quantity {
             }
             Quantity::Derived => {
                 return Ok(said(env.payment(at)?).map(|(amount, exact)| Resolved::amount(amount, exact)));
+            }
+            Quantity::Interest => {
+                return Ok(said(env.interest(at, left)?).map(|(amount, exact)| Resolved::amount(amount, exact)));
             }
             Quantity::Target(expr) => said(env.amount(at, left, expr)?)
                 .map(|(amount, _)| Resolved::marker(amount, Infer::Target { end, balance: amount.qty })),
@@ -649,6 +657,8 @@ mod tests {
         assert_eq!(resolve(Quantity::All(None)).infer, Infer::All);
         assert_eq!(resolve(Quantity::Derived).amount, usd(0));
         assert!(!resolve(Quantity::Derived).exact);
+        assert_eq!(resolve(Quantity::Interest).amount, usd(0));
+        assert!(!resolve(Quantity::Interest).exact);
     }
 
     #[test]

@@ -123,7 +123,7 @@ fn index_moved(book: &Book<'_>, param: Id<Param>, first: Day, day: Day) -> Resul
 }
 
 /// The index `param` stood at on `day`: its latest row at or before it that has no keys, and a positive number.
-fn index_on(book: &Book<'_>, param: Id<Param>, day: Day) -> Result<Ratio, ForecastError> {
+pub(super) fn index_on(book: &Book<'_>, param: Id<Param>, day: Day) -> Result<Ratio, ForecastError> {
     let row = book.params.get(param).and_then(|data| data.row(day, &[]));
     match row.ok_or(ForecastError::MissingIndex { param, day })?.value {
         Value::Num(index) if index > Ratio::ZERO => Ok(index),

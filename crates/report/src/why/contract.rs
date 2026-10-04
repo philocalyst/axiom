@@ -1,8 +1,9 @@
 //! `why CONTRACT`: each change in terms and the occurrences it promised.
 
-use axiom_core::Id;
+use axiom_core::{Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Contract, Derivation, Origin};
+use axiom_model::promise::{Entry, Kind};
+use axiom_model::{Amount, Contract, Derivation, Origin};
 
 use crate::lens::Lens;
 use crate::places::route;
@@ -18,11 +19,12 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contrac
             book.name(book.entities[contract.owner].path)
         )));
     }
-    Report::new(format!("Why {name}"))
+    let report = Report::new(format!("Why {name}"))
         .with(about_section(lens, contract))
         .with(terms_section(lens, contract))
         .with(promises_section(lens, run, contract_id))
-        .with(derived_section(lens, contract_id))
+        .with(derived_section(lens, contract_id));
+    schedule_section(lens, run, contract_id).into_iter().fold(report, Report::with)
 }
 
 fn about_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Section<'s> {
@@ -117,6 +119,58 @@ fn promises_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<C
     }
     promises.note(format!("{kept} kept; {late} late."));
     promises
+}
+
+/// How many payments of a loan's schedule `why` shows either side of today.
+const AROUND_TODAY: usize = 6;
+
+/// A loan's schedule around today: what each payment pays of interest and of principal, and what is owed after it, with what
+/// became of it. None for a contract that is no loan.
+fn schedule_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contract>) -> Option<Section<'s>> {
+    let book = lens.book();
+    let loan = book.promises.loan(contract_id)?;
+    let unit = loan.terms().principal().unit;
+    let money = |qty| Cell::amount(book, Amount::new(qty, unit));
+    let mut schedule = Section::new([
+        Column::left("Due"),
+        Column::right("Interest"),
+        Column::right("Principal"),
+        Column::right("Owed after"),
+        Column::left("State"),
+    ])
+    .headed("Loan schedule");
+    let entries = loan.entries();
+    let next = entries.partition_point(|entry| entry.day <= run.today);
+    for entry in &entries[next.saturating_sub(AROUND_TODAY)..entries.len().min(next + AROUND_TODAY)] {
+        let interest = if entry.kind == Kind::Pay { money(entry.paid.interest) } else { Cell::Blank };
+        schedule.push(Row::new([
+            Cell::Day(entry.day),
+            interest,
+            money(entry.paid.principal),
+            money(entry.paid.open),
+            Cell::Word(entry_state(run, contract_id, entry)),
+        ]));
+    }
+    let (ahead, interest) = (
+        loan.payments().filter(|payment| payment.day > run.today).count(),
+        entries.iter().map(|entry| entry.paid.interest).sum::<Qty>(),
+    );
+    let payments =
+        format!("{} payments, {ahead} of them ahead; interest over the life of the loan", loan.payments().count());
+    schedule.note(Cell::list(" ", [Cell::text(payments), money(interest)]));
+    Some(schedule)
+}
+
+/// What became of an entry of a loan's schedule, in a word.
+fn entry_state(run: &Run, contract_id: Id<Contract>, entry: &Entry) -> &'static str {
+    let kept = |promise: &&axiom_engine::Promise| promise.contract == contract_id && promise.due == entry.day;
+    match (entry.kind, run.promises.iter().find(kept)) {
+        (Kind::Prepay, _) => "prepaid",
+        (Kind::Pay, Some(promise)) if promise.kept.is_some() => "kept",
+        (Kind::Pay, Some(_)) => "missed",
+        (Kind::Pay, None) if entry.day > run.today => "ahead",
+        (Kind::Pay, None) => "not written",
+    }
 }
 
 /// The flows the contract derived, or that its occurrences wrote.

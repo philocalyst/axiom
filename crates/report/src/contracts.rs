@@ -1,8 +1,6 @@
 //! `contracts`: promises, their current terms and the next time due.
 
-use std::collections::BTreeMap;
-
-use axiom_core::{Day, Days, Id, Qty};
+use axiom_core::{Day, Days, Id};
 use axiom_engine::Run;
 use axiom_model::{
     Cadence, Change, Contract, Cut, Expr, FlowSide, Item, On, Part, Promised, Quantity, Says, ScheduleKind, Sign, Terms,
@@ -35,7 +33,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
             let late_days = promise.late(run.today);
             (kept + usize::from(promise.kept.is_some()), late + usize::from(late_days > 0), age + i64::from(late_days))
         });
-        let loan_balance = loan_balance(lens, run, contract);
+        let loan_balance = loan_balance(lens, run, id);
         let cells = [
             Cell::Name(name),
             Cell::Name(book.name(book.entities[contract.party].path)),
@@ -60,10 +58,20 @@ fn next_due(book: &axiom_model::Book<'_>, run: &Run, id: Id<Contract>, contract:
     let kept = |due: Day| {
         run.promises.iter().any(|promise| promise.contract == id && promise.due == due && promise.kept.is_some())
     };
+    // A loan's regular stream is owed its payments and no more: none after the one that paid it off.
+    let loan = book.promises.loan(id).map(|loan| loan.payments().map(|payment| payment.day).collect::<Vec<_>>());
+    let owed_days = |kind: ScheduleKind| -> Box<dyn Iterator<Item = Day> + '_> {
+        match (&loan, book.promises.schedule(id, kind)) {
+            (Some(payments), _) if kind == ScheduleKind::Regular => {
+                Box::new(payments.iter().copied().filter(move |day| window.contains(*day)))
+            }
+            (_, Some(schedule)) => Box::new(schedule.days(window)),
+            (_, None) => Box::new(std::iter::empty()),
+        }
+    };
     [ScheduleKind::Regular, ScheduleKind::Standing]
         .into_iter()
-        .filter_map(|kind| book.promises.schedule(id, kind))
-        .filter_map(|schedule| schedule.days(window).find(|due| !kept(*due)))
+        .filter_map(|kind| owed_days(kind).find(|due| !kept(*due)))
         .min()
 }
 
@@ -93,21 +101,14 @@ pub(crate) fn terms_cell<'s>(
     Cell::list(" ", parts)
 }
 
-fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) -> Cell<'s> {
+/// What a loan owes today by its schedule: what its terms and every payment, prepayment and rate the book says make of it.
+fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Contract>) -> Cell<'s> {
     let book = lens.book();
-    let Some(loan) = contract.loan else {
-        return Cell::Blank;
-    };
-    let sign = lens.display_sign(loan.debt);
-    let mut balances = BTreeMap::<Id<axiom_model::Commodity>, Qty>::new();
-    for holding in run.holdings.iter().filter(|holding| holding.place == loan.debt) {
-        *balances.entry(holding.unit).or_default() += Qty(lens.place_qty(loan.debt, holding.qty()).0 * sign);
+    let owed = book.promises.loan(id).and_then(|loan| Some((loan.open_on(run.today)?, loan.terms().principal().unit)));
+    match owed.filter(|(qty, _)| !qty.is_zero()) {
+        Some((qty, unit)) => Cell::amount(book, axiom_model::Amount::new(qty, unit)),
+        None => Cell::Blank,
     }
-    let cells = balances
-        .into_iter()
-        .filter(|(_, qty)| !qty.is_zero())
-        .map(|(unit, qty)| Cell::amount(book, axiom_model::Amount::new(qty, unit)));
-    Cell::list_or_blank(" · ", cells)
 }
 
 /// Never render placeholder values for a term expression that the engine must
@@ -159,7 +160,8 @@ fn quantity_cell<'s>(lens: Lens<'s, '_, '_, '_>, flow: &axiom_model::Flow, quant
         Quantity::All(unit) => unit.map_or(Cell::Word("all"), |unit| {
             Cell::list(" ", [Cell::Word("all"), Cell::Name(book.name(book.commodities[unit].symbol))])
         }),
-        Quantity::Derived => Cell::Word("derived by contract rule"),
+        Quantity::Derived => Cell::Word("the loan's payment"),
+        Quantity::Interest => Cell::Word("the loan's interest"),
     }
 }
 

@@ -14,7 +14,7 @@ use super::push_amount_root;
 use super::staged::Staged;
 use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
-    lower_measure, lower_split, lower_value, unsupported_statement,
+    lower_measure, lower_rate_change, lower_split, lower_value, names_a_contract, unsupported_statement,
 };
 use crate::balance::{self, Settled, Total};
 use crate::book::{Amount, Contract, Place, ScheduleKind, Terms};
@@ -654,6 +654,11 @@ fn lower_statement<'s>(
         ast::Verb::Split { numerator, denominator } => lower_split(world, at, *numerator, *denominator, diags),
         // Custom properties are lowered by props::declare, which stages dated values and their inclusive `until`
         // restoration; native budgets by the declaration and law pass.
+        ast::Verb::Now(ast::Change::Property(line))
+            if line.name.0 == "at" && names_a_contract(world, statement.subject) =>
+        {
+            lower_rate_change(world, at, line, diags)
+        }
         ast::Verb::Now(ast::Change::Property(_) | ast::Change::Budget(_)) => {}
         ast::Verb::Waived => match statement.subject {
             Subject::Code(code) => lower_claim_change(world, at, code, diags),

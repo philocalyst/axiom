@@ -206,10 +206,12 @@ contract car-loan with bank
     with_book(text, |book| {
         let promise = book.promises.of(book.contract("car-loan").unwrap());
         let every = promise.regular.unwrap().every;
+        let loan = book.promises.loan(book.contract("car-loan").unwrap()).unwrap();
         let mut owed = Residual::start(&book.promises, every);
         let mut payments = Vec::new();
         while let Some(next) = owed.next() {
-            payments.push((next.to_string(), owed.open().0));
+            // What the loan owes before the payment: what the schedule says the day before it is due.
+            payments.push((next.to_string(), loan.open_on(next.add_days(-1)).unwrap().0));
             owed.advance(&book.promises);
         }
         // The loan was made on 2026-01-01, so its payments are the first of the three months after it.

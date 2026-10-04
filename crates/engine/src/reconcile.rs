@@ -22,7 +22,7 @@ use crate::ledger::Ledger;
 use crate::motion::Motion;
 use crate::scope::owner_of;
 use crate::state::LastCheck;
-use crate::{Pad, explain};
+use crate::{Pad, explain, loan_balance};
 
 impl Ledger<'_, '_, '_> {
     pub(crate) fn reconcile(&mut self, index: usize) {
@@ -36,8 +36,11 @@ impl Ledger<'_, '_, '_> {
         let gap = assert.amount.qty - shown;
         let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
         let now = LastCheck { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
+        let schedule = self.schedule_disagrees(&assert);
         let now = match (assert.gap, gap.is_zero()) {
             (_, true) => now,
+            // The loan's diagnostic says it better where the book and the schedule agree with each other.
+            (Gap::Refused, false) if schedule.as_ref().is_some_and(|(_, found)| found.gap() == gap) => now,
             (Gap::Refused, false) => self.refuse(&assert, shown, last, now),
             (Gap::Unexplained(waive), false) => {
                 let unknown = book.entities[book.roots.unknown].place;
@@ -56,6 +59,9 @@ impl Ledger<'_, '_, '_> {
             }
         };
         self.record.checkpoints.insert((place, unit), now);
+        if let Some((contract, found)) = schedule {
+            self.record.report(loan_balance::disagreement(book, &assert, contract, &found));
+        }
     }
 
     /// A gap nobody accepted. It is reported once: not when an amount that could not be solved may be to blame

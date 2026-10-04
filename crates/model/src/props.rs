@@ -689,7 +689,7 @@ fn property_changes<'a, 's>(
         let Verb::Now(Change::Property(line)) = &written.node.verb else {
             continue;
         };
-        if is_builtin_line(line.name.0) {
+        if is_builtin_line(line.name.0) || says_a_loans_rate(collected, written.node.subject, line) {
             continue;
         }
         if let Some(change) = property_change(world, written, line, changes.len(), seen, diags) {
@@ -697,6 +697,13 @@ fn property_changes<'a, 's>(
         }
     }
     changes
+}
+
+/// Whether the statement is `DATE CONTRACT now at 6.25%`: a loan's rate, which the record lowering reads. A contract may be
+/// named as a kind is (`mortgage`), and the statement is about the contract then.
+fn says_a_loans_rate(collected: &Collected<'_, '_>, subject: Subject<'_>, line: &Line<'_>) -> bool {
+    let Subject::Name(name) = subject else { return false };
+    line.name.0 == "at" && collected.contracts.iter().any(|contract| contract.node.name.0 == name.0)
 }
 
 /// One statement's change of a property a kind declared, or nothing after what is wrong with it is said.

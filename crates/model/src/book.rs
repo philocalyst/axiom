@@ -511,6 +511,9 @@ pub struct Contract {
     /// The holding account named by `deposit ... into HOLDING`.
     pub deposit_holding: Option<Id<Place>>,
     pub loan: Option<Loan>,
+    /// `DATE NAME now at 6.25%`: what statements say the lender's rate is from a day, in the order of their days. Like a
+    /// waiver, a statement about a contract and not a term of its schedule.
+    pub rates: Vec<RateChange>,
     /// `DATE NAME ends`: the statement that cut `days` short.
     pub ended: Option<Loc>,
     pub laws: Box<[Id<Law>]>,
@@ -736,6 +739,14 @@ pub struct Loan {
     pub resets: Option<Reset>,
     /// What a flow to the contract does: the default `Shortens`.
     pub prepay: Prepay,
+}
+
+/// `2029-03-01 mortgage now at 6.25%`: from its day the lender's yearly rate is this.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RateChange {
+    pub day: Day,
+    pub rate: Ratio,
+    pub loc: Loc,
 }
 
 /// A loan's rate follows an index.

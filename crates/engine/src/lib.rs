@@ -49,6 +49,7 @@ mod facts;
 mod fire;
 mod infer;
 mod ledger;
+mod loan_balance;
 mod lots;
 mod monitor;
 mod motion;
@@ -74,6 +75,8 @@ mod traits;
 mod claim_tests;
 #[cfg(test)]
 mod fixture;
+#[cfg(test)]
+mod loan_tests;
 #[cfg(test)]
 mod payment_tests;
 #[cfg(test)]
