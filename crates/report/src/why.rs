@@ -17,6 +17,8 @@ mod system;
 mod taxline;
 mod text;
 
+pub(crate) use line::line;
+
 use std::borrow::Cow;
 
 use axiom_core::{Diagnostic, Id, Sym};
@@ -27,10 +29,10 @@ use axiom_model::{
 };
 
 use crate::history::Posting;
-use crate::lens::Lens;
 use crate::places::{names, route};
 use crate::resolve;
 use crate::table::{cause_cell, creditor, doc_headline, plural};
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// How many of the latest records a page lists; the rest are counted in a note.
@@ -42,9 +44,13 @@ fn recent<T>(items: &[T]) -> (&[T], usize) {
     (&items[left_out..], left_out)
 }
 
-/// Flows, dated, with where each stands.
-fn flows_table<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
-    let book = lens.book();
+/// Flows, dated, with where each stands: the latest of them, and how many earlier ones are not shown.
+fn flows_table<'s, 'a>(
+    view: View<'s, '_, '_>,
+    postings: impl IntoIterator<Item = Posting<'a>>,
+    heading: &str,
+) -> Section<'s> {
+    let book = view.book();
     let columns = [
         Column::left("Date"),
         Column::left("Flow"),
@@ -53,17 +59,14 @@ fn flows_table<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ids: &[Id<Flow>], head
         Column::left("From"),
     ];
     let mut section = Section::new(columns).headed(Cell::Said(Cow::Owned(heading.to_owned())));
-    let (shown, left_out) = recent(ids);
-    for &id in shown {
-        let posting = Posting::at(book, run, id);
-        let flow = posting.flow;
+    let postings: Vec<Posting> = postings.into_iter().collect();
+    let (shown, left_out) = recent(&postings);
+    for posting in shown {
+        let (flow, out) = (posting.flow, posting.out());
         let cells = [
             Cell::Day(flow.day),
             Cell::text(route(book, flow)),
-            Cell::amount(
-                book,
-                Amount::new(crate::flow::scoped_movement_qty(lens, flow, posting.out().qty), posting.out().unit),
-            ),
+            Cell::amount(book, Amount::new(view.flow_qty(flow, out.qty), out.unit)),
             Cell::text(state_words(posting.posted.state)),
             Cell::Source(flow.loc),
         ];
@@ -127,7 +130,7 @@ pub(crate) enum Target<'a> {
     Code(&'a str),
     /// `#name`: a purpose, which its page looks up and says if there is none.
     Purpose(&'a str),
-    /// A description, and the written flows of the lens's owners that have exactly it.
+    /// A description, and the written flows of the view's owners that have exactly it.
     Description(&'a str, Vec<Id<Flow>>),
 }
 
@@ -135,8 +138,8 @@ impl<'a> Target<'a> {
     /// What `text` asks about. A prefix says which kind of thing (`contract:`, `entity:`, `asset:`, `^`, `#`); a bare word is
     /// an asset, a contract, the description of some flow, and then a place, an entity, a system, a law or a tax line, in
     /// that order, the first that it names.
-    pub fn of(lens: Lens<'_, '_, '_, '_>, run: &Run, text: &'a str) -> Result<Target<'a>, Diagnostic> {
-        let book = lens.book();
+    pub fn of(view: View<'_, '_, '_>, text: &'a str) -> Result<Target<'a>, Diagnostic> {
+        let book = view.book();
         if let Some(name) = text.strip_prefix("contract:") {
             return Ok(Target::Contract(resolve::contract(book, name)?));
         }
@@ -159,11 +162,11 @@ impl<'a> Target<'a> {
             return Ok(Target::Contract(contract));
         }
         let quoted = text.strip_prefix('"').and_then(|text| text.strip_suffix('"')).unwrap_or(text);
-        let described = self::text::flows(lens, run, quoted);
+        let described = self::text::flows(view, quoted);
         if !described.is_empty() {
             return Ok(Target::Description(quoted, described));
         }
-        Target::named(book, run, text)
+        Target::named(book, view.run, text)
     }
 
     /// A name is a place if it can be one, else an entity, a system, a law, or something a law tallied or owed. An ambiguous
@@ -220,26 +223,22 @@ impl<'a> Target<'a> {
     }
 
     /// The page about it.
-    pub fn report<'s>(self, lens: Lens<'s, '_, '_, '_>, run: &Run) -> Result<Report<'s>, Diagnostic> {
-        let book = lens.book();
+    pub fn report<'s>(self, view: View<'s, '_, '_>) -> Result<Report<'s>, Diagnostic> {
+        let book = view.book();
         Ok(match self {
-            Target::Place(place) => place::report(lens, run, place),
-            Target::Entity(entity) => entity::report(lens, run, entity),
-            Target::System(system) => system::report(lens, run, system),
-            Target::Law(law) => law::report(lens, run, law),
+            Target::Place(place) => place::report(view, place),
+            Target::Entity(entity) => entity::report(view, entity),
+            Target::System(system) => system::report(view, system),
+            Target::Law(law) => law::report(view, law),
             Target::Laws(candidates) => law::which(book, &candidates),
-            Target::TaxLine(name) => taxline::report(lens, run, name),
-            Target::Asset(asset) => asset::report(lens, run, asset),
-            Target::Contract(contract) => contract::report(lens, run, contract),
-            Target::Code(pattern) => return code::report(lens, run, pattern),
-            Target::Purpose(name) => return purpose::report(lens, run, name),
-            Target::Description(description, flows) => self::text::report(lens, run, description, &flows),
+            Target::TaxLine(name) => taxline::report(view, name),
+            Target::Asset(asset) => asset::report(view, asset),
+            Target::Contract(contract) => contract::report(view, contract),
+            Target::Code(pattern) => return code::report(view, pattern),
+            Target::Purpose(name) => return purpose::report(view, name),
+            Target::Description(description, flows) => self::text::report(view, description, &flows),
         })
     }
-}
-
-pub(crate) fn line_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: axiom_core::Loc) -> Report<'s> {
-    line::line(lens, run, at)
 }
 
 /// What a law does to a move: forbids it or warns of it (a limit), puts a

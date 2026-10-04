@@ -9,23 +9,19 @@ use axiom_model::{Amount, Book, ClaimChange};
 
 use super::{event_words, flows_table};
 use crate::history::postings;
-use crate::lens::Lens;
 use crate::resolve;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// `pattern` may be a glob: `check-*`.
-pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book();
+pub fn report<'s>(view: View<'s, '_, '_>, pattern: &str) -> Result<Report<'s>, Diagnostic> {
+    let book = view.book();
     let marked = |code: Sym| glob(pattern, book.name(code));
-    let flows: Vec<_> = postings(book, run)
-        .filter(|posting| {
-            lens.owns(crate::flow::movement_place(lens, posting.flow))
-                && book.flow_view(posting.flow).codes().any(marked)
-        })
-        .filter_map(|posting| posting.id.journal())
+    let flows: Vec<_> = postings(book, view.run)
+        .filter(|posting| view.owns_flow(posting.flow) && book.flow_view(posting.flow).codes().any(marked))
         .collect();
-    let visible_codes = super::line::scoped_codes(book, lens);
-    let event_visible = |code| lens.whose.is_everyone() || visible_codes.contains(&code);
+    let visible_codes = super::line::scoped_codes(book, view);
+    let event_visible = |code| view.whose.is_everyone() || visible_codes.contains(&code);
     let mut happened =
         Section::new([Column::left("Date"), Column::left("Event"), Column::left("From")]).headed("Events");
     for event in book.events.iter().filter(|event| event_visible(event.code) && marked(event.code)) {
@@ -35,7 +31,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
     for (at, change) in book.claim_changes.iter().enumerate() {
         let mut codes = book.codes[book.txns[change.target].codes].iter().copied();
         if codes.any(|code| event_visible(code) && marked(code)) {
-            happened.push(waiver(book, run, at, change));
+            happened.push(waiver(book, view.run, at, change));
         }
     }
 
@@ -44,7 +40,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
         let known: BTreeSet<&str> = visible_codes.iter().copied().chain(events).map(|code| book.name(code)).collect();
         return Err(resolve::nothing_named("code", pattern, known));
     }
-    Ok(Report::new(format!("Why ^{pattern}")).with(flows_table(lens, run, &flows, "Flows")).with(happened))
+    Ok(Report::new(format!("Why ^{pattern}")).with(flows_table(view, flows, "Flows")).with(happened))
 }
 
 /// A claim written off: the day it was said, and what it forgave.

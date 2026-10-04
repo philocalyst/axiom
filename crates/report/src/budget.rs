@@ -5,30 +5,43 @@ use axiom_engine::{Headroom, Run};
 use axiom_model::{Amount, Book, Budget, Entity, Limit, Period};
 
 use crate::calendar::Periods;
-use crate::lens::Lens;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Option<Day>, by: Period) -> Report<'s> {
-    let at = at.unwrap_or(run.today);
-    purpose_budgets(lens.on(at), run, at, by)
+pub(crate) fn report<'s>(view: View<'s, '_, '_>, at: Option<Day>, by: Period) -> Report<'s> {
+    let at = at.unwrap_or(view.run.today);
+    let nothing = if view.book().budgets.is_empty() {
+        "No budgets are declared in this book."
+    } else {
+        "No budget headroom was recorded for this window."
+    };
+    let title = format!("Budgets for {}", Periods::covering(by, at, at).title(0));
+    Report::new(title).with(section(view.on(at), at, by, |_| true, nothing))
 }
 
-fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Period) -> Report<'s> {
-    let book = lens.book();
+/// The budgets `wanted` picks, each spent against its limit in the month or the year (`by`) that holds `at`. `nothing` says
+/// why the table is empty when no budget has anything to show.
+pub(crate) fn section<'s>(
+    view: View<'s, '_, '_>,
+    at: Day,
+    by: Period,
+    wanted: impl Fn(&Budget) -> bool,
+    nothing: &'static str,
+) -> Section<'s> {
+    let book = view.book();
     let query = Periods::covering(by, at, at).window(0).days();
-    let end = query.last().min(run.horizon);
-    let title = format!("Budgets for {}", Periods::covering(by, at, at).title(0));
-    let mut table = Table::new(lens, run, View { query, end, by });
+    let end = query.last().min(view.run.horizon);
+    let mut table = Table::new(view, Asked { query, end, by });
     if !book.budgets.is_empty() && query.first() > end {
         table.section.note("The requested budget window is beyond the run horizon.");
-        return Report::new(title).with(table.section);
+        return table.section;
     }
-    let mut budgets: Vec<_> = book.budgets.iter().map(|(_, budget)| budget).collect();
+    let mut budgets: Vec<_> = book.budgets.values().filter(|&budget| wanted(budget)).collect();
     budgets.sort_by_key(|budget| book.name(book.purposes[budget.purpose].name));
     for budget in budgets.into_iter().filter(|budget| budget.starts <= end) {
         let name = book.name(book.purposes[budget.purpose].name);
-        let terms = *budget.terms.at(at.max(budget.starts).min(run.horizon));
-        let owners = budget_owners(lens, run, budget);
+        let terms = *budget.terms.at(at.max(budget.starts).min(view.run.horizon));
+        let owners = budget_owners(view, budget);
         if terms.period == Period::Year {
             let window = Periods::covering(Period::Year, at.max(budget.starts), end).window(0).days();
             table.yearly(budget, name, &terms.limit, &owners, window);
@@ -37,14 +50,10 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
         }
     }
     if table.section.rows.is_empty() {
-        table.section.note(if book.budgets.is_empty() {
-            "No budgets are declared in this book."
-        } else {
-            "No budget headroom was recorded for this window."
-        });
+        table.section.note(nothing);
     }
     table.section.unpriced(table.unpriced, "budget total");
-    Report::new(title).with(table.section)
+    table.section
 }
 
 /// What a budget spent in one window, against its limit.
@@ -56,9 +65,9 @@ struct Month {
     carries: bool,
 }
 
-/// The window a budget view is about, and how it groups what it shows.
+/// The window a budget table is about, and how it groups what it shows.
 #[derive(Clone, Copy)]
-struct View {
+struct Asked {
     /// The days the view is of: the month or the year asked for.
     query: Days,
     /// Where it stops: its last day, or the end of what the run covers.
@@ -67,28 +76,27 @@ struct View {
 }
 
 /// The budget table as it fills: its rows, and how many budget totals could not be priced.
-struct Table<'s, 'b, 'w, 'p, 'r> {
-    lens: Lens<'s, 'b, 'w, 'p>,
-    run: &'r Run,
-    view: View,
+struct Table<'s, 'b, 'v> {
+    view: View<'s, 'b, 'v>,
+    asked: Asked,
     section: Section<'s>,
     unpriced: usize,
 }
 
-impl<'s, 'b, 'w, 'p, 'r> Table<'s, 'b, 'w, 'p, 'r> {
-    fn new(lens: Lens<'s, 'b, 'w, 'p>, run: &'r Run, view: View) -> Table<'s, 'b, 'w, 'p, 'r> {
+impl<'s, 'b, 'v> Table<'s, 'b, 'v> {
+    fn new(view: View<'s, 'b, 'v>, asked: Asked) -> Table<'s, 'b, 'v> {
         let columns = ["Purpose", "Owner", "Window"]
             .map(Column::left)
             .into_iter()
             .chain(["Spent", "Limit", "Left", "Used"].map(Column::right));
-        Table { lens, run, view, section: Section::new(columns), unpriced: 0 }
+        Table { view, asked, section: Section::new(columns), unpriced: 0 }
     }
 
     /// A budget that allows a limit for each year: one row for each owner, if it has one for the year.
     fn yearly(&mut self, budget: &Budget, name: &'s str, limit: &Limit, owners: &[Option<Id<Entity>>], window: Days) {
-        let book = self.lens.book();
+        let book = self.view.book();
         for &owner in owners {
-            let reading = matching_reading(self.run, budget, owner, window);
+            let reading = matching_reading(self.view.run, budget, owner, window);
             if let Some(values) = values(limit, reading) {
                 self.push(name, owner_name(book, owner), window_label(window), values, 0);
             }
@@ -98,13 +106,13 @@ impl<'s, 'b, 'w, 'p, 'r> Table<'s, 'b, 'w, 'p, 'r> {
     /// A budget that allows a limit for each month: for each owner, a row for each month, and when the view is
     /// of a year, the year's total above them.
     fn monthly(&mut self, budget: &Budget, name: &'s str, owners: &[Option<Id<Entity>>]) {
-        let book = self.lens.book();
-        let View { query, end, by } = self.view;
+        let book = self.view.book();
+        let Asked { query, end, by } = self.asked;
         let months = Periods::covering(Period::Month, budget.starts.max(query.first()), end);
         for &owner in owners {
             let rows = self.months(budget, owner, months);
             if by == Period::Year {
-                match sum_periods(self.lens, &rows) {
+                match sum_periods(self.view, &rows) {
                     Some(total) => self.push(name, owner_name(book, owner), window_label(query), total, 0),
                     None => self.unpriced += 1,
                 }
@@ -125,14 +133,14 @@ impl<'s, 'b, 'w, 'p, 'r> Table<'s, 'b, 'w, 'p, 'r> {
         for index in 0..months.len() {
             let window = months.window(index).days();
             let start = window.first().max(budget.starts);
-            if start > self.view.end || start > window.last() {
+            if start > self.asked.end || start > window.last() {
                 continue;
             }
             let active = *budget.terms.at(start);
             if active.period != Period::Month {
                 continue;
             }
-            let reading = matching_reading(self.run, budget, owner, window);
+            let reading = matching_reading(self.view.run, budget, owner, window);
             if let Some((spent, limit)) = values(&active.limit, reading) {
                 rows.push(Month { window, spent, limit, carries: active.carries });
             }
@@ -148,7 +156,7 @@ impl<'s, 'b, 'w, 'p, 'r> Table<'s, 'b, 'w, 'p, 'r> {
         (spent, limit): (Amount, Amount),
         depth: usize,
     ) {
-        let book = self.lens.book();
+        let book = self.view.book();
         let left = Amount::new(room_amount(limit, spent), limit.unit);
         let purpose = if purpose.is_empty() { Cell::Blank } else { Cell::Purpose(purpose) };
         let style = match (left.qty.is_negative(), depth) {
@@ -174,15 +182,16 @@ impl<'s, 'b, 'w, 'p, 'r> Table<'s, 'b, 'w, 'p, 'r> {
 
 /// Preserve owners recorded by the engine, but still show a wholly unused
 /// typed budget when it has not needed an owner-specific comparison yet.
-fn budget_owners(lens: Lens<'_, '_, '_, '_>, run: &Run, budget: &Budget) -> Vec<Option<Id<Entity>>> {
-    let mut owners: Vec<_> = run
+fn budget_owners(view: View<'_, '_, '_>, budget: &Budget) -> Vec<Option<Id<Entity>>> {
+    let mut owners: Vec<_> = view
+        .run
         .headroom
         .iter()
-        .filter(|reading| reading.law == budget.law && lens.owns_entity(reading.owner))
+        .filter(|reading| reading.law == budget.law && view.owns_entity(reading.owner))
         .map(|reading| Some(reading.owner))
         .collect();
     owners.sort_unstable();
-    if let Some(selected) = lens.whose.owners() {
+    if let Some(selected) = view.whose.owners() {
         owners.extend(selected.iter().copied().map(Some));
     }
     owners.sort_unstable();
@@ -212,14 +221,14 @@ fn values(limit: &Limit, reading: Option<&Headroom>) -> Option<(Amount, Amount)>
     Some((Amount::zero(limit.unit), limit))
 }
 
-fn sum_periods(lens: Lens<'_, '_, '_, '_>, months: &[Month]) -> Option<(Amount, Amount)> {
+fn sum_periods(view: View<'_, '_, '_>, months: &[Month]) -> Option<(Amount, Amount)> {
     if months.iter().any(|month| month.carries) {
         let last = months.last().expect("a nonempty month series");
         return Some((last.spent, last.limit));
     }
-    let spent = months.iter().try_fold(Qty::ZERO, |sum, month| Some(sum + lens.value(month.spent)?))?;
-    let limit = months.iter().try_fold(Qty::ZERO, |sum, month| Some(sum + lens.value(month.limit)?))?;
-    let unit = lens.book().base;
+    let spent = months.iter().try_fold(Qty::ZERO, |sum, month| Some(sum + view.value(month.spent)?))?;
+    let limit = months.iter().try_fold(Qty::ZERO, |sum, month| Some(sum + view.value(month.limit)?))?;
+    let unit = view.book().base;
     Some((Amount::new(spent, unit), Amount::new(limit, unit)))
 }
 

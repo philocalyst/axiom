@@ -535,26 +535,19 @@ asset laptop : thing
 ";
 
     with_run(source, day(2026, 1, 5), |book, run| {
-        let contract =
-            crate::tests::report(book, run, &Query::Register { place: "figma", from: None, to: None }, None).unwrap();
-        assert!(
-            contract
-                .sections
-                .iter()
-                .flat_map(|s| &s.rows)
-                .any(|row| { row.cells.iter().any(|cell| matches!(cell, crate::Cell::Word("terms active"))) })
-        );
-
-        let party =
-            crate::tests::report(book, run, &Query::Register { place: "entity:figma", from: None, to: None }, None)
-                .unwrap();
-        assert!(
-            !party
-                .sections
-                .iter()
-                .flat_map(|s| &s.rows)
-                .any(|row| { row.cells.iter().any(|cell| matches!(cell, crate::Cell::Word("terms active"))) })
-        );
+        let register = |place| {
+            let query = Query::Register { place, from: None, to: None };
+            crate::tests::report(book, run, &query, None).unwrap()
+        };
+        // The contract has written nothing yet, so its register says so; the party is at the end of the opening of its
+        // savings, which the contract's register does not list.
+        let contract = register("figma");
+        assert!(contract.sections[0].rows.is_empty());
+        assert_eq!(crate::tests::cell(&contract.sections[0].notes[0]), "Nothing happened under figma in this window.");
+        let party = register("entity:figma");
+        let rows = lines(&party.sections[0]);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].contains("opening → savings"), "{rows:?}");
 
         let why_contract = crate::tests::report(book, run, &Query::Why { target: "figma" }, None).unwrap();
         assert_eq!(crate::tests::heading(&why_contract.sections[0]), Some("Contract"));
@@ -1435,10 +1428,11 @@ budget meals 500 USD monthly
     });
 }
 
-/// A euro spent in a shop with no rate for it has no worth on its day: `balance --value` says how many such flows have
-/// happened by the day it is asked for, and none that have not.
+/// A euro spent in a shop with no rate for it has no worth on its day. `balance --value` leaves it out of every total and
+/// says nothing of it in a note: the places of the balance sheet are what a value is of, and a flow's end in an income or an
+/// expense place is in none of them.
 #[test]
-fn a_value_says_how_many_flows_it_could_not_price_that_have_happened_by_its_day() {
+fn a_value_says_nothing_of_the_flows_it_could_not_price() {
     let source = "\
 base USD
 commodity USD
@@ -1459,27 +1453,12 @@ opening 2026-01-01
 2026-03-20 ^s1 returned
 ";
     with_run(source, day(2026, 3, 31), |book, run| {
-        let note = |at: Day| {
+        for at in [day(2026, 1, 15), day(2026, 2, 15), day(2026, 3, 5), day(2026, 3, 19), day(2026, 3, 20)] {
             let query = Query::Balance { globs: vec![], at: Some(at), value: true, monthly: false };
             let report = crate::tests::report(book, run, &query, None).unwrap();
-            report.sections[0]
-                .notes
-                .iter()
-                .map(crate::tests::cell)
-                .filter(|note| note.contains("no price"))
-                .collect::<Vec<_>>()
-        };
-        let said =
-            |count: usize| vec![format!("{count} flows have no price on their day and are not counted in the value.")];
-        // The opening's source and the shop are the places that are not on the balance sheet: a flow end each, when the
-        // commodity of the flow has no price (a flow of dollars is worth what it says).
-        assert_eq!(note(day(2026, 1, 15)), said(1));
-        assert_eq!(note(day(2026, 2, 1)), said(2), "a flow stands on its own day");
-        assert_eq!(note(day(2026, 2, 15)), said(2));
-        assert_eq!(note(day(2026, 3, 5)), said(3));
-        assert_eq!(note(day(2026, 3, 19)), said(4), "a flow stands until the day it is returned");
-        assert_eq!(note(day(2026, 3, 20)), said(3), "and not on that day");
-        assert_eq!(note(day(2025, 12, 1)), Vec::<String>::new(), "nothing had happened");
+            let notes: Vec<_> = report.sections[0].notes.iter().map(crate::tests::cell).collect();
+            assert!(notes.iter().all(|note| !note.contains("flows have no price")), "{at}: {notes:?}");
+        }
     });
 }
 
@@ -1764,7 +1743,7 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
         );
         assert_eq!(
             rows(book, run, register("market")),
-            ["2025-03-31 |  | assets/k → market | 1,000.00 USD | revalued via market | actual | @1"]
+            ["2025-03-31 | assets/k → market |  | revalued via market | 1,000.00 USD"]
         );
     });
 }
@@ -1772,11 +1751,11 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
 #[test]
 fn balances_apply_assertion_pads_through_each_requested_day() {
     with_run(GAPS, day(2025, 12, 31), |book, run| {
-        let whose = crate::lens::Whose::default();
+        let whose = crate::view::Whose::default();
         let plan = axiom_engine::Plan::new(book);
-        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let view = crate::view::View::new(&plan, &whose, run, run.today);
         let days = [day(2025, 1, 1), day(2025, 3, 31), day(2025, 6, 30), day(2025, 9, 30)];
-        let balances = crate::balances::Balances::of(lens, run, &days);
+        let balances = crate::balances::Balances::of(view, &days);
         let place = book.place("assets/k").unwrap();
         let balances: Vec<_> =
             (0..days.len()).map(|column| balances.subtree(book, column, place).get(book.base)).collect();
@@ -1805,11 +1784,11 @@ opening 2025-01-01
 2025-01-04 ^deposit returned
 ";
     with_run(source, day(2025, 1, 5), |book, run| {
-        let whose = crate::lens::Whose::default();
+        let whose = crate::view::Whose::default();
         let plan = axiom_engine::Plan::new(book);
-        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let view = crate::view::View::new(&plan, &whose, run, run.today);
         let days = [day(2025, 1, 1), day(2025, 1, 2), day(2025, 1, 3), day(2025, 1, 4)];
-        let balances = crate::balances::Balances::of(lens, run, &days);
+        let balances = crate::balances::Balances::of(view, &days);
         let broker = book.place("assets/broker").unwrap();
         let checking = book.place("assets/checking").unwrap();
         let fast = book.commodity("FAST").unwrap();
@@ -1870,10 +1849,10 @@ fn basis_consumption_and_later_days_preserve_the_native_purchase_economics() {
         assert_eq!(rows(book, run, balance), ["=checking | 1,000.00 USD", "=house | 1 house",]);
 
         let plan = axiom_engine::Plan::new(book);
-        let whose = crate::lens::Whose::default();
-        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let whose = crate::view::Whose::default();
+        let view = crate::view::View::new(&plan, &whose, run, run.today);
         let days = [day(2025, 1, 1), day(2025, 2, 28), day(2026, 4, 16), day(2026, 5, 1)];
-        let balances = crate::balances::Balances::of(lens, run, &days);
+        let balances = crate::balances::Balances::of(view, &days);
         let checking = book.place("checking").unwrap();
         let house = book.place("house").unwrap();
         let house_unit = book.assets[asset].unit;

@@ -42,12 +42,12 @@ Governed by
     investment-income, itemized, long-term-gains, payments, pretax, salt, short-term-gains,
     total-income, wages.
 
-Recent flows
-  Date        With      Payee    Note         Amount       Balance
-  ────────────────────────────────────────────────────────────────
-  2025-12-31  opening                   8,500.00 USD  8,500.00 USD
-  2026-01-05  checking                    300.00 USD  8,800.00 USD
-  2026-02-05  checking                    300.00 USD  9,100.00 USD
-  2026-02-20  state-u   state-u        -1,200.00 USD  7,900.00 USD
-  2026-03-05  checking                    300.00 USD  8,200.00 USD
-  2026-03-25  checking                 -1,500.00 USD  6,700.00 USD
+Flows
+  Date        Flow                      Amount  State   From
+  ───────────────────────────────────────────────────────────────────────────
+  2025-12-31  opening → college   8,500.00 USD  actual  journal/2025/12.ax:15
+  2026-01-05  checking → college    300.00 USD  actual  journal/2026/01.ax:6
+  2026-02-05  checking → college    300.00 USD  actual  journal/2026/02.ax:13
+  2026-02-20  college → state-u   1,200.00 USD  actual  journal/2026/02.ax:42
+  2026-03-05  checking → college    300.00 USD  actual  journal/2026/03.ax:9
+  2026-03-25  college → checking  1,500.00 USD  actual  journal/2026/03.ax:28

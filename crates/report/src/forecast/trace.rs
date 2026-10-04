@@ -13,7 +13,7 @@ use axiom_engine::{Holding, Ledger, Options};
 use axiom_model::{Book, Class, Commodity, Flow, Place};
 
 use super::Past;
-use crate::lens::{Basket, Lens, Liquidity};
+use crate::view::{Basket, Liquidity, View};
 
 /// A cash place that goes below zero.
 pub struct Overdraft {
@@ -39,65 +39,65 @@ impl<'p, 'b, 's> Trace<'p, 'b, 's> {
     /// date order) as they fall due and reading the position at each checkpoint. Laws with deadlines fire all the way to
     /// the last checkpoint.
     pub fn run(
-        lens: Lens<'b, 's, '_, 'p>,
+        view: View<'b, 's, 'p>,
         past: &Past<'_>,
         options: Options,
         habits: Vec<Flow>,
         checkpoints: &[Day],
     ) -> Trace<'p, 'b, 's> {
         let today = checkpoints[0];
-        let mut ledger = promising(lens, past, options, checkpoints);
+        let mut ledger = promising(view, past, options, checkpoints);
         let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
         let (mut liquid, mut worth) = (Vec::new(), Vec::new());
         let mut coming = habits.into_iter().peekable();
         for &checkpoint in checkpoints {
             while let Some(flow) = coming.next_if(|flow| flow.day <= checkpoint) {
-                apply_habit(lens, &mut ledger, flow, &mut overdrawn);
+                apply_habit(view, &mut ledger, flow, &mut overdrawn);
             }
-            note_promised(lens, &mut ledger, checkpoint, &mut overdrawn);
+            note_promised(view, &mut ledger, checkpoint, &mut overdrawn);
             ledger.advance(checkpoint);
             let months = checkpoint.since(today).months;
-            let position = |pick: &dyn Fn(&Holding) -> Qty| grown(lens, months, &ledger, pick);
-            liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
+            let position = |pick: &dyn Fn(&Holding) -> Qty| grown(view, months, &ledger, pick);
+            liquid.push(position(&|holding| in_hand_or_owed(view, holding)));
             worth.push(position(&|holding| holding.qty()));
         }
         Trace { ledger, liquid, worth, overdrafts: overdrawn.into_values().collect() }
     }
 }
 
-/// The ledger a forecast goes on with: the run's fold, resumed from its checkpoint, closed through today, made to reach the last checkpoint and to promise the contracts of the lens's owners.
+/// The ledger a forecast goes on with: the run's fold, resumed from its checkpoint, closed through today, made to reach the last checkpoint and to promise the contracts of the view's owners.
 fn promising<'p, 'b, 's>(
-    lens: Lens<'b, 's, '_, 'p>,
+    view: View<'b, 's, 'p>,
     past: &Past<'_>,
     options: Options,
     checkpoints: &[Day],
 ) -> Ledger<'p, 'b, 's> {
-    let (plan, book) = (lens.plan(), lens.book());
+    let (plan, book) = (view.plan(), view.book());
     let (today, horizon) = (options.today, checkpoints[checkpoints.len() - 1]);
     debug_assert_eq!(today, checkpoints[0], "the forecast begins on the day the run stands on");
     debug_assert!(past.at.day() <= today, "a forecast cannot rewind the checkpoint it goes on from");
     let mut ledger = plan.resume(past.at, options);
     ledger.advance(today);
     ledger.reach(horizon);
-    ledger.promise(|contract| lens.owns_entity(book.contracts[contract].owner));
+    ledger.promise(|contract| view.owns_entity(book.contracts[contract].owner));
     ledger
 }
 
 /// Applies a flow a habit expects, after every occurrence the contracts promise by its day, unless the means to make it are
 /// not there.
-fn apply_habit(lens: Lens, ledger: &mut Ledger, flow: Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
-    note_promised(lens, ledger, flow.day, overdrawn);
-    let Some(flow) = within_means(lens, ledger, flow) else { return };
+fn apply_habit(view: View, ledger: &mut Ledger, flow: Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+    note_promised(view, ledger, flow.day, overdrawn);
+    let Some(flow) = within_means(view, ledger, flow) else { return };
     ledger.apply(&flow);
-    note_overdrafts(lens, ledger, &flow, overdrawn);
+    note_overdrafts(view, ledger, &flow, overdrawn);
 }
 
 /// Takes every occurrence the contracts promise by `day`, one at a time, and notes where each left a cash place.
-fn note_promised(lens: Lens, ledger: &mut Ledger, day: Day, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+fn note_promised(view: View, ledger: &mut Ledger, day: Day, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
     while let Some(planned) = ledger.promise_through(day) {
         let Ok(made) = planned.made else { continue };
         for flow in made.flows(ledger.recorded().promised_flows).unwrap_or_default() {
-            note_overdrafts(lens, ledger, &flow.flow, overdrawn);
+            note_overdrafts(view, ledger, &flow.flow, overdrawn);
         }
     }
 }
@@ -105,45 +105,45 @@ fn note_promised(lens: Lens, ledger: &mut Ledger, day: Day, overdrawn: &mut BTre
 /// What a holding adds to what can be spent: its free money, less what is
 /// owed on debts with no term (a card, a tab). A loan with a term is paid by
 /// the payments the projection already makes.
-fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
-    let place = &lens.book().places[holding.place];
-    let has_term = lens.known().maturity.is_some_and(|name| lens.book().says(holding.place, name));
-    match lens.liquidity(holding.place, holding.unit) {
-        Some(Liquidity::Cash) => lens.free(holding),
+fn in_hand_or_owed(view: View, holding: &Holding) -> Qty {
+    let place = &view.book().places[holding.place];
+    let has_term = view.known().maturity.is_some_and(|name| view.book().says(holding.place, name));
+    match view.liquidity(holding.place, holding.unit) {
+        Some(Liquidity::Cash) => view.free(holding),
         _ if place.class == Class::Debt && !has_term => holding.qty(),
         _ => Qty::ZERO,
     }
 }
 
-/// What the lens's owners hold on the balance sheet, as `pick` counts it,
+/// What the view's owners hold on the balance sheet, as `pick` counts it,
 /// each commodity priced as a whole at today's prices and grown `months` ahead.
-fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
+fn grown(view: View, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
     for holding in ledger.holdings() {
-        if !matches!(lens.book().places[holding.place].class, Class::Asset | Class::Debt) {
+        if !matches!(view.book().places[holding.place].class, Class::Asset | Class::Debt) {
             continue;
         }
-        let qty = lens.place_qty(holding.place, pick(holding));
+        let qty = view.place_qty(holding.place, pick(holding));
         if qty.is_zero() {
             continue;
         }
         basket.add(holding.unit, qty);
     }
-    basket.amounts().filter_map(|amount| Some(compound(lens.book(), amount.unit, lens.value(amount)?, months))).sum()
+    basket.amounts().filter_map(|amount| Some(compound(view.book(), amount.unit, view.value(amount)?, months))).sum()
 }
 
 /// A flow that cannot move more than its ends hold: what leaves an account
 /// that is not cash is limited by what it holds, and a payment into a debt by
 /// what is owed. `None` when there is nothing to move.
-fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
+fn within_means(view: View, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
     let movement = &flow;
     let (from, to, out_unit, arrive_unit, exchange, amount) =
         (movement.from, movement.to, movement.out.unit, movement.arrive.unit, movement.is_exchange(), movement.out.qty);
     // Slow holdings and claims cannot move more than they currently hold.
-    let held_back = matches!(lens.liquidity(from, out_unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
+    let held_back = matches!(view.liquidity(from, out_unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
     let room = if held_back {
         Some(ledger.balance(from, out_unit))
-    } else if lens.book().places[to].class == Class::Debt {
+    } else if view.book().places[to].class == Class::Debt {
         Some(-ledger.balance(to, arrive_unit))
     } else {
         None
@@ -163,9 +163,9 @@ fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
 }
 
 /// Records where a flow left a cash place below zero.
-fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
-    let book = lens.book();
-    let cash = |&place: &Id<Place>| lens.liquidity(place, book.base) == Some(Liquidity::Cash);
+fn note_overdrafts(view: View, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+    let book = view.book();
+    let cash = |&place: &Id<Place>| view.liquidity(place, book.base) == Some(Liquidity::Cash);
     for place in [flow.from, flow.to].into_iter().filter(cash) {
         let balance = ledger.balance(place, book.base);
         if balance.is_negative() {
@@ -232,10 +232,10 @@ mod tests {
         view.apply(&salary);
         let checkpoint = view.checkpoint();
 
-        let whose = crate::lens::Whose::default();
-        let lens = Lens::new(&plan, &whose, tomorrow);
+        let whose = crate::view::Whose::default();
+        let view = View::new(&plan, &whose, &house.run, tomorrow);
         let resumed = Trace::run(
-            lens,
+            view,
             &Past { at: &checkpoint, effects: &[] },
             Options { today: tomorrow, relaxed: false },
             Vec::new(),
@@ -243,7 +243,7 @@ mod tests {
         );
         let start = plan.start(Options { today: tomorrow, relaxed: false }).checkpoint();
         let folded = Trace::run(
-            lens,
+            view,
             &Past { at: &start, effects: &[] },
             Options { today: tomorrow, relaxed: false },
             Vec::new(),
@@ -282,17 +282,17 @@ opening 2026-01-01
             let start = plan.start(options).checkpoint();
             let past = Past { at: &start, effects: &[] };
             let forecast_for = |name| {
-                let whose = crate::lens::Whose::of(book, owner(name));
-                let lens = Lens::new(&plan, &whose, run.today);
-                Trace::run(lens, &past, options, Vec::new(), &[run.today]).worth[0]
+                let whose = crate::view::Whose::of(book, owner(name));
+                let view = View::new(&plan, &whose, run, run.today);
+                Trace::run(view, &past, options, Vec::new(), &[run.today]).worth[0]
             };
 
             assert_eq!(forecast_for("me"), Qty(6_000));
             assert_eq!(forecast_for("jordan"), Qty(4_000));
 
-            let everyone = crate::lens::Whose::default();
-            let lens = Lens::new(&plan, &everyone, run.today);
-            assert_eq!(Trace::run(lens, &past, options, Vec::new(), &[run.today]).worth[0], Qty(10_000));
+            let everyone = crate::view::Whose::default();
+            let view = View::new(&plan, &everyone, run, run.today);
+            assert_eq!(Trace::run(view, &past, options, Vec::new(), &[run.today]).worth[0], Qty(10_000));
             assert_eq!(plan.allocate(place, Qty(10_000)).map(|(_, amount)| amount).sum::<Qty>(), Qty(10_000));
         });
     }

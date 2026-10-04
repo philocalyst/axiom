@@ -11,9 +11,9 @@ use axiom_core::{Day, Id, Qty};
 use axiom_engine::Holding;
 use axiom_model::{Amount, Book, Class, Entity, Place, RuntimeTxn};
 
-use crate::lens::Lens;
 use crate::places::path;
 use crate::table::{code_labels, doc_headline};
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// One open claim.
@@ -44,16 +44,16 @@ impl Claim {
     }
 }
 
-/// Every claim open on the lens's day, for its owners, given the holdings on that day: soonest due first, what is owed to
+/// Every claim open on the view's day, for its owners, given the holdings on that day: soonest due first, what is owed to
 /// you before what you owe, and of two claims made and due on one day the one whose place is listed first (see
 /// `Book::listing`). What is owed by you is a parcel of a debt place, negative as a liability is, and is read in the sign the
 /// place is shown in.
-pub fn open<'h>(lens: Lens, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
-    let book = lens.book();
-    let claimed = holdings.into_iter().filter(|holding| book.is_claim(holding.place) && lens.owns(holding.place));
+pub fn open<'h>(view: View, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
+    let book = view.book();
+    let claimed = holdings.into_iter().filter(|holding| book.is_claim(holding.place) && view.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
         holding.lots.iter().filter_map(move |lot| {
-            let left = lens.plan().sides().display(holding.place, lens.place_qty(holding.place, lot.qty));
+            let left = view.plan().sides().display(holding.place, view.place_qty(holding.place, lot.qty));
             if left.is_zero() {
                 return None;
             }
@@ -75,15 +75,12 @@ pub fn open<'h>(lens: Lens, holdings: impl IntoIterator<Item = &'h Holding>) -> 
 }
 
 /// Builds a claims view from holdings supplied by a shared context ledger.
-pub(crate) fn view_from<'h, 's>(
-    lens: Lens<'s, '_, '_, '_>,
-    holdings: impl IntoIterator<Item = &'h Holding>,
-) -> Report<'s> {
-    let at = lens.day;
-    let claims = open(lens, holdings);
+pub(crate) fn view_from<'h, 's>(view: View<'s, '_, '_>, holdings: impl IntoIterator<Item = &'h Holding>) -> Report<'s> {
+    let at = view.day;
+    let claims = open(view, holdings);
     let (mine, theirs): (Vec<&Claim>, Vec<&Claim>) = claims.iter().partition(|claim| claim.mine);
-    let report = Report::new(format!("Claims on {at}")).with(section(lens, "Owed to you", &mine));
-    let report = report.with(section(lens, "Owed by you", &theirs));
+    let report = Report::new(format!("Claims on {at}")).with(section(view, "Owed to you", &mine));
+    let report = report.with(section(view, "Owed by you", &theirs));
     match claims.is_empty() {
         true => report.with(Section::note_only(
             "Nothing is owed either way. A flow with `due` into a receivable place makes one.",
@@ -112,8 +109,8 @@ fn what_of<'s>(book: &'s Book<'_>, claim: &Claim) -> Cell<'s> {
 
 /// Claims with what each is, when it was made and how old it is, when it is due
 /// and whether it is late, and what they come to.
-pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Claim]) -> Section<'s> {
-    let (book, at) = (lens.book(), lens.day);
+pub fn section<'s>(view: View<'s, '_, '_>, heading: &'s str, claims: &[&Claim]) -> Section<'s> {
+    let (book, at) = (view.book(), view.day);
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
     let columns = columns.chain([Column::right("Left")]).chain(["Made", "Age", "Due", "Status"].map(Column::left));
     let mut section = Section::new(columns).headed(Cell::text(heading));
@@ -121,7 +118,7 @@ pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Clai
     for claim in claims {
         let days_left = claim.due.map(|due| due.0 - at.0);
         let status = days_left.map(|days| if days < 0 { format!("overdue {}d", -days) } else { format!("in {days}d") });
-        match lens.value(claim.left) {
+        match view.value(claim.left) {
             Some(qty) => total += qty,
             None => unpriced += 1,
         }

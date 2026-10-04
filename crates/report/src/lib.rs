@@ -4,7 +4,8 @@
 //!
 //! Every view is a pure function of the book and its run. What several views
 //! need lives in one place: [`history`] answers "what happened, as posted",
-//! [`lens`] says whose it is, what it is worth and how liquid it is,
+//! [`view`] is the context of one view (a day, whose money, the plan and the run) and says what it is worth and how
+//! liquid it is,
 //! [`headroom`] what every limit has counted, [`calendar`] cuts time into
 //! periods, and [`table`] builds sections so the views stay declarative.
 
@@ -23,16 +24,17 @@ mod gains;
 mod headroom;
 mod history;
 pub mod json;
-mod lens;
 mod limits;
 mod lots;
 mod pivot;
 mod places;
+mod plain;
 mod register;
 mod resolve;
 mod synth;
 mod table;
 mod tax;
+mod view;
 mod why;
 
 #[cfg(test)]
@@ -51,7 +53,7 @@ use axiom_engine::{Plan, Run};
 use axiom_model::{Amount, Book, Period, Place, Trigger};
 
 use crate::balances::Balances;
-use crate::lens::{Lens, Whose};
+use crate::view::{View, Whose};
 
 /// What to show. A client builds this from its own input surface.
 #[derive(Clone, Debug)]
@@ -212,6 +214,7 @@ pub struct Fact<'s> {
 }
 
 pub use context::{Context, Folded};
+pub use plain::{CellSink, Mark};
 pub use table::percent;
 
 /// A source position as a client can display it. Lines and columns are
@@ -280,8 +283,8 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
 /// [`summary`], with the plan the run was folded with: a client that has one does not build another.
 pub fn summary_of(plan: &Plan<'_, '_>, run: &Run) -> Summary {
     let (everyone, today, book) = (Whose::default(), run.today, plan.book());
-    let lens = Lens::new(plan, &everyone, today);
-    let worth = balance::NetWorth::of(lens, &Balances::of(lens, run, &[today]), 0);
+    let view = View::new(plan, &everyone, run, today);
+    let worth = balance::NetWorth::of(view, &Balances::of(view, &[today]), 0);
     // Built-in place rows exist in every book: only declared or used places
     // contribute to the summary.
     let used = |place: Id<Place>| {

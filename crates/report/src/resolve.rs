@@ -22,11 +22,6 @@ pub fn entity(book: &Book, text: &str) -> Result<Id<Entity>, Diagnostic> {
     book.entity(text).map_err(|miss| explain(book, &ENTITY, text, miss, |id| book.entities[id].path))
 }
 
-/// Why `text` is not one entity.
-pub fn entity_miss(book: &Book, text: &str, miss: Miss<Entity>) -> Diagnostic {
-    explain(book, &ENTITY, text, miss, |id| book.entities[id].path)
-}
-
 pub fn contract(book: &Book, text: &str) -> Result<Id<Contract>, Diagnostic> {
     book.contract(text).ok_or_else(|| {
         nothing_named("contract", text, book.contracts.iter().map(|(_, contract)| book.name(contract.name)))

@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Days, Id, spread};
-use axiom_engine::{Piece, Run};
+use axiom_engine::Piece;
 use axiom_model::{Book, Flow, Period, Purpose, PurposeRoot};
 
 use crate::calendar::Periods;
 use crate::flow::for_each_counted;
-use crate::lens::Lens;
+use crate::view::View;
 
 /// What each top-level spending purpose cost in each full month of history,
 /// leaving out the flows that contracts and habits already project. This is the
@@ -26,28 +26,28 @@ impl Variable {
     /// History runs from the first month anything was spent to the last full
     /// month: the current month is still going, and months before the books
     /// had any spending would only dilute it.
-    pub fn from_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
-        purpose_history(lens, run, explained)
+    pub fn from_history(view: View, explained: impl Fn(&Flow) -> bool) -> Variable {
+        purpose_history(view, explained)
     }
 }
 
 /// Spending history grouped under the first child of the spending root. A
 /// recognized flow is spread across the months it belongs to, so a refund
 /// offsets its purpose in the month it is recognized.
-fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
-    let book = lens.book();
+fn purpose_history(view: View, explained: impl Fn(&Flow) -> bool) -> Variable {
+    let book = view.book();
     let none = Variable { amounts: Vec::new(), categories: Vec::new(), months: 0 };
     let spent = |flow: &Flow, piece: &Piece| {
         let category = piece.purpose.and_then(|purpose| spending_category(book, purpose.purpose));
         category.is_some() && !explained(flow)
     };
     let mut first = None::<Day>;
-    for_each_counted(lens, run, run.today, spent, |counted| {
+    for_each_counted(view, view.run.today, spent, |counted| {
         let day = counted.recognized.first();
         first = Some(first.map_or(day, |first| first.min(day)));
     });
     let Some(first) = first else { return none };
-    let last_full_month = run.today.month_start().add_days(-1);
+    let last_full_month = view.run.today.month_start().add_days(-1);
     if first > last_full_month {
         return none;
     }
@@ -55,7 +55,7 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     let months = Periods::covering(Period::Month, first, last_full_month);
     let mut categories: BTreeMap<Id<Purpose>, usize> = BTreeMap::new();
     let mut amounts = Vec::new();
-    for_each_counted(lens, run, last_full_month, spent, |counted| {
+    for_each_counted(view, last_full_month, spent, |counted| {
         let (Some(purpose), Some(amount)) = (counted.purpose, counted.amount) else { return };
         let Some(category) = spending_category(book, purpose.purpose) else { return };
         for month in months.overlapping(counted.recognized.first(), counted.recognized.last()) {
@@ -96,8 +96,8 @@ mod tests {
     use axiom_core::Day;
 
     use super::*;
-    use crate::lens::Whose;
     use crate::source_tests::with_run;
+    use crate::view::Whose;
 
     #[test]
     fn native_variability_uses_top_level_spending_purposes() {
@@ -122,7 +122,7 @@ opening 2026-01-01
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
             let whose = Whose::default();
             let plan = axiom_engine::Plan::new(book);
-            let variable = Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
+            let variable = Variable::from_history(View::new(&plan, &whose, run, run.today), |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [10_000; 4]);
             assert_eq!(variable.months, 4);
@@ -156,7 +156,7 @@ opening 2026-01-01
             let theo = book.entity("theo").unwrap();
             let whose = Whose::of(book, theo);
             let plan = axiom_engine::Plan::new(book);
-            let variable = Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
+            let variable = Variable::from_history(View::new(&plan, &whose, run, run.today), |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [1, 1, 0, 1]);
             assert_eq!(variable.months, 4);

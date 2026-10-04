@@ -15,9 +15,9 @@ use axiom_model::{
 
 use crate::calendar::Periods;
 use crate::history::all_postings;
-use crate::lens::Lens;
 use crate::pivot::{Grid, Pivot};
 use crate::places::path;
+use crate::view::View;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many periods to show when the window is not given.
@@ -38,22 +38,22 @@ fn root_names(root: PurposeRoot) -> (&'static str, &'static str) {
 }
 
 /// The periods a flow report covers: from the day asked for, else from the first activity, the last twelve.
-fn periods_of(lens: Lens<'_, '_, '_, '_>, by: Period, from: Option<Day>) -> Periods {
+fn periods_of(view: View<'_, '_, '_>, by: Period, from: Option<Day>) -> Periods {
     match from {
-        Some(from) => Periods::covering(by, from, lens.day),
-        None => Periods::covering(by, first_activity(lens, lens.day), lens.day).last(DEFAULT_PERIODS),
+        Some(from) => Periods::covering(by, from, view.day),
+        None => Periods::covering(by, first_activity(view, view.day), view.day).last(DEFAULT_PERIODS),
     }
 }
 
 // ─── By party ───────────────────────────────────────────────────────────────
 
-pub(crate) fn view_by_party_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, from: Option<Day>) -> Report<'s> {
-    let periods = periods_of(lens, Period::Month, from);
-    let totals = PartyTotals::of(lens, run, periods);
+pub(crate) fn report_by_party<'s>(view: View<'s, '_, '_>, from: Option<Day>) -> Report<'s> {
+    let periods = periods_of(view, Period::Month, from);
+    let totals = PartyTotals::of(view, periods);
     let mut section = table("Party", &periods);
     let (mut income, mut spending) = (vec![Qty::ZERO; periods.len()], vec![Qty::ZERO; periods.len()]);
     for root in ROOTS {
-        let Some(total) = totals.push_root(lens, periods, root, &mut section) else { continue };
+        let Some(total) = totals.push_root(view, periods, root, &mut section) else { continue };
         match root {
             PurposeRoot::Income => add_into(&mut income, &total),
             PurposeRoot::Spending => add_into(&mut spending, &total),
@@ -62,7 +62,7 @@ pub(crate) fn view_by_party_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run,
     }
     if !is_zero(&income) || !is_zero(&spending) {
         let net: Vec<Qty> = income.iter().zip(&spending).map(|(&earned, &spent)| earned - spent).collect();
-        section.push(net_row(lens.book(), &net));
+        section.push(net_row(view.book(), &net));
     }
     section.unpriced(totals.0.unpriced, "flow");
     Report::new("Income and spending").with(section)
@@ -87,17 +87,17 @@ impl Party {
 struct PartyTotals(Pivot<(PurposeRoot, Party)>);
 
 impl PartyTotals {
-    fn of(lens: Lens<'_, '_, '_, '_>, run: &Run, periods: Periods) -> PartyTotals {
-        let book = lens.book();
+    fn of(view: View<'_, '_, '_>, periods: Periods) -> PartyTotals {
+        let book = view.book();
         let mut pivot = Pivot::new(periods);
         let classified = |_: &Flow, piece: &Piece| piece.purpose.is_some();
-        for_each_counted(lens, run, lens.day, classified, |counted| {
+        for_each_counted(view, view.day, classified, |counted| {
             let Counted { flow, purpose: Some(purpose), .. } = counted else { return };
             let Some(amount) = pivot.price(&counted) else { return };
             // The end that is not the book's own: where the money came from, or went.
             let other = if book.places[flow.from].class == Class::Outside { flow.from } else { flow.to };
             let party = flow.payee.map_or(Party::Place(other), Party::Entity);
-            pivot.add((book.purposes[purpose.purpose].root, party), &counted, amount, lens.day);
+            pivot.add((book.purposes[purpose.purpose].root, party), &counted, amount, view.day);
         });
         PartyTotals(pivot)
     }
@@ -105,12 +105,12 @@ impl PartyTotals {
     /// The rows of one root: its total, then each party, the largest first. The total, or `None` if nothing moved.
     fn push_root<'s>(
         &self,
-        lens: Lens<'s, '_, '_, '_>,
+        view: View<'s, '_, '_>,
         periods: Periods,
         root: PurposeRoot,
         section: &mut Section<'s>,
     ) -> Option<Vec<Qty>> {
-        let book = lens.book();
+        let book = view.book();
         let rows = self.0.keys().iter().filter(|(found, _)| *found == root);
         let mut parties: Vec<(Party, &[Qty])> =
             rows.map(|&key| (key.1, self.0.amounts(key).expect("a key has a row"))).collect();
@@ -127,7 +127,7 @@ impl PartyTotals {
         section.push(row(book, Cell::Word(heading), 0, &total, Style::Total));
         for (party, amounts) in parties {
             let name = party.label(book);
-            add_facts(section, lens, periods, concept, Some(name), amounts);
+            add_facts(section, view, periods, concept, Some(name), amounts);
             section.push(row(book, Cell::Name(name), 1, amounts, Style::Normal));
         }
         Some(total)
@@ -156,11 +156,11 @@ fn net_row<'s>(book: &'s Book<'_>, values: &[Qty]) -> Row<'s> {
 // ─── By purpose ─────────────────────────────────────────────────────────────
 
 /// Builds an income statement with names resolved by a shared report context.
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Option<Day>) -> Report<'s> {
-    let periods = periods_of(lens, by, from);
-    let mut totals = PurposeTotals::of(lens, run, periods);
-    totals.roll_up(lens.book());
-    let mut section = totals.section(lens, periods);
+pub(crate) fn report<'s>(view: View<'s, '_, '_>, by: Period, from: Option<Day>) -> Report<'s> {
+    let periods = periods_of(view, by, from);
+    let mut totals = PurposeTotals::of(view, periods);
+    totals.roll_up(view.book());
+    let mut section = totals.section(view, periods);
     section.unpriced(totals.0.unpriced, "flow");
     if totals.0.spread {
         section.note("Flows written over a date range are recognized a little each day across the periods they cover.");
@@ -169,7 +169,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Peri
         section.note("No classified flows in this window.");
     }
     let mut report = Report::new("Income, spending and capital").with(section);
-    if let Some(measures) = measure_section(lens, periods) {
+    if let Some(measures) = measure_section(view, periods) {
         report.sections.push(measures);
     }
     report
@@ -190,15 +190,15 @@ enum Tally<'s> {
 struct PurposeTotals<'s>(Pivot<Tally<'s>>);
 
 impl<'s> PurposeTotals<'s> {
-    fn of(lens: Lens<'s, '_, '_, '_>, run: &Run, periods: Periods) -> PurposeTotals<'s> {
+    fn of(view: View<'s, '_, '_>, periods: Periods) -> PurposeTotals<'s> {
         let mut totals = PurposeTotals(Pivot::new(periods));
-        for_each_counted(lens, run, lens.day, |_, _| true, |counted| totals.add(lens, counted));
+        for_each_counted(view, view.day, |_, _| true, |counted| totals.add(view, counted));
         totals
     }
 
     /// Adds what one posting counts to the purpose it is for, and the object of that, or to those with no purpose.
-    fn add(&mut self, lens: Lens<'s, '_, '_, '_>, counted: Counted<'_>) {
-        let (book, cutoff) = (lens.book(), lens.day);
+    fn add(&mut self, view: View<'s, '_, '_>, counted: Counted<'_>) {
+        let (book, cutoff) = (view.book(), view.day);
         let Some(amount) = self.0.price(&counted) else { return };
         let mut add = |key| self.0.add(key, &counted, amount, cutoff);
         match counted.purpose {
@@ -225,17 +225,17 @@ impl<'s> PurposeTotals<'s> {
     }
 
     /// The purposes that had something, each under its parent, with the objects they are of and what had no purpose.
-    fn section(&self, lens: Lens<'s, '_, '_, '_>, periods: Periods) -> Section<'s> {
-        let book = lens.book();
+    fn section(&self, view: View<'s, '_, '_>, periods: Periods) -> Section<'s> {
+        let book = view.book();
         let mut section = table("Purpose", &periods);
         let objects = self.objects(book);
         let mut cursor = ObjectCursor { objects: &objects, next: 0 };
         for root in book.purposes.roots() {
             for id in book.purposes.subtree(root).filter(|&id| self.0.moved(Tally::Purpose(id))) {
-                self.push_purpose(lens, periods, &mut section, id, cursor.take(id));
+                self.push_purpose(view, periods, &mut section, id, cursor.take(id));
             }
         }
-        self.push_unclassified(lens, periods, &mut section);
+        self.push_unclassified(view, periods, &mut section);
         section
     }
 
@@ -260,32 +260,32 @@ impl<'s> PurposeTotals<'s> {
     /// A purpose's row, its facts, and a row below it for each object it is of.
     fn push_purpose(
         &self,
-        lens: Lens<'s, '_, '_, '_>,
+        view: View<'s, '_, '_>,
         periods: Periods,
         section: &mut Section<'s>,
         id: Id<Purpose>,
         objects: &[(Id<Purpose>, Object)],
     ) {
-        let book = lens.book();
+        let book = view.book();
         let purpose = &book.purposes[id];
         let (name, concept) = (book.name(purpose.name), root_names(purpose.root).1);
         let values = self.0.amounts(Tally::Purpose(id)).expect("a purpose that moved has a row");
         let depth = book.purposes.depth(id) as usize;
         let style = if book.purposes.parent(id).is_none() { Style::Total } else { Style::Normal };
         section.push(row(book, Cell::Name(name), depth, values, style));
-        add_facts(section, lens, periods, concept, Some(name), values);
+        add_facts(section, view, periods, concept, Some(name), values);
         for &(_, object) in objects {
             let (name, amounts) =
                 (object_name(book, object), self.0.amounts(Tally::Of(id, object)).expect("an object that moved"));
             let label = Cell::list(" ", [Cell::Word("of"), Cell::Name(name)]);
             section.push(row(book, label, depth + 1, amounts, Style::Muted));
-            add_facts(section, lens, periods, concept, Some(name), amounts);
+            add_facts(section, view, periods, concept, Some(name), amounts);
         }
     }
 
     /// What no purpose explains: a total row, and a row for each description that moved something, in description order.
-    fn push_unclassified(&self, lens: Lens<'s, '_, '_, '_>, periods: Periods, section: &mut Section<'s>) {
-        let book = lens.book();
+    fn push_unclassified(&self, view: View<'s, '_, '_>, periods: Periods, section: &mut Section<'s>) {
+        let book = view.book();
         let zeros = vec![Qty::ZERO; periods.len()];
         let all = self.0.amounts(Tally::Unclassified).unwrap_or(&zeros);
         let mut described: Vec<(Option<&'s str>, &[Qty])> = self
@@ -302,11 +302,11 @@ impl<'s> PurposeTotals<'s> {
         }
         described.sort_by_key(|&(description, _)| description);
         section.push(row(book, Cell::Word("Unclassified"), 0, all, Style::Total));
-        add_facts(section, lens, periods, "unclassified", None, all);
+        add_facts(section, view, periods, "unclassified", None, all);
         for (description, amounts) in described {
             let label = description.map_or(Cell::Word("unclassified"), Cell::text);
             section.push(row(book, label, 1, amounts, Style::Normal));
-            add_facts(section, lens, periods, "unclassified", description, amounts);
+            add_facts(section, view, periods, "unclassified", description, amounts);
         }
     }
 }
@@ -362,12 +362,12 @@ struct MeasureKey {
 }
 
 /// Events have units rather than money, so they have their own rows and facts.
-fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods) -> Option<Section<'s>> {
-    let book = lens.book();
+fn measure_section<'s>(view: View<'s, '_, '_>, periods: Periods) -> Option<Section<'s>> {
+    let book = view.book();
     // A row in a grid for each owner, purpose and unit, not a vector of its own.
     let mut rows: BTreeMap<MeasureKey, usize> = BTreeMap::new();
     let mut grid = Grid::new(periods.len());
-    for measure in book.measures.values().filter(|measure| measure.day <= lens.day && lens.owns_entity(measure.owner)) {
+    for measure in book.measures.values().filter(|measure| measure.day <= view.day && view.owns_entity(measure.owner)) {
         let Some(period) = periods.index_of(measure.day) else { continue };
         let key = MeasureKey {
             action: MeasureAction::of(measure.action),
@@ -390,7 +390,7 @@ fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods) -> Option<S
     )
     .headed("Measures");
     for (key, at) in rows {
-        push_measures(&mut section, lens, periods, key, grid.row(at));
+        push_measures(&mut section, view, periods, key, grid.row(at));
     }
     Some(section)
 }
@@ -398,12 +398,12 @@ fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods) -> Option<S
 /// The row of one kind of measure, and a fact for each period it has some in.
 fn push_measures<'s>(
     section: &mut Section<'s>,
-    lens: Lens<'s, '_, '_, '_>,
+    view: View<'s, '_, '_>,
     periods: Periods,
     key: MeasureKey,
     values: &[Qty],
 ) {
-    let book = lens.book();
+    let book = view.book();
     let action = key.action.word();
     let purpose = key.purpose.map(|id| book.name(book.purposes[id].name));
     let owner = book.name(book.entities[key.owner].path);
@@ -440,14 +440,14 @@ impl MovementShares {
     /// one signed boundary across both inflows and outflows is important when
     /// a small shared balance crosses zero: separately rounding positive and
     /// negative magnitudes can disagree with the scoped closing balance.
-    fn split(&mut self, lens: Lens<'_, '_, '_, '_>, place: Id<Place>, amount: Amount) -> Qty {
-        if lens.whose.is_everyone() || amount.qty.is_zero() {
+    fn split(&mut self, view: View<'_, '_, '_>, place: Id<Place>, amount: Amount) -> Qty {
+        if view.whose.is_everyone() || amount.qty.is_zero() {
             return amount.qty;
         }
         let cumulative = self.cumulative.entry((place, amount.unit)).or_default();
-        let before = lens.place_qty(place, *cumulative);
+        let before = view.place_qty(place, *cumulative);
         *cumulative += amount.qty;
-        let after = lens.place_qty(place, *cumulative);
+        let after = view.place_qty(place, *cumulative);
         after - before
     }
 }
@@ -466,37 +466,36 @@ pub(crate) struct Counted<'a> {
 }
 
 /// Calls `each` for everything the postings real on `cutoff` count, in the order of the journal, and then for what the
-/// claims written off by then took back, as the lens owns it and `wanted` asks for it. What a posting counts is
+/// claims written off by then took back, as the view owns it and `wanted` asks for it. What a posting counts is
 /// `recognition`'s rule, the one the fold counts the totals and the laws by, so that what a report says of a purpose is
 /// what a limit, a law and the forecast say.
 pub(crate) fn for_each_counted<'a>(
-    lens: Lens<'a, '_, '_, '_>,
-    run: &'a Run,
+    view: View<'a, '_, 'a>,
     cutoff: Day,
     wanted: impl Fn(&Flow, &Piece) -> bool,
     mut each: impl FnMut(Counted<'a>),
 ) {
-    let (book, plan) = (lens.book(), lens.plan());
+    let (book, plan) = (view.book(), view.plan());
     let (mut shares, mut pieces) = (MovementShares::default(), Vec::new());
-    for posting in all_postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
+    for posting in all_postings(book, view.run).filter(|posting| posting.is_real_on(cutoff)) {
         let (flow, posted) = (posting.flow, posting.posted);
         Counting::posted(plan, flow, &posted, posting.settlement).pieces(book, &mut pieces);
         for piece in pieces.iter().filter(|piece| wanted(flow, piece)) {
             let (place, signed) = counted_at(book, flow, &posted, piece);
-            if !lens.owns(place) {
+            if !view.owns(place) {
                 continue;
             }
-            let amount = signed.and_then(|signed| priced(lens, flow.day, place, signed, piece, &mut shares));
+            let amount = signed.and_then(|signed| priced(view, flow.day, place, signed, piece, &mut shares));
             each(Counted { flow, purpose: piece.purpose, day: flow.day, recognized: piece.recognized, amount });
         }
     }
-    for Forgiven { day, claim, tab, unit, qty } in forgiven_by(run, book, cutoff) {
+    for Forgiven { day, claim, tab, unit, qty } in forgiven_by(view.run, book, cutoff) {
         let flow = &book.flows[claim];
         Counting::forgiving(plan, flow, tab, day, qty).pieces(book, &mut pieces);
-        for piece in pieces.iter().filter(|piece| wanted(flow, piece) && lens.owns(tab)) {
+        for piece in pieces.iter().filter(|piece| wanted(flow, piece) && view.owns(tab)) {
             let (Share::Part(taken), Counts::Claim { dir, .. }) = (piece.share, piece.counts) else { continue };
             let signed = Amount::new(if dir == Dir::In { taken } else { -taken }, unit);
-            let amount = priced(lens, day, tab, signed, piece, &mut shares);
+            let amount = priced(view, day, tab, signed, piece, &mut shares);
             each(Counted { flow, purpose: piece.purpose, day, recognized: piece.recognized, amount });
         }
     }
@@ -556,16 +555,16 @@ fn counted_at(book: &Book<'_>, flow: &Flow, posted: &Posted, piece: &Piece) -> (
 /// the primary owner: the physical end it moves through carries the effective ownership shares, so the quantity is scoped
 /// there before it is priced. That also keeps a foreign-currency movement's displayed share aligned with the unit posted.
 fn priced(
-    lens: Lens<'_, '_, '_, '_>,
+    view: View<'_, '_, '_>,
     day: Day,
     place: Id<Place>,
     signed: Amount,
     piece: &Piece,
     shares: &mut MovementShares,
 ) -> Option<Qty> {
-    let book = lens.book();
-    let amount = Amount::new(shares.split(lens, place, signed), signed.unit);
-    let value = lens.on(day).value(amount)?;
+    let book = view.book();
+    let amount = Amount::new(shares.split(view, place, signed), signed.unit);
+    let value = view.on(day).value(amount)?;
     match piece.purpose.map(|purpose| book.purposes[purpose.purpose].root) {
         Some(PurposeRoot::Income) => Some(value),
         Some(PurposeRoot::Spending | PurposeRoot::Capital) => Some(Qty(value.0.checked_neg()?)),
@@ -577,32 +576,14 @@ fn priced(
     }
 }
 
-/// The physical endpoint whose amount is used by income/spending reports.
-/// Incoming flows use what reached the owned end; all other flows use what
-/// left the source, which is the end `counted_at` counts a flow's own pieces at.
-pub(crate) fn movement_place(lens: Lens<'_, '_, '_, '_>, flow: &axiom_model::Flow) -> Id<Place> {
-    let book = lens.book();
-    if book.places[flow.from].class == Class::Outside && book.places[flow.to].class != Class::Outside {
-        flow.to
-    } else {
-        flow.from
-    }
-}
-
-/// Applies the same endpoint ownership split to template amounts and other
-/// unpriced quantity views.
-pub(crate) fn scoped_movement_qty(lens: Lens<'_, '_, '_, '_>, flow: &axiom_model::Flow, qty: Qty) -> Qty {
-    lens.place_qty(movement_place(lens, flow), qty)
-}
-
-fn first_activity(lens: Lens<'_, '_, '_, '_>, cutoff: Day) -> Day {
-    let book = lens.book();
+fn first_activity(view: View<'_, '_, '_>, cutoff: Day) -> Day {
+    let book = view.book();
     book.flows
         .iter()
-        .filter(|(_, flow)| lens.owns(movement_place(lens, flow)))
+        .filter(|(_, flow)| view.owns_flow(flow))
         .map(|(_, flow)| flow.day)
         .chain(
-            book.measures.iter().filter(|(_, measure)| lens.owns_entity(measure.owner)).map(|(_, measure)| measure.day),
+            book.measures.iter().filter(|(_, measure)| view.owns_entity(measure.owner)).map(|(_, measure)| measure.day),
         )
         .filter(|day| *day <= cutoff)
         .min()
@@ -611,7 +592,7 @@ fn first_activity(lens: Lens<'_, '_, '_, '_>, cutoff: Day) -> Day {
 
 fn add_facts<'s>(
     section: &mut Section<'s>,
-    lens: Lens<'s, '_, '_, '_>,
+    view: View<'s, '_, '_>,
     periods: Periods,
     concept: &'static str,
     of: Option<&'s str>,
@@ -621,9 +602,9 @@ fn add_facts<'s>(
         section.fact(
             concept,
             of,
-            lens.whose.label(lens.book()),
+            view.whose.label(view.book()),
             crate::When::During(periods.window(index).days()),
-            crate::Money::base(lens.book(), amount),
+            crate::Money::base(view.book(), amount),
         );
     }
 }

@@ -310,7 +310,7 @@ opening 2026-01-01
 ";
 
 #[test]
-fn what_a_value_could_not_price_does_not_depend_on_whose_books_asked_first() {
+fn what_a_value_says_does_not_depend_on_whose_books_asked_first() {
     let value = Query::Balance { globs: vec![], at: None, value: true, monthly: false };
     let texts = Texts::default();
     let fresh = || Session::open(Sources::in_memory(&texts, &[("axiom.ax", TWO_OWNERS)], &[]), options());
@@ -320,8 +320,8 @@ fn what_a_value_could_not_price_does_not_depend_on_whose_books_asked_first() {
     let owners = [None, Some("me"), Some("jordan")];
     let alone: Vec<_> = owners.iter().map(|&owner| ask(&fresh(), owner)).collect();
     let note = "flows have no price on their day";
-    assert!(alone[0].contains(note) && alone[1].contains(note), "everyone and me are told of the flows: {alone:?}");
-    assert!(!alone[2].contains(note), "jordan owns no place that a flow of EUR moved through: {alone:?}");
+    assert!(alone.iter().all(|said| !said.contains(note)), "a value says nothing of the flows it could not price");
+    assert!(alone[1] != alone[2], "two owners' books are two answers, or the order they are asked in proves nothing");
     let session = fresh();
     for (&owner, said) in owners.iter().zip(&alone) {
         assert_eq!(&ask(&session, owner), said, "asked in turn: {owner:?}");

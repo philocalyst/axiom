@@ -75,7 +75,7 @@ use std::ops::Range;
 use crate::calendar::Days;
 use crate::day::Day;
 use crate::dayset::DaySet;
-use crate::groups::bucket;
+use crate::groups::Groups;
 use crate::hash::Map;
 use crate::id::{Id, Run};
 use crate::par;
@@ -753,21 +753,20 @@ impl Builder {
 /// The statements sorted by holder, as the positions of each holder's statements in the order they were made.
 struct ByHolder<'a> {
     statements: &'a [Statement],
-    /// Holder to where its statements begin in `order`; one more at the end.
-    starts: Vec<u32>,
-    order: Vec<u32>,
+    /// The positions of each holder's statements.
+    positions: Groups<(), u32>,
 }
 
 impl<'a> ByHolder<'a> {
     fn new(statements: &'a [Statement], holders: usize) -> ByHolder<'a> {
-        let (starts, order) = bucket(holders, statements.len(), |at| statements[at].holder as usize);
-        ByHolder { statements, starts, order }
+        let pairs = statements.iter().enumerate().map(|(at, statement)| (Id::new(statement.holder), at as u32));
+        ByHolder { statements, positions: Groups::build(holders, pairs) }
     }
 
     /// The store of the holders `holders`, whose rows are numbered from zero.
     fn freeze(&self, holders: Range<usize>) -> Facts {
-        let said = |holder: usize| &self.order[self.starts[holder] as usize..self.starts[holder + 1] as usize];
-        let statements_in = (self.starts[holders.end] - self.starts[holders.start]) as usize;
+        let said = |holder: usize| &self.positions[Id::new(holder as u32)];
+        let statements_in = self.positions.span(holders.start, holders.end).len();
         let mut writer = Writer::with_room_for(holders.len(), statements_in);
         let (mut row, mut painted) = (Vec::new(), Vec::new());
         for holder in holders {

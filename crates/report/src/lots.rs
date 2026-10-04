@@ -5,18 +5,18 @@ use axiom_engine::{Holding, Parcel};
 use axiom_model::{Amount, Book, Class, Place};
 
 use crate::gains::Term;
-use crate::lens::Lens;
 use crate::places::path;
 use crate::table::code_labels;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Builds a lots view from holdings supplied by a shared context ledger.
 pub(crate) fn view_from<'h, 's>(
-    lens: Lens<'s, '_, '_, '_>,
+    view: View<'s, '_, '_>,
     scope: Option<axiom_core::Id<Place>>,
     holdings: impl IntoIterator<Item = &'h Holding>,
 ) -> Report<'s> {
-    let (book, at) = (lens.book(), lens.day);
+    let (book, at) = (view.book(), view.day);
 
     let mut section = Section::new([
         Column::left("Place"),
@@ -35,20 +35,20 @@ pub(crate) fn view_from<'h, 's>(
         .into_iter()
         .filter(|holding| {
             let held = book.places[holding.place].class == Class::Asset;
-            held && lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
+            held && view.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
         })
         .collect();
     held.sort_by_key(|holding| book.listing(holding.place));
     for holding in held {
         for lot in &holding.lots {
-            let quantity = lens.place_qty(holding.place, lot.qty);
-            let lot_basis = lens.place_qty(holding.place, lot.basis);
+            let quantity = view.place_qty(holding.place, lot.qty);
+            let lot_basis = view.place_qty(holding.place, lot.basis);
             if quantity.is_zero() && lot_basis.is_zero() {
                 continue;
             }
-            let worth = lens.value(Amount::new(quantity, holding.unit));
+            let worth = view.value(Amount::new(quantity, holding.unit));
             sum.add(lot_basis, worth);
-            section.push(row(lens, holding, lot, quantity, lot_basis, worth));
+            section.push(row(view, holding, lot, quantity, lot_basis, worth));
         }
     }
 
@@ -104,14 +104,14 @@ impl Sum {
 }
 
 fn row<'s>(
-    lens: Lens<'s, '_, '_, '_>,
+    view: View<'s, '_, '_>,
     holding: &Holding,
     lot: &Parcel,
     quantity: Qty,
     basis: Qty,
     worth: Option<Qty>,
 ) -> Row<'s> {
-    let book = lens.book();
+    let book = view.book();
     let tie = lot.tied.map(|entity| format!("tied to {}", book.name(book.entities[entity].path)));
     let notes =
         code_labels(book, book.codes[lot.codes.header].iter().chain(book.codes[lot.codes.local].iter()).copied())
@@ -122,10 +122,10 @@ fn row<'s>(
         Cell::amount(book, Amount::new(quantity, holding.unit)),
         Cell::base(book, basis),
         Cell::Day(lot.acquired),
-        Cell::text(lens.day.since(lot.acquired).to_string()),
+        Cell::text(view.day.since(lot.acquired).to_string()),
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth)),
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth - basis)),
-        Cell::text(Term::of(book, holding.unit, lot.acquired, lens.day).word()),
+        Cell::text(Term::of(book, holding.unit, lot.acquired, view.day).word()),
         Cell::list_or_blank(" · ", notes),
     ];
     Row::new(cells).style(if worth.is_some() { Style::Normal } else { Style::Muted })

@@ -15,10 +15,8 @@
 
 use std::fmt::{self, Write as _};
 
-use axiom_core::calendar::Window;
-use axiom_core::{Days, Qty, Ratio};
-use axiom_model::{Closing, Period, Trigger};
-use axiom_report::{Align, Cell, Column, Report, ReportRenderer, Row, Section, SourceProvider, Style};
+use axiom_core::Qty;
+use axiom_report::{Align, Cell, CellSink, Column, Mark, Report, ReportRenderer, Row, Section, SourceProvider, Style};
 
 use crate::style::{Ink, Line, Terminal};
 use crate::text::wrap;
@@ -174,15 +172,21 @@ fn cell_string(cell: &Cell<'_>, sources: &dyn SourceProvider) -> String {
     if let Cell::Amount { qty, scale, unit } = cell {
         let _ = write!(&mut text, "{} {unit}", qty.brief(*scale));
     } else {
-        let _ = write_cell(&mut PlainText(&mut text), cell, sources, Ink::PLAIN, 0);
+        write_cell(&mut text, cell, sources, Ink::PLAIN, 0);
     }
     text
 }
 
 fn measure_cell(cell: &Cell<'_>, sources: &dyn SourceProvider, unit_width: usize) -> usize {
     let mut width = Width(0);
-    let _ = write_cell(&mut width, cell, sources, Ink::PLAIN, unit_width);
+    write_cell(&mut width, cell, sources, Ink::PLAIN, unit_width);
     width.0
+}
+
+/// Where a cell is written on a terminal: a line, which draws its ink; a string; or only counted for its width.
+trait Ground: fmt::Write {
+    /// The ink the text that follows is drawn in.
+    fn ink(&mut self, _: Ink) {}
 }
 
 struct StyledLine<'a> {
@@ -203,14 +207,13 @@ impl fmt::Write for StyledLine<'_> {
     }
 }
 
-struct PlainText<'a>(&'a mut String);
-
-impl fmt::Write for PlainText<'_> {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        self.0.push_str(text);
-        Ok(())
+impl Ground for StyledLine<'_> {
+    fn ink(&mut self, ink: Ink) {
+        self.ink = ink;
     }
 }
+
+impl Ground for String {}
 
 #[derive(Default)]
 struct Width(usize);
@@ -222,222 +225,49 @@ impl fmt::Write for Width {
     }
 }
 
-trait CellSink: fmt::Write {
-    fn ink(&mut self, ink: Ink);
-}
+impl Ground for Width {}
 
-impl CellSink for StyledLine<'_> {
-    fn ink(&mut self, ink: Ink) {
-        self.ink = ink;
-    }
-}
-
-impl CellSink for PlainText<'_> {
-    fn ink(&mut self, _: Ink) {}
-}
-
-impl CellSink for Width {
-    fn ink(&mut self, _: Ink) {}
-}
-
-fn write_cell<W: CellSink>(
-    out: &mut W,
-    cell: &Cell<'_>,
-    sources: &dyn SourceProvider,
+/// A cell as a terminal writes it: in its row's ink, a negative amount red and a source dim, a count grouped, and every
+/// unit of a column padded to the widest, so that the numbers of `12.00 USD` and `3.5 VTI` end in the same column.
+struct OnTerminal<'a, G> {
+    to: &'a mut G,
     ink: Ink,
     unit_width: usize,
-) -> bool {
-    out.ink(ink);
-    match cell {
-        Cell::Blank => false,
-        Cell::Text(text) | Cell::Said(text) => {
-            let _ = out.write_str(text);
-            !text.is_empty()
-        }
-        Cell::Word(word) => {
-            let _ = out.write_str(word);
-            !word.is_empty()
-        }
-        Cell::Name(name) => {
-            let _ = out.write_str(name);
-            !name.is_empty()
-        }
-        Cell::Code(code) => {
-            let _ = write!(out, "^{code}");
-            true
-        }
-        Cell::Purpose(purpose) => {
-            let _ = write!(out, "#{purpose}");
-            true
-        }
-        Cell::Day(day) => {
-            let _ = write!(out, "{day}");
-            true
-        }
-        Cell::Span(span) => {
-            let _ = write!(out, "{span}");
-            true
-        }
-        Cell::Period(days) => {
-            let _ = write_period(out, *days);
-            true
-        }
-        Cell::Percent(ratio) => {
-            let _ = write_percent(out, *ratio);
-            true
-        }
-        Cell::Number(ratio) => {
-            let _ = write!(out, "{ratio}");
-            true
-        }
-        Cell::Count(count, noun) => {
-            if noun.is_empty() {
-                let _ = write!(out, "{}", Qty(*count as i64).show(0));
-            } else {
-                let _ = write!(out, "{} {noun}{}", Qty(*count as i64).show(0), if *count == 1 { "" } else { "s" });
-            }
-            true
-        }
-        Cell::Trigger(trigger) => {
-            let _ = write_trigger(out, *trigger);
-            true
-        }
-        Cell::Amount { qty, scale, unit } => {
-            let previous_ink = ink;
-            if qty.is_negative() {
-                out.ink(ink.colored(Ink::RED));
-            }
-            let _ = write!(out, "{} {unit}", qty.show(*scale));
-            let padding = unit_width.saturating_sub(unit.chars().count());
-            for _ in 0..padding {
-                let _ = out.write_char(' ');
-            }
-            out.ink(previous_ink);
-            true
-        }
-        Cell::Source(loc) => {
-            let Some(position) = SourceProvider::describe(sources, *loc) else {
-                return false;
-            };
-            out.ink(Ink::DIM);
-            let _ = write!(out, "{}:{}", position.path, position.line);
-            true
-        }
-        Cell::Join(separator, parts) => {
-            let mut any = false;
-            for part in parts {
-                if !cell_visible(part, sources) {
-                    continue;
-                }
-                if any && !(*separator == " " && starts_with_punctuation(part, sources)) {
-                    let _ = out.write_str(separator);
-                }
-                any |= write_cell(out, part, sources, ink, unit_width);
-            }
-            any
-        }
-    }
 }
 
-fn cell_visible(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
-    match cell {
-        Cell::Blank => false,
-        Cell::Text(text) | Cell::Said(text) => !text.is_empty(),
-        Cell::Word(text) => !text.is_empty(),
-        Cell::Name(text) => !text.is_empty(),
-        Cell::Purpose(text) => !text.is_empty(),
-        Cell::Source(loc) => SourceProvider::describe(sources, *loc).is_some_and(|p| !p.path.is_empty()),
-        Cell::Join(_, parts) => parts.iter().any(|part| cell_visible(part, sources)),
-        _ => true,
-    }
-}
-
-fn starts_with_punctuation(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
-    let first = match cell {
-        Cell::Text(text) | Cell::Said(text) => text.chars().next(),
-        Cell::Word(text) => text.chars().next(),
-        Cell::Name(text) => text.chars().next(),
-        Cell::Purpose(text) => text.chars().next().or(Some('#')),
-        Cell::Source(loc) => SourceProvider::describe(sources, *loc).and_then(|p| p.path.chars().next()),
-        Cell::Join(_, parts) => {
-            return parts
-                .iter()
-                .find(|part| cell_visible(part, sources))
-                .is_some_and(|part| starts_with_punctuation(part, sources));
-        }
-        _ => None,
-    };
-    first.is_some_and(|ch| matches!(ch, ',' | ';' | ':' | '.' | ')'))
-}
-
-fn write_period(out: &mut impl fmt::Write, days: Days) -> fmt::Result {
-    match (Window::exactly(days), days.single()) {
-        (Some(window), _) => write!(out, "{window}"),
-        (None, Some(day)) => write!(out, "on {day}"),
-        (None, None) if days == Days::ALWAYS => out.write_str("ever"),
-        (None, None) => write!(out, "{}..{}", days.first(), days.last()),
-    }
-}
-
-fn write_trigger(out: &mut impl fmt::Write, trigger: Trigger) -> fmt::Result {
-    match trigger {
-        Trigger::In => out.write_str("on in"),
-        Trigger::Out => out.write_str("on out"),
-        Trigger::Gain => out.write_str("on gain"),
-        Trigger::Spend => out.write_str("on spend"),
-        Trigger::Flow => out.write_str("on flow"),
-        Trigger::Each(Period::Month, _) => out.write_str("each month"),
-        Trigger::Each(Period::Year, None) => out.write_str("each year"),
-        Trigger::Each(Period::Year, Some(Closing { month, day })) => {
-            write!(out, "each year closing {month:02}-{day:02}")
-        }
-        Trigger::By(_) => out.write_str("by a date"),
-        Trigger::Always => out.write_str("always"),
-    }
-}
-
-/// Formats a percent through a small stack buffer, then writes the trimmed
-/// digits into the renderer without allocating a temporary String.
-fn write_percent(out: &mut impl fmt::Write, ratio: Ratio) -> fmt::Result {
-    let Some(hundredths) = Qty(10_000).scale(ratio) else {
-        return write!(out, "{ratio}");
-    };
-    let mut shown = StackText::new();
-    write!(&mut shown, "{}", hundredths.show(2))?;
-    while shown.len > 0 && shown.bytes[shown.len - 1] == b'0' {
-        shown.len -= 1;
-    }
-    if shown.len > 0 && shown.bytes[shown.len - 1] == b'.' {
-        shown.len -= 1;
-    }
-    out.write_str(shown.as_str())?;
-    out.write_char('%')
-}
-
-struct StackText {
-    bytes: [u8; 64],
-    len: usize,
-}
-
-impl StackText {
-    fn new() -> StackText {
-        StackText { bytes: [0; 64], len: 0 }
-    }
-
-    fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.len]).expect("formatted numbers are UTF-8")
-    }
-}
-
-impl fmt::Write for StackText {
+impl<G: Ground> fmt::Write for OnTerminal<'_, G> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        let Some(end) = self.len.checked_add(text.len()).filter(|&end| end <= self.bytes.len()) else {
-            return Err(fmt::Error);
-        };
-        self.bytes[self.len..end].copy_from_slice(text.as_bytes());
-        self.len = end;
+        self.to.write_str(text)
+    }
+}
+
+impl<G: Ground> CellSink for OnTerminal<'_, G> {
+    fn mark(&mut self, mark: Mark) {
+        self.to.ink(match mark {
+            Mark::Plain => self.ink,
+            Mark::Negative => self.ink.colored(Ink::RED),
+            Mark::Source => Ink::DIM,
+        });
+    }
+
+    fn count(&mut self, count: usize) -> fmt::Result {
+        write!(self, "{}", Qty(count as i64).show(0))
+    }
+
+    fn amount(&mut self, qty: Qty, scale: u8, unit: &str) -> fmt::Result {
+        if qty.is_negative() {
+            self.mark(Mark::Negative);
+        }
+        write!(self, "{} {unit}", qty.show(scale))?;
+        write!(self, "{:1$}", "", self.unit_width.saturating_sub(unit.chars().count()))?;
+        self.mark(Mark::Plain);
         Ok(())
     }
+}
+
+/// Writes `cell` to `to` in `ink`, its amounts padded to `unit_width`.
+fn write_cell<G: Ground>(to: &mut G, cell: &Cell<'_>, sources: &dyn SourceProvider, ink: Ink, unit_width: usize) {
+    let _ = cell.write_plain(&mut OnTerminal { to, ink, unit_width }, sources);
 }
 
 #[cfg(test)]

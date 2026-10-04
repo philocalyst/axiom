@@ -15,7 +15,7 @@ use std::iter;
 
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Id, Map, Qty, Span};
-use axiom_engine::{Checkpoint, Effect, Options, Planned, Recorded, Run, Violation};
+use axiom_engine::{Checkpoint, Effect, Options, Planned, Recorded, Violation};
 use axiom_model::{Amount, Book, Contract, Flow, Law, Period, Subject};
 
 use self::bands::{Bands, Share};
@@ -24,9 +24,9 @@ use self::trace::Trace;
 use self::variable::Variable;
 use crate::calendar::Periods;
 use crate::closings;
-use crate::lens::{Lens, Whose};
 use crate::places::{path, route};
 use crate::table::{headline, plural};
+use crate::view::{View, Whose};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// A fixed seed: the same books always give the same bands.
@@ -43,28 +43,27 @@ pub(crate) struct Past<'a> {
     pub effects: &'a [Effect],
 }
 
-/// The forecast of the lens's owners to `until` (default: a year ahead), with `paths` simulated futures around it.
-pub(crate) fn view<'b, 's, 'p>(
+/// The forecast of the view's owners to `until` (default: a year ahead), with `paths` simulated futures around it.
+pub(crate) fn report<'b, 's>(
     past: Past<'_>,
-    run: &Run,
-    lens: Lens<'b, 's, '_, 'p>,
+    view: View<'b, 's, '_>,
     options: Options,
     until: Option<Day>,
     paths: u32,
 ) -> Report<'b> {
-    let book = lens.book();
-    let today = run.today;
+    let book = view.book();
+    let today = view.run.today;
     let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
 
-    let expected = expected(lens, run);
+    let expected = expected(view);
     let habits = habit_flows(book, &expected, today, until);
     let checkpoints = checkpoints(today, until);
-    let trace = Trace::run(lens, &past, options, habits, &checkpoints);
-    let (contract_rows, contract_issues) = contract_rows(lens, trace.ledger.recorded());
+    let trace = Trace::run(view, &past, options, habits, &checkpoints);
+    let (contract_rows, contract_issues) = contract_rows(view, trace.ledger.recorded());
 
-    let due = coming_due(&trace, past.effects, lens.whose, today);
-    let committed = committed(lens, &checkpoints, &trace.liquid, &due);
-    let variable = Variable::from_history(lens, run, |flow| {
+    let due = coming_due(&trace, past.effects, view.whose, today);
+    let committed = committed(view, &checkpoints, &trace.liquid, &due);
+    let variable = Variable::from_history(view, |flow| {
         expected.iter().any(|expectation| expectation.covers(flow)) || covered_by_contract(book, flow)
     });
     let bands = simulate(&checkpoints, &committed, &variable, paths);
@@ -75,7 +74,7 @@ pub(crate) fn view<'b, 's, 'p>(
     }
 
     let mut report =
-        Report::new(format!("Forecast to {until}")).with(outlook).with(expected_section(lens, &expected, today, until));
+        Report::new(format!("Forecast to {until}")).with(outlook).with(expected_section(view, &expected, today, until));
     if !book.contracts.is_empty() {
         report = report.with(contract_section(book, &contract_rows, &contract_issues));
     }
@@ -126,7 +125,7 @@ fn checkpoints(today: Day, until: Day) -> Vec<Day> {
     days
 }
 
-/// Obligations of the lens's owners falling due after `today`, soonest first.
+/// Obligations of the view's owners falling due after `today`, soonest first.
 /// A checkpoint deliberately forgets past records, so its paired run supplies
 /// the exact pre-close prefix while the resumed ledger supplies closings and
 /// flows from today onward.
@@ -155,11 +154,11 @@ fn select_due_effects<'a>(
 }
 
 /// The liquid position at each checkpoint, less obligations already due.
-fn committed(lens: Lens, checkpoints: &[Day], liquid: &[Qty], due: &[&Effect]) -> Vec<Qty> {
-    let lens = lens.on(checkpoints[0]);
+fn committed(view: View, checkpoints: &[Day], liquid: &[Qty], due: &[&Effect]) -> Vec<Qty> {
+    let view = view.on(checkpoints[0]);
     let owed_by = |day: Day| -> Qty {
         let paid = due.iter().filter(|effect| effect.owed().is_some_and(|owed| owed.due <= day));
-        paid.filter_map(|effect| lens.value(effect.amount)).sum()
+        paid.filter_map(|effect| view.value(effect.amount)).sum()
     };
     checkpoints.iter().zip(liquid).map(|(&day, &liquid)| liquid - owed_by(day)).collect()
 }
@@ -242,8 +241,8 @@ fn outlook_section<'s>(
 
 /// One row for each thing that recurs, soonest first: a paycheck's legs are one
 /// row, shown under its biggest leg with what all of them come to.
-fn expected_section<'s>(lens: Lens<'s, '_, '_, '_>, expected: &[Expectation], today: Day, until: Day) -> Section<'s> {
-    let book = lens.book();
+fn expected_section<'s>(view: View<'s, '_, '_>, expected: &[Expectation], today: Day, until: Day) -> Section<'s> {
+    let book = view.book();
     let columns = [
         Column::left("Expected"),
         Column::left("Every"),
@@ -264,7 +263,7 @@ fn expected_section<'s>(lens: Lens<'s, '_, '_, '_>, expected: &[Expectation], to
         let total = legs
             .iter()
             .filter(|leg| leg.out.unit == main.out.unit)
-            .map(|leg| crate::flow::scoped_movement_qty(lens, leg.template, leg.out.qty))
+            .map(|leg| view.flow_qty(leg.template, leg.out.qty))
             .sum();
         let next = legs
             .iter()
@@ -308,8 +307,8 @@ struct ContractRow {
 /// A row of "Contract occurrences" for each occurrence the ledger promised, and what could not be forecast: an occurrence
 /// that could not be made, and the inputs an occurrence needs that nothing says. The promised occurrences are in the
 /// order they fell due, which is the order of the rows.
-fn contract_rows(lens: Lens, recorded: Recorded) -> (Vec<ContractRow>, Vec<(Id<Contract>, String)>) {
-    let book = lens.book();
+fn contract_rows(view: View, recorded: Recorded) -> (Vec<ContractRow>, Vec<(Id<Contract>, String)>) {
+    let book = view.book();
     let (mut rows, mut issues) = (Vec::new(), Vec::new());
     for planned in recorded.planned {
         let made = match planned.made {
@@ -320,7 +319,7 @@ fn contract_rows(lens: Lens, recorded: Recorded) -> (Vec<ContractRow>, Vec<(Id<C
             }
         };
         let flows = made.flows(recorded.promised_flows).unwrap_or_default();
-        rows.push(contract_row(lens, planned, flows));
+        rows.push(contract_row(view, planned, flows));
         let missing = made.missing(recorded.promised_inputs).unwrap_or_default();
         if !missing.is_empty() {
             let terms = book.contracts[planned.contract].terms_of(planned.schedule);
@@ -334,17 +333,13 @@ fn contract_rows(lens: Lens, recorded: Recorded) -> (Vec<ContractRow>, Vec<(Id<C
 }
 
 /// One occurrence as a row: what it is (its biggest flow's route), how often, and what it comes to.
-fn contract_row(lens: Lens, planned: &Planned, flows: &[axiom_model::RuntimeFlow]) -> ContractRow {
-    let (book, contract) = (lens.book(), &lens.book().contracts[planned.contract]);
+fn contract_row(view: View, planned: &Planned, flows: &[axiom_model::RuntimeFlow]) -> ContractRow {
+    let (book, contract) = (view.book(), &view.book().contracts[planned.contract]);
     let main = flows.iter().filter(|flow| flow.flow.day == planned.due).max_by_key(|flow| flow.flow.out.qty.abs());
     let amount = main.map(|main| {
         let same_unit =
             |flow: &&axiom_model::RuntimeFlow| flow.flow.day == planned.due && flow.flow.out.unit == main.flow.out.unit;
-        let qty = flows
-            .iter()
-            .filter(same_unit)
-            .map(|flow| crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty))
-            .sum();
+        let qty = flows.iter().filter(same_unit).map(|flow| view.flow_qty(&flow.flow, flow.flow.out.qty)).sum();
         Amount::new(qty, main.flow.out.unit)
     });
     let what = main.map_or_else(|| book.name(contract.name).to_string(), |flow| route(book, &flow.flow));
@@ -526,8 +521,8 @@ mod tests {
         crate::source_tests::with_run(&text, day(2026, 3, 1), |book, run| {
             let plan = axiom_engine::Plan::new(book);
             let whose = Whose::default();
-            let lens = Lens::new(&plan, &whose, day(2026, 3, 1));
-            let habits = expected(lens, run);
+            let view = View::new(&plan, &whose, run, day(2026, 3, 1));
+            let habits = expected(view);
             let (today, until) = (day(2026, 3, 1), day(2026, 6, 30));
             let apart: Vec<_> =
                 habits.iter().flat_map(|habit| habit.flows(today, until)).map(|flow| flow.day).collect();
