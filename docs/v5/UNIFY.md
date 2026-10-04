@@ -1831,3 +1831,9 @@ declared-lines corpus (`docs/v5/measure/diff/cases3/`) and its run on a baseline
 and prorata bench books (`bench/gen.py`) and K3e's model-based relief test (a test module; `lots.rs`'s code unchanged); the
 mutation lists the instruments can already be held to. The Book dump waits for C1: it needs L1's `Debug` derives and K6b's
 `Book` fields.
+
+Phase 1a done (2026-10-04): the count restated (55,367); `core` clean under `clippy -D warnings` (+9 lines: `Add<Span>`
+for `Day`, `Neg` for `Dec`, a type name; 55,376); the declared-lines corpus (208 cases, 68 codes, all raising what they
+claim on a baseline binary of `b3b98fc`); the relief model test and its fourteen mutants, all killed; the relief books.
+The corpus found that `currency USD` cannot be written (the built-in's reader asks for a name, a currency is lexed as a
+unit): a bug for lane D or for U4, whose `Want::Commodity` reads units.

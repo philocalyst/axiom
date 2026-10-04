@@ -229,6 +229,15 @@ Phase 1a, the instruments (`claude/great-wozniak-pnqn7x-v5-unify`; the plan is `
 `peg.rs` 3); it now skips the module to its matching brace. **Baseline: 55,367** at `a21eee9` (53,419 by the old counter):
 model 19,777, engine 12,463, report 6,804, syntax 5,634, sync 4,339, core 3,484, cli 2,350, session 502, systems 14.
 
+The instruments, built: `core` is clean under `clippy -D warnings` (the workspace beyond it has 238 warnings, 168 of them
+`result_large_err`); **the declared-lines corpus** (`measure/diff/declared.py`, `cases3/`: 208 books, every error path of
+the readers U4/U5 replace, 68 codes, all raising what they claim on a baseline binary of `b3b98fc`); **the relief model
+test** (`engine/src/lots/tests/relief_model.rs`: 3,000 seeded holdings, every policy, ties, selectors, merges; today's
+relief agrees everywhere) with **fourteen mutants, all killed** (`measure/u/relief_mutants.py`); **the relief books**
+(`bench/gen.py --relief`: 100k lots and 50k sales, `check` 0.69 s and 128 MB with HIFO; pro rata 2k and 1k, 0.27 s;
+load 5.6). Found: `currency USD` cannot be written (the reader wants a name, a currency is a unit). Running total
+**55,376**.
+
 ## K5e, in numbers
 
 | | |
