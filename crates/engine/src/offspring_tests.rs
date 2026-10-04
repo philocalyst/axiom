@@ -366,3 +366,19 @@ opening 2026-01-01
         assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
     });
 }
+
+#[test]
+fn the_claim_the_monitor_makes_for_a_missed_occurrence_derives_nothing() {
+    // The party owes the owner, so a missed occurrence is a claim, which the monitor posts.
+    let contract = "contract rent with stripe\n  100.00 USD monthly on 15 into checking\n  from 2026-01-15\n  until 2026-02-28\n  due 5d\n";
+    let head = Lines { stripe: "  also + 2% of amount #fee\n", ..Lines::default() }.book();
+    let text = format!("{head}{contract}2026-01-15 rent\n");
+    with_run(&text, day(2026, 6, 1), |_, run| {
+        assert!(run.diagnostics.iter().any(|diagnostic| diagnostic.code == "overdue"), "{:?}", run.diagnostics);
+        assert_eq!(
+            run.offspring.len(),
+            1,
+            "the occurrence that was kept derives, and the claim for the one that was not does not"
+        );
+    });
+}
