@@ -61,7 +61,9 @@ impl Promises {
     /// loan, for a day before the loan was made, and for a statement that agrees with the schedule.
     pub fn reconcile(&self, book: &Book<'_>, contract: Id<Contract>, day: Day, stated: Qty) -> Option<Disagreement> {
         let loan = self.loan(contract)?;
-        loan.disagreement(&Said::of(book, contract, &book.contracts[contract]), day, stated)
+        // What the book says of the loan is read off every transaction, so only a statement that disagrees pays for it.
+        (loan.open_on(day)? != stated)
+            .then(|| loan.disagreement(&Said::of(book, contract, &book.contracts[contract]), day, stated))?
     }
 }
 
