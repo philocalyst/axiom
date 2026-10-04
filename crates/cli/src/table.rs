@@ -18,7 +18,7 @@ use std::fmt::{self, Write as _};
 use axiom_core::calendar::Window;
 use axiom_core::{Days, Qty, Ratio};
 use axiom_model::{Closing, Period, Trigger};
-use axiom_report::{Align, Cell, Column, Report, ReportRenderer, Row, Section, SourceProvider, Style, percent};
+use axiom_report::{Align, Cell, Column, Report, ReportRenderer, Row, Section, SourceProvider, Style};
 
 use crate::style::{Ink, Line, Terminal};
 use crate::text::wrap;
@@ -447,6 +447,7 @@ mod tests {
     use axiom_core::{Day, Qty, Ratio};
 
     use super::*;
+    use axiom_report::percent;
     use axiom_session::{Sources, Texts};
 
     fn column(title: &'static str, align: Align) -> Column<'static> {
