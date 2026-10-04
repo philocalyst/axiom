@@ -166,8 +166,8 @@ impl Said {
 
     /// What `after` says differently, if anything: the first thing it says another way.
     fn changed_by(&self, after: &Said) -> Option<String> {
-        let counts = self.counted.iter().zip(&after.counted);
-        let count = counts.filter(|(before, after)| before.1 != after.1).next();
+        let mut counts = self.counted.iter().zip(&after.counted);
+        let count = counts.find(|(before, after)| before.1 != after.1);
         if let Some(((what, before), (_, after))) = count {
             return Some(format!("the {what} the book holds: {before} before, {after} after"));
         }
