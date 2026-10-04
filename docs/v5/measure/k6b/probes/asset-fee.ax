@@ -1,0 +1,11 @@
+use std
+base USD
+purpose fee : spending
+entity me : person
+entity shop
+account checking : bank
+asset house : property
+  also + 5% of amount #fee
+2025-12-31 market -> checking 10_000.00 USD
+2026-02-05 checking -> shop 100.00 USD #repair of house
+2026-02-06 checking -> shop 50.00 USD #repair

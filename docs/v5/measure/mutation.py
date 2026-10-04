@@ -8,6 +8,9 @@ mutant at all). What neither catches is SURVIVED: an equivalent change, or a cor
 which.
 
     mutate(TREE, WORK, MUTANTS, detect[, ONLY])    prints one line per mutant and writes WORK/mutants.txt
+
+A mutant may say after what it means which layer of the oracle is able to see it, as a fifth word that `detect` is given
+(`detect(source, work, layer)`): one that changes only an order the engine's dump does not hold is for the CLI to find.
 """
 import os
 import re
@@ -50,7 +53,7 @@ def mutate(tree, work, mutants, detect, only=None):
     known = failing_tests(source, work)
     print(f"the tests fail without a mutant: {sorted(known)}", flush=True)
     results = []
-    for number, (path, old, replacement, what) in enumerate(mutants):
+    for number, (path, old, replacement, what, *layer) in enumerate(mutants):
         if only is not None and number not in only:
             continue
         target = os.path.join(source, path)
@@ -58,7 +61,7 @@ def mutate(tree, work, mutants, detect, only=None):
         assert original.count(old) == 1, f"mutant {number}: the text occurs {original.count(old)} times in {path}"
         open(target, "w").write(original.replace(old, replacement))
         try:
-            outcome = detect(source, work)
+            outcome = detect(source, work, *layer)
             if outcome is None:
                 new = sorted(failing_tests(source, work) - known)
                 outcome = "SURVIVED" if not new else "killed by test " + new[0] + (f" and {len(new) - 1} more" if len(new) > 1 else "")

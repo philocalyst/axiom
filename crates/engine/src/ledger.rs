@@ -24,7 +24,7 @@ use axiom_model::{
 use crate::Promise;
 use crate::checkpoint::CheckpointPhase;
 use crate::monitor;
-use crate::motion::{Amounts, Motion};
+use crate::motion::{Amounts, Course, Motion};
 use crate::plan::Plan;
 use crate::promising::Promising;
 use crate::scope::is_money;
@@ -332,6 +332,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             promises: &record.promises,
             planned: &record.planned,
             promised_flows: &record.promised_flows,
+            offspring: &record.offspring,
+            first_offspring: record.first_offspring,
             promised_inputs: &record.promise_missing_inputs,
             promised_details: &record.promise_runtime_details,
         }
@@ -382,6 +384,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             assets,
             promises: record.promises,
             promised_flows: record.promised_flows.into_boxed_slice(),
+            offspring: record.offspring.into_boxed_slice(),
             runtime_details: record.promise_runtime_details,
             missing_inputs: record.promise_missing_inputs.into_boxed_slice(),
             open_claims,
@@ -469,13 +472,13 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 let split = self.plan.book.splits[at as usize];
                 self.world.holdings.scale(split.unit, split.ratio);
             }
-            Fact::Source(_, SourceFact::Flow(id)) => self.post_journal(id, moment.day, false),
+            Fact::Source(_, SourceFact::Flow(id)) => self.post_journal(id, moment.day, Course::Forward),
             Fact::Source(_, SourceFact::Occurrence(txn)) => self.post_written_occurrence(txn, moment.day),
             Fact::ClaimChange(at) => self.write_off(at),
             // A settlement lands a pending flow; a return runs an actual one backwards.
             Fact::Settle(id) => {
                 let returned = matches!(self.plan.events.state(id, &self.plan.book.flows[id]), State::Returned(_));
-                self.post_journal(id, moment.day, returned);
+                self.post_journal(id, moment.day, if returned { Course::Back } else { Course::Forward });
             }
             Fact::Assert(index) => self.reconcile(index as usize),
             Fact::Deadline(rule, period) => self.deadline(rule as usize, moment.day, period),
@@ -493,7 +496,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// Evaluate sparse computed journal roots before posting their source
     /// flow. Literal-only flows retain the borrowed fast path above; computed
     /// quantities never fall back to the zero placeholders stored in Book.
-    fn post_journal(&mut self, id: Id<Flow>, day: Day, reversed: bool) {
+    fn post_journal(&mut self, id: Id<Flow>, day: Day, course: Course) {
         let book = self.plan.book;
         let source = &book.flows[id];
         let txn_id = source.txn;
@@ -515,10 +518,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let computed_cost_item = cost_item.is_some_and(|(_, item)| matches!(item.amount, Cut::Of(Expr::Computed(_))));
         if roots.is_none() && cost_header.is_none() && !computed_cost_item {
             let motion = self.journal_motion(id, day);
-            self.post(&if reversed { motion.reversed() } else { motion });
+            self.post(&motion.running(course));
             return;
         }
-        if let Err(problem) = self.post_computed(id, day, reversed, roots, cost_header) {
+        if let Err(problem) = self.post_computed(id, day, course, roots, cost_header) {
             self.record.report(problem);
         }
     }
@@ -529,7 +532,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         &mut self,
         id: Id<Flow>,
         day: Day,
-        reversed: bool,
+        course: Course,
         roots: Option<FlowExpressions>,
         cost_header: Option<&'b Made>,
     ) -> Result<(), Diagnostic> {
@@ -582,7 +585,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         // A computed basis is a call-local override: borrow it for this motion and allocate no runtime detail.
         let view = book.flow_view_with_detail(&flow, &detail);
         let motion = Motion::from_view_at(book, view, txn, Cause::Flow(id), day, amounts, offset.unwrap_or_default());
-        self.post(&if reversed { motion.reversed() } else { motion });
+        self.post(&motion.running(course));
         Ok(())
     }
 

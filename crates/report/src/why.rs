@@ -87,7 +87,7 @@ fn state_words(state: State) -> Cow<'static, str> {
 }
 
 /// What laws counted or owed, when, and for whom.
-fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> Section<'s> {
+fn effects_table<'s>(book: &'s Book<'_>, run: &Run, effects: &[&Effect], heading: &str) -> Section<'s> {
     let columns = ["Date", "Effect", "Owner"].map(Column::left).into_iter();
     let mut section =
         Section::new(columns.chain([Column::right("Amount")]).chain(["Owed to", "From"].map(Column::left)));
@@ -101,7 +101,7 @@ fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> 
             Cell::text(book.name(book.entities[effect.owner].path)),
             Cell::amount(book, effect.amount),
             owed,
-            cause_cell(book, effect.cause),
+            cause_cell(book, run, effect.cause),
         ];
         section.push(Row::new(cells));
     }

@@ -10,7 +10,7 @@ use axiom_model::{Amount, Book, Class, Commodity, End, Period, Place};
 
 use crate::balances::Balances;
 use crate::calendar::Periods;
-use crate::history::{Change, postings};
+use crate::history::{Change, all_postings};
 use crate::lens::{Basket, Lens, Valued, on_balance_sheet};
 use crate::places::{depth, leaf, names, path};
 use crate::resolve;
@@ -119,7 +119,7 @@ impl Unpriced {
     pub(crate) fn of(lens: Lens, run: &Run) -> Unpriced {
         let book = lens.book();
         let mut ends = Vec::new();
-        for posting in postings(book, run) {
+        for posting in all_postings(book, run) {
             let Some((start, past)) = posting.standing() else { continue };
             let on_its_day = lens.on(posting.flow.day);
             for end in [End::From, End::To] {

@@ -1,0 +1,27 @@
+// MISTAKE: nine purposes each derive a flow for the next, so a flow is derived through more laws than a chain may have.
+use std
+base USD
+purpose p0 : spending
+  also - 100% of amount #p1
+purpose p1 : spending
+  also - 100% of amount #p2
+purpose p2 : spending
+  also - 100% of amount #p3
+purpose p3 : spending
+  also - 100% of amount #p4
+purpose p4 : spending
+  also - 100% of amount #p5
+purpose p5 : spending
+  also - 100% of amount #p6
+purpose p6 : spending
+  also - 100% of amount #p7
+purpose p7 : spending
+  also - 100% of amount #p8
+purpose p8 : spending
+  also - 100% of amount #p9
+purpose p9 : spending
+entity me : person
+entity shop
+account checking : bank
+2025-12-31 market -> checking 1_000.00 USD
+2026-01-05 checking -> shop 10.00 USD #p0

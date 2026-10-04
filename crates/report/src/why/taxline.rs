@@ -14,17 +14,16 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, name: &str) -> Report<'
     let book = lens.book();
     let effects: Vec<&Effect> =
         run.effects.iter().filter(|effect| book.name(effect.name) == name && lens.owns_entity(effect.owner)).collect();
-    let mut flows: Vec<Id<Flow>> = effects
-        .iter()
-        .filter_map(|effect| if let Cause::Flow(flow) = effect.cause { Some(flow) } else { None })
-        .collect();
+    let mut flows: Vec<Id<Flow>> =
+        effects.iter().filter_map(|effect| crate::history::journal_root(run, effect.cause)).collect();
     flows.sort_unstable();
     flows.dedup();
-    let sold =
-        run.gains.iter().filter(|gain| matches!(gain.cause, Cause::Flow(flow) if flows.binary_search(&flow).is_ok()));
+    let sold = run.gains.iter().filter(|gain| {
+        crate::history::journal_root(run, gain.cause).is_some_and(|flow| flows.binary_search(&flow).is_ok())
+    });
     let sold: Vec<&Gain> = sold.collect();
 
-    let mut tallied = effects_table(book, &effects, "Effects");
+    let mut tallied = effects_table(book, run, &effects, "Effects");
     if effects.iter().any(|effect| effect.cause == Cause::Time) {
         tallied.note("Effects from a period ending were computed from the tallies counted during it.");
     }

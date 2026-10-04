@@ -1,20 +1,24 @@
-//! `derive`: the step of a law that makes a flow, and the lines of a contract that are such laws.
+//! `derive`: the step of a law that makes a flow, and the lines that are such laws.
 //!
-//! A law judges (`require`, `warn`) or it derives. What it derives is read when a promise's occurrence is made (the
-//! fold's `derive.rs`), so a deriving law belongs to a contract, fires on `on flow`, and says nothing a posted flow
-//! would judge: a flow of its own, or an item of the occurrence's header (LANGUAGE §10). This module compiles one
-//! such step: its template, which is data, and its amount, which is a node of the law like any other.
+//! A law judges (`require`, `warn`) or it derives, and a law that derives fires on `on flow` and says nothing a flow
+//! would judge (LANGUAGE §10). Where it is written decides when what it derives is made. A contract's law is read when
+//! a promise's occurrence is made, before any of it posts (the fold's `occurrence/derive.rs`), so what it derives can
+//! be an item carved from the header. Any other law is read as a flow posts, and what it derives is made of a flow that
+//! has moved (the fold's `offspring.rs`): a flow of its own, or an item that is a flow along the header's ends or back.
+//! This module compiles one such step: its template, which is data, and its amount, which is a node of the law like any
+//! other.
 //!
-//! Two lines a contract writes say a law in fewer words, and are compiled to it here, so that nothing else in the
-//! book or the fold knows them: `also LINE [when E]` is `on flow`, `when E`, `derive LINE`; and `share 60% for
-//! studio` is `on flow`, `derive 60% of amount`, an item carved from the header and borne by the studio.
+//! Lines say a law in fewer words, and are compiled to it here, so that nothing else in the book or the fold knows
+//! them: `also LINE [when E]`, under a contract or any declaration, is `on flow`, `when E`, `derive LINE`; and a
+//! contract's `share 60% for studio` is `on flow`, `derive 60% of amount`, an item carved from the header and borne by
+//! the studio.
 
 use axiom_core::{Arena, Diagnostic, Dim, Id, Loc, Run};
 use axiom_syntax as ast;
 
 use super::line::{Positions, lower_selectors, read_line, tail};
 use super::{Compiler, Placement, When};
-use crate::book::{Amount, Derived, Shape, Share};
+use crate::book::{Amount, Derived, Shape, Share, Stand};
 use crate::declare::World;
 use crate::errors::Reported;
 use crate::law::{BinOp, Effect, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var};
@@ -85,10 +89,6 @@ pub(crate) fn share(world: &mut World<'_>, owner: Owner, home: Home, share: &Sha
 impl<'s> Compiler<'_, '_, 's> {
     /// `derive ITEM | FLOW`, or nothing after what is wrong with it has been said.
     pub(super) fn derive(&mut self, line: &ast::AlsoLine<'s>, loc: Loc) -> Option<Effect> {
-        if !matches!(self.owner, Some(Owner::Contract(_))) {
-            self.report(not_a_contracts(loc));
-            return None;
-        }
         let said = read_line(self.world, self.home, self.file, line, loc, self.positions, self.diags);
         let Some(said) = said else {
             self.failed = true;
@@ -105,8 +105,9 @@ impl<'s> Compiler<'_, '_, 's> {
             self.failed = true;
             return None;
         }
+        let in_contract = matches!(self.owner, Some(Owner::Contract(_)));
         let derived = Derived {
-            shape: said.shape,
+            shape: if in_contract { flows_own_ends(said.shape) } else { said.shape },
             owner: None,
             purpose: metadata.purpose,
             description: metadata.description,
@@ -116,6 +117,10 @@ impl<'s> Compiler<'_, '_, 's> {
             waive: metadata.waive,
             loc,
         };
+        if !in_contract && !derived.follows_a_posted_flow() {
+            self.report(changes_a_posted_flow(loc));
+            return None;
+        }
         Some(Effect::Derive { template: self.world.book.derived.push(derived), amount })
     }
 
@@ -156,11 +161,20 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 }
 
-fn not_a_contracts(loc: Loc) -> Diagnostic {
-    Diagnostic::error("derive-owner", "a derived flow is made only for the occurrences of a contract")
-        .label(loc, "this law is not a contract's")
-        .note("a law that fires on a posted flow cannot change what that flow already moved; an occurrence is made before it posts, so a flow can join it")
-        .help("write the law inside the contract whose occurrences should carry it")
+/// A contract's `self` is the flow itself, so as an end it is the flow's own at that position, as no end at all is.
+fn flows_own_ends(shape: Shape) -> Shape {
+    let own = |stand| if stand == Stand::Subject { Stand::Flow } else { stand };
+    match shape {
+        Shape::Flow { from, to } => Shape::Flow { from: own(from), to: own(to) },
+        item @ Shape::Item(_) => item,
+    }
+}
+
+fn changes_a_posted_flow(loc: Loc) -> Diagnostic {
+    Diagnostic::error("derive-posted", "a flow that has posted cannot be changed or given away in part")
+        .label(loc, "this item is a part of the flow it comes with, or takes from it")
+        .note("a law that is not a contract's is read as a flow posts, after its value has moved; only an occurrence is made before it posts, so only a contract's law can carve an item out of it")
+        .help("give it a purpose, so that it is a flow of its own along the same ends (`+ 5% of amount #fee`) or back (`- 5% of amount #refund`)")
 }
 
 fn not_on_flow(step: Loc, law: Loc) -> Diagnostic {

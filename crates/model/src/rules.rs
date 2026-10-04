@@ -14,13 +14,39 @@
 //! the place's owner, and a member who lives somewhere of their own is governed
 //! there as themselves.
 
-use axiom_core::{Days, Groups, Id};
+use axiom_core::{Days, Diagnostic, Groups, Id, Set};
 
 use crate::book::{Book, Contract, Entity, Place, Role, Sort, System};
 use crate::law::{Keys, Law, Owner, Rule, Rules, Subject, Trigger, Watch};
 
 pub(crate) fn govern(book: &mut Book, rank: &[u32]) {
     book.rules = Rules::of(book, rank);
+}
+
+/// Says of each `on flow` law of the project that no flow can reach, because nothing it governs exists: the `also` of
+/// a kind that nothing is of is never read, and nothing in the fold would say so. A system's laws are written for every
+/// book that lives under it, and most books have no thing of the kinds they govern.
+pub(crate) fn unreached(book: &Book, diags: &mut Vec<Diagnostic>) {
+    let reached: Set<Id<Law>> = book.rules.all().iter().map(|rule| rule.law).collect();
+    let flows = book
+        .laws
+        .iter()
+        .filter(|(id, law)| law.trigger == Trigger::Flow && law.system.is_none() && !reached.contains(id));
+    for (_, law) in flows {
+        let Owner::Kind(kind) = law.owner else { continue };
+        let of = match book.kinds[kind].sort {
+            Sort::Place(_) => "account",
+            Sort::Entity => "entity",
+            Sort::Thing => "asset",
+            Sort::Commodity | Sort::Contract => continue,
+        };
+        let name = book.name(book.kinds[kind].name);
+        diags.push(
+            Diagnostic::warning("law-never-fires", format!("no flow can reach this law: no {of} is of kind `{name}`"))
+                .label(law.loc, format!("this watches the flows of every {of} of kind `{name}`, and there is none"))
+                .help(format!("declare an {of} of kind `{name}`, or remove the law")),
+        );
+    }
 }
 
 /// The laws of every system that governs one entity, dated: each system of
@@ -110,7 +136,8 @@ fn place_watch(book: &Book, rule: Rule, place: Id<Place>) -> Option<Watch> {
         Trigger::Out => Some(Watch::Out(place)),
         Trigger::Gain => Some(Watch::Gain(place)),
         Trigger::Always => Some(Watch::Always(place)),
-        Trigger::Spend | Trigger::Flow | Trigger::Each(..) | Trigger::By(_) => None,
+        Trigger::Flow => Some(Watch::Touching(place)),
+        Trigger::Spend | Trigger::Each(..) | Trigger::By(_) => None,
     }
 }
 
@@ -160,8 +187,6 @@ impl WrittenIn {
     }
 }
 
-/// Whether a law is only an expression arena for an `also` line. Such a law
-/// is evaluated by that line and must not be registered as an event rule.
 /// Every rule that watches `place`.
 fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place: Id<Place>, out: &mut Vec<Rule>) {
     let owner = book.places[place].owner;
@@ -173,6 +198,7 @@ fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place
             out.extend(book.kinds[kind].laws.iter().map(|&law| always(law, Subject::Place(place))));
         }
     }
+    out.extend(standing_flows(book, written, book.standing_at(place)));
     for &asset in written.assets[place].iter() {
         for kind in book.kinds.lineage(book.assets[asset].kind) {
             out.extend(
@@ -199,6 +225,15 @@ fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place
     }
     let resident = household.unwrap_or(owner);
     out.extend(written.project.iter().map(|&law| always(law, Subject::Entity(resident))));
+}
+
+/// What the entity that stands at a place says about a flow there: the `on flow` laws of its kind chain, then its own. The
+/// rest of what an entity writes is about its money leaving or about time, and is not looked up by a place.
+fn standing_flows<'b>(book: &'b Book, written: &'b WrittenIn, entity: Id<Entity>) -> impl Iterator<Item = Rule> + 'b {
+    let kind_laws = book.kinds.lineage(book.entities[entity].kind).flat_map(|kind| book.kinds[kind].laws.iter());
+    let laws = kind_laws.chain(written.entities[entity].iter());
+    let flows = laws.filter(|&&law| book.laws[law].trigger == Trigger::Flow);
+    flows.map(move |&law| always(law, Subject::Entity(entity)))
 }
 
 /// A restricted entity's `on spend` laws: its kind chain's, then its own.

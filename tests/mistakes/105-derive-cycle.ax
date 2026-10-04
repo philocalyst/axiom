@@ -1,0 +1,15 @@
+// MISTAKE: a card's law credits it and a purpose's law takes the credit back, which the card's law sees again: the chain closes, and is said once.
+use std
+base USD
+purpose rebate : income
+  also - 50% of amount #tip
+purpose tip : spending
+entity me : person
+entity issuer
+entity shop
+kind rewards : credit-card
+  also issuer -> self 2% of amount #rebate
+account checking : bank
+account visa : rewards
+2025-12-31 market -> checking 1_000.00 USD
+2026-01-05 visa -> shop 100.00 USD #groceries

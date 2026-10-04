@@ -947,10 +947,43 @@ A written line that says the same thing replaces the derived one.
 A contract's `also` and `share` are laws: `also LINE [when E]` is `on flow`, `when E`,
 `derive LINE`, and `share 60% for studio` is `on flow`, `derive 60% of amount` as an item
 carved from the header, borne by the studio and for what the header is. They are made with
-each occurrence of the contract, a forecast's too. An `also` under a kind, an entity or a
-purpose derives nothing yet, and the book is told so (`also-inert`): what it would derive
-is a flow of a flow that has already posted. A `share` for a party, which is a claim, and a
-party kind's `sales-tax`, which is inside a price a journal flow paid, are not made yet.
+each occurrence of the contract, a forecast's too. A `share` for a party, which is a claim,
+and a party kind's `sales-tax`, which is inside a price a journal flow paid, are not made yet.
+
+An `also` under a kind, an account, an entity, a purpose or an asset is the same law, read
+as a flow posts instead of as an occurrence is made. `kind card`'s `also issuer -> self 2%
+of amount #rebate` is `on flow`, `derive issuer -> self 2% of amount #rebate`, for every
+flow at an account of that kind: a purchase on the card, a payment to it, a refund. What it
+derives is a flow of its own, or a `+` or `-` item that is one, along the flow's ends or back,
+and it is made after the flow's value has moved, so it cannot be a part of that flow: an item
+with no purpose (`- 5% of amount`) is an `error[derive-posted]` outside a contract. Beside what
+a derived flow says, it is the flow it came from: its day, its owner, its purpose when it says
+none (`self` is the end of the flow at what the law governs, the owner's end in a purpose's
+law).
+
+- **Which laws, in what order.** A flow fires the laws of the account at each end and of the
+  accounts it lies in, of the account's kind, of the party that stands there and of its
+  kind, then those of its purpose and the purposes above it, then those of the asset it is
+  for, each in the order it was written and once for the flow, however many of the places it
+  touches the law governs. Value that moved around inside what a law governs (between two of
+  an entity's own bank accounts) fires it for nothing. What a flow derives posts right after
+  it, the first it derived first, and what that derives before the next.
+- **A law does not watch what it made.** A card's cash back is no purchase and earns none,
+  and nothing is said. A chain that comes back to a law another law's flow led to is
+  stopped there and `error[derive-cycle]` names each law in order and the flow that began it,
+  once; so is a flow derived through more than eight laws (`derive-depth`). Narrow a law
+  with `when` to end the chain.
+- **A derived flow is a posting.** `register`, `flow`, `balance` and `tax` count it, and say
+  "derived by the `also` of kind `card` from FILE:LINE"; `why FILE:LINE` lists the flows a
+  line derived. It settles nothing: it is not a claim's payment, and a contract's occurrences
+  it comes from stay what they were.
+- **When it is made.** A pending flow derives what it derives when it settles, on that day,
+  and a void one never; a flow written ahead derives when the run reaches it; a forecast's
+  promised occurrences derive what a kept one does, since the forecast is the same run
+  continued. A returned flow returns what it derived, in the order it posted it, and the
+  return derives nothing anew.
+- **A law that can never fire** (an `also` under a kind of which nothing exists) is a
+  `warning[law-never-fires]`, not silence.
 
 ## 11. Dates, files, documents and returns
 

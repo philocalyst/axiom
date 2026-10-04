@@ -738,6 +738,7 @@ pub(crate) fn household() -> Household {
         adjustments: Vec::new(),
         checks: vec![0; law_count].into(),
         promised_flows: Box::default(),
+        offspring: Box::default(),
         runtime_details: Arena::new(),
         missing_inputs: Box::default(),
         open_claims: Box::default(),

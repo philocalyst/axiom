@@ -5,13 +5,18 @@
 //!     forecasts forecast PATH TODAY UNTIL   the fold to TODAY through its view checkpoint, resumed, promising to UNTIL
 //!     forecasts history  PATH TODAY UNTIL   the fold run to UNTIL (what is written is history)
 //!
+//! `derived` and `flow` rows are for `docs/v5/measure/derived.py`: `flow` is every flow the fold posted, a journal line's, an
+//! occurrence's or a law's (a derived flow has the state of the flow it began with), said as what it is and is for; `derived`
+//! is a law's, after TODAY, with the law that made it. A forecast and a fold that has what it forecast written must print
+//! the same `derived` rows.
+//!
 //! Both print the same kinds of line, so that they can be compared: `holding DAY PLACE UNIT QTY LOTS` at every month end after
 //! TODAY and at UNTIL; `effect`, `violation`, `gain` after TODAY; `missed` (a due day nothing kept) after TODAY; and, for each
 //! occurrence, `planned` (the forecast posted it) or `kept` (a line did) with the flows it made.
 use axiom_core::calendar::Window;
 use axiom_core::{Day, FileId, Period};
-use axiom_engine::{Options, Plan, Planned, Promise};
-use axiom_model::{Book, RuntimeFlow, Source};
+use axiom_engine::{Options, Plan, Planned, Promise, Run, State};
+use axiom_model::{Book, Cause, Object, Offspring, RuntimeFlow, Source};
 use axiom_syntax::Folder;
 
 fn day(text: &str) -> Day {
@@ -66,6 +71,62 @@ fn flow(book: &Book, runtime: &RuntimeFlow, details: &axiom_core::Arena<axiom_mo
         f.infer,
         detail
     )
+}
+
+/// A flow said as what it is and what it is for, and nothing of which line or law made it.
+fn plain(book: &Book, flow: &axiom_model::Flow) -> String {
+    let said = |place| book.name(book.places[place].path);
+    let purpose = flow.purpose.map_or("-".to_owned(), |purposed| {
+        let name = book.name(book.purposes[purposed.purpose].name);
+        match purposed.of {
+            Some(Object::Asset(asset)) => format!("{name}+of+{}", book.name(book.assets[asset].name)),
+            Some(_) => format!("{name}+of+?"),
+            None => name.to_owned(),
+        }
+    });
+    let payee = flow.payee.map_or("-", |entity| book.name(book.entities[entity].path));
+    format!(
+        "{} {}>{} out={}{} arrive={} purpose={purpose} owner={} payee={payee}",
+        flow.day,
+        said(flow.from),
+        said(flow.to),
+        flow.out.qty.0,
+        book.name(book.commodities[flow.out.unit].symbol),
+        flow.arrive.qty.0,
+        book.name(book.entities[flow.owner].path),
+    )
+}
+
+/// What a derived flow is after: the flow it began with, returned or not, since it is returned with it.
+fn after(run: &Run, offspring: &Offspring) -> String {
+    match offspring.root {
+        Cause::Flow(id) => match run.posted[id.index()].state {
+            State::Returned(day) => format!("Returned({day:?})"),
+            _ => "Actual".to_owned(),
+        },
+        _ => "Actual".to_owned(),
+    }
+}
+
+fn derived_rows(book: &Book, today: Day, offspring: &[Offspring]) {
+    for derived in offspring.iter().filter(|derived| derived.flow.day > today) {
+        println!("derived law={} {}", derived.law.index(), plain(book, &derived.flow));
+    }
+}
+
+/// Every flow the fold posted, once: the journal's, the occurrences' it kept and the laws' derived.
+fn flow_rows(book: &Book, run: &Run) {
+    for (id, flow) in book.flows.iter() {
+        println!("flow {} {:?}", plain(book, flow), run.posted[id.index()].state);
+    }
+    for promise in run.promises.iter().filter(|promise| promise.kept.is_some()) {
+        for runtime in run.promise_flows(promise) {
+            println!("flow {} Actual", plain(book, &runtime.flow));
+        }
+    }
+    for derived in run.offspring.iter() {
+        println!("flow {} {}", plain(book, &derived.flow), after(run, derived));
+    }
 }
 
 fn promise_line(
@@ -176,6 +237,7 @@ fn main() {
                 }
             }
             recorded(&book, today, recorded_);
+            derived_rows(&book, today, recorded_.offspring);
             missed(&book, today, recorded_.promises);
         }
         _ => {
@@ -202,9 +264,13 @@ fn main() {
                 promises: &run.promises,
                 planned: &[],
                 promised_flows: &run.promised_flows,
+                offspring: &run.offspring,
+                first_offspring: 0,
                 promised_inputs: &run.missing_inputs,
                 promised_details: &run.runtime_details,
             });
+            derived_rows(&book, today, &run.offspring);
+            flow_rows(&book, &run);
             missed(&book, today, &run.promises);
         }
     }

@@ -9,7 +9,7 @@ use axiom_core::tagless::Field;
 use axiom_core::{Day, DaySet, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Book, Books, Class, Commodity, Entity, Kind, Place, Purpose, System};
+use crate::book::{Basis, Book, Books, Class, Commodity, Entity, Kind, Place, Purpose, Role, System};
 use crate::builtin::{self, Coded};
 use crate::holders::Holder;
 use crate::journal::Flow;
@@ -109,6 +109,24 @@ impl Book<'_> {
         let mut holds = self.holds(place)?;
         let only = holds.next()?;
         holds.next().is_none().then_some(only)
+    }
+
+    /// The entity a place is where a flow reaches: the party whose outside place it is, and the owner of every other
+    /// place. The laws an entity or its kind writes about the flows that touch it are about the flows at its places.
+    pub fn standing_at(&self, place: Id<Place>) -> Id<Entity> {
+        match self.places[place].role {
+            Role::Outside(Some(party)) => party,
+            _ => self.places[place].owner,
+        }
+    }
+
+    /// The party a place is the outside of, if it is: who a flow into or out of it is paid to or paid by.
+    pub fn party_at(&self, place: Id<Place>) -> Option<Id<Entity>> {
+        match self.places[place].role {
+            Role::Outside(party) => party,
+            Role::Tab(party) => Some(party),
+            Role::Account { .. } | Role::Holding(_) | Role::Issuer(_) | Role::Asset(_) => None,
+        }
     }
 
     /// The household an entity belongs to.

@@ -21,7 +21,7 @@ use axiom_syntax::{
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
 use super::vars::When;
-use crate::book::{Entity, Input, Param};
+use crate::book::{Commodity, Entity, Input, Param};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
 use crate::journal::Program;
@@ -114,6 +114,14 @@ const FUNCTION_SPECS: &[FunctionSpec] = &[
 
 fn function_spec(name: &str) -> Option<&'static FunctionSpec> {
     FUNCTION_SPECS.iter().find(|spec| spec.name == name)
+}
+
+/// A selector in a law that is not read with an occurrence's flows.
+fn no_occurrence_to_select_from(at: Loc) -> Diagnostic {
+    Diagnostic::error("selector-owner", "a selector reads the flows of one occurrence")
+        .label(at, "this law has no occurrence to select from")
+        .note("only a contract's law is read with the flows of an occurrence; a law that fires on a posted flow has that one flow, and its `amount`")
+        .help("write the law inside a contract, or narrow what it derives with `when`")
 }
 
 fn function_names() -> Vec<&'static str> {
@@ -548,9 +556,24 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
         if fits(want, found_ty) {
             return Some(node);
         }
-        let diagnostic = expected(&article(want.word()), found_ty, found.loc);
+        let diagnostic = match (want, found_ty) {
+            (Ty::Amount(Dim::Of(unit)), Ty::Amount(Dim::Any)) => self.unconverted(unit, found.loc),
+            _ => expected(&article(want.word()), found_ty, found.loc),
+        };
         self.report(diagnostic);
         None
+    }
+
+    /// An amount of whatever a flow moved, where one commodity is counted: it must say what it is worth.
+    fn unconverted(&self, unit: Id<Commodity>, loc: Loc) -> Diagnostic {
+        let book = &self.world.book;
+        let unit = book.name(book.commodities[unit].symbol);
+        Diagnostic::error(
+            "type-mismatch",
+            format!("expected an amount of {unit}, but this amount may be of any commodity"),
+        )
+        .label(loc, "a flow at what this law governs can move any commodity")
+        .help(format!("say what it is worth: `value(amount, {unit})`"))
     }
 
     fn condition(&mut self, root: ExprId) -> Option<NodeId> {
@@ -796,10 +819,19 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
         Err(self.unknown_field(ty, field, receiver).into())
     }
 
+    /// Whether the law is read with the flows of one occurrence to select from: a contract's is, and so are the
+    /// expressions of a contract's template, which have no owner of their own.
+    fn reads_an_occurrence(&self) -> bool {
+        self.owner.is_none_or(|owner| matches!(owner, Owner::Contract(_)))
+    }
+
     /// Compiles the selector on an expression such as `50% of [retirement]`.
     /// The ids and keys are fixed now; the engine applies them to the borrowed,
     /// materialized occurrence groups when the template runs.
     fn select(&mut self, keys: &[ExprId]) -> Check<(Op, Ty)> {
+        if let Some(&first) = keys.first().filter(|_| !self.reads_an_occurrence()) {
+            return Err(no_occurrence_to_select_from(self.file.exprs[first].loc).into());
+        }
         let mut resolved = Vec::with_capacity(keys.len());
         for &key in keys {
             let expr = &self.file.exprs[key];
@@ -890,10 +922,12 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
     /// A flow amount has a static unit only when its governing place declares
     /// exactly one accepted commodity. Otherwise the expression must state a
     /// conversion with `value(amount, UNIT)` before comparing unlike units.
+    ///
+    /// An asset's law is about the flows that are for the asset (`#repair of house`), which are money: its own unit
+    /// is what its parts count in, not what a flow moves.
     fn flow_amount_ty(&self) -> Ty {
         let unit = match self.owner {
             Some(Owner::Place(place)) => self.world.book.holds_only(place),
-            Some(Owner::Asset(asset)) => Some(self.world.book.assets[asset].unit),
             _ => None,
         };
         unit.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))

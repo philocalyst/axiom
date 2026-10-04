@@ -14,7 +14,8 @@ use std::hash::{Hash, Hasher};
 use axiom_core::hash::FxHasher;
 use axiom_core::{Arena, Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
 use axiom_model::{
-    Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Select, Subject, Value,
+    Amount, Book, Commodity, Entity, Flow, Law, Offspring, Param, Place, Rule, RuntimeDetail, RuntimeFlow, Select,
+    Subject, Value,
 };
 
 use crate::assets::Assets;
@@ -23,6 +24,7 @@ use crate::histories::Changes;
 use crate::lots::{Holdings, Relief};
 use crate::monitor::Monitor;
 use crate::motion::Amounts;
+use crate::offspring::{Brood, Chain, Lineage};
 use crate::recognition::{Piece, Settlement};
 use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
@@ -116,6 +118,15 @@ pub(crate) struct Record {
     pub ambiguous: Set<Id<Place>>,
     /// What was already reported missing.
     pub missing: Set<Missing>,
+    /// The flows laws derived from flows that had posted, in the order they were posted, numbered from
+    /// `first_offspring`: where the record this one was forked from ended.
+    pub offspring: Vec<Offspring>,
+    pub first_offspring: u32,
+    /// What a flow the plan says is returned derived, numbered, for its return to post backwards. A fork keeps it: a
+    /// return dated after a checkpoint reverses what was derived before it.
+    pub returnable: Map<Id<Flow>, Chain>,
+    /// The chains that could not go on, each said once: the laws so far, and the law that would not be derived again.
+    pub stopped: Set<(Lineage, Id<Law>)>,
     /// Native contract occurrences already kept by a journal transaction.
     pub promises: Vec<crate::Promise>,
     /// The occurrences a forecast ledger posted as they fell due.
@@ -167,6 +178,9 @@ impl Record {
             reported: self.reported.clone(),
             ambiguous: self.ambiguous.clone(),
             missing: self.missing.clone(),
+            first_offspring: self.first_offspring + self.offspring.len() as u32,
+            returnable: self.returnable.clone(),
+            stopped: self.stopped.clone(),
             ..Record::default()
         }
     }
@@ -230,6 +244,8 @@ pub(crate) struct Scratch {
     pub runtime_flows: Vec<RuntimeFlow>,
     pub runtime_details: Arena<RuntimeDetail>,
     pub missing_inputs: Vec<u16>,
+    /// What the flow being posted derived, and what waits to post.
+    pub brood: Brood,
 }
 
 impl Scratch {
@@ -286,5 +302,9 @@ impl Hash for Record {
         unordered(&self.reported).hash(state);
         unordered(&self.ambiguous).hash(state);
         unordered(&self.missing).hash(state);
+        self.first_offspring.hash(state);
+        self.offspring.len().hash(state);
+        unordered(self.returnable.keys()).hash(state);
+        unordered(&self.stopped).hash(state);
     }
 }
