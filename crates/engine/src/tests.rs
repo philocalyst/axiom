@@ -842,22 +842,8 @@ fn kind_totals_use_descendants_and_only_the_subject_owners_places() {
     f.flow(date(2025, 1, 6), salary, checking, 20_00);
     f.flow(date(2025, 2, 1), salary, checking, 10_00);
 
-    // Replace the fixture's two unrelated kinds with an asset-kind tree whose
-    // bank descendants and unrelated cash place make the widened set explicit.
-    let mut book = f.book();
-    let root = book.kinds[Id::new(0)].clone();
-    let market = book.kinds[Id::new(1)].clone();
-    let kind = |name, sort, parent: &Kind| Kind { name, sort, ..parent.clone() };
-    let bank_kind = kind(book.names.intern("bank"), Sort::Place(Class::Asset), &root);
-    let checking_kind = kind(book.names.intern("checking-kind"), Sort::Place(Class::Asset), &bank_kind);
-    let savings_kind = kind(book.names.intern("savings-kind"), Sort::Place(Class::Asset), &bank_kind);
-    let brokerage_kind = kind(book.names.intern("brokerage-kind"), Sort::Place(Class::Asset), &bank_kind);
-    book.kinds = Tree::build(
-        vec![root, bank_kind, checking_kind, savings_kind, brokerage_kind, market],
-        &[None, Some(0), Some(1), Some(1), Some(1), None],
-    )
-    .expect("acyclic kind fixture")
-    .0;
+    // An asset-kind tree whose bank descendants and unrelated cash place make the widened set explicit.
+    let mut book = f.book_with_kinds(&[("bank", 0), ("checking-kind", 1), ("savings-kind", 1), ("brokerage-kind", 1)]);
     book.places[checking].kind = Id::new(2);
     book.places[savings].kind = Id::new(3);
     book.places[brokerage].kind = Id::new(4);
@@ -909,20 +895,8 @@ fn computed_kind_totals_index_every_kind_and_use_the_selected_kind() {
     f.flow(date(2025, 1, 2), salary, market, 200_00);
     f.flow(date(2025, 1, 3), salary, checking, 20_00);
 
-    let mut book = f.book();
-    let root = book.kinds[Id::new(0)].clone();
-    let old_market = book.kinds[Id::new(1)].clone();
-    let kind = |name, sort, parent: &Kind| Kind { name, sort, ..parent.clone() };
-    let bank = kind(book.names.intern("computed-bank"), Sort::Place(Class::Asset), &root);
-    let checking_kind = kind(book.names.intern("computed-checking"), Sort::Place(Class::Asset), &bank);
-    let savings_kind = kind(book.names.intern("computed-savings"), Sort::Place(Class::Asset), &bank);
-    let brokerage_kind = kind(book.names.intern("computed-brokerage"), Sort::Place(Class::Asset), &bank);
-    book.kinds = Tree::build(
-        vec![root, bank, checking_kind, savings_kind, brokerage_kind, old_market],
-        &[None, Some(0), Some(1), Some(1), Some(1), None],
-    )
-    .expect("acyclic kind fixture")
-    .0;
+    let kinds = [("computed-bank", 0), ("computed-checking", 1), ("computed-savings", 1), ("computed-brokerage", 1)];
+    let mut book = f.book_with_kinds(&kinds);
     book.places[checking].kind = Id::new(2);
     book.places[savings].kind = Id::new(3);
     book.places[brokerage].kind = Id::new(4);

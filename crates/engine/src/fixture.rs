@@ -466,7 +466,15 @@ impl Fixture {
         Rule { law, subject, days: Days::ALWAYS }
     }
 
-    pub fn book(mut self) -> Book<'static> {
+    pub fn book(self) -> Book<'static> {
+        self.book_with_kinds(&[])
+    }
+
+    /// The book, with kinds of places between its root kind and `market`: each is a name and where its parent is among
+    /// the kinds (the root is 0), a parent before its children and the descendants of a kind right after it. The holders
+    /// are numbered for all of them, so a test that wants a tree of kinds asks for it here, and does not replace
+    /// `Book::kinds` after the numbering is made.
+    pub fn book_with_kinds(mut self, between: &[(&'static str, usize)]) -> Book<'static> {
         let kind_name = self.names.intern("thing");
         let kind = Kind {
             name: kind_name,
@@ -478,7 +486,11 @@ impl Fixture {
             loc: None,
         };
         let market = Kind { name: self.names.intern("market"), sort: Sort::Place(Class::Outside), ..kind.clone() };
-        let (kinds, _) = Tree::build(vec![kind, market], &[None, None]).expect("no cycles");
+        let named = between.iter().map(|&(name, _)| Kind { name: self.names.intern(name), ..kind.clone() });
+        let parents: Vec<_> =
+            [None].into_iter().chain(between.iter().map(|&(_, parent)| Some(parent))).chain([None]).collect();
+        let (kinds, _) = Tree::build([kind.clone()].into_iter().chain(named).chain([market]).collect(), &parents)
+            .expect("no cycles");
         let (schema, holders, facts) = self.facts(kinds.len());
         let k = Id::new(0);
         let (purposes, [income, spending, capital, transfer]) = Purpose::roots(&mut self.names);
