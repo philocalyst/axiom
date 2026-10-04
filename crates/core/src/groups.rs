@@ -34,6 +34,7 @@ pub(crate) fn bucket(buckets: usize, n: usize, key: impl Fn(usize) -> usize) -> 
     (starts, order)
 }
 
+#[derive(Debug)]
 pub struct Groups<K, V> {
     starts: Vec<u32>,
     values: Vec<V>,

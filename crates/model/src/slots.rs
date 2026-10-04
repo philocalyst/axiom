@@ -121,7 +121,7 @@ const VALUE_TYPES: [(&str, Ty); 12] = [
 const FIELD_WORDS: [&str; 8] = ["balance", "basis", "owner", "kind", "age", "unit", "year", "month"];
 
 /// Every slot of every kind, and the numbers of the slots.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Schema {
     slots: Arena<Slot>,
     kinds: Arena<Id<Kind>>,

@@ -237,6 +237,7 @@ impl Class {
 }
 
 /// A place value can be: `assets/bank/checking`, `expenses/food`, `income/salary`.
+#[derive(Debug)]
 pub struct Place {
     /// The full path.
     pub path: Sym,
@@ -291,6 +292,7 @@ pub enum Role {
 }
 
 /// Someone: `me`, `acme`, `landlord`, `irs`, `paypal/john`.
+#[derive(Debug)]
 pub struct Entity {
     pub path: Sym,
     pub kind: Id<Kind>,
@@ -332,7 +334,7 @@ pub enum Basis {
 }
 
 /// What something is: `bank`, `401k`, `stock`, `grant`, `person`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Kind {
     pub name: Sym,
     pub sort: Sort,
@@ -370,6 +372,7 @@ pub struct At<T> {
 }
 
 /// A unit of account: `USD`, `VTI`, `BTC`, `HOUSE`.
+#[derive(Debug)]
 pub struct Commodity {
     pub symbol: Sym,
     pub kind: Id<Kind>,
@@ -380,6 +383,7 @@ pub struct Commodity {
 }
 
 /// A node of the purpose tree: `groceries : food`.
+#[derive(Debug)]
 pub struct Purpose {
     pub name: Sym,
     /// Which of the four roots it descends from.
@@ -443,6 +447,7 @@ pub struct Share {
 }
 
 /// An identified thing: `asset condo : rental-home`.
+#[derive(Debug)]
 pub struct Asset {
     pub name: Sym,
     pub kind: Id<Kind>,
@@ -470,6 +475,7 @@ pub struct Filler {
 }
 
 /// A promise of flows with one party.
+#[derive(Debug)]
 pub struct Contract {
     pub name: Sym,
     /// `contract NAME : KIND`: what the two sides are to each other, whose legs it writes once.
@@ -869,6 +875,7 @@ impl Stand {
 
 /// `budget food 900 USD monthly [carries]` (LANGUAGE §4): a warning when the
 /// purpose's total for a window passes the limit in force in it.
+#[derive(Debug)]
 pub struct Budget {
     pub purpose: Id<Purpose>,
     /// The first day this budget has an active allowance. Earlier dates have
@@ -912,6 +919,7 @@ pub enum Limit {
 
 /// A body of kinds, params and laws: `us`, `us/ca`, `us/401k`. Children
 /// include their ancestors: `us/ca/san-francisco` is governed by all three.
+#[derive(Debug)]
 pub struct System {
     pub path: Sym,
     /// Top-level laws, which govern residents and every place they own.
@@ -1018,6 +1026,7 @@ pub enum ConversionError {
 }
 
 /// `param limit`: values by time and name keys.
+#[derive(Debug)]
 pub struct Param {
     pub name: Sym,
     /// `param mileage-rate USD/MI`: what its values are counted in.
@@ -1028,6 +1037,7 @@ pub struct Param {
     pub loc: Loc,
 }
 
+#[derive(Debug)]
 pub struct ParamRow {
     /// A year key `2026` means from 2026-01-01; a date key means from that
     /// day. Lookup takes the latest row at or before the day asked for.
@@ -1108,6 +1118,7 @@ mod param_lookup_tests {
 }
 
 /// Marginal brackets: `0 USD 10% | 12_400 USD 12% | …`.
+#[derive(Debug)]
 pub struct Schedule {
     pub unit: Id<Commodity>,
     /// Ascending thresholds; the first is zero.
@@ -1121,6 +1132,7 @@ pub struct Bracket {
 }
 
 /// `code trip-*` / `on expenses/travel/*`: where codes may appear.
+#[derive(Debug)]
 pub struct CodeRule {
     pub pattern: Sym,
     pub on: Box<[CodeScope]>,
