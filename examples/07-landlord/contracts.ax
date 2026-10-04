@@ -27,8 +27,11 @@ contract home-loan with lender
   from 2025-02-01
 
 /// The manager's 8% fee was 192 USD on ordinary 2,400 USD rent, with explicit
-/// restatements for the late fee and tenant B's 2,500 USD rent.
+/// restatements for the late fee and tenant B's 2,500 USD rent. The final fee
+/// was paid on 2025-12-29, 24 days after its due day, so the contract allows
+/// a grace of 30 days (the default is half the cadence, 15 days).
 contract manager-fee with hartwell-pm
   about 192 USD monthly on 5 from rental-bank #management of house
   from 2025-03-05
   until 2025-12-31
+  grace 30d
