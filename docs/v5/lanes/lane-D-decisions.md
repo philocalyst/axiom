@@ -68,6 +68,14 @@ item says is not in this lane.
    suggestion must be something that can be pasted in place of what was written. A mistake book each, the old behaviour in the
    map. Lane U rewrites `resolve.rs`, `fill.rs` and the address passes after you, so keep both fixes small and tested.
 
+10. **Two things lane U's instruments found.** (a) `currency USD` cannot be written: the built-in property reads a *name*, but a
+    currency is lexed as a *unit* (`docs/v5/measure/diff/cases3/` has the book that shows it, on the `unit-currency` or
+    nearest name; read `declared.py` for the case). Fix the one reader so the line a book needs is accepted, with a test and
+    the old failure in the map. (b) Two engine tests, `computed_kind_totals_*` and `kind_totals_use_descendants_*`, fail **in
+    debug builds only**: they rebuild `book.kinds` after the holders are numbered and trip the numbering check in
+    `holders.rs`. The fixture is inconsistent, not the product: fix the test input so they pass in both profiles. (Run the
+    debug build with `CARGO_INCREMENTAL=0` and delete `target/debug` afterwards: the disk is shared.)
+
 ## The proof
 
 - The workspace tests: all green, **including the two that were the known failures** (items 1 and 7). `cargo fmt --check`.
