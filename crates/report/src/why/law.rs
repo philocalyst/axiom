@@ -1,7 +1,7 @@
 //! `why LAW`: where it applies, what it says, how often it ran, what it caused.
 
 use axiom_core::Id;
-use axiom_engine::Run;
+use axiom_engine::{Run, Violation};
 use axiom_model::{Book, Law, Owner};
 
 use super::{effects_table, recent, trigger_words};
@@ -36,9 +36,18 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<
         about.note(Cell::text(line));
     }
 
+    let caused = effects_table(book, run, &effects, "Recent effects");
+    Report::new(format!("Why {}", book.name(law.name)))
+        .with(about)
+        .with(broken_section(book, run, &violations))
+        .with(caused)
+}
+
+/// The latest violations of a law, each with what caused it.
+fn broken_section<'s>(book: &'s Book<'_>, run: &Run, violations: &[&Violation]) -> Section<'s> {
     let mut broken = Section::new([Column::left("Date"), Column::left("Violation"), Column::left("From")])
         .headed("Recent violations");
-    for violation in recent(&violations).0 {
+    for violation in recent(violations).0 {
         let message = &run.diagnostics[violation.diagnostic as usize].message;
         let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
         let cells = [
@@ -48,8 +57,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<
         ];
         broken.push(Row::new(cells).style(style));
     }
-    let caused = effects_table(book, run, &effects, "Recent effects");
-    Report::new(format!("Why {}", book.name(law.name))).with(about).with(broken).with(caused)
+    broken
 }
 
 /// Several laws answer to one name, in different systems or files: each one
