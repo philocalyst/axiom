@@ -1,0 +1,45 @@
+2025-06-01 us-checking -> sf-rent 3_400 USD / landlord-sf
+2025-06-04 visa -> groceries 149.03 USD
+2025-06-05 us-checking -> 420 USD / mohela
+  student-loan            308.27 USD   // principal
+  loan-interest           111.73 USD   // interest
+2025-06-09 visa -> dining 50.80 USD
+2025-06-11 visa -> groceries 128.79 USD
+
+/// Shipping two boxes and a bike to Berlin.
+2025-06-12 us-checking -> moving 2_150 USD / sea-freight
+2025-06-14 visa -> utilities 96.83 USD
+
+/// The one-way flight.
+2025-06-14 visa -> travel 1_180.40 USD / lufthansa
+2025-06-16 visa -> transport 71.41 USD
+2025-06-18 visa -> groceries 143.19 USD
+
+/// May's statement, paid in full.
+2025-06-20 us-checking -> visa 945.82 USD
+2025-06-21 visa -> dining 106 USD
+2025-06-23 visa -> shopping 173.39 USD
+2025-06-25 visa -> groceries 100.29 USD
+
+/// Opening the German account: 9,500 USD sent through Wise. The fee is 0.58% and the rate is the mid-market rate of the day.
+2025-06-27 us-checking 9_500.00 USD ->
+  fx-fees                 55.10 USD
+  girokonto               8_100.26 EUR
+2025-06-30 acme -> 10_416.67 USD
+  us-401k                 625.00 USD   // 6% pre-tax
+  taxes/federal           1_180.00 USD
+  taxes/state             470.00 USD
+  taxes/payroll           796.87 USD   // Social Security and Medicare
+  taxes/sdi               125.00 USD   // California SDI
+  us-checking             ...
+// Berlin: the German account is open, the deposit for the flat is paid before the keys.
+
+/// Mietkaution: three months of base rent in a blocked account in my name, unavailable until the lease ends.
+2025-06-30 girokonto -> kaution 3_600 EUR
+2025-06-30 interest -> us-savings 147.10 USD
+2025-06-30 visa = 2_200.13 USD
+2025-06-30 us-checking = 20_759.17 USD
+2025-06-30 us-savings = 42_174.92 USD
+2025-06-30 student-loan = 29_288.07 USD
+2025-06-30 girokonto = 4_500.26 EUR
+2025-06-30 kaution = 3_600.00 EUR

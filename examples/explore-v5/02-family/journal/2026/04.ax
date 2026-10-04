@@ -1,21 +1,21 @@
 // April 2026.
 
 01 mortgage                                                   // ▸ 3,364.95: #interest of home 1,870.63 · principal 792.32 · escrow 702.00
-04 me-visa -> trader-joes 80.12 USD
+04 me-visa        -> trader-joes     80.12 USD
 10 property-tax                                               // ▸ 3,512.00 from escrow · #property-tax of home, for the half-year to 04-10
 12 electricity-ca
-12 jamie-amex -> target 73.95 USD
+12 jamie-amex     -> target          73.95 USD
 14 car-loan                                                   // ▸ 560.20: #interest of car2 140.76 · principal 419.44
 15 job-lumen
 15 job-jamie
-15 irs -> me-checking 1_820.00 USD for 2025                   // ▸ a refund: tax paid, negative, for the year the return was for      // ⇄ 02d1: the memo has no year
-15 ftb -> me-checking 640.00 USD for 2025
-15 irs -> jamie-checking 940.00 USD for 2025
-15 ftb -> jamie-checking 310.00 USD for 2025
-19 me-visa -> whole-foods 99.48 USD
-20 me-visa -> blooming-events 640 USD #wedding "invitations"
-27 me-visa -> trader-joes 88.70 USD
-30 mortgage = 459_671.05 USD
+15 me-checking    <- irs             1_820.00 USD for 2025    // ▸ a refund: tax paid, negative, for the year the return was for      // ⇄ 02d1: the memo has no year
+15 me-checking    <- ftb             640.00 USD   for 2025
+15 jamie-checking <- irs             940.00 USD   for 2025
+15 jamie-checking <- ftb             310.00 USD   for 2025
+19 me-visa        -> whole-foods     99.48 USD
+20 me-visa        -> blooming-events 640 USD      #wedding "invitations"
+27 me-visa        -> trader-joes     88.70 USD
+30 mortgage       =  459_671.05 USD
 30 job-lumen
 30 job-jamie
 30 hsa-employer

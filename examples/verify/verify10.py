@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from axparse import read_journal  # noqa: E402
 
-ROOT = os.path.join(HERE, "..", "10-budgeter")
+ROOT = os.path.join(HERE, "..", "..", "tests", "v4-syntax", "examples", "10-budgeter")
 TODAY = date(2026, 2, 14)
 flows = [f for f in read_journal(ROOT) if f.day <= TODAY]
 

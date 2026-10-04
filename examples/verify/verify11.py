@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent / "11-sam"
+ROOT = HERE.parents[1] / "tests" / "v4-syntax" / "examples" / "11-sam"
 
 
 def source(path):

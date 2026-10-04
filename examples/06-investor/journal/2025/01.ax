@@ -1,31 +1,31 @@
-2025-01-01 checking -> landlord 2_650 USD
-2025-01-05 checking 1_499.99 USD -> fidelity 5.2237 VTI @ 287.15 USD
+2025-01-01 checking -> landlord   2_650 USD
+2025-01-05 checking -> fidelity   5.2237 VTI @ 287.15 USD
 2025-01-09 checking -> utility-co 174.27 USD
-2025-01-12 checking -> grocer 363.42 USD
+2025-01-12 checking -> grocer     363.42 USD
 
 /// UnitedHealth, a first lot in January.
-2025-01-14 checking 7_599.99 USD -> fidelity 14.9072 UNH @ 509.82 USD
-2025-01-16 checking -> cafe 379.51 USD
-2025-01-20 checking -> grocer 260.40 USD
-2025-01-20 checking 9_856.66 USD -> coinbase 0.1 BTC @ 98_566.63 USD
-2025-01-24 checking -> misc-vendor 153.53 USD
-2025-01-28 dividend-source -> fidelity 75.53 USD
-2025-01-31 northwind -> 14_000.00 USD
-  retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  irs       2_650.00 USD
-  payroll-office       1_071.00 USD   // Social Security and Medicare
-  checking            ...
-2025-01-31 interest-source -> savings 382.16 USD
-2025-01-31 interest-source -> fidelity 98.67 USD
-2025-01-31 checking = 10_800.20 USD
-2025-01-31 savings = 115_030.82 USD
-2025-01-31 espp-cash = 1_400.01 USD
-2025-01-31 fidelity = 57.0312 VTI
-2025-01-31 fidelity = 26.6511 MSFT
-2025-01-31 fidelity = 14.9072 UNH
-2025-01-31 fidelity = 50.9847 FAST
-2025-01-31 fidelity = 333.4448 BND
-2025-01-31 fidelity = 38.2029 VXUS
-2025-01-31 etrade = 144.7354 NWND
-2025-01-31 coinbase = 0.3 BTC
+2025-01-14 checking -> fidelity        14.9072 UNH   @ 509.82 USD
+2025-01-16 checking -> cafe            379.51 USD
+2025-01-20 checking -> grocer          260.40 USD
+2025-01-20 checking -> coinbase        0.1 BTC       @ 98_566.63 USD
+2025-01-24 checking -> misc-vendor     153.53 USD
+2025-01-28 fidelity <- dividend-source 75.53 USD
+2025-01-31 me       <- northwind       14_000.00 USD
+  -> retirement     1_958.33 USD           // 401(k) deferral
+  -> espp-cash      1_400.00 USD for espp  // ESPP contribution, after tax
+  -> irs            2_650.00 USD
+  -> payroll-office 1_071.00 USD           // Social Security and Medicare
+  -> checking       ...
+2025-01-31 savings   <- interest-source 382.16 USD
+2025-01-31 fidelity  <- interest-source 98.67 USD
+2025-01-31 checking  =  10_800.20 USD
+2025-01-31 savings   =  115_030.82 USD
+2025-01-31 espp-cash =  1_400.01 USD
+2025-01-31 fidelity  =  57.0312 VTI
+2025-01-31 fidelity  =  26.6511 MSFT
+2025-01-31 fidelity  =  14.9072 UNH
+2025-01-31 fidelity  =  50.9847 FAST
+2025-01-31 fidelity  =  333.4448 BND
+2025-01-31 fidelity  =  38.2029 VXUS
+2025-01-31 etrade    =  144.7354 NWND
+2025-01-31 coinbase  =  0.3 BTC

@@ -6,6 +6,9 @@ UNIT [@ PRICE UNIT] [/ payee] [#purpose] [^code] [for WHAT] [due WHEN]
 `opening` blocks, prices, splits, assertions and doc comments. In a dated
 journal folder it expands a day (`5`) or month-day (`02-05`) from the path.
 It yields plain records; tax and balance rules are the caller's.
+
+The checks that use it read the examples as v4 wrote them, kept in `tests/v4-syntax/examples`: what they pin is the
+numbers, and `crates/cli/tests/upgrade.rs` shows that the examples as they are now say the same book.
 """
 import glob
 import os

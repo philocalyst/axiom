@@ -1,0 +1,51 @@
+// February 2026.
+
+01 apartment-rent
+
+/// The scholarship's grant money lands in checking, tied to education.
+02 scholarship -> checking 1_200 USD
+
+/// January's card statement, paid in full.
+03 checking -> visa 461.50 USD
+03 visa = empty
+
+04 visa -> trader-joes 118.40 USD
+05 checking -> college 300 USD #contribution
+
+/// The check is pending until the plumber presents it.
+05 checking -> plumber (350 USD) ^check-1041
+
+07 visa -> cafe 58.90 USD #dining
+08 checking = 5_758.20 USD
+
+/// The ATM amount is inferred from the two checking statements.
+10 checking -> cash ? USD
+
+11 visa -> trader-joes 143.25 USD
+12 ^check-1041 settled
+
+/// This is the paycheck contract's first kept occurrence.
+13 paycheck
+
+14 visa -> cafe 74.20 USD #dining
+14 checking = 10_646.20 USD
+
+/// The scholarship money is spent first on tuition.
+16 checking -> state-u 3_600 USD #tuition
+
+18 checking -> brokerage 3 VTI @ 291.35 USD
+19 visa -> trader-joes 96.80 USD
+20 checking -> savings 500 USD #transfer
+20 utility-bill 121.75 USD
+
+/// The 529 plan pays the other share of fall tuition directly.
+20 college -> state-u 1_200 USD #tuition
+
+21 visa -> cafe 61.35 USD #dining
+22 visa -> metro 41.20 USD #transport
+25 visa -> trader-joes 128.10 USD
+28 chase -> savings 46.18 USD #interest
+
+28 checking = 5_550.40 USD
+28 savings = 16_095.91 USD
+28 retirement = 42_900 USD

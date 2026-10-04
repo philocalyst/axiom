@@ -446,36 +446,36 @@ error[assertion]: assets/bank/us-checking holds 18,420.55 USD, not 15,020.55 USD
    ╭─[journal/2025/01.ax:10:1]
    │
  2 │ opening 2025-01-01
- 3 │   us-checking     18_420.55 USD
-   │   ──────────────┬──────────────
-   │                 ╰── +18,420.55 USD from opening
+ 3 │   us-checking  18_420.55 USD
+   │   ─────────────┬────────────
+   │                ╰── +18,420.55 USD from opening
    ⋮
-10 │ 2025-01-01 us-checking = 15_020.55 USD
-   │ ───────────────────┬──────────────────
-   │                    ╰── 3,400.00 USD less than the ledger holds
+10 │ 2025-01-01 us-checking  =  15_020.55 USD
+   │ ────────────────────┬───────────────────
+   │                     ╰── 3,400.00 USD less than the ledger holds
    │
    = note: 3,400.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-10 + 2025-01-01 us-checking = 15_020.55 USD !
+10 + 2025-01-01 us-checking  =  15_020.55 USD !
 
 error[flow-shape]: a flow needs a named end and at least one leg
    ╭─[journal/2025/01.ax:14:1]
    │
-14 │ 2025-01-04 visa -> groceries 90.40 USD
-   │ ───────────────────┬──────────────────
-   │                    ╰── no complete flow can be formed here
+14 │ 2025-01-04 visa         -> groceries     90.40 USD
+   │ ─────────────────────────┬────────────────────────
+   │                          ╰── no complete flow can be formed here
    │
    = note: also at journal/2025/01.ax:20, journal/2025/01.ax:21, journal/2025/01.ax:22,
            journal/2025/01.ax:23, … (109 more)
    = help: write both ends in the header, or write one end and indent the other legs
 
 error[unknown-entity]: there is no entity `groceries`
-   ╭─[journal/2025/01.ax:14:20]
+   ╭─[journal/2025/01.ax:14:28]
    │
-14 │ 2025-01-04 visa -> groceries 90.40 USD
-   │                    ────┬────
-   │                        ╰── not a known entity
+14 │ 2025-01-04 visa         -> groceries     90.40 USD
+   │                            ────┬────
+   │                                ╰── not a known entity
    │
    = note: also at journal/2025/01.ax:21, journal/2025/01.ax:24, journal/2025/01.ax:30,
            journal/2025/02.ax:2, … (49 more)
@@ -495,7 +495,7 @@ error[v3-party]: `/ mohela` is written the other way round now
 error[unknown-entity]: there is no entity `dining`
    ╭─[journal/2025/01.ax:20:20]
    │
-20 │ 2025-01-09 visa -> dining 116.98 USD
+20 │ 2025-01-09 visa -> dining    116.98 USD
    │                    ───┬──
    │                       ╰── not a known entity
    │
@@ -523,11 +523,11 @@ error[unknown-entity]: there is no entity `transport`
            journal/2025/05.ax:9, … (1 more)
 
 error[unknown-entity]: there is no entity `interest`
-   ╭─[journal/2025/01.ax:40:12]
+   ╭─[journal/2025/01.ax:40:28]
    │
-40 │ 2025-01-31 interest -> us-savings 144.55 USD
-   │            ────┬───
-   │                ╰── not a known entity
+40 │ 2025-01-31 us-savings   <- interest      144.55 USD
+   │                            ────┬───
+   │                                ╰── not a known entity
    │
    = note: also at journal/2025/02.ax:24, journal/2025/03.ax:24, journal/2025/04.ax:29,
            journal/2025/05.ax:24, … (7 more)

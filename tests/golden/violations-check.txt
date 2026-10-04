@@ -15,7 +15,7 @@ error[unknown-property]: `benificiary` is not a property of an account of kind `
 error[deferral-limit]: 401(k) deferrals over the yearly limit: 26,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 1,500.00 USD
    ╭─[03-violations.ax:45:1]
    │
-45 │ 2026-01-30 acme -> retirement 26_000 USD
+45 │ 2026-01-30 retirement <- acme 26_000 USD
    │ ────────────────────┬───────────────────
    │                     ╰── this flow: 26,000.00 USD into retirement
    │
@@ -36,15 +36,15 @@ error[deferral-limit]: 401(k) deferrals over the yearly limit: 26,000.00 USD in 
 error[ambiguous-lots]: ambiguous lot: wallet holds 2 lots that differ and no policy applies
    ╭─[03-violations.ax:56:1]
    │
-54 │ 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
-   │ ─────────────────────────┬────────────────────────
-   │                          ╰── acquired 2026-02-10: 0.50 BTC, basis 30,000.00 USD; from it alone the gain is 9,000.00 USD
-55 │ 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
-   │ ─────────────────────────┬────────────────────────
-   │                          ╰── acquired 2026-02-20: 0.50 BTC, basis 45,000.00 USD; from it alone the gain is 1,500.00 USD
-56 │ 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
-   │ ────────────────────────┬────────────────────────
-   │                         ╰── 0.25 BTC could come from any of them
+54 │ 2026-02-10 checking        -> wallet   0.5 BTC @ 60_000 USD
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── acquired 2026-02-10: 0.50 BTC, basis 30,000.00 USD; from it alone the gain is 9,000.00 USD
+55 │ 2026-02-20 checking        -> wallet   0.5 BTC @ 90_000 USD
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── acquired 2026-02-20: 0.50 BTC, basis 45,000.00 USD; from it alone the gain is 1,500.00 USD
+56 │ 2026-03-01 wallet 0.25 BTC -> checking         @ 96000.00 USD
+   │ ──────────────────────────────┬──────────────────────────────
+   │                               ╰── 0.25 BTC could come from any of them
    │
    = note: the sale still moves the oldest lot first, so the lines after it stay consistent
    = note: later sales from this place are booked the same way, without another report
@@ -62,9 +62,9 @@ error[price-disagrees]: the stated price does not match the flow amounts
 error[purpose]: grant money spent outside its purpose
     ╭─[03-violations.ax:70:1]
     │
- 70 │ 2026-04-02 education-fund -> theater 300 USD #fun
-    │ ────────────────────────┬────────────────────────
-    │                         ╰── this flow: 300.00 USD of restricted money leaving education-fund
+ 70 │ 2026-04-02 education-fund -> theater     300 USD   #fun
+    │ ───────────────────────────┬───────────────────────────
+    │                            ╰── this flow: 300.00 USD of restricted money leaving education-fund
     │
     ├─[std.ax:156:13] (built in)
     │
@@ -85,28 +85,28 @@ error[assertion]: checking holds 58,915.80 USD, not 57,915.80 USD
    │ ──────────────────────┬─────────────────────
    │                       ╰── +10,000.00 USD from retirement
    ⋮
-54 │ 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
-   │ ─────────────────────────┬────────────────────────
-   │                          ╰── -30,000.00 USD to wallet
-55 │ 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
-   │ ─────────────────────────┬────────────────────────
-   │                          ╰── -45,000.00 USD to wallet
-56 │ 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
-   │ ────────────────────────┬────────────────────────
-   │                         ╰── +24,000.00 USD from wallet
+54 │ 2026-02-10 checking        -> wallet   0.5 BTC @ 60_000 USD
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── -30,000.00 USD to wallet
+55 │ 2026-02-20 checking        -> wallet   0.5 BTC @ 90_000 USD
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── -45,000.00 USD to wallet
+56 │ 2026-03-01 wallet 0.25 BTC -> checking         @ 96000.00 USD
+   │ ──────────────────────────────┬──────────────────────────────
+   │                               ╰── +24,000.00 USD from wallet
    ⋮
 60 │ 2026-03-02 checking -> trader-joes 84.20 USD #rent
    │ ─────────────────────────┬────────────────────────
    │                          ╰── -84.20 USD to trader-joes
    ⋮
-75 │ 2026-12-31 checking = 57_915.80 USD
-   │ ─────────────────┬─────────────────
-   │                  ╰── 1,000.00 USD less than the ledger holds
+75 │ 2026-12-31 checking       = 57_915.80 USD
+   │ ────────────────────┬────────────────────
+   │                     ╰── 1,000.00 USD less than the ledger holds
    │
    = note: 1,000.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-75 + 2026-12-31 checking = 57_915.80 USD !
+75 + 2026-12-31 checking       = 57_915.80 USD !
 
 error[deadline]: grant money left unspent at the deadline
     ╭─[std.ax:157:3] (built in)

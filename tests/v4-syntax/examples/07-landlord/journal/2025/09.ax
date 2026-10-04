@@ -1,0 +1,44 @@
+2025-09-01 checking -> oak-street 1_950 USD #rent
+2025-09-01 home-loan
+// Historical loan split, independently checked from the contract terms: home-loan            249.83 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_559.76 USD   // interest
+
+/// Listing for the vacancy.
+2025-09-03 rental-bank -> rentlist 149 USD #advertising of house
+2025-09-05 manager-fee
+
+/// REPAIR: turnover. Paint, carpet clean, new blinds. Routine, so an expense, not an improvement.
+2025-09-06 rental-bank -> fresh-paint 1_150 USD #repair of house
+2025-09-08 checking -> trader-joes 205.73 USD #groceries
+
+/// The vacant month: the landlord pays the utilities.
+2025-09-10 rental-bank -> city-power 96.40 USD #rental-utilities of house
+2025-09-10 rental-bank -> city-water 58.20 USD #rental-utilities of house
+
+/// Tenant A moves out. Carpet cleaning and a broken blind cost 350.00 USD: the lease lets Jamie keep that much of the
+/// deposit. 2,050.00 USD goes back (a payment `for #deposit`), 350.00 USD settles the rest of the claim as income, and
+/// the money Jamie keeps is released from the tenant (`for me`) into the rental account.
+2025-09-12 deposit-bank -> tenant-a 2_050 USD #deposit-return
+// Forfeiture is recognized on the native tagged cash release below.
+2025-09-12 deposit-bank -> rental-bank 350 USD #forfeited-deposit of house
+2025-09-15 checking -> trader-joes 127.53 USD #groceries
+
+/// IMPROVEMENT: a new roof, 14,200.00 USD. It restores the house past what it was and lasts decades, so it is not an
+/// expense: it raises the house's basis (`house.basis`). The contractor's invoice is a bill, due in a month.
+2025-09-15 me owes summit-roofing due 30d ^inv-roof
+  14_200 USD #improvement of house "new roof"
+2025-09-19 checking -> cafe 100.13 USD #dining
+
+/// Window screens.
+2025-09-20 rental-bank -> hardware-hank 96 USD #repair of house
+2025-09-22 checking -> home-supplies 265.91 USD #household
+2025-09-28 paycheck
+
+/// The roof is depreciated as well, from mid-September: 14,200 USD over 27.5 years, a half month in the first.
+// Previous hand-entered depreciation: 935.09 USD on 2025-09-30. v4 derives this from the house parts.
+2025-09-30 home-loan = 277_040.01 USD
+2025-09-30 bills = 14_200 USD
+2025-09-30 rental-bank = 1_601.38 USD
+2025-09-30 checking = 50_656.63 USD
+2025-09-30 deposit-bank = 0.00 USD
+2025-09-30 deposits = 0.00 USD

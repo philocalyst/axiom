@@ -162,7 +162,7 @@ fn a_share_of_amount_in_an_item_is_a_share_of_the_header() {
 fn the_language_example_a_cost_withheld_from_proceeds_is_a_share_of_the_header() {
     // §3: `15 title-co -> checking 627_000 USD #sale of condo` with `- 6% #selling-costs "commission"`: 37,620 withheld.
     let lines = "\
-2026-03-14 buyer -> checking 1_000 USD #household
+2026-03-14 checking <- buyer 1_000 USD #household
   - 6% #fees \"commission\"
 ";
     with_run(lines, |book, run| {
@@ -178,51 +178,68 @@ fn the_language_example_a_cost_withheld_from_proceeds_is_a_share_of_the_header()
 
 #[test]
 fn a_split_takes_every_leg_from_its_source() {
-    let split = "\
+    for split in [
+        "\
 2026-03-14 checking 300 USD ->
   shop 100 USD
   acme 100 USD
   savings 100 USD
-";
-    let plain = "\
+",
+        "\
+2026-03-14 checking -> 300 USD
+  -> shop    100 USD
+  -> acme    100 USD
+  -> savings 100 USD
+",
+    ] {
+        let plain = "\
 2026-03-14 checking -> shop 100 USD
 2026-03-14 checking -> acme 100 USD
 2026-03-14 checking -> savings 100 USD
 ";
-    with_run(split, |book, run| {
-        assert_eq!(
-            moves(book, run),
-            ["checking -> shop 100.00 USD", "checking -> acme 100.00 USD", "checking -> savings 100.00 USD"]
-        );
-        assert_eq!(cents(book, run, "checking"), 70_000, "300 left the account");
-        assert_eq!(cents(book, run, "savings"), 60_000);
-    });
-    let (spent, saved) = with_run(plain, |book, run| (cents(book, run, "checking"), cents(book, run, "savings")));
-    with_run(split, |book, run| {
-        assert_eq!((cents(book, run, "checking"), cents(book, run, "savings")), (spent, saved), "three transfers");
-    });
+        with_run(split, |book, run| {
+            assert_eq!(
+                moves(book, run),
+                ["checking -> shop 100.00 USD", "checking -> acme 100.00 USD", "checking -> savings 100.00 USD"]
+            );
+            assert_eq!(cents(book, run, "checking"), 70_000, "300 left the account");
+            assert_eq!(cents(book, run, "savings"), 60_000);
+        });
+        let (spent, saved) = with_run(plain, |book, run| (cents(book, run, "checking"), cents(book, run, "savings")));
+        with_run(split, |book, run| {
+            assert_eq!((cents(book, run, "checking"), cents(book, run, "savings")), (spent, saved), "three transfers");
+        });
+    }
 }
 
 #[test]
 fn the_remainder_leg_is_what_the_other_legs_leave_of_the_total() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 300 USD ->
   shop 100 USD
   savings ...
-";
-    with_run(lines, |book, run| {
-        assert_eq!(moves(book, run), ["checking -> shop 100.00 USD", "checking -> savings 200.00 USD"]);
-        assert_eq!(cents(book, run, "checking"), 70_000);
-        assert_eq!(cents(book, run, "savings"), 70_000);
-    });
+",
+        "\
+2026-03-14 checking -> 300 USD
+  -> shop    100 USD
+  -> savings ...
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(moves(book, run), ["checking -> shop 100.00 USD", "checking -> savings 200.00 USD"]);
+            assert_eq!(cents(book, run, "checking"), 70_000);
+            assert_eq!(cents(book, run, "savings"), 70_000);
+        });
+    }
 }
 
 #[test]
 fn a_total_written_after_the_arrow_is_the_total() {
     let lines = "\
 2026-03-14 checking -> 300 USD
-  shop 100 USD
-  savings ...
+  -> shop    100 USD
+  -> savings ...
 ";
     with_run(lines, |book, run| {
         assert_eq!(moves(book, run), ["checking -> shop 100.00 USD", "checking -> savings 200.00 USD"]);
@@ -233,9 +250,9 @@ fn a_total_written_after_the_arrow_is_the_total() {
 #[test]
 fn a_split_into_one_end_pays_it_by_its_legs() {
     let lines = "\
-2026-03-14 -> checking 300 USD
-  shop 100 USD
-  acme ...
+2026-03-14 checking <- 300 USD
+  <- shop 100 USD
+  <- acme ...
 ";
     with_run(lines, |book, run| {
         assert_eq!(moves(book, run), ["shop -> checking 100.00 USD", "acme -> checking 200.00 USD"]);
@@ -247,8 +264,8 @@ fn a_split_into_one_end_pays_it_by_its_legs() {
 fn a_split_with_no_total_is_the_sum_of_its_legs() {
     let lines = "\
 2026-03-14 checking ->
-  shop 100 USD
-  savings 50 USD
+  -> shop    100 USD
+  -> savings  50 USD
 ";
     with_run(lines, |book, run| {
         assert_eq!(moves(book, run), ["checking -> shop 100.00 USD", "checking -> savings 50.00 USD"]);
@@ -258,47 +275,72 @@ fn a_split_with_no_total_is_the_sum_of_its_legs() {
 
 #[test]
 fn a_computed_leg_is_solved_when_the_split_lands_and_the_remainder_follows() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 300 USD ->
   shop 10% of 100 USD
   savings ...
-";
-    with_run(lines, |book, run| {
-        assert_eq!(moves(book, run), ["checking -> shop 10.00 USD", "checking -> savings 290.00 USD"]);
-        assert_eq!(cents(book, run, "checking"), 70_000);
-    });
+",
+        "\
+2026-03-14 checking -> 300 USD
+  -> shop    10% of 100 USD
+  -> savings ...
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(moves(book, run), ["checking -> shop 10.00 USD", "checking -> savings 290.00 USD"]);
+            assert_eq!(cents(book, run, "checking"), 70_000);
+        });
+    }
 }
 
 #[test]
 fn a_target_leg_is_the_gap_to_its_balance_and_the_remainder_is_what_is_left() {
     // savings holds 500.00; `= 800 USD` is a leg of 300.00.
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 1_000 USD ->
   savings = 800 USD
   shop ...
-";
-    with_run(lines, |book, run| {
-        assert_eq!(moves(book, run), ["checking -> savings 300.00 USD", "checking -> shop 700.00 USD"]);
-        assert_eq!(cents(book, run, "savings"), 80_000);
-        assert_eq!(cents(book, run, "checking"), 0);
-    });
+",
+        "\
+2026-03-14 checking -> 1_000 USD
+  -> savings = 800 USD
+  -> shop    ...
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(moves(book, run), ["checking -> savings 300.00 USD", "checking -> shop 700.00 USD"]);
+            assert_eq!(cents(book, run, "savings"), 80_000);
+            assert_eq!(cents(book, run, "checking"), 0);
+        });
+    }
 }
 
 #[test]
 fn items_under_a_split_sit_between_the_source_and_the_remainder_leg() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   shop 60 USD
   acme ...
   10 USD #fees
-";
-    with_run(lines, |book, run| {
-        assert_eq!(
-            moves(book, run),
-            ["checking -> shop 60.00 USD", "checking -> acme 30.00 USD", "checking -> acme 10.00 USD #fees"]
-        );
-        assert_eq!(cents(book, run, "checking"), 90_000);
-    });
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> shop 60 USD
+  -> acme ...
+  10 USD #fees
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(
+                moves(book, run),
+                ["checking -> shop 60.00 USD", "checking -> acme 30.00 USD", "checking -> acme 10.00 USD #fees"]
+            );
+            assert_eq!(cents(book, run, "checking"), 90_000);
+        });
+    }
 }
 
 // ─── Conservation: a split that cannot add up is said, at its legs ──────────
@@ -309,51 +351,84 @@ fn imbalances(lines: &str) -> Vec<axiom_core::Diagnostic> {
 
 #[test]
 fn legs_that_are_short_of_the_total_are_an_error_at_the_legs() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   shop 40 USD
   savings 30 USD
-";
-    let said = imbalances(lines);
-    assert_eq!(said.len(), 1, "{said:?}");
-    assert!(said[0].is_error());
-    assert!(said[0].message.contains("70.00 USD") && said[0].message.contains("100.00 USD"), "{}", said[0].message);
-    assert!(said[0].labels.len() >= 3, "the header and both legs are pointed at: {:?}", said[0].labels);
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> shop    40 USD
+  -> savings 30 USD
+",
+    ] {
+        let said = imbalances(lines);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].is_error());
+        assert!(said[0].message.contains("70.00 USD") && said[0].message.contains("100.00 USD"), "{}", said[0].message);
+        assert!(said[0].labels.len() >= 3, "the header and both legs are pointed at: {:?}", said[0].labels);
+    }
 }
 
 #[test]
 fn legs_that_take_more_than_the_total_leave_a_negative_remainder_and_are_an_error() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   shop 80 USD
   acme 50 USD
   savings ...
-";
-    assert_eq!(imbalances(lines).len(), 1);
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> shop    80 USD
+  -> acme    50 USD
+  -> savings ...
+",
+    ] {
+        assert_eq!(imbalances(lines).len(), 1);
+    }
 }
 
 #[test]
 fn a_leg_in_another_commodity_and_a_remainder_both_want_what_the_others_leave_and_are_an_error() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   shop 40 EUR
   savings ...
-";
-    let said = imbalances(lines);
-    assert_eq!(said.len(), 1, "{said:?}");
-    assert!(said[0].message.contains("two legs"), "{}", said[0].message);
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> shop    40 EUR
+  -> savings ...
+",
+    ] {
+        let said = imbalances(lines);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].message.contains("two legs"), "{}", said[0].message);
+    }
 }
 
 #[test]
 fn an_exchange_leg_with_nothing_left_to_exchange_is_an_error() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   shop 100 USD
   savings 90 EUR
-";
-    let said = imbalances(lines);
-    assert_eq!(said.len(), 1, "{said:?}");
-    assert!(said[0].message.contains("nothing is left"), "{}", said[0].message);
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> shop    100 USD
+  -> savings  90 EUR
+",
+    ] {
+        let said = imbalances(lines);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].message.contains("nothing is left"), "{}", said[0].message);
+    }
 }
 
 #[test]
@@ -367,20 +442,30 @@ fn items_that_take_more_than_their_header_are_an_error() {
 
 #[test]
 fn a_leg_that_cannot_be_read_is_the_error_and_the_split_is_not_judged_short_of_it() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   groceries 40 USD
   shop 30 USD
   acme 30 USD
-";
-    let diagnostics = built(lines);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "unknown-entity"), "{diagnostics:?}");
-    assert!(imbalances(lines).is_empty(), "{diagnostics:?}");
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> groceries 40 USD
+  -> shop      30 USD
+  -> acme      30 USD
+",
+    ] {
+        let diagnostics = built(lines);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "unknown-entity"), "{diagnostics:?}");
+        assert!(imbalances(lines).is_empty(), "{diagnostics:?}");
+    }
 }
 
 #[test]
 fn a_split_that_adds_up_is_not_an_error() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 100 USD ->
   shop 40 USD
   savings 60 USD
@@ -390,52 +475,81 @@ fn a_split_that_adds_up_is_not_an_error() {
 2026-03-16 checking ->
   shop 40 USD
   savings 10 USD
-";
-    assert!(imbalances(lines).is_empty());
+",
+        "\
+2026-03-14 checking -> 100 USD
+  -> shop    40 USD
+  -> savings 60 USD
+2026-03-15 checking -> 100 USD
+  -> shop    40 USD
+  -> savings ...
+2026-03-16 checking ->
+  -> shop    40 USD
+  -> savings 10 USD
+",
+    ] {
+        assert!(imbalances(lines).is_empty());
+    }
 }
 
 #[test]
 fn a_leg_in_another_commodity_is_the_exchange_of_what_the_others_leave() {
     // README of example 08: `girokonto 900 EUR ->` with a fee leg and a USD leg. 5.00 USD is the fee, and what is left of
     // the 900.00 USD is exchanged for the 800.00 EUR the leg says.
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 900 USD ->
   shop 5 USD
   savings 800 EUR
-";
-    with_run(lines, |book, run| {
-        assert_eq!(
-            moves(book, run),
-            ["checking -> shop 5.00 USD", "checking -> savings 895.00 USD out, 800.00 EUR in"]
-        );
-        assert_eq!(cents(book, run, "checking"), 10_000);
-        assert_eq!(holds(book, run, "savings", "EUR"), 80_000);
-        assert_eq!(cents(book, run, "savings"), 50_000);
-    });
+",
+        "\
+2026-03-14 checking -> 900 USD
+  -> shop      5 USD
+  -> savings 800 EUR
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(
+                moves(book, run),
+                ["checking -> shop 5.00 USD", "checking -> savings 895.00 USD out, 800.00 EUR in"]
+            );
+            assert_eq!(cents(book, run, "checking"), 10_000);
+            assert_eq!(holds(book, run, "savings", "EUR"), 80_000);
+            assert_eq!(cents(book, run, "savings"), 50_000);
+        });
+    }
 }
 
 #[test]
 fn an_exchange_leg_of_a_total_the_fold_computes_is_exchanged_for_what_is_left_of_it_then() {
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 checking 50% of 1_800 USD ->
   shop 5 USD
   savings 800 EUR
-";
-    with_run(lines, |book, run| {
-        assert_eq!(
-            moves(book, run),
-            ["checking -> shop 5.00 USD", "checking -> savings 895.00 USD out, 800.00 EUR in"]
-        );
-        assert_eq!(cents(book, run, "checking"), 10_000);
-    });
+",
+        "\
+2026-03-14 checking 50% of 1_800 USD ->
+  -> shop      5 USD
+  -> savings 800 EUR
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(
+                moves(book, run),
+                ["checking -> shop 5.00 USD", "checking -> savings 895.00 USD out, 800.00 EUR in"]
+            );
+            assert_eq!(cents(book, run, "checking"), 10_000);
+        });
+    }
 }
 
 #[test]
 fn an_exchange_leg_into_the_source_of_a_split_that_arrives_takes_the_remainder_the_other_way() {
     let lines = "\
-2026-03-14 -> checking 900 USD
-  shop 5 USD
-  savings 800 EUR
+2026-03-14 checking <- 900 USD
+  <- shop      5 USD
+  <- savings 800 EUR
 ";
     with_run(lines, |book, run| {
         assert_eq!(
@@ -448,23 +562,31 @@ fn an_exchange_leg_into_the_source_of_a_split_that_arrives_takes_the_remainder_t
 #[test]
 fn an_all_header_is_everything_its_source_holds_and_the_remainder_is_what_the_legs_leave() {
     // `SOURCE := [END [SELECT]] [AMOUNT | all [UNIT]]`: savings holds 500.00, which is the total.
-    let lines = "\
+    for lines in [
+        "\
 2026-03-14 savings all ->
   checking 60 USD
   shop ...
-";
-    with_run(lines, |book, run| {
-        assert_eq!(moves(book, run), ["savings -> checking 60.00 USD", "savings -> shop 440.00 USD"]);
-        assert_eq!(cents(book, run, "savings"), 0);
-        assert_eq!(cents(book, run, "checking"), 106_000);
-    });
+",
+        "\
+2026-03-14 savings all ->
+  -> checking 60 USD
+  -> shop     ...
+",
+    ] {
+        with_run(lines, |book, run| {
+            assert_eq!(moves(book, run), ["savings -> checking 60.00 USD", "savings -> shop 440.00 USD"]);
+            assert_eq!(cents(book, run, "savings"), 0);
+            assert_eq!(cents(book, run, "checking"), 106_000);
+        });
+    }
 }
 
 #[test]
 fn an_all_leg_is_everything_the_source_holds_when_the_split_lands() {
     let lines = "\
 2026-03-14 savings ->
-  shop all
+  -> shop all
 ";
     with_run(lines, |book, run| {
         assert_eq!(moves(book, run), ["savings -> shop 500.00 USD"]);

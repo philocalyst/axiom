@@ -1,0 +1,99 @@
+/// Balances at the start of March, from the bank apps and the wallet, and what the collective's account held.
+opening 2025-03-01
+  checking              5_218.44 USD
+  savings               3_100.00 USD
+  wallet                240.00 USD
+  collective-checking   1_842.30 USD
+  collective-cash       96.50 USD
+  visa                  412.66 USD
+
+/// Rent is 3,150.00 USD for the flat, paid by me from checking. My third is an expense; Ben's and Cleo's thirds are claims on them, due in a week, and each payment is `for` the month's code.
+2025-03-01 checking -> 3_150.00 USD / landlord #rent-2025-03 due 2025-03-08
+  rent                    1_050.00 USD
+  ben                     1_050.00 USD
+  cleo                    1_050.00 USD
+2025-03-01 checking = 2_068.44 USD
+2025-03-01 savings = 3_100.00 USD
+2025-03-01 wallet = 240.00 USD
+2025-03-01 visa = 412.66 USD
+2025-03-01 collective-checking = 1_842.30 USD
+2025-03-01 collective-cash = 96.50 USD
+
+/// Cash tips, counted on Sunday night: taxable income when received, reported to the employer monthly.
+2025-03-02 income/tips -> wallet 163.14 USD
+2025-03-02 ben -> checking 1_050.00 USD for #rent-2025-03
+2025-03-03 checking -> car 128 USD / progressive
+2025-03-04 cleo -> checking 1_050.00 USD for #rent-2025-03
+2025-03-06 wallet -> dining 8.74 USD
+
+/// The Lantern: hourly wages plus card tips, paid every second Friday.
+2025-03-07 lantern -> 1_440.25 USD   // 1_036.00 wages + 404.25 card tips
+  taxes/federal           178.59 USD
+  taxes/payroll           110.18 USD
+  checking                ...
+
+/// Shared groceries on my card: split three ways.
+2025-03-07 visa -> 85.05 USD #shared-2025-03 due 2025-04-21
+  groceries               28.35 USD
+  ben                     28.35 USD
+  cleo                    28.35 USD
+2025-03-08 visa -> phone 45 USD / mint-mobile
+2025-03-09 income/tips -> wallet 233.07 USD
+
+/// Internet, 69.99 USD, in my name, split three ways. The month's small bills all carry one code (`#shared-2025-03`): Ben and Cleo pay them at month end with one flow `for` it.
+2025-03-09 checking -> 69.99 USD / fiberco #shared-2025-03 due 2025-04-23
+  utilities               23.33 USD
+  ben                     23.33 USD
+  cleo                    23.33 USD
+2025-03-09 income/donations -> collective-checking 60 USD
+
+/// Electricity is in Ben's name: he pays the bill and I owe him my third, a payable due in a month. Nothing moves in my bank until I pay it.
+/// There is no `/ power-co` payee here: on a payable the payee is the counterparty, and the one owed is Ben.
+2025-03-12 owed-to-ben -> utilities 29.47 USD #power-2025-03 due 2025-04-11   // my third of 88.40, from power-co
+2025-03-12 checking -> car 330.50 USD / carmax-finance
+2025-03-13 wallet -> dining 8.53 USD
+2025-03-14 visa -> dining 74.73 USD
+2025-03-15 checking -> health 189.40 USD / marketplace-plan
+
+/// The Riverfront Foundation's grant: 6,000.00 USD for garden supplies and tools, to be spent by 2025-10-31. It lands in the collective's account but stays the foundation's money.
+2025-03-15 riverfront -> collective-checking 6_000.00 USD
+2025-03-16 income/tips -> wallet 249.10 USD
+2025-03-17 visa -> groceries 79.53 USD / farmers-market
+2025-03-18 wallet -> transport 5.10 USD
+2025-03-19 visa -> entertainment 34.15 USD
+2025-03-21 lantern -> 1_396.55 USD   // 1_073.00 wages + 323.55 card tips
+  taxes/federal           173.17 USD
+  taxes/payroll           106.84 USD
+  checking                ...
+2025-03-21 visa -> 73.54 USD #shared-2025-03 due 2025-05-05
+  groceries               24.52 USD
+  ben                     24.51 USD
+  cleo                    24.51 USD
+
+/// Compost and soil for the new beds.
+2025-03-22 collective-checking -> soil 1_280.00 USD / bayview-soil
+
+/// February's statement.
+2025-03-22 checking -> visa 412.66 USD
+2025-03-23 income/tips -> wallet 264.96 USD
+
+/// Paying the tips into the bank, keeping about 150 in the wallet.
+2025-03-24 wallet -> checking 950 USD
+2025-03-26 visa -> clothing 28.35 USD
+2025-03-27 wallet -> dining 9.73 USD
+2025-03-28 checking -> savings 700 USD
+2025-03-30 income/tips -> wallet 130.54 USD
+
+/// Month end: the small shared bills are paid `for` their code, one flow each. I pay what I owe Ben and Cleo the same way.
+2025-03-31 ben -> checking 76.19 USD for #shared-2025-03
+2025-03-31 cleo -> checking 76.19 USD for #shared-2025-03
+2025-03-31 checking -> owed-to-ben 29.47 USD for #power-2025-03
+2025-03-31 by-ben = 0.00 USD
+2025-03-31 by-cleo = 0.00 USD
+2025-03-31 owed-to-ben = 0.00 USD
+2025-03-31 owed-to-cleo = 0.00 USD
+2025-03-31 visa = 420.35 USD
+2025-03-31 checking = 5_678.82 USD
+2025-03-31 savings = 3_800.00 USD
+2025-03-31 collective-checking = 6_622.30 USD
+2025-03-31 wallet = 298.71 USD

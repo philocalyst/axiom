@@ -9,38 +9,38 @@
 contract job-lumen with lumen                      // Priya: 138,000 a year
   5_750 USD twice monthly on 15, last into me-checking
   until 2026-08-31
-  retirement-lumen 6%                              // ▸ pre-tax deferral
-  blue-shield 210.00 USD #premium                  // ▸ pre-tax (§125)
-  irs 785.30 USD                                   // ▸ federal tax paid for the year of the paycheck
-  ftb 341.20 USD
-  ssa 439.88 USD                                   // ▸ Social Security and Medicare: 7.65%
-  edd 74.75 USD                                    // ▸ California SDI
-  match 50% of retirement-lumen up to 6%           // ▸ Lumen adds 172.50 to each 345.00
+  -> retirement-lumen 6%                              // ▸ pre-tax deferral
+  -> blue-shield 210.00 USD #premium                  // ▸ pre-tax (§125)
+  -> irs 785.30 USD                                   // ▸ federal tax paid for the year of the paycheck
+  -> ftb 341.20 USD
+  -> ssa 439.88 USD                                   // ▸ Social Security and Medicare: 7.65%
+  -> edd 74.75 USD                                    // ▸ California SDI
+  -> match 50% of retirement-lumen up to 6%           // ▸ Lumen adds 172.50 to each 345.00
 
 contract job-harbor with harbor-labs               // Priya: 148,000 a year, from 2026-09-08
   6_166.67 USD twice monthly on 15, last into joint-checking
   from 2026-09-08
-  retirement-harbor 6%
-  blue-shield 240.00 USD #premium
-  irs 862.40 USD
-  dtf 318.70 USD                                   // ▸ New York State
-  nyc-dof 173.15 USD                               // ▸ New York City resident tax
-  ssa 471.75 USD
-  ny-pfl 23.93 USD
-  match 100% of retirement-harbor up to 3%
+  -> retirement-harbor 6%
+  -> blue-shield 240.00 USD #premium
+  -> irs 862.40 USD
+  -> dtf 318.70 USD                                   // ▸ New York State
+  -> nyc-dof 173.15 USD                               // ▸ New York City resident tax
+  -> ssa 471.75 USD
+  -> ny-pfl 23.93 USD
+  -> match 100% of retirement-harbor up to 3%
   // ✗ 02a4: the first paycheck, 09-15, covers 09-08 to 09-15 only. No way to say "prorated by the days worked";
   // it is written with its amount below (journal/2026/09.ax).
 
 contract job-jamie with pinnacle                   // Jamie: 105,600 a year
   4_400 USD twice monthly on 15, last into jamie-checking
-  retirement-jamie 5%
-  blue-shield 165.00 USD #premium
-  hsa 250.00 USD                                   // ▸ pre-tax, into the HSA
-  irs 402.60 USD
-  ftb 176.10 USD
-  ssa 336.60 USD
-  edd 57.20 USD
-  match 100% of retirement-jamie up to 3%
+  -> retirement-jamie 5%
+  -> blue-shield 165.00 USD #premium
+  -> hsa 250.00 USD                                   // ▸ pre-tax, into the HSA
+  -> irs 402.60 USD
+  -> ftb 176.10 USD
+  -> ssa 336.60 USD
+  -> edd 57.20 USD
+  -> match 100% of retirement-jamie up to 3%
 
 /// Pinnacle puts a fixed 100 USD a month into Jamie's HSA. Its own contract: `match` is a percentage of a
 /// deferral and this is not one.

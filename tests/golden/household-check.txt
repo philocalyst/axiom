@@ -12,21 +12,21 @@ error[cannot-infer]: cannot infer the amount of this flow
 warning[food]: me: 681.00 USD in 2026-02 against a limit of 650.00 USD, over by 31.00 USD
    ╭─[journal/2026/02.ax:46:1]
    │
-30 │ 14 visa -> cafe 74.20 USD #dining
-   │ ────────────────┬────────────────
-   │                 ╰── 2026-02-14: 74.20 USD from visa to cafe
+30 │ 14 visa     -> cafe          74.20 USD #dining
+   │ ───────────────────────┬──────────────────────
+   │                        ╰── 2026-02-14: 74.20 USD from visa to cafe
    ⋮
-37 │ 19 visa -> trader-joes 96.80 USD
-   │ ────────────────┬───────────────
-   │                 ╰── 2026-02-19: 96.80 USD from visa to trader-joes
+37 │ 19 visa         -> trader-joes 96.80 USD
+   │ ────────────────────┬───────────────────
+   │                     ╰── 2026-02-19: 96.80 USD from visa to trader-joes
    ⋮
-44 │ 21 visa -> cafe 61.35 USD #dining
-   │ ────────────────┬────────────────
-   │                 ╰── 2026-02-21: 61.35 USD from visa to cafe
-45 │ 22 visa -> metro 41.20 USD #transport
-46 │ 25 visa -> trader-joes 128.10 USD
-   │ ────────────────┬────────────────
-   │                 ╰── this flow: 128.10 USD from visa to trader-joes
+44 │ 21 visa    -> cafe        61.35 USD  #dining
+   │ ──────────────────────┬─────────────────────
+   │                       ╰── 2026-02-21: 61.35 USD from visa to cafe
+45 │ 22 visa    -> metro       41.20 USD  #transport
+46 │ 25 visa    -> trader-joes 128.10 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── this flow: 128.10 USD from visa to trader-joes
    │
    ├─[accounts.ax:18:1]
    │
@@ -62,9 +62,9 @@ note[unchecked]: checking is not checked against 10,646.20 USD
    │ ────────────┬────────────
    │             ╰── this amount is unknown
    ⋮
-31 │ 14 checking = 10_646.20 USD
-   │ ─────────────┬─────────────
-   │              ╰── not checked: it depends on an amount that could not be worked out
+31 │ 14 checking =  10_646.20 USD
+   │ ──────────────┬─────────────
+   │               ╰── not checked: it depends on an amount that could not be worked out
    │
    = note: the assertions on this place after it are judged from here, and only a change in the gap
            is reported

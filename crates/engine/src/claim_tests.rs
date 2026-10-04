@@ -42,9 +42,9 @@ opening 2026-01-01
 
 /// Three claims in `owed`, the oldest not the one that is exactly 200.00: 300.00, 200.00, 300.00.
 const THREE: &str = "\
-2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
-2026-01-03 ann -> owed 200 USD due 2026-02-01 #design ^i2
-2026-01-04 ann -> owed 300 USD due 2026-02-01 #design ^i3
+2026-01-02 owed <- ann 300 USD #design ^i1 due 2026-02-01
+2026-01-03 owed <- ann 200 USD #design ^i2 due 2026-02-01
+2026-01-04 owed <- ann 300 USD #design ^i3 due 2026-02-01
 ";
 
 fn day(year: i32, month: u32, day: u32) -> Day {
@@ -143,9 +143,9 @@ fn a_flow_larger_than_any_claim_settles_oldest_first_across_them() {
 #[test]
 fn of_two_claims_that_are_exactly_the_flows_amount_the_older_is_settled() {
     let lines = "\
-2026-01-02 ann -> owed 200 USD due 2026-02-01 #design ^i1
-2026-01-03 ann -> owed 300 USD due 2026-02-01 #design ^i2
-2026-01-04 ann -> owed 300 USD due 2026-02-01 #design ^i3
+2026-01-02 owed <- ann      200 USD #design ^i1 due 2026-02-01
+2026-01-03 owed <- ann      300 USD #design ^i2 due 2026-02-01
+2026-01-04 owed <- ann      300 USD #design ^i3 due 2026-02-01
 2026-01-20 owed -> checking 300 USD
 ";
     with_run(lines, |book, run| {
@@ -202,9 +202,9 @@ fn a_written_day_beats_the_flows_own_code() {
 #[test]
 fn a_claim_of_any_commodity_is_settled_by_the_same_order() {
     let lines = "\
-2026-01-02 ann -> owed 12 BOX due 2026-02-01 ^i1
-2026-01-03 ann -> owed 5 BOX due 2026-02-01 ^i2
-2026-01-04 ann -> owed 12 BOX due 2026-02-01 ^i3
+2026-01-02 owed <- ann   12 BOX ^i1 due 2026-02-01
+2026-01-03 owed <- ann   5 BOX  ^i2 due 2026-02-01
+2026-01-04 owed <- ann   12 BOX ^i3 due 2026-02-01
 2026-01-20 owed -> stock 5 BOX
 ";
     with_run(lines, |book, run| {
@@ -217,9 +217,9 @@ fn a_claim_of_any_commodity_is_settled_by_the_same_order() {
 #[test]
 fn a_claim_place_that_names_a_policy_keeps_it() {
     let lines = "\
-2026-01-02 ann -> queue 300 USD due 2026-02-01 #design ^i1
-2026-01-03 ann -> queue 200 USD due 2026-02-01 #design ^i2
-2026-01-04 ann -> queue 300 USD due 2026-02-01 #design ^i3
+2026-01-02 queue <- ann      300 USD #design ^i1 due 2026-02-01
+2026-01-03 queue <- ann      200 USD #design ^i2 due 2026-02-01
+2026-01-04 queue <- ann      300 USD #design ^i3 due 2026-02-01
 2026-01-20 queue -> checking 200 USD
 ";
     with_run(lines, |book, run| {
@@ -243,7 +243,7 @@ fn paid(payment: &str) -> String {
 /// "A later flow between them settles open claims ... the one whose open amount is exactly the flow's".
 #[test]
 fn a_payment_from_the_party_settles_the_claim_whose_open_amount_is_exactly_its_own() {
-    with_run(&paid("2026-01-20 ann -> checking 200 USD"), |book, run| {
+    with_run(&paid("2026-01-20 checking <- ann 200 USD"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00), ("i3", 300_00)]));
     });
 }
@@ -251,7 +251,7 @@ fn a_payment_from_the_party_settles_the_claim_whose_open_amount_is_exactly_its_o
 /// "else the oldest first".
 #[test]
 fn a_payment_that_is_exactly_no_claim_settles_the_oldest_first() {
-    with_run(&paid("2026-01-20 ann -> checking 400 USD"), |book, run| {
+    with_run(&paid("2026-01-20 checking <- ann 400 USD"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i2", 100_00), ("i3", 300_00)]));
     });
 }
@@ -259,7 +259,7 @@ fn a_payment_that_is_exactly_no_claim_settles_the_oldest_first() {
 /// "those its codes name": the code on the payment beats the exact amount and the oldest.
 #[test]
 fn a_payment_that_carries_the_code_of_a_claim_settles_that_claim() {
-    with_run(&paid("2026-01-20 ann -> checking 200 USD ^i3"), |book, run| {
+    with_run(&paid("2026-01-20 checking <- ann 200 USD ^i3"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00), ("i2", 200_00), ("i3", 100_00)]));
     });
 }
@@ -269,7 +269,7 @@ fn a_payment_that_carries_the_code_of_a_claim_settles_that_claim() {
 /// settles the claim it names.
 #[test]
 fn a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles() {
-    with_run(&paid("2026-01-20 ann -> checking 400 USD\n  100 USD ^i3"), |book, run| {
+    with_run(&paid("2026-01-20 checking <- ann 400 USD\n  100 USD ^i3"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i2", 200_00), ("i3", 200_00)]));
     });
 }
@@ -277,7 +277,7 @@ fn a_code_on_a_line_item_of_a_payment_names_the_claim_that_item_settles() {
 /// "What remains is an ordinary flow": it pays checking all the same, and more than the claims is no claim.
 #[test]
 fn what_a_payment_does_not_settle_is_an_ordinary_flow() {
-    with_run(&paid("2026-01-20 ann -> checking 1_000 USD"), |book, run| {
+    with_run(&paid("2026-01-20 checking <- ann 1_000 USD"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[]));
         let checking = book.place("assets/checking").unwrap();
         let held: i64 = run.holdings.iter().filter(|h| h.place == checking).map(|h| h.qty().0).sum();
@@ -289,7 +289,7 @@ fn what_a_payment_does_not_settle_is_an_ordinary_flow() {
 /// Value is conserved: what the party was debited, with what the claims were, adds up to what checking was paid.
 #[test]
 fn settling_a_claim_does_not_create_or_lose_value() {
-    with_run(&paid("2026-01-20 ann -> checking 500 USD"), |book, run| {
+    with_run(&paid("2026-01-20 checking <- ann 500 USD"), |book, run| {
         let total: i64 = run.holdings.iter().filter(|h| h.unit == book.base).map(|h| h.qty().0).sum();
         assert_eq!(total, 0, "every place, the parties' too: {:?}", run.holdings);
     });
@@ -299,10 +299,10 @@ fn settling_a_claim_does_not_create_or_lose_value() {
 #[test]
 fn a_payment_settles_only_what_was_owed_by_its_party_and_already() {
     let lines = "\
-2026-01-01 bob -> checking 50 USD
-2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
-2026-01-03 bob -> checking 300 USD
-2026-01-04 ann -> checking 20 USD
+2026-01-01 checking <-   bob 50 USD
+2026-01-02 ann      owes me  300 USD ^i1 due 2026-02-01
+2026-01-03 checking <-   bob 300 USD
+2026-01-04 checking <-   ann 20 USD
 ";
     with_run(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 280_00)]), "ann's 20.00 settled in part");
@@ -312,7 +312,7 @@ fn a_payment_settles_only_what_was_owed_by_its_party_and_already() {
 /// A payment in another commodity than the claim is not the claim's settlement.
 #[test]
 fn a_payment_in_another_commodity_is_no_settlement() {
-    let lines = "2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1\n2026-01-04 ann -> stockroom 5 BOX\n";
+    let lines = "2026-01-02 ann       owes me  300 USD ^i1 due 2026-02-01\n2026-01-04 stockroom <-   ann 5 BOX\n";
     with_run(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00)]));
     });
@@ -322,8 +322,8 @@ fn a_payment_in_another_commodity_is_no_settlement() {
 #[test]
 fn a_payment_that_is_returned_opens_the_claims_it_settled() {
     let lines = "\
-2026-01-20 ann -> checking 200 USD ^pay-1
-2026-01-25 ^pay-1 returned
+2026-01-20 checking <-       ann 200 USD ^pay-1
+2026-01-25 ^pay-1   returned
 ";
     with_run(&paid(lines).replace("\n\n", "\n"), |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00), ("i2", 200_00), ("i3", 300_00)]));
@@ -396,9 +396,9 @@ fn a_claim_is_forgiven_on_the_day_it_was_made() {
 #[test]
 fn a_write_off_forgives_what_a_payment_of_the_same_day_left() {
     let lines = "\
-2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
-2026-01-20 owed[^i1] -> checking 100 USD
-2026-01-20 ^i1 waived
+2026-01-02 owed      <-     ann      300 USD #design ^i1 due 2026-02-01
+2026-01-20 owed[^i1] ->     checking 100 USD
+2026-01-20 ^i1       waived
 ";
     with_run(lines, |book, run| {
         assert_eq!(open(book, run, "assets/owed"), claims(&[]));
@@ -413,9 +413,9 @@ fn a_write_off_forgives_what_a_payment_of_the_same_day_left() {
 #[test]
 fn a_claim_whose_payment_carries_its_code_is_still_written_off_by_that_code() {
     let lines = "\
-2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
-2026-01-20 owed -> checking 100 USD ^i1
-2026-02-15 ^i1 waived
+2026-01-02 owed <-     ann      300 USD #design ^i1 due 2026-02-01
+2026-01-20 owed ->     checking 100 USD ^i1
+2026-02-15 ^i1  waived
 ";
     with_run(lines, |book, run| {
         assert_eq!(open(book, run, "assets/owed"), claims(&[]));
@@ -454,9 +454,9 @@ fn an_itemized_claim_is_forgiven_whole() {
 #[test]
 fn a_write_off_of_a_claim_that_is_settled_says_it_forgave_nothing() {
     let lines = "\
-2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
-2026-01-20 owed[^i1] -> checking 300 USD
-2026-02-15 ^i1 waived
+2026-01-02 owed      <-     ann      300 USD #design ^i1 due 2026-02-01
+2026-01-20 owed[^i1] ->     checking 300 USD
+2026-02-15 ^i1       waived
 ";
     with_run(lines, |_, run| {
         let said = said(run, "claim-writeoff-empty");

@@ -1,0 +1,9 @@
+// Prices for the year: what one unit was worth in dollars on the day. Sample
+// figures. In a real project a `sync` script writes this file.
+
+2026-01-02 VTI = 280.14 USD
+2026-01-22 VTI = 285.70 USD
+2026-02-18 VTI = 291.35 USD
+2026-03-02 VTI = 296.80 USD
+2026-03-20 VTI = 304.10 USD
+2026-03-31 VTI = 302.55 USD

@@ -1,0 +1,26 @@
+// Rental income for tax year 2025. us/rental recognizes rent, depreciation and
+// the standard repair/insurance/property-tax/interest purposes. These local
+// rules add the other documented Schedule E expenses and recapture depreciation
+// on sale. The independent verifier below works the return without Axiom.
+
+law recapture
+  on gain
+  when from is rental-home
+  let taken = min(max(gain, empty), tally(rental-depreciation))
+  count taken as recaptured
+  count taken as short-term-gains
+  count empty - taken as long-term-gains
+
+/// Schedule E: rents less the expenses attached to the house. The passive loss
+/// allowance is deliberately simplified as described in README.md.
+law schedule-e
+  each year closing 04-15
+  let net = value(tally(rental-income) - tally(rental-expenses), USD)
+  let allowance = value(passive-allowance[year], USD)
+  count net as rental-net
+  count max(net, empty - allowance) as total-income
+
+param passive-allowance
+  2024 25_000 USD
+  2025 25_000 USD
+  2026 25_000 USD

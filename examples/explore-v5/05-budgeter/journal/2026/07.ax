@@ -5,18 +5,18 @@
 01 card -> king-soopers 92.30 USD
 01 internet 89.99 USD monthly "annual rate increase"            // ▸ the terms from today: what the promotion's end would have returned to (85.00) is not what she pays
 03 phone
-07 card -> trader-joes 58.60 USD
-09 internet 89.99 USD                                           // ▸ 89.99: the price increase
-12 electric 118.20 USD
-12 card -> blue-bottle 13.50 USD #dining
-12 gc-target -> target 48.20 USD #household                     // ▸ spent from the gift card
-14 gas 19.80 USD
+07 card      -> trader-joes  58.60 USD
+09 internet  89.99 USD                                          // ▸ 89.99: the price increase
+12 electric  118.20 USD
+12 card      -> blue-bottle  13.50 USD    #dining
+12 gc-target -> target       48.20 USD    #household            // ▸ spent from the gift card
+14 gas       19.80 USD
 15 job
-18 card -> king-soopers 95.05 USD
-20 ben -> venmo 1_125.99 USD "rent + power, gas, wifi"
-21 cleo -> venmo 1_125.99 USD "rent + power, gas, wifi"
+18 card      -> king-soopers 95.05 USD
+20 venmo     <- ben          1_125.99 USD "rent + power, gas, wifi"
+21 venmo     <- cleo         1_125.99 USD "rent + power, gas, wifi"
 22 netflix
-24 venmo -> checking 2_251.98 USD
-25 card -> sprouts 47.85 USD
+24 venmo     -> checking     2_251.98 USD
+25 card      -> sprouts      47.85 USD
 31 job
-31 chase -> card 7.96 USD #rebate "cash back, 2% of 397.79"
+31 card      <- chase        7.96 USD     #rebate "cash back, 2% of 397.79"

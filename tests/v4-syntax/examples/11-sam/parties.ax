@@ -1,0 +1,45 @@
+// ─── Who Sam deals with ─────────────────────────────────────────────────────
+//
+// A party's kind says what dealing with it means:
+// - paying a grocer is groceries;
+// - money from an employer is wages;
+// - money to a tax authority is tax paid, for the year of the flow.
+//
+// std and `us` declare the common kinds, and the agencies `irs`, `ftb`,
+// `ssa` and `edd`. A party that is never declared can still be written: it
+// is simply untyped, and its flows need a `#purpose` (or at least a "description").
+// A party can also carry its purpose itself, without a kind:
+entity farmers-market #groceries
+entity chase : org
+entity fidelity : org
+
+entity lumen        : employer
+entity greystar     : landlord          // Sam's own landlord
+entity rocket       : lender
+entity dana         : tenant            // rents the condo from Sam
+entity mint         : phone-company
+entity figma        : software
+entity netflix      : streaming
+entity equinox      : gym
+entity state-farm   : insurer
+entity bay-plumbing : contractor
+entity blue-shield  : health-insurer
+// Every party is known on statements by its own name (`safeway` matches
+// "SAFEWAY #1234"). Only a name the bank spells otherwise needs a pattern.
+entity trader-joes : grocer
+  known-as "TRADER JOE"                 // the bank writes "TRADER JOE'S #552"
+entity safeway      : grocer
+entity jo           : person            // a friend
+
+/// A store's price includes the sales tax where it sells. The tax is derived
+/// from the price, never written.
+kind best-buy-store : store
+  sales-tax 8.625%
+entity best-buy : best-buy-store
+
+/// Clients pay the studio, not Sam: what arrives from them is the studio's
+/// income.
+entity northwind : client
+  purpose design
+entity halcyon : client
+  purpose design

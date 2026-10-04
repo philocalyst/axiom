@@ -2,24 +2,24 @@
 
 01 lisbon-rent
 02 cowork
-02 oakline-labs owes me 1_200 USD due 14d ^inv-2026-022 #consulting "landing page"
-03 staking 0.001451 ETH
+02 oakline-labs owes me           1_200 USD    #consulting "landing page" ^inv-2026-022 due 14d
+03 staking      0.001451 ETH
 08 github
 08 notion
 08 internet
-10 staking 0.001452 ETH
-10 oakline-labs -> stripe-bal 1_200.00 USD ^inv-2026-022 via stripe
+10 staking      0.001452 ETH
+10 stripe-bal   <-   oakline-labs 1_200.00 USD ^inv-2026-022 via stripe
   - 2.9% #fees
   - 0.30 USD #fees
 12 nordlicht-retainer
 14 cloudflare
 15 brightside-retainer
-15 est-tax                                                      // ▸ 3,100.00 from chase-checking, for 2026
-17 staking 0.001447 ETH
-18 pixelcraft -> metamask 1_500.00 USDC #consulting "logo animation"  // ▸ income of 1,500.00 USD at the price that day; basis: ? 04c3
+15 est-tax                                                                            // ▸ 3,100.00 from chase-checking, for 2026
+17 staking             0.001447 ETH
+18 metamask            <- pixelcraft   1_500.00 USDC #consulting "logo animation"     // ▸ income of 1,500.00 USD at the price that day; basis: ? 04c3
 20 edp
-24 staking 0.001448 ETH
-24 millennium -> continente 71.85 EUR #groceries
+24 staking             0.001448 ETH
+24 millennium          -> continente   71.85 EUR     #groceries
 27 health
-30 stripe-bal -> oakline-labs 1_200.00 USD ^inv-2026-022 "disputed charge"      // ✗ 04a7: the client's bank reversed it
+30 stripe-bal          -> oakline-labs 1_200.00 USD  "disputed charge" ^inv-2026-022  // ✗ 04a7: the client's bank reversed it
   + 15.00 USD #fees "dispute fee"                                              //   income is reversed, the invoice is open again, the fee is real

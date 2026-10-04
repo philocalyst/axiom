@@ -490,16 +490,16 @@ error[assertion]: assets/bank/checking holds 1,842.10 USD, not 615.10 USD
    ╭─[journal/2025/09.ax:12:1]
    │
  2 │ opening 2025-09-01
- 3 │   checking    4_942.10 USD
-   │   ────────────┬───────────
-   │               ╰── +4,942.10 USD from opening
+ 3 │   checking 4_942.10 USD
+   │   ──────────┬──────────
+   │             ╰── +4,942.10 USD from opening
    ⋮
  7 │ 2025-09-01 checking -> savings 2_400 USD for emergency-fund
    │ ─────────────────────────────┬─────────────────────────────
    │                              ╰── -2,400.00 USD to assets/bank/savings
- 8 │ 2025-09-01 checking -> savings 700 USD for insurance-fund
-   │ ────────────────────────────┬────────────────────────────
-   │                             ╰── -700.00 USD to assets/bank/savings
+ 8 │ 2025-09-01 checking -> savings 700 USD   for insurance-fund
+   │ ─────────────────────────────┬─────────────────────────────
+   │                              ╰── -700.00 USD to assets/bank/savings
    ⋮
 12 │ 2025-09-01 checking = 615.10 USD
    │ ────────────────┬───────────────

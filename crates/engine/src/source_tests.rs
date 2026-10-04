@@ -922,7 +922,7 @@ opening 2025-01-01
   checking 2_000 USD
 
 2025-01-02 checking -> seller 1_200 USD #purchase of condo
-2025-02-15 buyer -> checking 1_500 USD #sale of condo
+2025-02-15 checking <- buyer  1_500 USD #sale of condo
 ";
     with_run(text, day(2025, 2, 28), |book, run| {
         let errors: Vec<_> = run
@@ -1009,7 +1009,8 @@ fn anything_else_that_differs_is_still_ambiguous_without_a_policy() {
 
 #[test]
 fn an_itemized_paid_for_split_keeps_the_header_and_each_legs_due_override() {
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -1025,45 +1026,64 @@ opening 2025-02-01
   landlord 1_050 USD #rent
   landlord 1_050 USD #rent for ben
   landlord 1_050 USD #rent for cleo due 2025-03-15
-";
-    with_book(text, |book| {
-        let checking = book.place("checking").unwrap();
-        let landlord = book.entity("landlord").unwrap();
-        let ben = book.entity("ben").unwrap();
-        let cleo = book.entity("cleo").unwrap();
-        let (_, txn) = book.txns.iter().find(|(_, txn)| txn.day == day(2025, 3, 1)).unwrap();
-        let program = &book.journal_programs[txn.program.expect("split retains its sparse group")];
-        let Some(group) = program.group.as_deref() else { panic!("one grouped split: {:?}", program.group) };
-        let axiom_model::Heading::Source { end, total } = group.header else {
-            panic!("one-sided split has no independently posted header: {:?}", group.header)
-        };
-        assert_eq!(end.place, checking);
-        assert!(matches!(
-            total,
-            Some(axiom_model::Quantity::Amount(axiom_model::Expr::Literal(amount)))
-                if amount.qty.0 == 315_000 && amount.unit == book.base
-        ));
-        assert_eq!(group.legs.len(), 3);
+",
+        "\
+base USD
+commodity USD
+  precision 2
+purpose rent : spending
+account assets/checking
+entity ben
+entity cleo
+entity landlord
+opening 2025-02-01
+  checking 5_000 USD
 
-        let legs: Vec<_> = group
-            .legs
-            .iter()
-            .map(|leg| {
-                let flow = &book.flows[axiom_core::Id::new(txn.flows.start().index() as u32 + leg.flow)];
-                let detail = flow.detail.map(|id| book.details[id]);
-                (flow.to, flow.payee, detail.and_then(|detail| detail.hold), detail.and_then(|detail| detail.due))
-            })
-            .collect();
-        assert_eq!(
-            legs,
-            [
-                (book.entities[landlord].place.unwrap(), Some(landlord), None, Some(day(2025, 3, 8))),
-                (book.entities[landlord].place.unwrap(), Some(landlord), Some(ben), Some(day(2025, 3, 8))),
-                (book.entities[landlord].place.unwrap(), Some(landlord), Some(cleo), Some(day(2025, 3, 15))),
-            ],
-            "header due date inherits to legs; itemized paid-for parties and the final leg override are retained"
-        );
-    });
+2025-03-01 checking -> 3_150 USD #rent due 2025-03-08
+  -> landlord 1_050 USD #rent
+  -> landlord 1_050 USD #rent for ben
+  -> landlord 1_050 USD #rent for cleo due 2025-03-15
+",
+    ] {
+        with_book(text, |book| {
+            let checking = book.place("checking").unwrap();
+            let landlord = book.entity("landlord").unwrap();
+            let ben = book.entity("ben").unwrap();
+            let cleo = book.entity("cleo").unwrap();
+            let (_, txn) = book.txns.iter().find(|(_, txn)| txn.day == day(2025, 3, 1)).unwrap();
+            let program = &book.journal_programs[txn.program.expect("split retains its sparse group")];
+            let Some(group) = program.group.as_deref() else { panic!("one grouped split: {:?}", program.group) };
+            let axiom_model::Heading::Source { end, total } = group.header else {
+                panic!("one-sided split has no independently posted header: {:?}", group.header)
+            };
+            assert_eq!(end.place, checking);
+            assert!(matches!(
+                total,
+                Some(axiom_model::Quantity::Amount(axiom_model::Expr::Literal(amount)))
+                    if amount.qty.0 == 315_000 && amount.unit == book.base
+            ));
+            assert_eq!(group.legs.len(), 3);
+
+            let legs: Vec<_> = group
+                .legs
+                .iter()
+                .map(|leg| {
+                    let flow = &book.flows[axiom_core::Id::new(txn.flows.start().index() as u32 + leg.flow)];
+                    let detail = flow.detail.map(|id| book.details[id]);
+                    (flow.to, flow.payee, detail.and_then(|detail| detail.hold), detail.and_then(|detail| detail.due))
+                })
+                .collect();
+            assert_eq!(
+                legs,
+                [
+                    (book.entities[landlord].place.unwrap(), Some(landlord), None, Some(day(2025, 3, 8))),
+                    (book.entities[landlord].place.unwrap(), Some(landlord), Some(ben), Some(day(2025, 3, 8))),
+                    (book.entities[landlord].place.unwrap(), Some(landlord), Some(cleo), Some(day(2025, 3, 15))),
+                ],
+                "header due date inherits to legs; itemized paid-for parties and the final leg override are retained"
+            );
+        });
+    }
 }
 
 #[test]
@@ -1145,7 +1165,8 @@ fn a_purchase_that_states_its_basis_keeps_it() {
 
 #[test]
 fn wash_sale_carries_a_loss_into_a_later_replacement_lot() {
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -1170,55 +1191,88 @@ opening 2026-01-01
 2026-01-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
 2026-02-05 fidelity-brokerage 10.000 VTI -> checking 500 USD
 2026-02-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
-";
-    with_run(text, day(2026, 2, 28), |book, run| {
-        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
-        let mut sales: Vec<_> = run.gains.iter().filter(|gain| gain.day == day(2026, 2, 5)).collect();
-        sales.sort_by_key(|gain| gain.acquired);
-        assert_eq!(sales.len(), 2);
-        assert_eq!(
-            sales.iter().map(|gain| (gain.proceeds.0, gain.basis.0, gain.gain().0)).collect::<Vec<_>>(),
-            [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
-            "each of the two sold parcels carries its own loss amount"
-        );
-        let carried: Vec<_> = run
-            .adjustments
-            .iter()
-            .filter_map(|adjustment| match adjustment.kind {
-                crate::AdjustmentKind::Carried { from, to: Some(to) } => Some((from, to, adjustment.amount.0)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(carried.len(), 2, "prior and future replacement portions are each matched once: {carried:?}");
-        assert_eq!(
-            carried.iter().map(|(_, _, amount)| *amount).collect::<Vec<_>>(),
-            [1_000, 1_000],
-            "the first $20 parcel loss is split over the prior and future replacement shares"
-        );
-        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
-        assert_eq!(broker.lots.len(), 2);
-        assert_eq!(
-            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect::<Vec<_>>(),
-            [(2_500, 13_500), (2_500, 13_500)],
-            "each 2.5-share replacement gets only its apportioned $10 loss"
-        );
-        assert!(
-            broker.lots.iter().all(|lot| lot.wash_matched),
-            "both matched quantities stay ineligible for future replacement matches"
-        );
-        assert_eq!(
-            broker.lots.iter().map(|lot| (lot.acquired, lot.held_since)).collect::<Vec<_>>(),
-            [(day(2026, 1, 20), day(2026, 1, 1)), (day(2026, 2, 20), day(2026, 1, 1)),],
-            "matched replacement shares retain their purchase date and tack the sold lot's holding period"
-        );
-        assert_eq!(run.pending_carries.len(), 1, "the unmatched second lot loss remains pending through its window");
-        assert_eq!((run.pending_carries[0].quantity.0, run.pending_carries[0].amount.0), (5_000, 8_000));
-    });
+",
+        "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking           1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+  fidelity-brokerage 5.000 VTI basis 330 USD since 2026-01-02
+
+2026-01-20 checking                      -> fidelity-brokerage 2.500 VTI @ 100.00 USD basis 125 USD
+2026-02-05 fidelity-brokerage 10.000 VTI -> checking                     @ 50.00 USD
+2026-02-20 checking                      -> fidelity-brokerage 2.500 VTI @ 100.00 USD basis 125 USD
+",
+    ] {
+        with_run(text, day(2026, 2, 28), |book, run| {
+            assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+            let mut sales: Vec<_> = run.gains.iter().filter(|gain| gain.day == day(2026, 2, 5)).collect();
+            sales.sort_by_key(|gain| gain.acquired);
+            assert_eq!(sales.len(), 2);
+            assert_eq!(
+                sales.iter().map(|gain| (gain.proceeds.0, gain.basis.0, gain.gain().0)).collect::<Vec<_>>(),
+                [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
+                "each of the two sold parcels carries its own loss amount"
+            );
+            let carried: Vec<_> = run
+                .adjustments
+                .iter()
+                .filter_map(|adjustment| match adjustment.kind {
+                    crate::AdjustmentKind::Carried { from, to: Some(to) } => Some((from, to, adjustment.amount.0)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(carried.len(), 2, "prior and future replacement portions are each matched once: {carried:?}");
+            assert_eq!(
+                carried.iter().map(|(_, _, amount)| *amount).collect::<Vec<_>>(),
+                [1_000, 1_000],
+                "the first $20 parcel loss is split over the prior and future replacement shares"
+            );
+            let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+            assert_eq!(broker.lots.len(), 2);
+            assert_eq!(
+                broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect::<Vec<_>>(),
+                [(2_500, 13_500), (2_500, 13_500)],
+                "each 2.5-share replacement gets only its apportioned $10 loss"
+            );
+            assert!(
+                broker.lots.iter().all(|lot| lot.wash_matched),
+                "both matched quantities stay ineligible for future replacement matches"
+            );
+            assert_eq!(
+                broker.lots.iter().map(|lot| (lot.acquired, lot.held_since)).collect::<Vec<_>>(),
+                [(day(2026, 1, 20), day(2026, 1, 1)), (day(2026, 2, 20), day(2026, 1, 1)),],
+                "matched replacement shares retain their purchase date and tack the sold lot's holding period"
+            );
+            assert_eq!(
+                run.pending_carries.len(),
+                1,
+                "the unmatched second lot loss remains pending through its window"
+            );
+            assert_eq!((run.pending_carries[0].quantity.0, run.pending_carries[0].amount.0), (5_000, 8_000));
+        });
+    }
 }
 
 #[test]
 fn wash_sale_replacement_capacity_is_not_reused_by_a_later_sale() {
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -1242,40 +1296,68 @@ opening 2026-01-01
 2026-01-15 fidelity-brokerage 2.500 VTI -> checking 125 USD
 2026-01-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
 2026-02-01 fidelity-brokerage 2.500 VTI -> checking 125 USD
-";
-    with_run(text, day(2026, 2, 1), |book, run| {
-        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
-        let carried: Vec<_> = run
-            .adjustments
-            .iter()
-            .filter_map(|adjustment| match adjustment.kind {
-                crate::AdjustmentKind::Carried { from: _, to: Some(to) } => Some((to, adjustment.amount.0)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            carried.iter().map(|(_, amount)| *amount).collect::<Vec<_>>(),
-            [1_000],
-            "the replacement shares match the first sale only"
-        );
-        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
-        assert_eq!(
-            broker
-                .lots
+",
+        "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking           1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+
+2026-01-15 fidelity-brokerage 2.500 VTI -> checking                     @ 50.00 USD
+2026-01-20 checking                     -> fidelity-brokerage 2.500 VTI @ 100.00 USD basis 125 USD
+2026-02-01 fidelity-brokerage 2.500 VTI -> checking                     @ 50.00 USD
+",
+    ] {
+        with_run(text, day(2026, 2, 1), |book, run| {
+            assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+            let carried: Vec<_> = run
+                .adjustments
                 .iter()
-                .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched))
-                .collect::<Vec<_>>(),
-            [(2_500, 13_500, day(2026, 1, 20), day(2026, 1, 1), true)],
-            "a later loss does not add basis to or retack the already-matched replacement shares"
-        );
-        let remaining: i64 = run.pending_carries.iter().map(|carry| carry.amount.0).sum();
-        assert_eq!(remaining, 1_000, "the second sale's loss remains pending");
-    });
+                .filter_map(|adjustment| match adjustment.kind {
+                    crate::AdjustmentKind::Carried { from: _, to: Some(to) } => Some((to, adjustment.amount.0)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                carried.iter().map(|(_, amount)| *amount).collect::<Vec<_>>(),
+                [1_000],
+                "the replacement shares match the first sale only"
+            );
+            let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+            assert_eq!(
+                broker
+                    .lots
+                    .iter()
+                    .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched))
+                    .collect::<Vec<_>>(),
+                [(2_500, 13_500, day(2026, 1, 20), day(2026, 1, 1), true)],
+                "a later loss does not add basis to or retack the already-matched replacement shares"
+            );
+            let remaining: i64 = run.pending_carries.iter().map(|carry| carry.amount.0).sum();
+            assert_eq!(remaining, 1_000, "the second sale's loss remains pending");
+        });
+    }
 }
 
 #[test]
 fn wash_sale_allocates_each_loss_to_distinct_replacement_shares() {
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -1299,41 +1381,72 @@ opening 2026-01-01
 
 2026-01-20 checking 500 USD -> fidelity-brokerage 10.000 VTI basis 500 USD
 2026-02-05 fidelity-brokerage 10.000 VTI -> checking 500 USD
-";
-    with_run(text, day(2026, 2, 6), |book, run| {
-        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
-        let mut sales: Vec<_> = run.gains.iter().filter(|gain| gain.day == day(2026, 2, 5)).collect();
-        sales.sort_by_key(|gain| gain.acquired);
-        assert_eq!(
-            sales.iter().map(|gain| (gain.proceeds.0, gain.basis.0, gain.gain().0)).collect::<Vec<_>>(),
-            [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
-            "the replacement cost is allocated to the two original loss lots in FIFO order"
-        );
-        let carried: Vec<_> = run
-            .adjustments
-            .iter()
-            .filter_map(|adjustment| match adjustment.kind {
-                crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(carried, [2_000, 8_000]);
-        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
-        let mut replacement: Vec<_> =
-            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since)).collect();
-        replacement.sort_by_key(|lot| lot.3);
-        assert_eq!(
-            replacement,
-            [(5_000, 27_000, day(2026, 1, 20), day(2026, 1, 1)), (5_000, 33_000, day(2026, 1, 20), day(2026, 1, 2)),],
-            "each five-share tranche gets its own loss basis and holding-period start"
-        );
-        assert!(run.pending_carries.is_empty());
-    });
+",
+        "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking           1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+  fidelity-brokerage 5.000 VTI basis 330 USD since 2026-01-02
+
+2026-01-20 checking                      -> fidelity-brokerage 10.000 VTI @ 50.00 USD basis 500 USD
+2026-02-05 fidelity-brokerage 10.000 VTI -> checking                      @ 50.00 USD
+",
+    ] {
+        with_run(text, day(2026, 2, 6), |book, run| {
+            assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+            let mut sales: Vec<_> = run.gains.iter().filter(|gain| gain.day == day(2026, 2, 5)).collect();
+            sales.sort_by_key(|gain| gain.acquired);
+            assert_eq!(
+                sales.iter().map(|gain| (gain.proceeds.0, gain.basis.0, gain.gain().0)).collect::<Vec<_>>(),
+                [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
+                "the replacement cost is allocated to the two original loss lots in FIFO order"
+            );
+            let carried: Vec<_> = run
+                .adjustments
+                .iter()
+                .filter_map(|adjustment| match adjustment.kind {
+                    crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(carried, [2_000, 8_000]);
+            let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+            let mut replacement: Vec<_> =
+                broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since)).collect();
+            replacement.sort_by_key(|lot| lot.3);
+            assert_eq!(
+                replacement,
+                [
+                    (5_000, 27_000, day(2026, 1, 20), day(2026, 1, 1)),
+                    (5_000, 33_000, day(2026, 1, 20), day(2026, 1, 2)),
+                ],
+                "each five-share tranche gets its own loss basis and holding-period start"
+            );
+            assert!(run.pending_carries.is_empty());
+        });
+    }
 }
 
 #[test]
 fn reselling_a_tacked_replacement_preserves_the_original_holding_period() {
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -1358,34 +1471,62 @@ opening 2026-01-01
 2026-01-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
 2026-02-01 fidelity-brokerage 5.000 VTI -> checking 250 USD
 2026-02-05 checking 500 USD -> fidelity-brokerage 5.000 VTI basis 250 USD
-";
-    with_run(text, day(2026, 2, 6), |book, run| {
-        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
-        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
-        assert_eq!(
-            broker
-                .lots
-                .iter()
-                .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched))
-                .collect::<Vec<_>>(),
-            [
-                (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
-                (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
-            ],
-            "replacement shares inherit the original start, rather than the resold lot's purchase date"
-        );
-        assert_eq!(
-            run.adjustments
-                .iter()
-                .filter_map(|adjustment| match adjustment.kind {
-                    crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            [1_000, 1_000, 1_000]
-        );
-        assert!(run.pending_carries.is_empty());
-    });
+",
+        "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking           1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+
+2026-01-15 fidelity-brokerage 2.500 VTI -> checking                     @ 50.00 USD
+2026-01-20 checking                     -> fidelity-brokerage 2.500 VTI @ 100.00 USD basis 125 USD
+2026-02-01 fidelity-brokerage 5.000 VTI -> checking                     @ 50.00 USD
+2026-02-05 checking                     -> fidelity-brokerage 5.000 VTI @ 100.00 USD basis 250 USD
+",
+    ] {
+        with_run(text, day(2026, 2, 6), |book, run| {
+            assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+            let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+            assert_eq!(
+                broker
+                    .lots
+                    .iter()
+                    .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched))
+                    .collect::<Vec<_>>(),
+                [
+                    (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
+                    (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
+                ],
+                "replacement shares inherit the original start, rather than the resold lot's purchase date"
+            );
+            assert_eq!(
+                run.adjustments
+                    .iter()
+                    .filter_map(|adjustment| match adjustment.kind {
+                        crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                [1_000, 1_000, 1_000]
+            );
+            assert!(run.pending_carries.is_empty());
+        });
+    }
 }
 
 // ─── Value recognized ahead of the window it belongs to ─────────────────────
@@ -1467,8 +1608,8 @@ budget fun 10% of #earnings monthly
 account checking
 entity employer
 entity cinema
-2025-09-01 employer -> checking 1_000 USD #earnings
-2025-09-05 checking -> cinema 120 USD #fun
+2025-09-01 checking <- employer 1_000 USD #earnings
+2025-09-05 checking -> cinema   120 USD   #fun
 ";
     with_run(&text, day(2025, 9, 30), |book, run| {
         let (_, budget) = book.budgets.iter().next().expect("native share budget declaration");
@@ -1539,10 +1680,10 @@ budget fun (10% of total(in, month)) monthly carries
 account checking
 entity employer
 entity cinema
-2025-09-01 employer -> checking 1_000 USD
-2025-09-05 checking -> cinema 120 USD #fun
-2025-10-01 employer -> checking 2_000 USD
-2025-10-05 checking -> cinema 220 USD #fun
+2025-09-01 checking <- employer 1_000 USD
+2025-09-05 checking -> cinema   120 USD   #fun
+2025-10-01 checking <- employer 2_000 USD
+2025-10-05 checking -> cinema   220 USD   #fun
 ";
     with_run(&text, day(2025, 10, 31), |book, run| {
         let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
@@ -1800,7 +1941,8 @@ opening 2026-01-01
 
 #[test]
 fn a_computed_exchange_keeps_the_explicit_other_side() {
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -1811,14 +1953,28 @@ account wallet
 opening 2026-01-01
   checking 20 USD
 2026-01-02 checking 10 USD -> wallet 50% of 20 EUR
-";
-    with_run(text, day(2026, 1, 2), |book, run| {
-        assert!(run.diagnostics.is_empty(), "computed exchange: {:?}", run.diagnostics);
-        assert_eq!(holding(book, run, "checking", "USD").unwrap().qty().0, 1_000);
-        assert_eq!(holding(book, run, "wallet", "EUR").unwrap().qty().0, 1_000);
-        let posted = run.posted.last().expect("the computed exchange is posted");
-        assert_eq!((posted.out.0, posted.arrive.0), (1_000, 1_000));
-    });
+",
+        "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+account checking
+account wallet
+opening 2026-01-01
+  checking 20 USD
+2026-01-02 checking 10 USD -> wallet 50% of 20 EUR
+",
+    ] {
+        with_run(text, day(2026, 1, 2), |book, run| {
+            assert!(run.diagnostics.is_empty(), "computed exchange: {:?}", run.diagnostics);
+            assert_eq!(holding(book, run, "checking", "USD").unwrap().qty().0, 1_000);
+            assert_eq!(holding(book, run, "wallet", "EUR").unwrap().qty().0, 1_000);
+            let posted = run.posted.last().expect("the computed exchange is posted");
+            assert_eq!((posted.out.0, posted.arrive.0), (1_000, 1_000));
+        });
+    }
 }
 
 /// A contract's laws, which no flow used to fire: the ones that judge are read as each of its occurrences posts.

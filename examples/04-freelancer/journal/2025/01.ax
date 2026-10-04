@@ -1,38 +1,38 @@
 /// Balances carried over from the books of 2024. An opening is a statement, not a flow.
 opening 2025-01-01
-  business-checking   12_620.44 USD
-  personal-checking   3_486.12 USD
-  sep                 18_350.00 USD
+  business-checking 12_620.44 USD
+  personal-checking  3_486.12 USD
+  sep               18_350.00 USD
 
 /// The tax vault starts with what was set aside last year. `for vault` ties it: it is
 /// not available to spend, and only estimated tax comes out of it.
 2025-01-01 business-checking -> tax-vault 4_200 USD for vault
-2025-01-01 business-card -> google 7.20 USD #business-software
-2025-01-01 personal-checking -> landlord 1_750 USD #home-office-cost
-2025-01-01 personal-checking -> bluecross 412 USD #health-premium
+2025-01-01 business-card     -> google    7.20 USD  #business-software
+2025-01-01 personal-checking -> landlord  1_750 USD #home-office-cost
+2025-01-01 personal-checking -> bluecross 412 USD   #health-premium
 
 /// Monthly retainer, net 30.
-2025-01-02 brightwave owes me due 30d ^inv-2025-b01
+2025-01-02 brightwave owes me ^inv-2025-b01 due 30d
   3_200 USD #design
-2025-01-03 business-card -> notion 10 USD #business-software
-2025-01-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
-2025-01-05 personal-checking -> statefarm 22 USD #home-office-cost
-2025-01-05 personal-checking -> trader-joes 99.27 USD #groceries
-2025-01-08 business-card -> adobe 59.99 USD #business-software
-2025-01-08 personal-checking -> restaurant 24.02 USD #dining
-2025-01-10 personal-checking -> transit-agency 55.14 USD #transport
-2025-01-12 personal-checking -> comcast 80 USD #home-office-cost
-2025-01-12 personal-checking -> safeway 105.79 USD #groceries
-2025-01-14 business-card -> figma 15 USD #business-software
-2025-01-16 personal-checking -> pge 96.20 USD #home-office-cost
-2025-01-18 personal-checking -> tmobile 64 USD #business-phone
-2025-01-20 personal-checking -> safeway 93.34 USD #groceries
-2025-01-22 business-card -> freshbooks 21 USD #business-software
-2025-01-22 personal-checking -> restaurant 76.56 USD #dining
-2025-01-22 car used 34 MI #business-mile for brightwave
-2025-01-27 personal-checking -> trader-joes 70.82 USD #groceries
-2025-01-31 interest-source -> tax-vault 14.70 USD #interest-income for vault
-2025-01-31 business-card = 113.19 USD
-2025-01-31 business-checking = 5_470.44 USD
-2025-01-31 personal-checking = 3_486.98 USD
-2025-01-31 tax-vault = 4_214.70 USD
+2025-01-03 business-card     ->   notion            10 USD     #business-software
+2025-01-03 business-checking ->   personal-checking 2_950 USD  #owner-draw  // owner's draw
+2025-01-05 personal-checking ->   statefarm         22 USD     #home-office-cost
+2025-01-05 personal-checking ->   trader-joes       99.27 USD  #groceries
+2025-01-08 business-card     ->   adobe             59.99 USD  #business-software
+2025-01-08 personal-checking ->   restaurant        24.02 USD  #dining
+2025-01-10 personal-checking ->   transit-agency    55.14 USD  #transport
+2025-01-12 personal-checking ->   comcast           80 USD     #home-office-cost
+2025-01-12 personal-checking ->   safeway           105.79 USD #groceries
+2025-01-14 business-card     ->   figma             15 USD     #business-software
+2025-01-16 personal-checking ->   pge               96.20 USD  #home-office-cost
+2025-01-18 personal-checking ->   tmobile           64 USD     #business-phone
+2025-01-20 personal-checking ->   safeway           93.34 USD  #groceries
+2025-01-22 business-card     ->   freshbooks        21 USD     #business-software
+2025-01-22 personal-checking ->   restaurant        76.56 USD  #dining
+2025-01-22 car               used 34 MI                        #business-mile for brightwave
+2025-01-27 personal-checking ->   trader-joes       70.82 USD  #groceries
+2025-01-31 tax-vault         <-   interest-source   14.70 USD  #interest-income for vault
+2025-01-31 business-card     =    113.19 USD
+2025-01-31 business-checking =    5_470.44 USD
+2025-01-31 personal-checking =    3_486.98 USD
+2025-01-31 tax-vault         =    4_214.70 USD

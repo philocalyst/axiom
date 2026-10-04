@@ -3,18 +3,18 @@
 // and each line can say what it cost and since when.
 
 opening 2025-12-31
-  checking     9_200 USD
-  savings     15_000 USD
+  checking  9_200 USD
+  savings  15_000 USD
 
   // Pre-tax money: a 401(k) arrives with no basis, so all of it is taxable when
   // it comes out. The kind says so; nothing here does.
-  retirement  41_300 USD
+  retirement 41_300 USD
 
   // The 529 was opened in 2019. What was put in, 6,300 USD, is its basis; the
   // growth since then, 2,200 USD, has none.
-  college      8_500 USD  basis 6_300 USD
+  college 8_500 USD basis 6_300 USD
 
-2025-12-31 checking = 9_200 USD
-2025-12-31 savings = 15_000 USD
+2025-12-31 checking   = 9_200 USD
+2025-12-31 savings    = 15_000 USD
 2025-12-31 retirement = 41_300 USD
-2025-12-31 college = 8_500 USD
+2025-12-31 college    = 8_500 USD

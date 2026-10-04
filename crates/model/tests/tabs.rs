@@ -110,7 +110,8 @@ fn tabs_come_in_the_order_the_journal_is_lowered_in_and_not_the_order_it_is_writ
 
 #[test]
 fn a_party_a_flow_mentions_with_due_for_or_via_has_no_tab_until_a_claim_asks_for_one() {
-    let flows = "2026-01-05 checking -> jo 5 USD due 30d for bank via pat\n2026-01-06 bank -> checking 5 USD for jo\n";
+    let flows =
+        "2026-01-05 checking -> jo   5 USD for bank due 30d via pat\n2026-01-06 checking <- bank 5 USD for jo\n";
     with_book(&format!("{PARTIES}{flows}"), |book| assert_eq!(tabs(book), []));
 }
 

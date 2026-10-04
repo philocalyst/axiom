@@ -1,0 +1,61 @@
+// February 2026: an improvement and a repair to the condo, a sale that
+// becomes a wash sale, a dinner in Paris, a claim settled from each side, and
+// a promotion that changes a contract's terms for a while.
+
+01 flat
+01 gym
+01 mortgage      // ▸ 2,302.92: #interest of condo 1,527.88 · principal 365.04 · escrow 410.00
+
+02 checking -> bay-plumbing 1_480 USD #improvement of condo "new water heater"
+                                                    // ▸ joins the condo: basis +1,480.00, depreciated over 27.5 years from 02
+
+03 lease         // ▸ 2 days late: dana owed 2,350.00 from 02-01 to 02-03
+03 figma
+
+05 fidelity-brokerage[2026-01-20] 1.620 VTI -> 481.14 USD "sold the January lot: its price fell"
+                                                    // ▸ proceeds stay at fidelity · loss 18.86
+                                                    // ▸ wash sale: VTI is bought again on 02-20, within 30 days, so the
+                                                    //   loss is disallowed and joins that lot's basis (500.00 → 518.86)
+
+07 me -> corner-store 9.80 USD "food for the routine"
+08 phone-bill
+
+10 visa 64.12 USD -> cafe-de-flore 58.40 EUR @ 1.098 USD #dining "dinner in Paris"
+                                                    // ▸ 58.40 EUR was 63.73 USD at 1.0912 · 0.39 exchange cost
+
+12 jo -> checking 200 USD                           // ▸ settles 200.00 of what jo owes · 400.00 left, due 04-01
+
+14 checking -> bay-plumbing 240 USD #repair of condo "leak under the kitchen sink"
+                                                    // ▸ spent: a rental expense this year
+
+15 job
+  retirement      276.00 USD
+  blue-shield     184.20 USD
+  irs             498.00 USD
+  ftb             196.30 USD
+  ssa             337.81 USD
+  edd              52.99 USD
+  checking        ...
+
+20 vti-monthly 1.660 VTI                            // ▸ 500.00 at 301.20 · basis 518.86, with the wash sale's loss
+21 me -> corner-store 14.15 USD "food for the routine"
+22 netflix
+25 checking -> visa 2_333.99 USD "January's statement"
+
+26 halcyon -> checking 3_800 USD ^inv-2026-01       // ▸ settles it: the studio's #design income, on its due day
+27 visa -> trader-joes 96.10 USD
+
+27 gym now 120 USD monthly until 04-30 ^promo "spring promotion: half price"
+                                                    // ▸ the gym's terms until 2026-04-30; 240.00 again from May
+
+28 job
+  retirement      276.00 USD
+  blue-shield     184.20 USD
+  irs             498.00 USD
+  ftb             196.30 USD
+  ssa             337.81 USD
+  edd              52.99 USD
+  checking        ...
+
+28 checking   = 11_531.34 USD
+28 fidelity-brokerage = 481.14 USD                  // the cash side of the brokerage

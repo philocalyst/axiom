@@ -1,0 +1,33 @@
+2025-04-01 us-checking -> sf-rent 3_400 USD / landlord-sf
+2025-04-04 visa -> groceries 129.48 USD
+2025-04-05 us-checking -> 420 USD / mohela
+  student-loan            305.96 USD   // principal
+  loan-interest           114.04 USD   // interest
+2025-04-09 visa -> dining 67.08 USD
+2025-04-11 visa -> groceries 122.22 USD
+2025-04-14 visa -> utilities 124.83 USD
+
+/// The balance due on the 2024 returns, paid on the deadline. `for 2024` says which year it belongs to: it is money out
+/// of Dana's account today, and it is not a payment toward 2025.
+2025-04-14 us-checking -> taxes/federal 640 USD for 2024
+2025-04-14 us-checking -> taxes/state 215 USD for 2024
+2025-04-16 visa -> transport 68.98 USD
+2025-04-18 visa -> groceries 161.12 USD
+
+/// March's statement, paid in full.
+2025-04-20 us-checking -> visa 886.34 USD
+2025-04-21 visa -> dining 76.52 USD
+2025-04-23 visa -> shopping 54.16 USD
+2025-04-25 visa -> groceries 65.15 USD
+2025-04-30 acme -> 10_416.67 USD
+  us-401k                 625.00 USD   // 6% pre-tax
+  taxes/federal           1_180.00 USD
+  taxes/state             470.00 USD
+  taxes/payroll           796.87 USD   // Social Security and Medicare
+  taxes/sdi               125.00 USD   // California SDI
+  us-checking             ...
+2025-04-30 interest -> us-savings 146.07 USD
+2025-04-30 visa = 869.54 USD
+2025-04-30 us-checking = 27_424.93 USD
+2025-04-30 us-savings = 41_881.24 USD
+2025-04-30 student-loan = 29_903.45 USD

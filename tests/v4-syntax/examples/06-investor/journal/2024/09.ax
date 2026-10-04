@@ -1,0 +1,46 @@
+/// Balances at the start of the ledger. An opening is a statement, not a flow: it carries the cost
+/// and the day of each lot, so a lot may be older than any tax table, and no law sees it.
+opening 2024-09-01
+  checking    14_620.55 USD
+  savings     148_000.00 USD
+  retirement  86_400.00 USD
+  espp-cash   4_200.00 USD
+  fidelity    30.0000 VTI   basis 5_100.00 USD  since 2020-05-11
+  fidelity    12.0000 MSFT  basis 3_000.00 USD  since 2021-06-15
+  fidelity    300.0000 BND  basis 25_500.00 USD  since 2021-08-11
+
+2024-09-01 checking -> landlord 2_650 USD
+2024-09-02 savings -> checking 15_000 USD
+
+/// A standing habit: 1,500 USD of VTI on the fifth of every month. Each purchase is its own lot.
+2024-09-05 checking 1_499.99 USD -> fidelity 5.5851 VTI @ 268.57 USD
+2024-09-09 checking -> utility-co 173.47 USD
+2024-09-12 checking -> grocer 387.95 USD
+2024-09-12 dividend-source -> fidelity 9.96 USD
+2024-09-16 checking -> cafe 286.11 USD
+
+/// International index fund, a few times a year.
+2024-09-18 checking 2_500.00 USD -> fidelity 38.2029 VXUS @ 65.44 USD
+
+/// Bond fund for the fixed-income slice.
+2024-09-18 checking 2_500.00 USD -> fidelity 33.4448 BND @ 74.75 USD
+2024-09-20 checking -> grocer 247.09 USD
+2024-09-24 checking -> misc-vendor 120.16 USD
+2024-09-28 dividend-source -> fidelity 75.53 USD
+
+/// Monthly pay from Northwind. 14% into the 401(k), 10% into the employee stock purchase plan, which holds it `for espp`: tied, not available to spend, until it buys shares.
+2024-09-30 northwind -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2024-09-30 interest-source -> savings 443.33 USD
+2024-09-30 interest-source -> fidelity 20.85 USD
+2024-09-30 checking = 26_176.45 USD
+2024-09-30 savings = 133_443.33 USD
+2024-09-30 espp-cash = 5_600.00 USD
+2024-09-30 fidelity = 35.5851 VTI
+2024-09-30 fidelity = 12 MSFT
+2024-09-30 fidelity = 333.4448 BND
+2024-09-30 fidelity = 38.2029 VXUS

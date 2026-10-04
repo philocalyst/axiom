@@ -3,22 +3,22 @@
 // 8% and pays her on the 10th of the next month. What follows is what its statement and her bank feed wrote.
 
 opening 01
-  checking        23_140.62 USD
-  savings         18_500.00 USD
-  pm-trust         3_504.00 USD                          // December's rents, net of the fee, not yet paid out
-  pm-trust         1_850.00 USD for tenant-b             // B's deposit, held by the PM
-  pm-trust         1_950.00 USD for tenant-c             // C's
-  escrow           4_400.00 USD
-  unit-a       basis 168_187.50 USD since 2022-08-12     // ✗ 03a1: the price 468,000.00 split by area by hand:
-  unit-b       basis 153_562.50 USD since 2022-08-12     //   35.94%, 32.81% and 31.25% of 3,200 sq ft
-  unit-c       basis 146_250.00 USD since 2022-08-12
+  checking 23_140.62 USD
+  savings  18_500.00 USD
+  pm-trust  3_504.00 USD                                        // December's rents, net of the fee, not yet paid out
+  pm-trust  1_850.00 USD for tenant-b                           // B's deposit, held by the PM
+  pm-trust  1_950.00 USD for tenant-c                           // C's
+  escrow    4_400.00 USD
+  unit-a                 basis 168_187.50 USD since 2022-08-12  // ✗ 03a1: the price 468,000.00 split by area by hand:
+  unit-b                 basis 153_562.50 USD since 2022-08-12  //   35.94%, 32.81% and 31.25% of 3,200 sq ft
+  unit-c                 basis 146_250.00 USD since 2022-08-12
 
 01 mortgage                                                   // ▸ 2,937.45: #interest of triplex 1,558.29 · principal 509.16 · escrow 870.00   // the interest is 100% of the building's, and 64.06% of it the rentals'
 01 common-electric
 01 lease-b                                                    // ▸ 1,850.00 from the tenant into pm-trust · - 148.00 #management (8%)
 03 lease-c                                                    // ▸ 1,950.00 from the tenant into pm-trust · - 156.00 #management (8%)
-10 pm-trust -> checking 3_504.00 USD                          // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
-31 mortgage = 355_671.89 USD
+10 pm-trust        -> checking       3_504.00 USD             // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
+31 mortgage        =  355_671.89 USD
 31 property-tax                                               // ▸ 3,920.00 from escrow · #property-tax of triplex
-31 escrow = 1_210.00 USD
-31 pm-trust = 7_296.00 USD                                    // the owner's money and the tenants' deposits
+31 escrow          =  1_210.00 USD
+31 pm-trust        =  7_296.00 USD                            // the owner's money and the tenants' deposits

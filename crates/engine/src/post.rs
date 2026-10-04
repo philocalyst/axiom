@@ -1189,8 +1189,8 @@ opening 2025-01-01
   checking 5_000 USD
 
 2025-01-05 checking -> contractor 1_000 USD #purchase of condo
-2025-02-15 checking -> contractor 100 USD #improvement of condo
-2025-03-01 buyer -> checking 1_500 USD #sale of condo
+2025-02-15 checking -> contractor 100 USD   #improvement of condo
+2025-03-01 checking <- buyer      1_500 USD #sale of condo
   - 60 USD #fees
 ";
         let book = book(text);

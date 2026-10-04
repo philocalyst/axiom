@@ -2,39 +2,39 @@
 // US, paid in EUR, GBP and USD. He moves to Lisbon on 03-01. Most lines below were written by `axiom sync`.
 
 opening 01
-  chase-checking   14_220.80 USD
-  visa              1_642.35 USD                        // owed
-  wise-bal          2_318.55 EUR
-  wise-bal          1_204.10 GBP
-  wise-bal          3_880.40 USD
-  paypal-bal          412.66 USD
-  kraken-stake      2.410000 ETH  basis 6_210.00 USD since 2024-02-20
-  metamask          0.810000 ETH  basis 2_120.00 USD since 2024-11-05
-  metamask          1_200.00 USDC basis 1_200.00 USD since 2025-06-10
+  chase-checking 14_220.80 USD
+  visa            1_642.35 USD                          // owed
+  wise-bal        2_318.55 EUR
+  wise-bal        1_204.10 GBP
+  wise-bal        3_880.40 USD
+  paypal-bal        412.66 USD
+  kraken-stake    2.410000 ETH  basis 6_210.00 USD since 2024-02-20
+  metamask        0.810000 ETH  basis 2_120.00 USD since 2024-11-05
+  metamask        1_200.00 USDC basis 1_200.00 USD since 2025-06-10
   nordlicht owes me 4_200.00 EUR due 01-10 ^inv-2025-12
   greenline-apts owes me 1_650.00 USD due 2026-03-14 ^dep-austin        // the Austin deposit
 
-01 rent-austin                                                  // ▸ 1,650.00 #rent
-02 staking 0.001435 ETH                                         // ▸ #staking income: 4.48 USD at 3,120.00
-05 health                                                       // ▸ 56.28 USD from visa every four weeks
-06 visa -> h-e-b 96.14 USD #groceries
+01 rent-austin                                                                     // ▸ 1,650.00 #rent
+02 staking               0.001435 ETH                                              // ▸ #staking income: 4.48 USD at 3,120.00
+05 health                                                                          // ▸ 56.28 USD from visa every four weeks
+06 visa                  ->   h-e-b         96.14 USD    #groceries
 08 github
 08 notion
-09 staking 0.001437 ETH
-10 nordlicht -> wise-bal 4_200.00 EUR ^inv-2025-12              // ▸ settles the opening claim
-12 nordlicht-retainer                                           // ▸ 4,200.00 EUR into wise-bal
+09 staking               0.001437 ETH
+10 wise-bal              <-   nordlicht     4_200.00 EUR ^inv-2025-12              // ▸ settles the opening claim
+12 nordlicht-retainer                                                              // ▸ 4,200.00 EUR into wise-bal
 14 cloudflare
-15 brightside-retainer                                          // ▸ 3,100.00 GBP into wise-bal
-16 staking 0.001435 ETH
-16 est-tax 2_400 USD for 2025                                   // ▸ from chase-checking · the fourth 2025 installment, paid a day late      // ✗ 04a4
-19 visa -> torchys-tacos 28.60 USD #dining
-20 wise-bal 3_000.00 EUR -> 3_247.01 USD                        // ▸ 3,260.40 at 1.0868: 13.39 exchange cost, Wise's 12.30 EUR fee inside it
-22 oakline-labs owes me 3_000 USD due 14d ^inv-2026-014 #consulting "API integration, milestone 1"
-23 staking 0.001441 ETH
-28 oakline-labs -> stripe-bal 3_000.00 USD ^inv-2026-014 via stripe        // ▸ settles the invoice
+15 brightside-retainer                                                             // ▸ 3,100.00 GBP into wise-bal
+16 staking               0.001435 ETH
+16 est-tax               2_400 USD for 2025                                        // ▸ from chase-checking · the fourth 2025 installment, paid a day late      // ✗ 04a4
+19 visa                  ->   torchys-tacos 28.60 USD    #dining
+20 wise-bal 3_000.00 EUR ->                 3_247.01 USD                           // ▸ 3,260.40 at 1.0868: 13.39 exchange cost, Wise's 12.30 EUR fee inside it
+22 oakline-labs          owes me            3_000 USD    #consulting "API integration, milestone 1" ^inv-2026-014 due 14d
+23 staking               0.001441 ETH
+28 stripe-bal            <-   oakline-labs  3_000.00 USD ^inv-2026-014 via stripe  // ▸ settles the invoice
   - 2.9% #fees
   - 0.30 USD #fees                                                        // ✗ 04a5: Stripe's schedule is 2.9% + 0.30, +1.5% international, +1% conversion:
                                                                            //   which of them applies depends on the card, and the card is in the payout report
-30 staking 0.001440 ETH
-31 kraken-stake = 2.417188 ETH
-31 stripe-bal -> chase-checking 2_912.70 USD                    // the payout
+30 staking      0.001440 ETH
+31 kraken-stake =  2.417188 ETH
+31 stripe-bal   -> chase-checking 2_912.70 USD                  // the payout

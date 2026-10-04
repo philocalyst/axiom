@@ -157,10 +157,10 @@ entity alice : entity
 entity employer : entity
 account assets/fidelity
   owner alice
-2026-01-01 VTI -> fidelity 10 USD
-2026-01-02 BND -> fidelity 20 USD
-2026-01-03 QQQ -> fidelity 30 USD
-2026-01-04 employer -> fidelity 40 USD
+2026-01-01 fidelity <- VTI      10 USD
+2026-01-02 fidelity <- BND      20 USD
+2026-01-03 fidelity <- QQQ      30 USD
+2026-01-04 fidelity <- employer 40 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -213,7 +213,7 @@ kind fund : commodity
   pays dividend
 commodity VTI : fund
 account assets/fidelity
-2026-01-01 VTI -> fidelity 10 USD #interest
+2026-01-01 fidelity <- VTI 10 USD #interest
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -244,8 +244,8 @@ entity grocer : grocer-kind
 entity designer : entity
   purpose groceries
 account checking
-2026-01-01 acme -> checking 4_600 USD
-2026-01-02 checking -> grocer 85 USD
+2026-01-01 checking <- acme     4_600 USD
+2026-01-02 checking -> grocer   85 USD
 2026-01-03 checking -> designer 90 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
@@ -384,7 +384,7 @@ kind retirement-account : asset
   takes pretax-deferral from wages
 entity acme : payroll-agency
 account retirement : retirement-account
-2026-01-01 acme -> retirement 400 USD
+2026-01-01 retirement <- acme 400 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -442,7 +442,7 @@ kind payroll-agency : entity
   purpose wages
 entity acme : payroll-agency
 account checking
-2026-01-01 acme -> checking 400 USD #interest
+2026-01-01 checking <- acme 400 USD #interest
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -505,8 +505,8 @@ kind retirement-account : asset
   takes pretax-deferral from wages
 entity acme : payroll-agency
 account retirement : retirement-account
-2026-01-01 acme -> retirement 400 USD
-2026-01-02 acme -> retirement 400 USD #wages
+2026-01-01 retirement <- acme 400 USD
+2026-01-02 retirement <- acme 400 USD #wages
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -528,7 +528,8 @@ account retirement : retirement-account
 #[test]
 fn quoted_unit_price_records_both_typed_flow_quantities() {
     let path = "journal/2026/01.ax";
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -538,26 +539,40 @@ account assets/checking
 account assets/brokerage
 2026-01-01 checking -> brokerage 7 VTI @ 285.70 USD
 2026-01-02 checking 1_999.90 USD -> brokerage 7 VTI @ 285.70 USD
-";
-    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
-    assert!(syntax.is_empty(), "{syntax:?}");
+",
+        "\
+base USD
+commodity USD
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account assets/checking
+account assets/brokerage
+2026-01-01 checking -> brokerage 7 VTI @ 285.70 USD
+2026-01-02 checking -> brokerage 7 VTI @ 285.70 USD
+",
+    ] {
+        let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+        assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
-    let flow = flows[0];
-    let vti = book.commodity("VTI").unwrap();
-    let usd = book.commodity("USD").unwrap();
-    assert_eq!(flow.out, axiom_model::Amount::new(axiom_core::Qty(199_990), usd));
-    assert_eq!(flow.arrive, axiom_model::Amount::new(axiom_core::Qty(7), vti));
-    assert_eq!(flows[1].out, flow.out);
-    assert_eq!(flows[1].arrive, flow.arrive);
+        let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
+        let flow = flows[0];
+        let vti = book.commodity("VTI").unwrap();
+        let usd = book.commodity("USD").unwrap();
+        assert_eq!(flow.out, axiom_model::Amount::new(axiom_core::Qty(199_990), usd));
+        assert_eq!(flow.arrive, axiom_model::Amount::new(axiom_core::Qty(7), vti));
+        assert_eq!(flows[1].out, flow.out);
+        assert_eq!(flows[1].arrive, flow.arrive);
+    }
 }
 
 #[test]
 fn quoted_unit_price_rejects_disagreeing_explicit_amounts() {
     let path = "journal/2026/01.ax";
-    let text = "\
+    for text in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -567,13 +582,26 @@ account assets/checking
 account assets/brokerage
 2026-01-01 checking 1_999.90 USD -> brokerage 7 VTI @ 285.70 USD
 2026-01-02 checking 2_000.00 USD -> brokerage 7 VTI @ 285.70 USD
-";
-    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
-    assert!(syntax.is_empty(), "{syntax:?}");
+",
+        "\
+base USD
+commodity USD
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account assets/checking
+account assets/brokerage
+2026-01-01 checking              -> brokerage 7 VTI @ 285.70 USD
+2026-01-02 checking 2_000.00 USD -> brokerage 7 VTI @ 285.70 USD
+",
+    ] {
+        let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+        assert!(syntax.is_empty(), "{syntax:?}");
 
-    let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "price-disagrees"), "{diagnostics:?}");
-    assert_eq!(book.flows.len(), 1, "the invalid priced transaction is rolled back atomically");
+        let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "price-disagrees"), "{diagnostics:?}");
+        assert_eq!(book.flows.len(), 1, "the invalid priced transaction is rolled back atomically");
+    }
 }
 
 #[test]
@@ -583,7 +611,7 @@ fn commodity_without_pays_cannot_be_used_as_a_party() {
 base USD
 commodity VTI
 account assets/fidelity
-2026-01-01 VTI -> fidelity 10 USD
+2026-01-01 fidelity <- VTI 10 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");

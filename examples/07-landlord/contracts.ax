@@ -2,9 +2,9 @@
 contract paycheck with acme
   8_000 USD monthly on 28 into checking #wages
   from 2025-01-28
-  irs 1_215 USD #federal-tax
-  payroll-office 612 USD #tax-paid
-  checking ...
+  -> irs 1_215 USD #federal-tax
+  -> payroll-office 612 USD #tax-paid
+  -> checking ...
 
 /// The leases carry the same rents and refundable deposits as the source ledger.
 contract rent-a with tenant-a

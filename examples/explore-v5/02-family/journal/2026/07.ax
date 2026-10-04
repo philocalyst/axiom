@@ -1,17 +1,17 @@
 // July 2026.
 
-01 mortgage-2                                                 // ▸ 3,465.38: #interest of home 2,250.19 · principal 513.19 · escrow 702.00
-03 joint-visa -> trader-joes 96.80 USD
-08 hsa -> jamie-checking 620.00 USD ^bill-0512 "reimburses the 05-12 dentist visit"  // ▸ a distribution: qualified?      // ✗ 02a11
-11 joint-visa -> target 77.15 USD
+01 mortgage-2                                                                                      // ▸ 3,465.38: #interest of home 2,250.19 · principal 513.19 · escrow 702.00
+03 joint-visa     -> trader-joes       96.80 USD
+08 hsa            -> jamie-checking    620.00 USD "reimburses the 05-12 dentist visit" ^bill-0512  // ▸ a distribution: qualified?      // ✗ 02a11
+11 joint-visa     -> target            77.15 USD
 12 electricity-ca
-14 car-loan                                                   // ▸ 560.20: #interest of car2 134.54 · principal 425.66
+14 car-loan                                                                                        // ▸ 560.20: #interest of car2 134.54 · principal 425.66
 15 job-lumen
 15 job-jamie
-15 joint-checking -> west-84th 4_850 USD "security deposit, lease signed"  // ? 02c3: before the lease's `from`
-20 joint-visa -> two-men-and-truck 1_000 USD #moving "deposit"
-25 joint-visa -> whole-foods 109.72 USD
-31 mortgage-2 = 479_526.80 USD
+15 joint-checking -> west-84th         4_850 USD  "security deposit, lease signed"                 // ? 02c3: before the lease's `from`
+20 joint-visa     -> two-men-and-truck 1_000 USD  #moving "deposit"
+25 joint-visa     -> whole-foods       109.72 USD
+31 mortgage-2     =  479_526.80 USD
 31 job-lumen
 31 job-jamie
 31 hsa-employer

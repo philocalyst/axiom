@@ -1,38 +1,38 @@
 2025-04-01 checking -> landlord 2_650 USD
-2025-04-02 savings -> checking 5_000 USD
-2025-04-05 checking 1_499.99 USD -> fidelity 5.5076 VTI @ 272.35 USD
+2025-04-02 savings  -> checking 5_000 USD
+2025-04-05 checking -> fidelity 5.5076 VTI @ 272.35 USD
 
 /// Swapping bitcoin for ether on the exchange. The 0.6% fee is inside the rate, so fewer ether arrive.
-2025-04-08 coinbase 0.15 BTC -> coinbase 6.95668225 ETH
-2025-04-09 checking -> utility-co 162.43 USD
+2025-04-08 coinbase 0.15 BTC -> coinbase              @ 46.37788167 ETH
+2025-04-09 checking          -> utility-co 162.43 USD
 
 /// Moving 6 ETH to a self-custody wallet to stake it. The network fee is paid in ETH: a small disposal.
-2025-04-10 coinbase 6 ETH -> wallet 6 ETH
+2025-04-10 coinbase          -> wallet          6 ETH
 2025-04-10 wallet 0.0021 ETH -> network-fees
-2025-04-12 checking -> grocer 304.87 USD
-2025-04-16 checking -> cafe 402.51 USD
-2025-04-20 checking -> grocer 363.71 USD
-2025-04-24 checking -> misc-vendor 305.27 USD
-2025-04-28 dividend-source -> schwab 75.53 USD
-2025-04-30 northwind -> 14_000.00 USD
-  retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  irs       2_650.00 USD
-  payroll-office       1_071.00 USD   // Social Security and Medicare
-  checking            ...
-2025-04-30 interest-source -> savings 268.83 USD
-2025-04-30 interest-source -> fidelity 185.10 USD
-2025-04-30 checking = 27_772.23 USD
-2025-04-30 savings = 80_917.64 USD
-2025-04-30 espp-cash = 5_600.01 USD
-2025-04-30 fidelity = 73.2646 VTI
-2025-04-30 fidelity = 36.3264 MSFT
-2025-04-30 fidelity = 24.6225 UNH
-2025-04-30 fidelity = 50.9847 FAST
-2025-04-30 fidelity = 37.7871 VXUS
-2025-04-30 schwab = 333.4448 BND
-2025-04-30 schwab = 38.2029 VXUS
-2025-04-30 etrade = 187.4775 NWND
-2025-04-30 coinbase = 0.15 BTC
-2025-04-30 coinbase = 0.95668225 ETH
-2025-04-30 wallet = 5.9979 ETH
+2025-04-12 checking          -> grocer          304.87 USD
+2025-04-16 checking          -> cafe            402.51 USD
+2025-04-20 checking          -> grocer          363.71 USD
+2025-04-24 checking          -> misc-vendor     305.27 USD
+2025-04-28 schwab            <- dividend-source 75.53 USD
+2025-04-30 me                <- northwind       14_000.00 USD
+  -> retirement     1_958.33 USD           // 401(k) deferral
+  -> espp-cash      1_400.00 USD for espp  // ESPP contribution, after tax
+  -> irs            2_650.00 USD
+  -> payroll-office 1_071.00 USD           // Social Security and Medicare
+  -> checking       ...
+2025-04-30 savings   <- interest-source 268.83 USD
+2025-04-30 fidelity  <- interest-source 185.10 USD
+2025-04-30 checking  =  27_772.23 USD
+2025-04-30 savings   =  80_917.64 USD
+2025-04-30 espp-cash =  5_600.01 USD
+2025-04-30 fidelity  =  73.2646 VTI
+2025-04-30 fidelity  =  36.3264 MSFT
+2025-04-30 fidelity  =  24.6225 UNH
+2025-04-30 fidelity  =  50.9847 FAST
+2025-04-30 fidelity  =  37.7871 VXUS
+2025-04-30 schwab    =  333.4448 BND
+2025-04-30 schwab    =  38.2029 VXUS
+2025-04-30 etrade    =  187.4775 NWND
+2025-04-30 coinbase  =  0.15 BTC
+2025-04-30 coinbase  =  0.95668225 ETH
+2025-04-30 wallet    =  5.9979 ETH

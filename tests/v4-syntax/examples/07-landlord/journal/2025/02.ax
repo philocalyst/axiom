@@ -1,0 +1,22 @@
+/// Lease A: 2,400 USD a month from 2025-02-01 to 2025-08-31. The deposit is a claim the tenant has on Jamie, due
+/// a month after the lease ends, and the money is tied to the tenant (`for tenant-a`) wherever it lands.
+// The lease contract creates this tenant-held deposit automatically.
+2025-02-01 checking -> oak-street 1_950 USD #rent
+
+/// First payment: principal and interest, no escrow. Interest is for the month behind. The plan's own legs are
+/// this month's; every later occurrence writes the two legs that changed.
+2025-02-01 home-loan
+
+/// Rent is an occurrence of the plan `rent-a`. It comes on the third this month, and on the first after that.
+2025-02-03 rent-a
+2025-02-08 checking -> trader-joes 204.31 USD #groceries
+2025-02-15 checking -> trader-joes 163.88 USD #groceries
+2025-02-19 checking -> cafe 99.86 USD #dining
+2025-02-22 checking -> home-supplies 362.38 USD #household
+2025-02-28 paycheck
+// Previous hand-entered depreciation: 913.57 USD on 2025-02-28. v4 derives this from the house parts.
+2025-02-28 home-loan = 278_759.79 USD
+2025-02-28 rental-bank = 5_338.11 USD
+2025-02-28 checking = 26_874.77 USD
+2025-02-28 deposit-bank = 2_400.00 USD
+2025-02-28 deposits = 2_400.00 USD

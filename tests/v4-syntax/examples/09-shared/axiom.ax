@@ -1,0 +1,21 @@
+// A shared life: a flat with two roommates, a loan to a friend, cash tips, a work
+// expense waiting to be reimbursed, and the small garden collective that Alex is
+// treasurer of, with a grant. March to December 2025.
+//
+// The folders are constraints: journal/2025/03.ax holds March 2025 only.
+
+base USD
+
+use std
+use us
+
+/// Alex, 28, a bartender at The Lantern, single, and treasurer of the collective.
+entity me : person
+  born   1996-11-08
+  filing single
+  lives  us
+
+/// A volunteer garden collective, with a bank account in its own name that Alex
+/// signs for. It does not `live` anywhere: a nonprofit pays no income tax, and
+/// that is spelled by writing nothing.
+entity green-table : org

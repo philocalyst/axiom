@@ -4,42 +4,42 @@
 // promotion extended.
 
 01 flat          // ▸ 2,918.60: the rent, and 12% of the building's water on top
-  water = 155.00 USD                                // the input the contract asks for
-01 gym           // ▸ 120.00: the promotion's terms
+  -> water = 155.00 USD                                // the input the contract asks for
+01 gym              // ▸ 120.00: the promotion's terms
 01 lease
 01 mortgage
-01 condo-insurance   // ▸ 1,140.00 · #insurance of condo, 95.00 a month through 2027-02
-03 figma waived "a month free: figma's apology for the outage"
+01 condo-insurance  // ▸ 1,140.00 · #insurance of condo, 95.00 a month through 2027-02
+03 figma           waived "a month free: figma's apology for the outage"
                                                     // ▸ kept at nothing: not late, nothing owed
 08 phone
 
 10 netflix ends      // cancelled: no more payments are expected, and none is missing
 
 15 job
-  retirement      276.00 USD
-  blue-shield     184.20 USD
-  irs             498.00 USD
-  ftb             196.30 USD
-  ssa             337.81 USD
-  edd              52.99 USD
-  checking        ...
+  -> retirement  276.00 USD
+  -> blue-shield 184.20 USD
+  -> irs         498.00 USD
+  -> ftb         196.30 USD
+  -> ssa         337.81 USD
+  -> edd          52.99 USD
+  -> checking    ...
 
-14 me -> farmers-market 23.00 USD                   // ▸ #groceries: the party's own purpose
+14 me          ->  farmers-market 23.00 USD         // ▸ #groceries: the party's own purpose
 20 vti-monthly 1.640 VTI
-28 ^promo now until 06-30 "the gym extended its promotion through June"
+28 ^promo      now until 06-30              "the gym extended its promotion through June"
 
 // Quarterly dividends. A fund that pays is a party like any other, and what
 // it pays is a dividend.
-26 VTI -> fidelity 198.12 USD                       // ▸ #dividend, qualified (VTI : fund)
-26 VXUS -> 25.09 USD                                // ▸ #dividend, 25.09 gross
-  foreign-tax      2.49 USD                         // ▸ #tax-paid abroad: a credit on the return (Form 1116)
-  fidelity         ...                              // ▸ 22.60
+26 fidelity <- VTI  198.12 USD                      // ▸ #dividend, qualified (VTI : fund)
+26 me       <- VXUS 25.09 USD                       // ▸ #dividend, 25.09 gross
+  -> foreign-tax 2.49 USD                              // ▸ #tax-paid abroad: a credit on the return (Form 1116)
+  -> fidelity    ...                                   // ▸ 22.60
 
 31 job
-  retirement      276.00 USD
-  blue-shield     184.20 USD
-  irs             498.00 USD
-  ftb             196.30 USD
-  ssa             337.81 USD
-  edd              52.99 USD
-  checking        ...
+  -> retirement  276.00 USD
+  -> blue-shield 184.20 USD
+  -> irs         498.00 USD
+  -> ftb         196.30 USD
+  -> ssa         337.81 USD
+  -> edd          52.99 USD
+  -> checking    ...

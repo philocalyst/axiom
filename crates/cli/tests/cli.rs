@@ -106,9 +106,9 @@ account assets/checking : bank
 ";
     fs::write(folder.join("axiom.ax"), setup).unwrap();
     let journal = "\
-2026-01-02 employer -> checking 1_000 USD #income
+2026-01-02 checking <- employer      1_000 USD #income
 2026-01-08 checking -> grocery-store 84.20 USD #groceries
-2026-01-09 checking -> grocery-store 5 USD #groceris
+2026-01-09 checking -> grocery-store 5 USD     #groceris
 ";
     fs::write(folder.join("journal.ax"), journal).unwrap();
     folder
@@ -151,7 +151,8 @@ fn a_balance_before_an_accepted_gap_does_not_see_it() {
     assert!(text(&after.stdout).contains("90.00 USD"), "{}", text(&after.stdout));
 }
 
-/// Two years under `us`, the first with more of a capital loss than one year may deduct.
+/// Two years under `us`, the first with more of a capital loss than one year may deduct, written the v4 way: an amount on
+/// each side of the arrow.
 const LOSSES: &str = "\
 base USD
 use std
@@ -182,10 +183,40 @@ opening 2024-01-01
 2026-03-01 broker 10 STK -> checking 2_000 USD
 ";
 
-#[test]
-fn a_net_capital_loss_beyond_the_limit_is_carried_into_the_next_years_return() {
-    let folder = empty_folder("loss-carryforward");
-    fs::write(folder.join("axiom.ax"), LOSSES).expect("write project");
+/// The same two years, each trade stating one amount and its price.
+const LOSSES_V5: &str = "\
+base USD
+use std
+use us
+
+entity me : person
+  born 1988-04-12
+  children 0
+  filing single
+  lives us
+
+commodity STK : stock
+  precision 0
+
+account assets/checking : bank
+account assets/broker : brokerage
+
+opening 2024-01-01
+  checking 50_000 USD
+
+// 2025: 4,000 USD lost on shares held over a year, 5,000 USD on shares held less.
+2024-02-01 checking -> broker 100 STK @ 100.00 USD
+2025-03-01 checking -> broker 100 STK @ 100.00 USD
+2025-06-01 broker 100 STK -> checking @ 60.00 USD
+2025-09-01 broker 100 STK -> checking @ 50.00 USD
+// 2026: 1,000 USD gained.
+2025-12-01 checking -> broker 10 STK @ 100.00 USD
+2026-03-01 broker 10 STK -> checking @ 200.00 USD
+";
+
+fn carries_the_loss_forward(book: &str, name: &str) {
+    let folder = empty_folder(name);
+    fs::write(folder.join("axiom.ax"), book).expect("write project");
     let project = folder.to_str().expect("a UTF-8 path");
     // The lines of the return about losses and income, as `name amount USD`.
     let lines = |year: &str| -> Vec<String> {
@@ -204,6 +235,16 @@ fn a_net_capital_loss_beyond_the_limit_is_carried_into_the_next_years_return() {
     // 5,000 USD is lost again, 3,000 deducted, and only long-term loss is left to carry.
     assert_eq!(lines("2026"), ["long-loss-carried 2,000.00 USD", "agi -3,000.00 USD"]);
     let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn a_net_capital_loss_beyond_the_limit_is_carried_into_the_next_years_return() {
+    carries_the_loss_forward(LOSSES, "loss-carryforward");
+}
+
+#[test]
+fn a_net_capital_loss_written_with_its_prices_is_carried_into_the_next_years_return_too() {
+    carries_the_loss_forward(LOSSES_V5, "loss-carryforward-v5");
 }
 
 #[test]

@@ -1,0 +1,9 @@
+commodity HOME : real-estate
+  name "the rental house"
+  precision 0
+
+/// The identified rental home. Its acquired cost includes the 4,850 USD closing
+/// costs; 75,370 USD is land, leaving 301,480 USD of depreciable building basis.
+asset house : rental-home
+  in-service 2025-01-15
+  land 75_370 USD
