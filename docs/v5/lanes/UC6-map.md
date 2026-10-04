@@ -209,7 +209,88 @@ the memos, which borrow the sources: `check_memos` splits into registering the f
 
 ## 3. Delivered
 
-(filled in as each entry lands)
+From the v5 head `f1baf39` (55,938) to the merge of v5 head `d52032c`; strict counts by `quality.py` (report 6,886 to 6,468,
+cli 2,487 to 2,320, core 3,502 to 3,418: **-669**; sync, session and the rest untouched). Planned is the ledger's number; the map
+is my reading before building. Every commit was green (`cargo fmt --check`, the tests of the crates it touched, the workspace
+at the end of U35 and at the merge, clippy no worse: report 12 to 10 warnings, the others as they were) and was held to the
+baseline's outputs by `allcmds.sh`, `dates.py`, `whys.py`, `diff/`, the goldens and the mistakes.
+
+| entry | ledger | map | delivered | what it is |
+|---|---:|---:|---:|---|
+| U35 K7c-1 `balance --value` without the note | -45 | -45 | **-34** | `Unpriced`, its `OnceLock`, `Posting::standing`; a `Worth` for the flag (+7) |
+| U35 K7c-2 registers of a party, asset, contract | -130 | -150 | **-153** | one listing, one row, `Source` (flow or gap) shared with the place register |
+| U35 K7c-3 `why asset:`/`contract:` through the flows table | -45 | -45 | **-59** | the table takes postings |
+| U35 K7c-4 `why #purpose` through `limits` and `budget` | -60 | -65 | **-85** | `limits::section`, `budget::section` (which the budget view is made of) |
+| U35 K7c-5 `flow --by party` as the periods table | -40 | -50 | **0** | built, measured -2, not kept (below) |
+| U35 K7c-6 one `why` layout | n/e | -10 | **-11** | the place page's flows; `section_for_lens` gone |
+| **U35** | **-320** | -300 | **-342** | |
+| U38 the view site | -150 | -25 | **-45** | `View` holds the run; `movement_place`, `owns_flow`, `flow_qty` |
+| U37 rows of flows | -180 | -15 | **0** | skipped: the merged builder is longer than the two it replaces |
+| U39 another owner's money | -80 | -20 | **-14** | `View::refuse`; the target half not made |
+| U40 enums in words | -110 | -30 | **not reached** | report half only (-25 to -30): see section 4 |
+| U41 periods through the pivot | -60 | -10 | **0** | skipped (section 2) |
+| U42 what has no price | -60 | 0 | **0** | skipped (section 2) |
+| U43 a cell said as text | -150 | -170 | **-184** | cli -167, report -17: `plain.rs`, a `CellSink` |
+| U44 writing what the language reads | -110 | 0 | **0** | skipped: the claims about it are wrong (section 1) |
+| U45 confining a write | -40 | -15 | **0** | skipped (section 2) |
+| U46 days due, grouping (core) | -205 | -90 | **-84** | `first_where`, `Landings`, `Groups` |
+| U47 sync's memos by the record reader | -130 | -50 | **not done** | the words differ (section 1, item 6) |
+| U48 the CLI's copy of sync's memo groups | -40 | -15 | **not done** | needs U47's borrow split (section 2) |
+| **lane** | **-1,675** | | **-669** | 40% of the ledger's entries that are mine (C6's -1,925 less U36, U49 and the entries of syntax, model and engine) |
+
+Per crate, by `quality.py` (the lines the lane touched are report, cli and core; the merge brought `core` +30 and `model` -198 from
+lane U's C1 to C3):
+
+| crate | start `f1baf39` | v5 head `d52032c` | this branch (merged) | lane's own change |
+|---|---:|---:|---:|---:|
+| report | 6,886 | 6,886 | 6,468 | **-418** |
+| cli | 2,487 | 2,487 | 2,320 | **-167** |
+| core | 3,502 | 3,532 | 3,448 | **-84** |
+| sync | 4,339 | 4,339 | 4,339 | 0 |
+| session | 501 | 501 | 501 | 0 |
+| engine | 12,863 | 12,863 | 12,863 | (not mine) |
+| model | 18,908 | 18,710 | 18,710 | (not mine) |
+| syntax | 6,438 | 6,438 | 6,438 | (not mine) |
+| **total** | 55,938 | 55,770 | **55,101** | -669 |
+
+The final proof, from binaries built here and kept in `scratchpad/lanec6/` (the baseline is the v5 head `d52032c` built from
+`git archive`, the new one is this branch after the merge), is: the workspace tests 1,389 passed, 0 failed, 21 ignored;
+`cargo fmt --check` clean; clippy 56 warnings (the start had 58: report 12 to 10); `allcmds.sh` 22 of 1,592 outputs differ,
+`dates.py` 44 of 2,314, `whys.py` 1,384 of 13,016, `diff/` (cases, cases2, cases3) none, the mistakes none, one golden
+(`household-why-place.txt`); and every one of those differences is one of U35's decided changes: the removed note of
+`balance --value` (6 + 44 outputs), the flows section of `why PLACE` (headed Recent flows, now Flows), of `why asset:`,
+`why contract:` and a tax line, and the Headroom and Budgets of `why #PURPOSE` (checked by setting those sections aside from
+both outputs, text and JSON, with the note deleted from the reference: nothing else differs, a section set aside only on
+the kind of page that has it). The registers of 702 entities, assets and contracts of the examples (2,501 rows, as JSON)
+list the same flows with the same routes, purposes and amounts, in the same order, as the baseline's but for the rows
+the decision drops. 135 colored outputs of the terminal (9 examples x 15 views, `--color always`) are identical to the
+binary before U43. Entries U38, U39, U43 and U46 are each byte-identical to the previous commit's binary on every harness.
+
+What the code showed that the plan got wrong, beyond section 1:
+
+- **K7c-5 has no lines to take.** The party table already is the purpose table's machinery (`Pivot`, `Periods`, `row`,
+  `add_facts`, the root names); a `Party` key in `Tally`, one dispatching view and one `Context` arm came to -2, so it stays two
+  views. The decision's change of bytes was not needed.
+- **The three goldens of K7c-6 are one.** `household-why-law.txt` and `household-why-code.txt` are `unknown-target` errors
+  in the household example now. `tests/mistakes/constraints.out` holds `why` pages too (Recent flows, Flows behind it) but
+  `constraints.sh` is not part of `run.sh`: it is a stale probe and was left alone.
+- **The register of a non-place is not a place's register minus a column.** An entity's register listed its gaps (an accepted
+  assertion has no journal flow) and a test pins them (`the_register_of_a_gaps_counter_place_lists_it_as_well`), so the listing
+  takes `Source` (a flow or a gap) and not postings; the hand-built households of the tests have no names, so a place register
+  by id stays a function of its own for two tests.
+- **U38 saves what rustfmt wraps, not what a parameter is.** 83 signatures lost a parameter; 14 lost a line with it; and
+  `view.run.x` is longer than `run.x`, which wrapped some that fitted. The ledger's -150 counted the 83.
+- **U37's four ledger sites were two** after U35 (the registers' rows and `why/text.rs`'s table went with it), and the merged
+  builder (an enum of columns and a cell for each) is longer than the two it would replace.
+- **An `Unpriced` count had two tests, one of them in `session`, built around a cache the removal deletes**: they became "a
+  value says nothing of the flows it could not price" and "what a value says does not depend on whose books asked first".
+- **Running the suites is the cost.** The workspace's thin-LTO release build of `report`'s tests took over ten minutes with
+  three lanes on four cores; every gate here ran with `CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16` (the
+  same optimised profile without whole-program linking), and the proof at the merge is from binaries built so.
+- **Two slips, both mine, both told to the coordinator:** a shell command with backticks in U46's commit message ate two
+  words of it ("the earliest of `on`'s landings" reads "of 's landings"; "serves every `on`" reads "every ."); and a `rm -rf` of
+  a scratch directory that was not mine (`scratchpad/base/`) while clearing my own files. My files live in `scratchpad/lanec6/`.
+
 
 ## 4. Notes for the lanes this one does not own
 
