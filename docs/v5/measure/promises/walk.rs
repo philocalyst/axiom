@@ -3,8 +3,9 @@
 //! Nothing but this reads a `Residual`, so there is no old answer to compare it with and it is held to the reference
 //! alone (check.rs): the occurrence it waits for is the reference's next owed day, with the reference's ordinal, until
 //! the stream owes nothing more. A loan's payments begin at the first owed day after the loan was made, there are as many
-//! as the term holds periods of the cadence (a part of a period is one), each leaves less owed than the last, and the last
-//! leaves nothing: the loan is done after it, whatever the schedule would go on to say.
+//! as the term holds periods of the cadence (a part of a period is one), and the loan is done after the last, whatever the
+//! schedule would go on to say. What a loan owes after each is the loan's schedule's to say (K5d, `loans.py` holds it to
+//! its own reference): here it is asked that each leaves no more owed than the last and that the last leaves nothing.
 
 use axiom_core::{Cadence, Day, Days, Dues, Span};
 use axiom_model::promise::{Residual, Stream, Term};
@@ -64,6 +65,7 @@ fn walk_stream(
         (began..).zip(&owed[began..]).map(|(ordinal, day)| (*day, ordinal as u32)).collect();
     expected.truncate(payments.map_or(STEPS, |periods| STEPS.min(periods as usize)));
 
+    let schedule = book.promises.loan(reference.id).filter(|_| payments.is_some());
     let mut residual = Residual::start(&book.promises, stream.every);
     let mut open = None;
     for (day, ordinal) in &expected {
@@ -71,12 +73,12 @@ fn walk_stream(
         tally.new("residual", next == Some(*day) && at == *ordinal, || {
             format!("{} {kind:?}: waits for {next:?} (ordinal {at}), the reference for {day} ({ordinal})", name())
         });
-        if payments.is_some() {
-            let owes = residual.open();
-            tally.new("residual open", owes.0 > 0 && open.is_none_or(|before| owes < before), || {
+        if let Some(schedule) = schedule {
+            let owes = schedule.paid_on(*day).map(|paid| paid.open);
+            tally.new("residual open", owes.is_ok_and(|owes| owes.0 >= 0 && open.is_none_or(|before| owes <= before)), || {
                 format!("{} {kind:?} {day}: {owes:?} owed after {open:?}", name())
             });
-            open = Some(owes);
+            open = owes.ok();
         }
         residual.advance(&book.promises);
     }
@@ -89,9 +91,9 @@ fn walk_stream(
             format!("{} {kind:?}: not done after {} days", name(), expected.len())
         });
     }
-    if paid {
-        tally.new("residual repaid", residual.open().0 == 0, || {
-            format!("{} {kind:?}: owes {:?}", name(), residual.open())
+    if let Some(schedule) = schedule.filter(|_| paid) {
+        tally.new("residual repaid", open.is_some_and(|owes| owes.0 == 0), || {
+            format!("{} {kind:?}: owes {:?} after {:?}", name(), open, schedule.entries().last().map(|entry| entry.day))
         });
     }
 }

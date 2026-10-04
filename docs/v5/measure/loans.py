@@ -37,9 +37,15 @@ import datetime
 import json
 import os
 import random
+import resource
+import shutil
+import subprocess
 import sys
+import tempfile
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
+from itertools import zip_longest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -337,7 +343,7 @@ class Case:
                 continue
             off = rng.choice([0, 0, 0, 1, -1, 2]) if self.reach >= 3 else 0
             at = due + datetime.timedelta(days=off)
-            self.lines[due] = due if at == self.begins or at > TODAY else at
+            self.lines[due] = due if at == self.begins or at > TODAY or at < self.anchor else at
         forms["missed"] += len(self.lines) < sum(d <= TODAY for d in self.dues)
         # what a line states of its own: over the payment (an extra) or under it (short)
         self.over = {due: rng.choice([1, 1, -1, -2]) * rng.randint(1, 60_000) for due in self.lines if rng.random() < 0.12}
@@ -393,8 +399,12 @@ class Case:
         for _ in range(self.seed_statements):
             day = self.begins + datetime.timedelta(days=rng.randint(5, (last - self.begins).days))
             owed = open_on(self.principal, self.rows, day)
+            extras = [amount for due, amount in self.excess.items() if due <= day]
+            unkept = [row[3] for row in self.rows if row[0] == "pay" and row[1] <= day and row[1] not in self.kept]
             stated = {"schedule": owed, "tab": self.tab_on(day), "prepayment": owed - rng.randint(1, 50) * 100,
-                      "off": owed + rng.randint(1, 5000)}[rng.choice(["schedule", "tab", "tab", "prepayment", "off"])]
+                      "off": owed + rng.randint(1, 5000), "extra": owed + (rng.choice(extras) if extras else 0),
+                      "extras": owed + sum(extras), "missed": owed + (rng.choice(unkept) if unkept else 0),
+                      }[rng.choice(["schedule", "tab", "tab", "prepayment", "off", "extra", "extras", "missed"])]
             self.values.append((day, stated if stated >= 0 else owed))
         self.values.sort()
         self.forms["statements"] += len(self.values)
@@ -411,7 +421,8 @@ class Case:
         if gap > 0:
             if sum(row[3] for row in payments if row[1] not in self.kept) == gap:
                 holds.append("missed")
-            short = sum(row[3] - self.posted(row[1])[1] for row in payments if row[1] in self.kept)
+            short = sum(row[3] - self.posted(row[1])[1] for row in payments
+                        if row[1] in self.kept and self.stated.get(row[1], row[2] + row[3]) < row[2] + row[3])
             if short == gap:
                 holds.append("short")
             extras = [amount for due, amount in self.excess.items() if due <= day]
@@ -455,20 +466,20 @@ class Case:
             if due in self.paid and due not in self.kept:
                 if due + datetime.timedelta(days=self.reach + 1) <= TODAY or (last_kept and due < last_kept):
                     out.append(f"missed {name} {due}")
-        probe, end = self.begins, min(UNTIL, self.dues[-1] + datetime.timedelta(days=90))
+        probe, end = self.begins, UNTIL
         while probe <= end:
             out.append(f"open {name} {probe} {open_on(self.principal, self.rows, probe)}")
             probe = add_months(probe.replace(day=1), 1)
             probe = probe.replace(day=calendar.monthrange(probe.year, probe.month)[1])
         out.append(f"tab {name} {TODAY} {self.tab_on(TODAY)}")
-        last_tab = last_loan = 0
+        last_tab = 0
         for day, stated in self.values:
-            gap = stated - self.tab_on(day)
-            out += ["diag assertion"] * (gap != 0 and gap != last_tab)
-            last_tab = gap
-            gap = stated - open_on(self.principal, self.rows, day)
-            out += [f"diag loan-balance {self.cause(day, stated)}"] * (gap != 0 and gap != last_loan)
-            last_loan = gap
+            gap_tab = stated - self.tab_on(day)
+            gap_loan = stated - open_on(self.principal, self.rows, day)
+            # The tab's gap is reported when it changes; when the schedule says the same, the loan's own diagnostic is the one.
+            out += ["diag assertion"] * (gap_tab != 0 and gap_tab != last_tab and not (gap_loan != 0 and gap_loan == gap_tab))
+            last_tab = gap_tab
+            out += [f"diag loan-balance {self.cause(day, stated)}"] * (gap_loan != 0)
         return out
 
 
@@ -551,6 +562,291 @@ def gen(directory, count, seed):
         print(f"  {key:<24} {forms[key]:>6}")
 
 
+# ─── The engine, held to the reference ───────────────────────────────────────────────────────────────────────
+
+CRATES = ["core", "syntax", "model", "engine", "systems"]
+PROFILE = "opt-level = 1\ncodegen-units = 16\nincremental = true"
+
+
+def build(tree, out, source=None):
+    """Builds the dump (`loans/main.rs`) against the crates of TREE, with a profile of its own: a dependency is built with the
+    profile of the workspace that asks for it, and the tree's is `lto = thin`."""
+    os.makedirs(out, exist_ok=True)
+    tree, source = os.path.abspath(tree), source or os.path.join(HERE, "loans")
+    deps = "\n".join(f'axiom-{c} = {{ path = "{tree}/crates/{c}" }}' for c in CRATES)
+    manifest = (f'[package]\nname = "loans-dump"\nversion = "0.0.0"\nedition = "2024"\n\n[workspace]\n\n'
+                f'[[bin]]\nname = "dump"\npath = "main.rs"\n\n[dependencies]\n{deps}\n\n[profile.release]\n{PROFILE}\n')
+    with open(os.path.join(out, "Cargo.toml"), "w") as handle:
+        handle.write(manifest)
+    shutil.copy(os.path.join(source, "main.rs"), os.path.join(out, "main.rs"))
+    shutil.copy(os.path.join(tree, "Cargo.lock"), os.path.join(out, "Cargo.lock"))
+    result = subprocess.run(["cargo", "build", "--release", "--offline"], cwd=out, capture_output=True, text=True)
+    if result.returncode:
+        sys.stderr.write(result.stderr[-4000:])
+        raise SystemExit("the dump did not build")
+    return os.path.join(out, "target", "release", "dump")
+
+
+MOST_MEMORY = 2 << 30
+MOST_OUTPUT = 32 << 20
+
+
+def limit_resources():
+    """A mutant that loops or collects what it should count must stop and be caught like one that is wrong."""
+    resource.setrlimit(resource.RLIMIT_AS, (MOST_MEMORY, MOST_MEMORY))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MOST_OUTPUT, MOST_OUTPUT))
+
+
+def projects(directory):
+    return sorted(os.path.join(directory, name) for name in os.listdir(directory) if name.startswith("p"))
+
+
+def run_dump(binary, path, limit=20):
+    """What the dump says of a project; a hang or a crash is what it says."""
+    with tempfile.TemporaryFile() as said, tempfile.TemporaryFile() as complained:
+        try:
+            result = subprocess.run([binary, os.path.join(path, "main.ax")], stdout=said, stderr=complained, timeout=limit,
+                                    preexec_fn=limit_resources)
+        except subprocess.TimeoutExpired:
+            return "no answer in %d seconds" % limit
+        said.seek(0)
+        complained.seek(0)
+        if result.returncode:
+            return f"the dump stopped ({result.returncode}): {complained.read().decode(errors='replace')[-300:]}"
+        return said.read().decode(errors="replace")
+
+
+def grouped(text):
+    """The lines of a dump by what they are about: the schedule keeps its order (payments and prepayments are one sequence);
+    the rest are compared as sets, because the engine finds a kept line and a missed one in the order of the fold."""
+    groups = {}
+    for line in text.splitlines():
+        if line:
+            word = line.split(" ", 1)[0]
+            groups.setdefault("schedule" if word in ("pay", "prepay") else word, []).append(line)
+    return {key: lines if key in ("schedule", "open", "tab") else sorted(lines) for key, lines in groups.items()}
+
+
+def differences(expected, actual):
+    """Where the engine's lines differ from the reference's, one line each: what was expected and what was said."""
+    want, got = grouped(expected), grouped(actual)
+    found = []
+    for key in sorted(set(want) | set(got)):
+        a, b = want.get(key, []), got.get(key, [])
+        if a != b:
+            expected_line, said_line = next((x, y) for x, y in zip_longest(a, b) if x != y)
+            found.append(f"{key}: expected {expected_line!r}, said {said_line!r} ({len(a)} lines expected, {len(b)} said)")
+    return found
+
+
+def verdict(binary, directory, jobs=3, limit=20, enough=None):
+    """What the engine says of every project against what the reference wrote. With ENOUGH, projects not yet asked are not
+    once that many have failed: a mutant is caught by one."""
+    failed = []
+
+    def one(path):
+        if enough is not None and len(failed) >= enough:
+            return None
+        found = differences(open(os.path.join(path, "expect.txt")).read(), run_dump(binary, path, limit))
+        if found:
+            failed.append((path, found))
+        return found
+
+    with ThreadPoolExecutor(jobs) as pool:
+        list(pool.map(one, projects(directory)))
+    return failed
+
+
+def check(binary, directory, jobs=3):
+    """The verdict, printed. Returns the number of projects the engine and the reference disagree on."""
+    names = projects(directory)
+    failed = verdict(binary, directory, jobs)
+    for path, found in failed[:10]:
+        print(f"{os.path.basename(path)}: " + "\n    ".join(found[:4]))
+    print(f"{len(names)} projects, {len(failed)} disagree")
+    return len(failed)
+
+
+# ─── What the corpus holds ───────────────────────────────────────────────────────────────────────────────────
+
+
+def cover(directory):
+    """What the corpus makes the engine say: how many projects hold each form (what was drawn), and how many lines of each
+    kind the reference expects, so that a form that is never exercised shows."""
+    forms = json.load(open(os.path.join(directory, "forms.json")))
+    facts, loans = Counter(), 0
+    for path in projects(directory):
+        loans += 1
+        lines = open(os.path.join(path, "expect.txt")).read().splitlines()
+        for line in lines:
+            word = line.split(" ", 1)[0]
+            facts[word if word != "diag" else " ".join(line.split(" ")[:3])] += 1
+    print(f"{loans} projects")
+    for key in sorted(forms):
+        print(f"  {key:<28} {forms[key]:>7}")
+    for key in sorted(facts):
+        print(f"  lines {key:<22} {facts[key]:>7}")
+
+
+# ─── Mutants ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+ANN = "crates/model/src/promise/annuity.rs"
+AMO = "crates/model/src/promise/amortization.rs"
+CAU = "crates/model/src/promise/causes.rs"
+PRO = "crates/model/src/promise.rs"
+RES = "crates/model/src/promise/residual.rs"
+OCC = "crates/engine/src/occurrence.rs"
+LOW = "crates/model/src/lower/contracts.rs"
+REC = "crates/engine/src/reconcile.rs"
+BAL = "crates/engine/src/loan_balance.rs"
+
+RANKS = "    Reset,\n    Rate,\n    Pay,\n    Prepay,\n}"
+INTEREST = "let held = mul_div(i128::from(open.0), i128::from(rate.num()), i128::from(rate.den())).unwrap_or(0);"
+CLEARS = "let due = if state.remaining <= 1 { state.open + interest } else { state.payment };"
+PRINCIPAL = "let principal = (due - interest).clamp(Qty::ZERO, state.open);"
+HOLDS = "hold(hold(index.checked_add(margin)?, previous, cap)?, self.initial, life)"
+RESETS = "if let (Some(resets), Some(&last)) = (annuity.resets(), dues.last())"
+
+# (file, the text, what replaces it, what the mutant is). Each must be caught by the oracle (the engine's lines against the
+# reference's) or by a test that names what it checks: the unit and integration tests of the crates it lives in.
+MUTANTS = [
+    # the step: the payment
+    (ANN, CLEARS, "let due = state.payment;", "the last payment pays the level payment again, where the loan has less owed"),
+    (ANN, CLEARS, "let due = if state.remaining < 1 { state.open + interest } else { state.payment };",
+     "the last payment is not the one that clears what is left"),
+    (ANN, PRINCIPAL, "let principal = (due - interest).min(state.open);", "a payment that does not cover the interest pays negative principal"),
+    (ANN, PRINCIPAL, "let principal = (due - interest).max(Qty::ZERO);", "a payment may pay more principal than is owed"),
+    (ANN, "let remaining = if open == Qty::ZERO { 0 } else { state.remaining.saturating_sub(1) };",
+     "let remaining = state.remaining.saturating_sub(1);", "a loan paid off by a payment before its last still counts the payments left"),
+    (ANN, "let remaining = if open == Qty::ZERO { 0 } else { state.remaining.saturating_sub(1) };",
+     "let remaining = if open == Qty::ZERO { 0 } else { state.remaining };", "a payment does not count one off the payments left"),
+    # the four rounding sites
+    (ANN, INTEREST, "let held = i128::from(open.0).checked_mul(i128::from(rate.num())).and_then(|n| n.checked_div(i128::from(rate.den()))).unwrap_or(0);",
+     "interest is truncated, not rounded half to even"),
+    (ANN, INTEREST, "let held = i128::from(open.0).checked_mul(i128::from(rate.num())).and_then(|n| n.checked_add(i128::from(rate.den()) / 2)).and_then(|n| n.checked_div(i128::from(rate.den()))).unwrap_or(0);",
+     "interest is rounded half up, not half to even"),
+    (ANN, "    open.scale(payment_factor(rate, periods)?)\n",
+     "    let factor = payment_factor(rate, periods)?;\n    i64::try_from(i128::from(open.0).checked_mul(i128::from(factor.num()))?.checked_div(i128::from(factor.den()))?).ok().map(Qty)\n",
+     "the payment is truncated, not rounded half to even"),
+    (ANN, "growth = mul_div(growth, SCALE.checked_add(rate)?, SCALE)?;", "growth = growth.checked_mul(SCALE.checked_add(rate)?)?.checked_div(SCALE)?;",
+     "the factor's loop truncates at each step"),
+    (ANN, "Ratio::new(mul_div(rate, growth, growth.checked_sub(SCALE)?)?, SCALE)",
+     "Ratio::new(rate.checked_mul(growth)?.checked_div(growth.checked_sub(SCALE)?)?, SCALE)", "the factor's last division truncates"),
+    (ANN, "let rate = mul_div(i128::from(rate.num()), SCALE, i128::from(rate.den()))?;",
+     "let rate = i128::from(rate.num()).checked_mul(SCALE)?.checked_div(i128::from(rate.den()))?;", "the factor's rate is truncated to 18 places"),
+    (ANN, "const SCALE: i128 = 1_000_000_000_000_000_000;", "const SCALE: i128 = 1_000_000_000_000_000;", "the factor is worked to 15 places, not 18"),
+    # the step: a prepayment
+    (ANN, "let amount = amount.clamp(Qty::ZERO, state.open);", "let amount = amount.min(state.open);", "a prepayment of less than nothing is borrowed"),
+    (ANN, "let amount = amount.clamp(Qty::ZERO, state.open);", "let amount = amount.max(Qty::ZERO);", "a prepayment may pay more than is owed"),
+    (ANN, "(true, _) => State { open, remaining: 0, ..state },", "(true, _) => State { open, ..state },",
+     "a loan paid off by a prepayment still has payments left"),
+    (ANN, "State { open, remaining: payments_to_clear(open, state.rate, state.payment, state.remaining), ..state }",
+     "State { open, ..state }", "a prepayment that shortens leaves the payments as they were"),
+    (ANN, "payment: payment_for(open, state.rate, state.remaining).unwrap_or(state.payment),", "payment: state.payment,",
+     "a prepayment that recasts leaves the payment as it was"),
+    (ANN, "payment: payment_for(open, state.rate, state.remaining).unwrap_or(state.payment),",
+     "payment: payment_for(open, state.rate, self.periods).unwrap_or(state.payment),", "a recast pays what is owed over all the periods, not the ones left"),
+    (ANN, "if open + interest <= payment {", "if open + interest < payment {", "a payment that exactly covers what is owed does not end the loan"),
+    (ANN, "if open + interest <= payment {", "if open <= payment {", "the interest is not counted in what a payment must cover"),
+    (ANN, "open -= (payment - interest).clamp(Qty::ZERO, open);", "open -= payment;", "the payments a prepayment saves are counted off whole"),
+    (ANN, "for needed in 1..bound {", "for needed in 0..bound {", "the payments a balance needs count from none"),
+    # the step: a rate
+    (ANN, HOLDS, "hold(hold(index, previous, cap)?, self.initial, life)", "a reset ignores the margin"),
+    (ANN, HOLDS, "hold(hold(index.checked_add(margin)?, self.initial, life)?, previous, cap)", "a reset holds the life before the cap"),
+    (ANN, HOLDS, "hold(hold(index.checked_add(margin)?, previous, cap)?, previous, life)", "a reset holds the life to the previous rate"),
+    (ANN, "let previous = state.rate.checked_div(self.per_year)?;", "let previous = self.initial;", "a reset's cap is held to the first rate, not the previous one"),
+    (ANN, "Some(by) => Some(rate.clamp(around.checked_sub(by)?, around.checked_add(by)?)),", "Some(by) => Some(rate.min(around.checked_add(by)?)),",
+     "a hold has no floor"),
+    (ANN, "Some(by) => Some(rate.clamp(around.checked_sub(by)?, around.checked_add(by)?)),", "Some(by) => Some(rate.max(around.checked_sub(by)?)),",
+     "a hold has no ceiling"),
+    (ANN, ".map(|yearly| yearly.clamp(Ratio::ZERO, Ratio::ONE))", ".map(|yearly| yearly)", "a rate is not held between nothing and everything"),
+    (ANN, "left => payment_for(state.open, rate, left),", "left => payment_for(self.principal.qty, rate, left),",
+     "a new rate refigures the payment on the principal, not on what is owed"),
+    (ANN, "Some((rate, payment)) => (State { rate, payment, ..state }, Paid::nothing(state.open)),",
+     "Some((rate, _)) => (State { rate, ..state }, Paid::nothing(state.open)),", "a new rate leaves the payment as it was"),
+    # the loan's terms
+    (ANN, "let rate = self.initial.checked_mul(self.per_year).unwrap_or(Ratio::ZERO);", "let rate = self.initial;", "the first rate is a year's, not a period's"),
+    (ANN, "loan.term.months.checked_add(months - 1)?.checked_div(months)?", "loan.term.months.checked_div(months)?", "part of a period is no payment"),
+    (ANN, "Ratio::new(1, 24)?", "Ratio::new(1, 12)?", "twice a month pays a twelfth of a year's rate"),
+    (ANN, "Ratio::new(i128::from(days), 365)?", "Ratio::new(i128::from(days), 360)?", "a period of days is of a 360-day year"),
+    (ANN, "Cadence::TwiceMonthly => (loan.term.months.checked_mul(2)?, Ratio::new(1, 24)?),", "Cadence::TwiceMonthly => (loan.term.months, Ratio::new(1, 24)?),",
+     "twice a month has one payment a month"),
+    (ANN, "number < self.payments", "number <= self.payments", "a payment is owed after the last"),
+    # the walk
+    (AMO, RANKS, "    Reset,\n    Rate,\n    Prepay,\n    Pay,\n}", "a prepayment of a due day comes before its payment"),
+    (AMO, RANKS, "    Reset,\n    Pay,\n    Rate,\n    Prepay,\n}", "a rate said on a due day is not that day's"),
+    (AMO, RANKS, "    Rate,\n    Pay,\n    Reset,\n    Prepay,\n}", "a reset on a due day is not that day's rate"),
+    (AMO, RANKS, "    Rate,\n    Reset,\n    Pay,\n    Prepay,\n}", "a rate said on the day of a reset is held by the reset"),
+    (AMO, "falls.sort_by_key(|fall| (fall.day, fall.rank));", "falls.sort_by_key(|fall| fall.day);", "events of one day are not ordered by rank"),
+    (AMO, ".filter(|fall| fall.day >= annuity.begins())", ".filter(|fall| fall.day > annuity.begins())", "an event on the day the loan was made is ignored"),
+    (AMO, "if state.open == Qty::ZERO {\n            break;\n        }", "if state.open == Qty::ZERO {\n            continue;\n        }", "events after a loan is paid off are walked"),
+    (AMO, "Ok(value) => Event::Reset(value),", "Ok(value) => Event::Rate(value),", "a reset is held to nothing"),
+    (AMO, "fall.rank == Rank::Pay && state.open > Qty::ZERO", "fall.rank == Rank::Pay", "a line that states more than the last payment prepays what is not owed"),
+    (AMO, "fall.rank == Rank::Pay && state.open > Qty::ZERO", "state.open > Qty::ZERO", "a line that states more than its payment prepays after any event of its day"),
+    (AMO, "(extra > Qty::ZERO).then_some(extra)", "(extra >= Qty::ZERO).then_some(extra)", "a line that states exactly its payment prepays nothing, as a prepayment"),
+    (AMO, "let extra = self.stated(due)? - paid.interest - paid.principal;", "let extra = self.stated(due)? - paid.principal;", "an extra is what a line states over the principal"),
+    (AMO, "&& book.txns.get(flow.txn).is_some_and(|txn| txn.occurrence.is_none())", "&& book.txns.get(flow.txn).is_some()",
+     "a payment's own principal is counted as a prepayment"),
+    (AMO, "let own = first.is_some_and(|(first, _)| first == id);", "let own = true;", "two loans of one tab are each prepaid by what is paid into it"),
+    (AMO, "Some(Expr::Literal(amount)) if amount.unit == loan.principal.unit => Some(amount.qty),", "Some(Expr::Literal(amount)) => Some(amount.qty),",
+     "a line that states another commodity is read as paying the loan"),
+    (AMO, "self.entries.partition_point(|entry| entry.day <= day).checked_sub(1)", "self.entries.partition_point(|entry| entry.day < day).checked_sub(1)",
+     "what is owed on a day is what was owed before its payments"),
+    (AMO, "(day >= self.annuity.begins()).then(|| {", "(day > self.annuity.begins()).then(|| {", "nothing is owed on the day the loan was made"),
+    (AMO, "self.entries.partition_point(|entry| entry.day < due);", "self.entries.partition_point(|entry| entry.day <= due);", "the payment of a due day is looked for after it"),
+    (AMO, "find(|entry| entry.kind == Kind::Pay);", "find(|entry| entry.kind == Kind::Prepay);", "the payment of a due day is its prepayment"),
+    (AMO, "filter(|halt| due >= halt.day)", "filter(|halt| due > halt.day)", "a schedule that stopped for want of an index still pays on the day it stopped"),
+    (AMO, "days.take_while(|&day| day <= last)", "days.take_while(|&day| day < last)", "a reset on the last due day is not read"),
+    (PRO, "let after = Day(annuity.begins().0.saturating_add(1));", "let after = annuity.begins();", "a payment falls due on the day the loan was made"),
+    (PRO, "let payments = walked.entries.iter().filter(|entry| entry.kind == Kind::Pay).count() as u32;",
+     "let payments = walked.entries.iter().filter(|entry| entry.kind == Kind::Pay).count() as u32 + 1;", "a payment is owed after the last the schedule has"),
+    (RES, ".max(first)", "", "the monitor waits for payments from before the loan was made"),
+    # the causes
+    (CAU, "gap if gap < Qty::ZERO => Cause::Prepaid,", "gap if gap < Qty::ZERO => Cause::Unknown,", "a statement that owes less than the schedule names no cause"),
+    (CAU, "filter(|payment| payment.day <= day)", "filter(|payment| payment.day < day)", "a payment due on the day of the statement is not counted in its causes"),
+    (CAU, "None => missed.push((due, paid.principal)),", "None => {}", "a payment no line keeps is not a cause"),
+    (CAU, "short.push((due, paid.principal - principal));", "short.push((due, principal));", "what a short payment left unpaid is what it paid"),
+    (CAU, "(stated - paid.interest).clamp(Qty::ZERO, paid.principal)", "(stated - paid.interest).min(paid.principal)", "a line that states less than the interest paid negative principal"),
+    (CAU, "extra.push((due, stated - paid.interest - paid.principal));", "extra.push((due, stated - paid.principal));", "an extra is what a line states over the principal"),
+    (CAU, "(!short.is_empty() && sum(&short) == gap)", "(!short.is_empty() && sum(&short) <= gap)", "a short payment explains any gap it is not larger than"),
+    (CAU, "(!missed.is_empty() && sum(&missed) == gap)", "(!missed.is_empty() && sum(&missed) >= gap)", "a missed payment explains any gap it is not smaller than"),
+    (CAU, "_ => Cause::Several(found),", "_ => found.remove(0),", "of two causes that explain a gap the first is named"),
+    # the fold
+    (OCC, "paid.interest.min(left.arrive.qty)", "paid.interest", "a line that states less than the interest pays more than it says"),
+    (OCC, "Answer::Amount(Amount::new(paid.interest + paid.principal, unit))", "Answer::Amount(Amount::new(paid.principal, unit))", "a payment is its principal"),
+    (OCC, "Ok(if paid == Qty::ZERO { Answer::Omitted } else { Answer::Amount(Amount::new(paid, unit)) })", "Ok(Answer::Amount(Amount::new(paid, unit)))",
+     "a payment with no interest has a leg of nothing"),
+    (LOW, "purposed(\"interest\", loan.asset.map(Object::Asset))", "purposed(\"interest\", None)", "the interest is not of the asset the loan is for"),
+    (LOW, "Flow { to: lender,", "Flow { to: loan.debt,", "the interest is paid into the debt tab"),
+    (LOW, "Some(Leg { flow: interest, part: Part::Of(Quantity::Interest) })", "Some(Leg { flow: interest, part: Part::Of(Quantity::Derived) })", "the interest leg is the whole payment"),
+    (LOW, "purposed(\"principal\", None))", "purposed(\"interest\", None))", "the principal is purposed as interest"),
+    (REC, "found.gap() == gap) => now,", "found.gap() != gap) => now,", "the book's assertion is said where the loan's is"),
+    (BAL, "if !matches!(assert.gap, Gap::Refused) ||", "if false ||", "a statement that accepts its gap is held to the schedule"),
+    (BAL, "found.filter(|_| assert.amount.unit == loan.principal.unit)", "found.filter(|_| true)", "a statement in another commodity is held to the schedule"),
+]
+
+
+def detect(source, work):
+    """What the oracle says of a build of SOURCE: the dump's lines on the sample, and nothing when they are the reference's."""
+    binary = build(source, os.path.join(work, "dump"))
+    failed = verdict(binary, os.path.join(work, "sample"), 3, limit=20, enough=1)
+    return f"killed by the oracle: {os.path.basename(failed[0][0])}, {failed[0][1][0][:60]}" if failed else None
+
+
+def mutate(tree, work, directory, only=None, sample=300):
+    """Each mutant must be caught by the oracle on the first SAMPLE projects of DIRECTORY, or by a test that fails only with it."""
+    from mutation import mutate as run_mutants
+
+    work = os.path.abspath(work)
+    kept = os.path.join(work, "sample")
+    shutil.rmtree(kept, ignore_errors=True)
+    os.makedirs(kept)
+    for name in [os.path.basename(path) for path in projects(directory)][:sample]:
+        shutil.copytree(os.path.join(directory, name), os.path.join(kept, name))
+    sys.path.insert(0, HERE)
+    return run_mutants(tree, work, MUTANTS, detect, only)
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -560,6 +856,16 @@ def main(argv):
         return selftest() or 0
     if command == "gen":
         return gen(rest[0], int(rest[1]), int(rest[2]) if len(rest) > 2 else 7) or 0
+    if command == "build":
+        print(build(rest[0], rest[1]))
+        return 0
+    if command == "check":
+        return 1 if check(rest[0], rest[1], int(rest[2]) if len(rest) > 2 else 3) else 0
+    if command == "cover":
+        return cover(rest[0]) or 0
+    if command == "mutate":
+        only = {int(n) for n in rest[3].split(",")} if len(rest) > 3 and rest[3] != "all" else None
+        return 1 if mutate(rest[0], rest[1], rest[2], only, int(rest[4]) if len(rest) > 4 else 300) else 0
     print(__doc__)
     return 2
 
