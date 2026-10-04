@@ -23,7 +23,7 @@
 use axiom_core::{Day, Diagnostic, Id, Loc, Qty};
 use axiom_model::{
     Amount, Asset, Basis, Class, Contract, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot, RuntimeTxn, Select,
-    Subject, Watch,
+    Subject, Table, Watch,
 };
 
 use crate::eval::{Occasion, Realized};
@@ -154,6 +154,10 @@ impl Ledger<'_, '_, '_> {
     /// nothing, so such a flow does not fire it.
     fn fire_touching(&mut self, m: &Motion, on: &Occasion) {
         let rules = &self.plan.book.rules;
+        // A book that writes no `on flow` law under a place, a kind or an entity looks nothing up, for any flow.
+        if !rules.watches(Table::Touching) {
+            return;
+        }
         let on = Occasion { amount: Some(m.out), skip_internal: true, ..*on };
         self.fire(rules.at(Watch::Touching(m.from)), &on);
         if m.to != m.from {

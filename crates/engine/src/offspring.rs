@@ -99,6 +99,8 @@ struct Waiting {
     /// The step that derived it, which a flow derives from once.
     template: Id<Derived>,
     lineage: Lineage,
+    /// Where the flow that began its chain was written.
+    started: Loc,
 }
 
 /// What the flow being posted has derived, and what is waiting to post.
@@ -128,9 +130,15 @@ impl Default for Brood {
 }
 
 impl Brood {
-    /// A flow no law derived is about to post.
+    /// The flow being posted is one no law derived: its chain begins with it. This is said when its first law derives
+    /// something and not before, so that a flow no law derives from pays nothing for it.
     fn begin(&mut self, root: &Motion) {
         (self.lineage, self.root, self.started) = (Lineage::ROOT, root.cause, root.loc);
+    }
+
+    /// A derived flow is about to post: what it derives descends through the chain it was made in.
+    fn enter(&mut self, waiting: &Waiting) {
+        (self.lineage, self.root, self.started) = (waiting.lineage, waiting.offspring.root, waiting.started);
     }
 
     /// What the flow that just posted derived goes on top of what waits, the first it derived on top: it posts before
@@ -145,7 +153,6 @@ impl Ledger<'_, '_, '_> {
     /// Applies a flow: moves its value and fires every law that watches it, then posts what they derived, each by
     /// the same path. A flow run backwards has the flows it derived run backwards with it, and derives nothing.
     pub(crate) fn post(&mut self, m: &Motion) {
-        self.scratch.brood.begin(m);
         self.post_flow(m);
         match m.course {
             Course::Forward => self.post_brood(m),
@@ -167,9 +174,10 @@ impl Ledger<'_, '_, '_> {
     }
 
     /// One derived flow posts, as a transaction of its own, and goes into the record.
-    fn post_offspring(&mut self, Waiting { offspring, lineage, .. }: Waiting) {
+    fn post_offspring(&mut self, waiting: Waiting) {
         let (book, id) = (self.plan.book, self.next_offspring());
-        self.scratch.brood.lineage = lineage;
+        self.scratch.brood.enter(&waiting);
+        let Waiting { offspring, .. } = waiting;
         self.post_flow(&Motion::derived(book, id, &offspring, offspring.flow.day));
         self.record.offspring.push(offspring);
         self.scratch.brood.lay_down();
@@ -207,6 +215,9 @@ impl Ledger<'_, '_, '_> {
         let (template, amount) = made;
         let Some(m) = ctx.motion.filter(|m| m.derives()) else { return };
         let Some(view) = m.view else { return };
+        if !matches!(m.cause, Cause::Derived(_)) {
+            self.scratch.brood.begin(m);
+        }
         let book = self.plan.book;
         let derived = &book.derived[template];
         if !derived.follows_a_posted_flow() {
@@ -222,7 +233,8 @@ impl Ledger<'_, '_, '_> {
         let payee = book.party_at(flow.to).or_else(|| book.party_at(flow.from));
         let flow = Flow { day: m.day, mode: Mode::Actual, recognized: ctx.over, payee, ..flow };
         let offspring = Offspring { flow, parent: m.cause, root: self.scratch.brood.root, law: rule.law };
-        self.scratch.brood.fresh.push(Waiting { offspring, template, lineage });
+        let started = self.scratch.brood.started;
+        self.scratch.brood.fresh.push(Waiting { offspring, template, lineage, started });
     }
 
     /// The lineage a flow `law` derives has, or nothing after the book is told why it cannot.
@@ -278,10 +290,17 @@ fn stopped_chain(book: &Book, stopped: Unbounded, lineage: &Lineage, law: Id<Law
             format!("{}. and {} would be one law too many: not made", lineage.laws().len() + 1, book.law_words(law))
         }
     };
-    let note = "a law derives once from a flow, and once from each flow another law derives from it, so a chain that \
-                comes back to a law stops where it began";
-    diagnostic
-        .label(book.laws[law].loc, again)
-        .note(note)
-        .help("narrow one of the laws with `when`, so that it does not watch the flow that closes the chain")
+    let (note, help) = match stopped {
+        Unbounded::Cycle => (
+            "a law derives once from a flow, and once from each flow another law derives from it, so a chain that comes \
+             back to a law stops where it began"
+                .to_owned(),
+            "narrow one of the laws with `when`, so that it does not watch the flow that closes the chain",
+        ),
+        Unbounded::TooDeep => (
+            format!("a flow is derived through {DEPTH} laws at most, so that a chain nothing ends is found where it grows too long"),
+            "end the chain: narrow a law with `when`, so that it does not watch the flow the one before it derived",
+        ),
+    };
+    diagnostic.label(book.laws[law].loc, again).note(note).help(help)
 }

@@ -234,9 +234,9 @@ impl<'f> Motion<'f> {
 
     /// Whether the laws that watch the flow may derive others from it. A flow run backwards has its derived flows
     /// reversed and derives nothing anew, and a flow the run makes to be consistent with itself (a pad, a claim the
-    /// monitor makes: caused by time) or one no law sees (an opening) causes nothing.
+    /// monitor makes: caused by time) causes nothing. An opening is watched by no law, so it is never asked.
     pub fn derives(&self) -> bool {
-        self.course == Course::Forward && !self.opening && self.cause != Cause::Time
+        self.course == Course::Forward && self.cause != Cause::Time
     }
 
     pub fn is_exchange(&self) -> bool {

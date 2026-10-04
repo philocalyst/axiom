@@ -341,3 +341,28 @@ opening 2026-01-01
         assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
     });
 }
+
+#[test]
+fn self_in_the_law_of_an_asset_is_the_asset_itself() {
+    let text = "base USD
+commodity USD
+  precision 2
+kind property : thing
+purpose repair : spending
+purpose fee : spending
+account checking
+entity contractor
+entity issuer
+asset condo : property
+  also issuer -> self 5% of amount #fee
+opening 2026-01-01
+  checking 1_000.00 USD
+2026-02-05 checking -> contractor 100.00 USD #repair of condo
+";
+    with_run(text, day(2026, 3, 1), |book, run| {
+        let condo = book.asset("condo").unwrap();
+        assert_eq!(run.offspring.len(), 1);
+        assert_eq!(run.offspring[0].flow.to, book.assets[condo].place, "the credit goes to what the law is about");
+        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+    });
+}
