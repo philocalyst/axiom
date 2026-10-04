@@ -1,0 +1,15 @@
+// WARNING: one due day nothing kept. The manager's fee of January was never written, and the contract ends with the month: the
+// warning says the one day and how to write it down, and has no `until` to offer, the contract has one.
+base USD
+use std
+
+entity hartwell
+account checking : bank
+
+opening 2026-01-01
+  checking 10_000 USD
+
+contract manager-fee with hartwell
+  200 USD monthly on 5 from checking
+  from 2026-01-05
+  until 2026-01-31

@@ -1,0 +1,17 @@
+// WARNING: two runs of due days nothing kept, with a kept day between them. Each run is a warning of its own; only the last,
+// which nothing kept after, can be ended by `until` where the payments stopped.
+base USD
+use std
+
+entity gym-co
+account checking : bank
+
+opening 2026-01-01
+  checking 10_000 USD
+
+contract gym with gym-co
+  40 USD monthly on 1 from checking
+  from 2026-01-01
+
+2026-01-01 gym
+2026-04-01 gym
