@@ -10,39 +10,40 @@ use axiom_model::{Amount, Book, Commodity, Law, Place, Rule, Subject, Watch};
 use super::{flows_table, laws_table};
 use crate::headroom::{current, latest};
 use crate::history::all_postings;
-use crate::lens::Lens;
 use crate::limits;
 use crate::places::path;
 use crate::table::plural;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section};
 
-pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>) -> Report<'s> {
-    let book = lens.book();
+pub fn report<'s>(view: View<'s, '_, '_>, place: Id<Place>) -> Report<'s> {
+    let book = view.book();
     let owner = book.places[place].owner;
     let name = path(book, place);
-    if !lens.owns(place) {
+    if !view.owns(place) {
         return Report::new(format!("Why {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[owner].path)
         )));
     }
-    let held: Vec<&Holding> = run
+    let held: Vec<&Holding> = view
+        .run
         .holdings
         .iter()
-        .filter(|holding| book.places.covers(place, holding.place) && lens.owns(holding.place))
+        .filter(|holding| book.places.covers(place, holding.place) && view.owns(holding.place))
         .collect();
-    let flows = all_postings(book, run).filter(|posting| posting.flow.from == place || posting.flow.to == place);
+    let flows = all_postings(book, view.run).filter(|posting| posting.flow.from == place || posting.flow.to == place);
 
     // A limit is about this place when it measures it, or a place around it, or one within it.
-    let all = &current(book, run, run.today, run.today);
+    let all = &current(book, view.run, view.run.today, view.run.today);
     let about = |subject: Subject| matches!(subject, Subject::Place(other) if book.places.covers(other, place) || book.places.covers(place, other));
     let limits = limits::section(
         book,
-        latest(all.iter().filter(|reading| about(reading.subject) && lens.governs(reading.subject))),
+        latest(all.iter().filter(|reading| about(reading.subject) && view.governs(reading.subject))),
     )
     .headed("Limits");
 
-    let (governing, elsewhere) = governing(book, run, place);
+    let (governing, elsewhere) = governing(book, view.run, place);
     let mut laws = laws_table(book, &governing);
     if elsewhere > 0 {
         laws.note(format!(
@@ -51,21 +52,21 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>) -> Re
         ));
     }
     Report::new(format!("Why {}", path(book, place)))
-        .with(composition(lens, &held))
-        .with(parcels(lens, &held))
+        .with(composition(view, &held))
+        .with(parcels(view, &held))
         .with(limits)
         .with(laws)
-        .with(flows_table(lens, flows, "Flows"))
+        .with(flows_table(view, flows, "Flows"))
 }
 
 /// What is held, by commodity, and how much of it is plain money.
-fn composition<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s> {
-    let book = lens.book();
+fn composition<'s>(view: View<'s, '_, '_>, held: &[&Holding]) -> Section<'s> {
+    let book = view.book();
     let mut units: BTreeMap<Id<Commodity>, (Qty, Qty, usize)> = BTreeMap::new();
     for holding in held {
         let (total, plain, parcels) = units.entry(holding.unit).or_default();
-        *total += lens.place_qty(holding.place, holding.qty());
-        *plain += lens.place_qty(holding.place, holding.plain);
+        *total += view.place_qty(holding.place, holding.qty());
+        *plain += view.place_qty(holding.place, holding.plain);
         *parcels += holding.lots.len();
     }
     let columns =
@@ -84,8 +85,8 @@ fn composition<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s>
 }
 
 /// Parcels: what is remembered about value at rest, and the line that brought it.
-fn parcels<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s> {
-    let book = lens.book();
+fn parcels<'s>(view: View<'s, '_, '_>, held: &[&Holding]) -> Section<'s> {
+    let book = view.book();
     let columns = [
         Column::left("Place"),
         Column::right("Quantity"),
@@ -97,8 +98,8 @@ fn parcels<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s> {
     let mut section = Section::new(columns).headed("Parcels");
     for holding in held {
         for lot in &holding.lots {
-            let qty = lens.place_qty(holding.place, lot.qty);
-            let basis = lens.place_qty(holding.place, lot.basis);
+            let qty = view.place_qty(holding.place, lot.qty);
+            let basis = view.place_qty(holding.place, lot.basis);
             if qty.is_zero() && basis.is_zero() {
                 continue;
             }

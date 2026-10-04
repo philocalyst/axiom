@@ -3,23 +3,23 @@
 use std::collections::BTreeSet;
 
 use axiom_core::{Id, Loc, Map, Sym};
-use axiom_engine::{Cause, Run};
+use axiom_engine::Cause;
 use axiom_model::{Action, Amount, Book, Flow, Promised, Provenance, Purposed, Subject, Terms};
 
 use super::event_words;
-use crate::flow::{object_name, scoped_movement_qty};
+use crate::flow::object_name;
 use crate::history::{Derivatives, Posting, journal_root};
-use crate::lens::Lens;
 use crate::places::{path, route};
 use crate::table::{creditor, gap_words};
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Explains the items whose source overlaps `at`.
-pub fn line<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Loc) -> Report<'s> {
-    let book = lens.book();
-    let flows = flows_on(book, at, lens);
+pub fn line<'s>(view: View<'s, '_, '_>, at: Loc) -> Report<'s> {
+    let book = view.book();
+    let flows = flows_on(book, at, view);
     let mut written = Section::new([Column::left("On this line"), Column::left("Source")]);
-    for (text, loc) in (OnLine { lens, run, at }).items(&flows) {
+    for (text, loc) in (OnLine { view, at }).items(&flows) {
         written.push(Row::new([Cell::text(text), Cell::Source(loc)]));
     }
     if written.rows.is_empty() {
@@ -27,7 +27,7 @@ pub fn line<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Loc) -> Report<'s> {
     }
 
     let mut caused = Section::new([Column::left("What it caused"), Column::left("Law")]);
-    consequences(lens, run, &flows, &mut caused);
+    consequences(view, &flows, &mut caused);
     Report::new("Why this line").with(written).with(caused.headed("Consequences"))
 }
 
@@ -37,35 +37,31 @@ fn overlaps(a: Loc, b: Loc) -> bool {
 
 /// The flows written on the line. The header of a split transaction holds no
 /// flow of its own; its legs do, so it stands for all of them.
-fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
+fn flows_on(book: &Book, at: Loc, view: View<'_, '_, '_>) -> Vec<Id<Flow>> {
     let direct: Vec<Id<Flow>> = book
         .flows
         .iter()
-        .filter(|(_, flow)| overlaps(flow.loc, at) && lens.owns(crate::flow::movement_place(lens, flow)))
+        .filter(|(_, flow)| overlaps(flow.loc, at) && view.owns_flow(flow))
         .map(|(id, _)| id)
         .collect();
     if !direct.is_empty() {
         return direct;
     }
     let headers = book.txns.values().filter(|txn| overlaps(txn.loc, at));
-    headers
-        .flat_map(|txn| txn.flows.ids())
-        .filter(|&id| lens.owns(crate::flow::movement_place(lens, &book.flows[id])))
-        .collect()
+    headers.flat_map(|txn| txn.flows.ids()).filter(|&id| view.owns_flow(&book.flows[id])).collect()
 }
 
-/// What the book records on one source line, as a lens sees it: each thing a sentence, and where it is written.
+/// What the book records on one source line, as a view sees it: each thing a sentence, and where it is written.
 struct OnLine<'a> {
-    lens: Lens<'a, 'a, 'a, 'a>,
-    run: &'a Run,
+    view: View<'a, 'a, 'a>,
     at: Loc,
 }
 
 impl OnLine<'_> {
     /// Everything whose source overlaps the line, described in a sentence.
     fn items(&self, flows: &[Id<Flow>]) -> Vec<(String, Loc)> {
-        let book = self.lens.book();
-        let codes = scoped_codes(book, self.lens);
+        let book = self.view.book();
+        let codes = scoped_codes(book, self.view);
         let mut items: Vec<_> = flows.iter().map(|&id| self.flow(id)).collect();
         items.extend(self.assertions());
         items.extend(self.events(&codes));
@@ -79,10 +75,10 @@ impl OnLine<'_> {
     }
 
     fn flow(&self, id: Id<Flow>) -> (String, Loc) {
-        let (book, lens) = (self.lens.book(), self.lens);
-        let posting = Posting::at(book, self.run, id);
+        let (book, view) = (self.view.book(), self.view);
+        let posting = Posting::at(book, self.view.run, id);
         let flow = posting.flow;
-        let scoped = |amount: Amount| Amount::new(scoped_movement_qty(lens, flow, amount.qty), amount.unit);
+        let scoped = |amount: Amount| Amount::new(view.flow_qty(flow, amount.qty), amount.unit);
         let (out, arrive) = (scoped(posting.out()), scoped(posting.arrive()));
         let amounts = if flow.is_exchange() {
             format!("{} for {}", book.show(out), book.show(arrive))
@@ -95,26 +91,26 @@ impl OnLine<'_> {
     }
 
     fn assertions(&self) -> impl Iterator<Item = (String, Loc)> {
-        let (book, lens, run, at) = (self.lens.book(), self.lens, self.run, self.at);
+        let (book, view, at) = (self.view.book(), self.view, self.at);
         let on_line = book.asserts.iter().enumerate();
-        on_line.filter(move |(_, assertion)| overlaps(assertion.loc, at) && lens.owns(assertion.place)).map(
+        on_line.filter(move |(_, assertion)| overlaps(assertion.loc, at) && view.owns(assertion.place)).map(
             move |(index, assertion)| {
-                let gap = run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
+                let gap = view.run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
                 let gap = gap.map_or(String::new(), |words| format!(", {words}"));
-                let held = Amount::new(lens.place_qty(assertion.place, assertion.amount.qty), assertion.amount.unit);
+                let held = Amount::new(view.place_qty(assertion.place, assertion.amount.qty), assertion.amount.unit);
                 (format!("assertion: {} = {}{gap}", path(book, assertion.place), book.show(held)), assertion.loc)
             },
         )
     }
 
     fn events(&self, codes: &BTreeSet<Sym>) -> impl Iterator<Item = (String, Loc)> {
-        let (book, at, visible) = (self.lens.book(), self.at, self.sees_every_code(codes));
+        let (book, at, visible) = (self.view.book(), self.at, self.sees_every_code(codes));
         let on_line = book.events.iter().filter(move |event| overlaps(event.loc, at) && visible(event.code));
         on_line.map(move |event| (format!("event: ^{} {}", book.name(event.code), event_words(event.state)), event.loc))
     }
 
     fn prices(&self) -> impl Iterator<Item = (String, Loc)> {
-        let (book, at) = (self.lens.book(), self.at);
+        let (book, at) = (self.view.book(), self.at);
         book.prices.quotes().iter().filter(move |quote| overlaps(quote.loc, at)).map(move |quote| {
             let (unit, priced_in) = (&book.commodities[quote.unit], &book.commodities[quote.quote]);
             let text = format!(
@@ -129,7 +125,7 @@ impl OnLine<'_> {
     }
 
     fn laws(&self) -> impl Iterator<Item = (String, Loc)> {
-        let (book, at) = (self.lens.book(), self.at);
+        let (book, at) = (self.view.book(), self.at);
         book.laws
             .values()
             .filter(move |law| overlaps(law.loc, at))
@@ -137,9 +133,9 @@ impl OnLine<'_> {
     }
 
     fn measures(&self) -> impl Iterator<Item = (String, Loc)> {
-        let (book, lens, at) = (self.lens.book(), self.lens, self.at);
+        let (book, view, at) = (self.view.book(), self.view, self.at);
         let on_line =
-            book.measures.values().filter(move |measure| overlaps(measure.loc, at) && lens.owns_entity(measure.owner));
+            book.measures.values().filter(move |measure| overlaps(measure.loc, at) && view.owns_entity(measure.owner));
         on_line.map(move |measure| {
             let action = match measure.action {
                 Action::Work => "worked",
@@ -159,8 +155,8 @@ impl OnLine<'_> {
     }
 
     fn filed(&self) -> impl Iterator<Item = (String, Loc)> {
-        let (book, lens, at) = (self.lens.book(), self.lens, self.at);
-        let on_line = book.filed.iter().filter(move |filed| overlaps(filed.loc, at) && lens.owns_entity(filed.owner));
+        let (book, view, at) = (self.view.book(), self.view, self.at);
+        let on_line = book.filed.iter().filter(move |filed| overlaps(filed.loc, at) && view.owns_entity(filed.owner));
         on_line.map(move |filed| {
             let (system, owner) =
                 (book.name(book.systems[filed.system].path), book.name(book.entities[filed.owner].path));
@@ -169,7 +165,7 @@ impl OnLine<'_> {
     }
 
     fn readings(&self, codes: &BTreeSet<Sym>) -> impl Iterator<Item = (String, Loc)> {
-        let (book, at, visible) = (self.lens.book(), self.at, self.sees_every_code(codes));
+        let (book, at, visible) = (self.view.book(), self.at, self.sees_every_code(codes));
         let on_line = book.readings.iter().filter(move |reading| overlaps(reading.loc, at) && visible(reading.code));
         on_line.map(move |reading| {
             (format!("reading: ^{} = {}", book.name(reading.code), book.show(reading.amount)), reading.loc)
@@ -178,7 +174,7 @@ impl OnLine<'_> {
 
     /// Events and readings have no owner, so an owner's view shows those whose code something it owns refers to.
     fn sees_every_code<'c>(&self, codes: &'c BTreeSet<Sym>) -> impl Fn(Sym) -> bool + 'c {
-        let everyone = self.lens.whose.is_everyone();
+        let everyone = self.view.whose.is_everyone();
         move |code| everyone || codes.contains(&code)
     }
 }
@@ -201,15 +197,15 @@ fn purpose_words(book: &Book, purposed: Purposed) -> String {
 /// Codes named by data visible in this owner scope. Events and readings have
 /// no owner of their own, so an owner-scoped source query only exposes them
 /// when a visible flow, measure or contract refers to their code.
-pub(super) fn scoped_codes(book: &Book, lens: Lens<'_, '_, '_, '_>) -> BTreeSet<axiom_core::Sym> {
+pub(super) fn scoped_codes(book: &Book, view: View<'_, '_, '_>) -> BTreeSet<axiom_core::Sym> {
     let mut codes = BTreeSet::new();
-    for (_, flow) in book.flows.iter().filter(|(_, flow)| lens.owns(crate::flow::movement_place(lens, flow))) {
+    for (_, flow) in book.flows.iter().filter(|(_, flow)| view.owns_flow(flow)) {
         codes.extend(book.flow_view(flow).codes());
     }
-    for (_, measure) in book.measures.iter().filter(|(_, measure)| lens.owns_entity(measure.owner)) {
+    for (_, measure) in book.measures.iter().filter(|(_, measure)| view.owns_entity(measure.owner)) {
         codes.extend(book.codes[measure.codes].iter().copied());
     }
-    for (_, contract) in book.contracts.iter().filter(|(_, contract)| lens.owns_entity(contract.owner)) {
+    for (_, contract) in book.contracts.iter().filter(|(_, contract)| view.owns_entity(contract.owner)) {
         for terms in [&contract.terms, &contract.standing].into_iter().flatten() {
             add_terms_codes(book, terms, &mut codes);
         }
@@ -257,18 +253,17 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
 }
 
 /// The flows laws derived from the flows of the line, as the first thing each of them caused.
-fn derived_flows<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], told: &mut Vec<(usize, u8, Row<'s>)>) {
-    let book = lens.book();
-    let derivatives = Derivatives::of(run);
+fn derived_flows<'s>(view: View<'s, '_, '_>, flows: &[Id<Flow>], told: &mut Vec<(usize, u8, Row<'s>)>) {
+    let book = view.book();
+    let derivatives = Derivatives::of(view.run);
     for (at, &id) in flows.iter().enumerate() {
-        for posting in
-            derivatives.after(id).filter(|posting| lens.owns(crate::flow::movement_place(lens, posting.flow)))
-        {
+        for posting in derivatives.after(id).filter(|posting| view.owns_flow(posting.flow)) {
             let flow = posting.flow;
-            let moved = Amount::new(scoped_movement_qty(lens, flow, posting.out().qty), posting.out().unit);
+            let moved = Amount::new(view.flow_qty(flow, posting.out().qty), posting.out().unit);
             let purpose = flow.purpose.map_or_else(String::new, |purposed| purpose_words(book, purposed));
             let text = format!("derived flow: {}, {}{purpose}", route(book, flow), book.show(moved));
-            let law = posting.offspring(run).map_or(Cell::Blank, |offspring| Cell::text(book.law_words(offspring.law)));
+            let law =
+                posting.offspring(view.run).map_or(Cell::Blank, |offspring| Cell::text(book.law_words(offspring.law)));
             told.push((at, 0, Row::new([Cell::text(text), law])));
         }
     }
@@ -277,15 +272,15 @@ fn derived_flows<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], 
 /// What the flows did downstream: gains, obligations, tallies, violations. Each of the run's records is read once, whatever
 /// the number of flows, and they are told in the order of the flows, each one's gains first, then its effects, then its
 /// violations, as the records stand in the run.
-fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], section: &mut Section<'s>) {
-    let book = lens.book();
+fn consequences<'s>(view: View<'s, '_, '_>, flows: &[Id<Flow>], section: &mut Section<'s>) {
+    let book = view.book();
     let rank: Map<Id<Flow>, usize> = flows.iter().enumerate().map(|(rank, &id)| (id, rank)).collect();
-    let ranked = |cause: Cause| journal_root(run, cause).and_then(|id| rank.get(&id).copied());
+    let ranked = |cause: Cause| journal_root(view.run, cause).and_then(|id| rank.get(&id).copied());
     let mut told: Vec<(usize, u8, Row<'s>)> = Vec::new();
-    derived_flows(lens, run, flows, &mut told);
-    for gain in run.gains.iter().filter(|gain| lens.owns(gain.from)) {
+    derived_flows(view, flows, &mut told);
+    for gain in view.run.gains.iter().filter(|gain| view.owns(gain.from)) {
         let Some(at) = ranked(gain.cause) else { continue };
-        let realized = lens.place_qty(gain.from, gain.gain());
+        let realized = view.place_qty(gain.from, gain.gain());
         let ambiguity = if gain.ambiguous { " (no lot policy: FIFO assumed)" } else { "" };
         let text = format!(
             "realized a gain of {} selling {} from {}{ambiguity}",
@@ -295,7 +290,7 @@ fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], s
         );
         told.push((at, 0, Row::new([Cell::text(text), Cell::Blank])));
     }
-    for effect in run.effects.iter().filter(|effect| lens.owns_entity(effect.owner)) {
+    for effect in view.run.effects.iter().filter(|effect| view.owns_entity(effect.owner)) {
         let Some(at) = ranked(effect.cause) else { continue };
         let name = book.name(effect.name);
         let text = match effect.owed() {
@@ -304,9 +299,9 @@ fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], s
         };
         told.push((at, 1, Row::new([Cell::text(text), Cell::text(book.name(book.laws[effect.law].name))])));
     }
-    for violation in run.violations.iter().filter(|violation| lens.governs(violation.subject)) {
+    for violation in view.run.violations.iter().filter(|violation| view.governs(violation.subject)) {
         let Some(at) = ranked(violation.cause) else { continue };
-        let message = run.diagnostics[violation.diagnostic as usize].message.clone();
+        let message = view.run.diagnostics[violation.diagnostic as usize].message.clone();
         let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
         let law = Cell::text(book.name(book.laws[violation.law].name));
         told.push((at, 2, Row::new([Cell::text(message), law]).style(style)));

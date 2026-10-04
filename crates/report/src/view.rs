@@ -1,17 +1,20 @@
-//! One answer, for every view, to "whose is this, what is it worth, and how
+//! The context of one view of a run, and one answer, for every view, to "whose is this, what is it worth, and how
 //! liquid is it".
 //!
-//! A [`Lens`] is a day and an owner scope over the book. `balance --value`,
-//! `available`, `forecast` and the summary all read money through it, so a euro
-//! is worth the same in each, and a house is out of reach in each.
+//! A [`View`] is a day and an owner scope over the book, the plan the run was folded with, and the run itself. Every
+//! view reads all four together, so they travel as one value: a `Copy` of three borrows, which a view makes anew for
+//! another day with [`View::on`]. `balance --value`, `available`, `forecast` and the summary all read money through it,
+//! so a euro is worth the same in each, and a house is out of reach in each. The three borrows share one lifetime
+//! because they are always borrows of one [`Context`](crate::Context): there is no view of a plan and a run that were
+//! not made together.
 
 use std::collections::BTreeMap;
 use std::iter;
 
 use axiom_core::num::{POW10, div_round, mul_div};
 use axiom_core::{Day, Diagnostic, Id, Qty, Span};
-use axiom_engine::{Holding, Known, OwnerShare, Plan};
-use axiom_model::{Amount, Book, Class, Commodity, Entity, Place, Subject};
+use axiom_engine::{Holding, Known, OwnerShare, Plan, Run};
+use axiom_model::{Amount, Book, Class, Commodity, Entity, Flow, Place, Subject};
 
 use crate::resolve;
 
@@ -44,7 +47,7 @@ impl Whose {
         self.owners.as_ref().is_none_or(|owners| owners.binary_search(&entity).is_ok())
     }
 
-    /// Whether this lens covers every owner in the book.
+    /// Whether this view covers every owner in the book.
     pub fn is_everyone(&self) -> bool {
         self.owners.is_none()
     }
@@ -72,35 +75,37 @@ pub enum Liquidity {
     Slow(Span),
 }
 
-/// The books on one day, seen for one owner scope.
+/// The books on one day, seen for one owner scope, as one run folded them.
 #[derive(Clone, Copy)]
-pub struct Lens<'b, 's, 'w, 'p> {
-    pub whose: &'w Whose,
+pub struct View<'b, 's, 'v> {
+    pub whose: &'v Whose,
     pub day: Day,
+    /// The journal as folded: its postings, holdings, effects and readings.
+    pub run: &'v Run,
     /// The exact plan that owns the book view, ownership map and display signs.
-    plan: &'p Plan<'b, 's>,
+    plan: &'v Plan<'b, 's>,
 }
 
-impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
+impl<'b, 's, 'v> View<'b, 's, 'v> {
     /// Uses the plan's exact book, ownership graph and display signs so a
-    /// lens cannot pair unrelated arenas or fall back to raw entity owners.
-    pub fn new(plan: &'p Plan<'b, 's>, whose: &'w Whose, day: Day) -> Lens<'b, 's, 'w, 'p> {
-        Lens { whose, day, plan }
+    /// view cannot pair unrelated arenas or fall back to raw entity owners.
+    pub fn new(plan: &'v Plan<'b, 's>, whose: &'v Whose, run: &'v Run, day: Day) -> View<'b, 's, 'v> {
+        View { whose, day, run, plan }
     }
 
-    /// The immutable model owned by this lens's exact prepared plan.
+    /// The immutable model owned by this view's exact prepared plan.
     pub fn book(&self) -> &'b Book<'s> {
         self.plan.book()
     }
 
-    /// Names and kinds resolved with the same plan as this lens.
+    /// Names and kinds resolved with the same plan as this view.
     pub fn known(&self) -> Known {
         self.plan.known()
     }
 
     /// The same books at another day's prices.
-    pub fn on(self, day: Day) -> Lens<'b, 's, 'w, 'p> {
-        Lens { day, ..self }
+    pub fn on(self, day: Day) -> View<'b, 's, 'v> {
+        View { day, ..self }
     }
 
     pub fn owns(self, place: Id<Place>) -> bool {
@@ -109,6 +114,27 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
 
     pub fn owns_entity(self, entity: Id<Entity>) -> bool {
         self.owns_shares(self.plan.owners_of_entity(entity))
+    }
+
+    /// The place a flow's money is counted at: where it arrives if it comes in from outside, else where it leaves, which
+    /// is the end the fold counts a flow's own pieces at.
+    pub fn movement_place(self, flow: &Flow) -> Id<Place> {
+        let places = &self.book().places;
+        if places[flow.from].class == Class::Outside && places[flow.to].class != Class::Outside {
+            flow.to
+        } else {
+            flow.from
+        }
+    }
+
+    /// Whether the flow moves money through a place these owners own.
+    pub fn owns_flow(self, flow: &Flow) -> bool {
+        self.owns(self.movement_place(flow))
+    }
+
+    /// `qty` of what a flow moves, as the owners of the place it moves through own it.
+    pub fn flow_qty(self, flow: &Flow, qty: Qty) -> Qty {
+        self.place_qty(self.movement_place(flow), qty)
     }
 
     fn owns_shares(self, owners: &[OwnerShare]) -> bool {
@@ -147,7 +173,7 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
             .sum()
     }
 
-    pub(crate) fn plan(self) -> &'p Plan<'b, 's> {
+    pub(crate) fn plan(self) -> &'v Plan<'b, 's> {
         self.plan
     }
 
@@ -156,7 +182,7 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         self.plan.sides().sign(place)
     }
 
-    /// `amount` in the base currency at the lens day's prices; `None` without
+    /// `amount` in the base currency at the view day's prices; `None` without
     /// a price path. Nothing to price is worth nothing, so an empty holding
     /// never counts as unpriced.
     pub fn value(self, amount: Amount) -> Option<Qty> {
@@ -248,10 +274,10 @@ impl Basket {
     }
 
     /// Everything priceable summed in the base currency, each commodity priced once as a whole; the rest listed apart.
-    pub fn value(&self, lens: Lens) -> Valued {
+    pub fn value(&self, view: View) -> Valued {
         let (mut valued, mut exact) = (Valued::default(), 0);
         for amount in self.amounts() {
-            match lens.exact(amount) {
+            match view.exact(amount) {
                 Some(worth) => {
                     exact += worth;
                     valued.priced += 1;

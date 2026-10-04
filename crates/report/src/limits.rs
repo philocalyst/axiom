@@ -6,24 +6,24 @@
 
 use axiom_core::Day;
 use axiom_core::calendar::Window;
-use axiom_engine::{Headroom, Run};
+use axiom_engine::Headroom;
 use axiom_model::{Amount, Book, Period, Subject};
 
 use crate::headroom::{current, is_floor, is_over, latest, room, used, window_words};
-use crate::lens::Lens;
 use crate::places::path;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
-    let book = lens.book();
-    let year = year.unwrap_or_else(|| run.today.year());
-    let window = Window::containing(Period::Year, Day::from_ymd(year, 1, 1).unwrap_or(run.today)).days();
-    let today = window.last().min(run.today);
-    let all = &current(book, run, today, today);
+pub(crate) fn report<'s>(view: View<'s, '_, '_>, year: Option<i32>) -> Report<'s> {
+    let book = view.book();
+    let year = year.unwrap_or_else(|| view.run.today.year());
+    let window = Window::containing(Period::Year, Day::from_ymd(year, 1, 1).unwrap_or(view.run.today)).days();
+    let today = window.last().min(view.run.today);
+    let all = &current(book, view.run, today, today);
     // A floor of nothing (`balance >= empty`) is an invariant, not a limit:
     // what stands above it is the balance, which `balance` already shows.
     let limit = |reading: &&Headroom| !(is_floor(reading) && reading.counted.qty.is_zero());
-    let touching = all.iter().filter(|reading| lens.owns_entity(reading.owner) && reading.days.overlaps(window));
+    let touching = all.iter().filter(|reading| view.owns_entity(reading.owner) && reading.days.overlaps(window));
     let readings = latest(touching.filter(limit));
     let floors = readings.iter().any(|reading| is_floor(reading));
     let mut table = section(book, readings);

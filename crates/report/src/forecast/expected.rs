@@ -12,8 +12,8 @@ use axiom_model::{Amount, Book, Class, Entity, Flow, Place};
 
 use super::recurrence::{Schedule, detect, median};
 use crate::history::{Posting, postings};
-use crate::lens::Lens;
 use crate::synth::planned;
+use crate::view::View;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Origin {
@@ -49,13 +49,13 @@ impl Expectation<'_> {
     }
 }
 
-/// Everything expected after `today` for the lens's owners: plans, and the
+/// Everything expected after `today` for the view's owners: plans, and the
 /// rhythms in history that no plan already says.
-pub fn expected<'b>(lens: Lens<'b, '_, '_, '_>, run: &Run) -> Vec<Expectation<'b>> {
-    let book = lens.book();
+pub fn expected<'b>(view: View<'b, '_, '_>) -> Vec<Expectation<'b>> {
+    let book = view.book();
     let mut expected: Vec<_> =
-        from_history(book, run).into_iter().filter(|habit| !has_ended(book, run, habit)).collect();
-    expected.retain(|item| lens.owns(item.template.from) || lens.owns(item.template.to));
+        from_history(book, view.run).into_iter().filter(|habit| !has_ended(book, view.run, habit)).collect();
+    expected.retain(|item| view.owns(item.template.from) || view.owns(item.template.to));
     expected
 }
 

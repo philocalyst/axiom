@@ -13,15 +13,15 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym};
-use axiom_engine::{Effect, Holding, Ledger, Run, Verdict};
+use axiom_engine::{Effect, Holding, Ledger, Verdict};
 use axiom_model::{Amount, Entity, Place, RuntimeFlow, RuntimeTxn};
 
 use crate::claims::{self, Claim};
 use crate::history::postings;
-use crate::lens::{Basket, Lens, Liquidity};
 use crate::places::path;
 use crate::synth::hypothetical;
 use crate::table::{headline, plural};
+use crate::view::{Basket, Liquidity, View};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Obligations falling due within this long count against what can be spent.
@@ -33,25 +33,25 @@ struct ScopedHolding<'h> {
     qty: Qty,
 }
 
-/// What can be spent on the lens's day, from the ledger the context stood on that day, run on to `horizon` to read what drawing
+/// What can be spent on the view's day, from the ledger the context stood on that day, run on to `horizon` to read what drawing
 /// on each other place would cost.
-pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Ledger, horizon: Day) -> Report<'s> {
-    let (book, at) = (lens.book(), lens.day);
+pub(crate) fn from_ledger<'s>(view: View<'s, '_, '_>, ledger: &Ledger, horizon: Day) -> Report<'s> {
+    let (book, at) = (view.book(), view.day);
 
     let holdings: Vec<&Holding> = ledger.holdings().collect();
     let (mut cash, mut slow) = (Vec::new(), Vec::new());
-    for holding in holdings.iter().filter(|holding| lens.owns(holding.place)) {
-        let qty = lens.place_qty(holding.place, holding.qty());
+    for holding in holdings.iter().filter(|holding| view.owns(holding.place)) {
+        let qty = view.place_qty(holding.place, holding.qty());
         if qty.is_zero() {
             continue;
         }
-        match lens.liquidity(holding.place, holding.unit) {
+        match view.liquidity(holding.place, holding.unit) {
             Some(Liquidity::Cash) => cash.push(ScopedHolding { holding, qty }),
             Some(Liquidity::Slow(span)) => slow.push((*holding, span)),
             Some(Liquidity::Claim) | None => {}
         }
     }
-    let claims = claims::open(lens, holdings.iter().copied());
+    let claims = claims::open(view, holdings.iter().copied());
     let to = cash
         .iter()
         .filter(|scoped| scoped.holding.unit == book.base)
@@ -60,17 +60,17 @@ pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Le
 
     let mut baseline = ledger.fork();
     baseline.advance(horizon);
-    let baseline = owing(lens, baseline.recorded().effects);
+    let baseline = owing(view, baseline.recorded().effects);
     let mut reach = Vec::new();
     for &(holding, span) in &slow {
-        for (owner, qty) in lens
+        for (owner, qty) in view
             .plan()
             .allocate(holding.place, holding.qty())
-            .filter(|(owner, qty)| lens.whose.includes(owner.owner) && !qty.is_zero())
+            .filter(|(owner, qty)| view.whose.includes(owner.owner) && !qty.is_zero())
         {
             reach.push(Reach::of(
                 &ledger,
-                lens,
+                view,
                 holding,
                 owner.owner,
                 qty,
@@ -78,27 +78,22 @@ pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Le
                 to,
                 &baseline,
                 horizon,
-                &run.runtime_details,
+                &view.run.runtime_details,
             ));
         }
     }
 
     let mine: Vec<&Claim> = claims.iter().filter(|claim| claim.mine).collect();
     Report::new(format!("Available on {at}"))
-        .with(spendable_section(lens, run, &cash, &claims))
-        .with(claims::section(lens, "Coming in", &mine))
-        .with(reach_section(lens, &reach, to, horizon))
+        .with(spendable_section(view, &cash, &claims))
+        .with(claims::section(view, "Coming in", &mine))
+        .with(reach_section(view, &reach, to, horizon))
 }
 
 // ─── What you can spend ─────────────────────────────────────────────────────
 
-fn spendable_section<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    cash: &[ScopedHolding<'_>],
-    claims: &[Claim],
-) -> Section<'s> {
-    let (book, at) = (lens.book(), lens.day);
+fn spendable_section<'s>(view: View<'s, '_, '_>, cash: &[ScopedHolding<'_>], claims: &[Claim]) -> Section<'s> {
+    let (book, at) = (view.book(), view.day);
     let mut section = Section::new([Column::left("In hand"), Column::right("Amount")]).headed("What you can spend");
     let mut unpriced = 0;
     let mut line = |section: &mut Section<'s>, label: String, worth: Option<Qty>, depth: usize| match worth {
@@ -116,19 +111,19 @@ fn spendable_section<'s>(
         let holding = scoped.holding;
         in_hand.add(holding.unit, scoped.qty);
         for (lot, entity) in holding.lots.iter().filter_map(|lot| Some((lot, lot.tied?))) {
-            let qty = lens.place_qty(holding.place, lot.qty);
+            let qty = view.place_qty(holding.place, lot.qty);
             tied.entry(entity).or_default().add(holding.unit, qty);
         }
     }
-    let hands = in_hand.value(lens);
+    let hands = in_hand.value(view);
     let mut spendable = hands.total;
     line(&mut section, "Money in hand".into(), Some(hands.total), 0);
     for scoped in cash {
         let holding = scoped.holding;
         line(
             &mut section,
-            place_label(lens, holding, scoped.qty),
-            lens.value(Amount::new(scoped.qty, holding.unit)),
+            place_label(view, holding, scoped.qty),
+            view.value(Amount::new(scoped.qty, holding.unit)),
             1,
         );
     }
@@ -136,25 +131,25 @@ fn spendable_section<'s>(
     // What is spoken for: held for someone else, written but not cashed, due soon.
     let held = tied.iter().map(|(&entity, basket)| {
         let whom = book.name(book.entities[entity].path);
-        (format!("held for {whom}"), basket.value(lens).total)
+        (format!("held for {whom}"), basket.value(view).total)
     });
-    let pending = postings(book, run)
+    let pending = postings(book, view.run)
         .filter(|posting| {
             let from = posting.flow.from;
             posting.is_pending_on(at)
-                && lens.owns(from)
-                && lens.liquidity(from, posting.flow.out.unit) == Some(Liquidity::Cash)
+                && view.owns(from)
+                && view.liquidity(from, posting.flow.out.unit) == Some(Liquidity::Cash)
         })
         .filter_map(|posting| {
             let out = posting.out();
-            let amount = Amount::new(lens.place_qty(posting.flow.from, out.qty), out.unit);
-            let amount = lens.on(posting.flow.day).value(amount)?;
+            let amount = Amount::new(view.place_qty(posting.flow.from, out.qty), out.unit);
+            let amount = view.on(posting.flow.day).value(amount)?;
             Some((format!("{} to {}", posting.flow.day, path(book, posting.flow.to)), amount))
         });
     let spoken_for = [
         ("Held for others", held.collect::<Vec<_>>()),
         ("Pending outflows", pending.collect()),
-        ("Due within 30 days", due_soon(lens, run, claims)),
+        ("Due within 30 days", due_soon(view, claims)),
     ];
     for (heading, items) in spoken_for {
         let total: Qty = items.iter().map(|(_, qty)| *qty).sum();
@@ -174,8 +169,8 @@ fn spendable_section<'s>(
 }
 
 /// A holding's place, with its own amount when it is not in the base currency.
-fn place_label(lens: Lens, holding: &Holding, qty: Qty) -> String {
-    let book = lens.book();
+fn place_label(view: View, holding: &Holding, qty: Qty) -> String {
+    let book = view.book();
     match holding.unit == book.base {
         true => path(book, holding.place).to_string(),
         false => format!("{} ({})", path(book, holding.place), book.show(Amount::new(qty, holding.unit))),
@@ -184,19 +179,19 @@ fn place_label(lens: Lens, holding: &Holding, qty: Qty) -> String {
 
 /// What falls due within a month: obligations the laws recorded, and debts
 /// with a due day.
-fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
-    let (book, at) = (lens.book(), lens.day);
+fn due_soon(view: View, claims: &[Claim]) -> Vec<(String, Qty)> {
+    let (book, at) = (view.book(), view.day);
     let soon = |day: Day| day >= at && day <= at + SOON;
-    let recorded = run.effects.iter().filter(|effect| effect.day <= at && lens.owns_entity(effect.owner));
+    let recorded = view.run.effects.iter().filter(|effect| effect.day <= at && view.owns_entity(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
         let owed = effect.owed().filter(|owed| soon(owed.due))?;
         let label =
             format!("{}, to {} by {}", book.name(effect.name), book.name(book.entities[owed.to].path), owed.due);
-        Some((label, lens.value(effect.amount)?))
+        Some((label, view.value(effect.amount)?))
     });
     let debts = claims.iter().filter(|claim| !claim.mine && claim.due.is_some_and(soon)).filter_map(|claim| {
         let label = format!("{} by {}", claim.counterparty(book), claim.due?);
-        Some((label, lens.value(claim.left)?))
+        Some((label, view.value(claim.left)?))
     });
     owed.chain(debts).collect()
 }
@@ -206,11 +201,11 @@ fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
 /// What the laws owe, in the base currency: by owner, name, creditor and due day.
 type Owing = BTreeMap<(Id<Entity>, Sym, Id<Entity>, Day), Qty>;
 
-fn owing(lens: Lens, effects: &[Effect]) -> Owing {
+fn owing(view: View, effects: &[Effect]) -> Owing {
     let mut owing = Owing::new();
     for effect in effects {
-        if lens.owns_entity(effect.owner) {
-            if let (Some(owed), Some(qty)) = (effect.owed(), lens.value(effect.amount)) {
+        if view.owns_entity(effect.owner) {
+            if let (Some(owed), Some(qty)) = (effect.owed(), view.value(effect.amount)) {
                 *owing.entry((effect.owner, effect.name, owed.to, owed.due)).or_default() += qty;
             }
         }
@@ -244,7 +239,7 @@ impl<'h> Reach<'h> {
     /// withdrawal's cost.
     fn of(
         ledger: &Ledger,
-        lens: Lens,
+        view: View,
         holding: &'h Holding,
         owner: Id<Entity>,
         qty: Qty,
@@ -254,9 +249,9 @@ impl<'h> Reach<'h> {
         horizon: Day,
         runtime_details: &axiom_core::Arena<axiom_model::RuntimeDetail>,
     ) -> Reach<'h> {
-        let book = lens.book();
+        let book = view.book();
         let held = Amount::new(qty, holding.unit);
-        let value = lens.value(held);
+        let value = view.value(held);
         let mut reach =
             Reach { holding, owner, qty, liquid_in, value, cost: Qty::ZERO, because: String::new(), blocked: false };
         let Some(cash_in) = value else {
@@ -269,10 +264,10 @@ impl<'h> Reach<'h> {
             return reach;
         };
         let mut flow =
-            hypothetical(&book.flows[template], lens.day, holding.place, to, held, Amount::new(cash_in, book.base));
+            hypothetical(&book.flows[template], view.day, holding.place, to, held, Amount::new(cash_in, book.base));
         flow.owner = owner;
         let runtime = RuntimeFlow {
-            txn: RuntimeTxn::Adjustment { place: holding.place, day: lens.day },
+            txn: RuntimeTxn::Adjustment { place: holding.place, day: view.day },
             detail: None,
             ordinal: 0,
             flow,
@@ -291,7 +286,7 @@ impl<'h> Reach<'h> {
 
         // What the laws owe now that they did not owe before, by name, biggest first.
         let mut drivers: BTreeMap<Sym, Qty> = BTreeMap::new();
-        for (&(effect_owner, name, to, due), &qty) in &owing(lens, recorded.effects) {
+        for (&(effect_owner, name, to, due), &qty) in &owing(view, recorded.effects) {
             if effect_owner != owner {
                 continue;
             }
@@ -313,8 +308,8 @@ impl<'h> Reach<'h> {
 
 /// One line per holding that is not cash. `judged` is the day the books were
 /// run on to.
-fn reach_section<'s>(lens: Lens<'s, '_, '_, '_>, reach: &[Reach], to: Option<Id<Place>>, judged: Day) -> Section<'s> {
-    let (book, at) = (lens.book(), lens.day);
+fn reach_section<'s>(view: View<'s, '_, '_>, reach: &[Reach], to: Option<Id<Place>>, judged: Day) -> Section<'s> {
+    let (book, at) = (view.book(), view.day);
     let columns = ["Holding", "Liquid in"].map(Column::left).into_iter();
     let columns = columns.chain(["Value", "Cost", "Net"].map(Column::right)).chain([Column::left("Because")]);
     let mut section = Section::new(columns).headed("What it would take to reach the rest");
@@ -326,7 +321,7 @@ fn reach_section<'s>(lens: Lens<'s, '_, '_, '_>, reach: &[Reach], to: Option<Id<
             (value, costs) = (value + worth, costs + row.cost);
         }
         let cells = [
-            Cell::text(reach_label(lens, row)),
+            Cell::text(reach_label(view, row)),
             Cell::text(liquid_in),
             row.value.map_or(Cell::Blank, |worth| Cell::base(book, worth)),
             Cell::base_or_blank(book, row.cost),
@@ -364,13 +359,13 @@ fn reach_section<'s>(lens: Lens<'s, '_, '_, '_>, reach: &[Reach], to: Option<Id<
     section
 }
 
-fn reach_label(lens: Lens, row: &Reach<'_>) -> String {
-    let label = place_label(lens, row.holding, row.qty);
-    let owners = lens
+fn reach_label(view: View, row: &Reach<'_>) -> String {
+    let label = place_label(view, row.holding, row.qty);
+    let owners = view
         .plan()
         .owners_of(row.holding.place)
         .iter()
-        .filter(|owner| lens.whose.includes(owner.owner) && !owner.share.is_zero())
+        .filter(|owner| view.whose.includes(owner.owner) && !owner.share.is_zero())
         .count();
-    if owners > 1 { format!("{label} · {}", lens.book().name(lens.book().entities[row.owner].path)) } else { label }
+    if owners > 1 { format!("{label} · {}", view.book().name(view.book().entities[row.owner].path)) } else { label }
 }

@@ -19,8 +19,8 @@ use axiom_model::Book;
 use crate::balance::Worth;
 use crate::closings;
 use crate::forecast::Past;
-use crate::lens::{Lens, Whose};
 use crate::resolve;
+use crate::view::{View, Whose};
 use crate::{FlowBy, Query, Report, SourceProvider};
 
 /// What folding a plan left behind, and nothing that borrows it: the run, and the state the fold stood in on its day
@@ -84,56 +84,54 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
         match query {
             Query::Balance { globs, at, value, monthly } => {
                 let worth = if *value { Worth::Market } else { Worth::Native };
-                super::balance::view_with_lens(self.lens(at.unwrap_or(run.today)), run, globs, worth, *monthly)
+                super::balance::report(self.view(at.unwrap_or(run.today)), globs, worth, *monthly)
             }
             Query::Register { place, from, to } => {
-                super::register::view_with_lens(self.lens(to.unwrap_or(run.today)), run, place, *from, *to)
+                super::register::report(self.view(to.unwrap_or(run.today)), place, *from, *to)
             }
             Query::Flow { by: FlowBy::Period(by), from, to } => {
                 let to = to.unwrap_or(run.today);
-                Ok(super::flow::view_with_lens(self.lens(to), run, *by, *from))
+                Ok(super::flow::report(self.view(to), *by, *from))
             }
             Query::Flow { by: FlowBy::Party, from, to } => {
                 let to = to.unwrap_or(run.today);
-                Ok(super::flow::view_by_party_with_lens(self.lens(to), run, *from))
+                Ok(super::flow::report_by_party(self.view(to), *from))
             }
             Query::Available { at } => Ok(self.available(at.unwrap_or(run.today))),
-            Query::Budget { at, by } => {
-                Ok(super::budget::view_with_lens(self.lens(at.unwrap_or(run.today)), run, *at, *by))
-            }
-            Query::Limits { year } => Ok(super::limits::view_with_lens(self.lens(run.today), run, *year)),
+            Query::Budget { at, by } => Ok(super::budget::report(self.view(at.unwrap_or(run.today)), *at, *by)),
+            Query::Limits { year } => Ok(super::limits::report(self.view(run.today), *year)),
             Query::Claims { at } => Ok(self.claims(at.unwrap_or(run.today))),
-            Query::Contracts => Ok(super::contracts::view_with_lens(self.lens(run.today), run)),
-            Query::Tax { year } => Ok(super::tax::view_with_lens(self.lens(run.today), run, *year)),
-            Query::Gains { year } => Ok(super::gains::view_with_lens(self.lens(run.today), run, *year)),
+            Query::Contracts => Ok(super::contracts::report(self.view(run.today))),
+            Query::Tax { year } => Ok(super::tax::report(self.view(run.today), *year)),
+            Query::Gains { year } => Ok(super::gains::report(self.view(run.today), *year)),
             Query::Lots { place, at } => self.lots(*place, at.unwrap_or(run.today)),
             Query::Forecast { until, paths } => Ok(self.forecast(*until, *paths)),
             Query::Why { target } => {
-                let lens = self.lens(run.today);
-                super::why::Target::of(lens, run, target)?.report(lens, run)
+                let view = self.view(run.today);
+                super::why::Target::of(view, target)?.report(view)
             }
-            Query::Line { loc } => Ok(super::why::line_with_lens(self.lens(run.today), run, *loc)),
+            Query::Line { loc } => Ok(super::why::line(self.view(run.today), *loc)),
         }
     }
 
     /// The claims open at `at`, from the parcels a fold to that day holds.
     fn claims(&self, at: Day) -> Report<'b> {
         let ledger = self.ledger_at(at, self.run().today);
-        super::claims::view_from(self.lens(at), ledger.holdings())
+        super::claims::view_from(self.view(at), ledger.holdings())
     }
 
     /// What is held at `at`, with its cost and its gain: everywhere, or in the place `scope` names.
     fn lots(&self, scope: Option<&str>, at: Day) -> Result<Report<'b>, Diagnostic> {
         let place = scope.map(|text| resolve::place(self.plan.book(), text)).transpose()?;
         let ledger = self.ledger_at(at, self.run().today);
-        Ok(super::lots::view_from(self.lens(at), place, ledger.holdings()))
+        Ok(super::lots::view_from(self.view(at), place, ledger.holdings()))
     }
 
     /// What can be spent at `at`, and what more costs.
     fn available(&self, at: Day) -> Report<'b> {
         let horizon = closings::judged_through(self.plan.book(), at);
         let ledger = self.ledger_at(at, horizon);
-        super::available::from_ledger(self.lens(at), self.run(), &ledger, horizon)
+        super::available::from_ledger(self.view(at), &ledger, horizon)
     }
 
     /// The forecast from the stored pre-close state, over `paths` simulated futures.
@@ -142,7 +140,7 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
         let effects = &folded.run.effects[..folded.effects_prefix_len];
         let past = Past { at: &folded.checkpoint, effects };
         let options = Options { today: folded.run.today, relaxed: folded.options.relaxed };
-        super::forecast::view(past, &folded.run, self.lens(folded.run.today), options, until, paths)
+        super::forecast::report(past, self.view(folded.run.today), options, until, paths)
     }
 
     /// Resolves source-backed `why FILE:LINE` queries through the client's
@@ -159,8 +157,8 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
         }
     }
 
-    pub(crate) fn lens<'a>(&'a self, day: Day) -> Lens<'b, 's, 'a, 'a> {
-        Lens::new(&self.plan, &self.whose, day)
+    pub(crate) fn view<'a>(&'a self, day: Day) -> View<'b, 's, 'a> {
+        View::new(&self.plan, &self.whose, self.run(), day)
     }
 
     /// A ledger at `day` before that day's closings. Future views resume the

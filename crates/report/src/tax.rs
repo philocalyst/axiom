@@ -13,25 +13,25 @@ use axiom_engine::{Cause, Effect, Owed, Run};
 use axiom_model::{Amount, Book, Commodity, Entity, System};
 
 use crate::closings;
-use crate::lens::Lens;
 use crate::table::{cause_cell, plural};
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
-    let book = lens.book();
-    let year = year.unwrap_or_else(|| run.today.year());
+pub(crate) fn report<'s>(view: View<'s, '_, '_>, year: Option<i32>) -> Report<'s> {
+    let book = view.book();
+    let year = year.unwrap_or_else(|| view.run.today.year());
     // An effect belongs to the year of the day it was recorded.
-    let effects = run.effects.iter().filter(|effect| lens.owns_entity(effect.owner) && effect.day.year() == year);
+    let effects = view.run.effects.iter().filter(|effect| view.owns_entity(effect.owner) && effect.day.year() == year);
     let (owed, tallied): (Vec<&Effect>, Vec<&Effect>) = effects.partition(|effect| effect.owed().is_some());
     let owners: BTreeSet<Id<Entity>> = owed.iter().chain(&tallied).map(|effect| effect.owner).collect();
 
     let (tallied, owed) = (lines(&tallied), lines(&owed));
     // A closing law has not judged the year until its day: what it owes is
     // missing, not nothing, and what was counted is counted so far.
-    let closes = pending_closings(lens, run, year);
+    let closes = pending_closings(view, year);
     let several = owners.len() > 1;
-    let mut tallies = tallies(book, run, &tallied, several);
-    let mut obligations = obligations(book, run, &owed, several, !closes.is_empty());
+    let mut tallies = tallies(book, view.run, &tallied, several);
+    let mut obligations = obligations(book, view.run, &owed, several, !closes.is_empty());
     if !closes.is_empty() {
         let note = not_closed(year, &closes);
         if obligations.rows.is_empty() {
@@ -62,9 +62,9 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
 
 /// The days after the run's end on which closing laws written for `whose`
 /// will judge `year`.
-fn pending_closings(lens: Lens<'_, '_, '_, '_>, run: &Run, year: i32) -> Vec<Day> {
-    let mut days = closings::days_for(lens.book(), year, |rule| lens.governs(rule.subject));
-    days.retain(|&day| day > run.horizon);
+fn pending_closings(view: View<'_, '_, '_>, year: i32) -> Vec<Day> {
+    let mut days = closings::days_for(view.book(), year, |rule| view.governs(rule.subject));
+    days.retain(|&day| day > view.run.horizon);
     days
 }
 

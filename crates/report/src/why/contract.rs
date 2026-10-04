@@ -7,34 +7,33 @@ use axiom_model::{Amount, Contract};
 
 use super::flows_table;
 use crate::history::all_postings;
-use crate::lens::Lens;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contract>) -> Report<'s> {
-    let book = lens.book();
+pub fn report<'s>(view: View<'s, '_, '_>, contract_id: Id<Contract>) -> Report<'s> {
+    let book = view.book();
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
-    if !lens.owns_entity(contract.owner) {
+    if !view.owns_entity(contract.owner) {
         return Report::new(format!("Why {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[contract.owner].path)
         )));
     }
     // The flows the contract derived, or that its occurrences wrote.
-    let derived = all_postings(book, run).filter(|posting| {
-        lens.owns(crate::flow::movement_place(lens, posting.flow))
-            && crate::register::contract_flow(posting.flow.origin, contract_id)
+    let derived = all_postings(book, view.run).filter(|posting| {
+        view.owns_flow(posting.flow) && crate::register::contract_flow(posting.flow.origin, contract_id)
     });
     let report = Report::new(format!("Why {name}"))
-        .with(about_section(lens, contract))
-        .with(terms_section(lens, contract))
-        .with(promises_section(lens, run, contract_id))
-        .with(flows_table(lens, derived, "Flows"));
-    schedule_section(lens, run, contract_id).into_iter().fold(report, Report::with)
+        .with(about_section(view, contract))
+        .with(terms_section(view, contract))
+        .with(promises_section(view, contract_id))
+        .with(flows_table(view, derived, "Flows"));
+    schedule_section(view, contract_id).into_iter().fold(report, Report::with)
 }
 
-fn about_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Section<'s> {
-    let book = lens.book();
+fn about_section<'s>(view: View<'s, '_, '_>, contract: &'s Contract) -> Section<'s> {
+    let book = view.book();
     let purpose = contract
         .purpose
         .map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.value.purpose].name)));
@@ -49,7 +48,7 @@ fn about_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Sect
 }
 
 /// Each change in terms, and the days they were in force.
-fn terms_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Section<'s> {
+fn terms_section<'s>(view: View<'s, '_, '_>, contract: &'s Contract) -> Section<'s> {
     let mut terms = Section::new([
         Column::left("From"),
         Column::left("Through"),
@@ -63,7 +62,7 @@ fn terms_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Sect
     for (days, value, waiver) in stretches {
         let active_days = days.intersect(contract.days).unwrap_or(days);
         let templates =
-            value.template.iter().map(|flow| crate::contracts::template_flow_cell(lens, flow)).collect::<Vec<_>>();
+            value.template.iter().map(|flow| crate::contracts::template_flow_cell(view, flow)).collect::<Vec<_>>();
         let state = match waiver {
             None => Cell::Word("active"),
             Some(_) => Cell::Word("waived"),
@@ -84,8 +83,8 @@ fn terms_section<'s>(lens: Lens<'s, '_, '_, '_>, contract: &'s Contract) -> Sect
 }
 
 /// The occurrences the contract promised, kept, late or missing.
-fn promises_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contract>) -> Section<'s> {
-    let book = lens.book();
+fn promises_section<'s>(view: View<'s, '_, '_>, contract_id: Id<Contract>) -> Section<'s> {
+    let book = view.book();
     let mut promises = Section::new([
         Column::left("Due"),
         Column::left("Kept"),
@@ -96,8 +95,8 @@ fn promises_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<C
     .headed("Occurrences");
     let mut kept = 0usize;
     let mut late = 0usize;
-    for promise in run.promises.iter().filter(|promise| promise.contract == contract_id) {
-        let late_by = promise.late(run.today);
+    for promise in view.run.promises.iter().filter(|promise| promise.contract == contract_id) {
+        let late_by = promise.late(view.run.today);
         kept += usize::from(promise.kept.is_some());
         late += usize::from(late_by > 0);
         let txn = promise.kept.map(|(_, txn)| &book.txns[txn]);
@@ -132,8 +131,8 @@ const AROUND_TODAY: usize = 6;
 
 /// A loan's schedule around today: what each payment pays of interest and of principal, and what is owed after it, with what
 /// became of it. None for a contract that is no loan.
-fn schedule_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contract>) -> Option<Section<'s>> {
-    let book = lens.book();
+fn schedule_section<'s>(view: View<'s, '_, '_>, contract_id: Id<Contract>) -> Option<Section<'s>> {
+    let book = view.book();
     let loan = book.promises.loan(contract_id)?;
     let unit = loan.terms().principal().unit;
     let money = |qty| Cell::amount(book, Amount::new(qty, unit));
@@ -146,7 +145,7 @@ fn schedule_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<C
     ])
     .headed("Loan schedule");
     let entries = loan.entries();
-    let next = entries.partition_point(|entry| entry.day <= run.today);
+    let next = entries.partition_point(|entry| entry.day <= view.run.today);
     for entry in &entries[next.saturating_sub(AROUND_TODAY)..entries.len().min(next + AROUND_TODAY)] {
         let interest = if entry.kind == Kind::Pay { money(entry.paid.interest) } else { Cell::Blank };
         schedule.push(Row::new([
@@ -154,11 +153,11 @@ fn schedule_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<C
             interest,
             money(entry.paid.principal),
             money(entry.paid.open),
-            Cell::Word(entry_state(run, contract_id, entry)),
+            Cell::Word(entry_state(view.run, contract_id, entry)),
         ]));
     }
     let (ahead, interest) = (
-        loan.payments().filter(|payment| payment.day > run.today).count(),
+        loan.payments().filter(|payment| payment.day > view.run.today).count(),
         entries.iter().map(|entry| entry.paid.interest).sum::<Qty>(),
     );
     let payments =

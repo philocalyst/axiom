@@ -3,11 +3,11 @@
 //! what was gained, with short-term and long-term subtotals.
 
 use axiom_core::{Day, Id, Qty, Span};
-use axiom_engine::{Gain, Run};
+use axiom_engine::Gain;
 use axiom_model::{Amount, Book, Commodity};
 
-use crate::lens::Lens;
 use crate::places::path;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Held longer than this, a gain is long-term. The boundary is the US one;
@@ -44,13 +44,13 @@ impl Term {
     }
 }
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
-    let book = lens.book();
-    let year = year.unwrap_or_else(|| run.today.year());
+pub(crate) fn report<'s>(view: View<'s, '_, '_>, year: Option<i32>) -> Report<'s> {
+    let book = view.book();
+    let year = year.unwrap_or_else(|| view.run.today.year());
     // Money leaving at its own basis (a grant spent, a deposit returned) realized nothing.
     let realized = |gain: &&Gain| gain.unit != book.base || gain.proceeds != gain.basis;
     let disposals: Vec<&Gain> =
-        run.gains.iter().filter(|gain| gain.day.year() == year && lens.owns(gain.from)).filter(realized).collect();
+        view.run.gains.iter().filter(|gain| gain.day.year() == year && view.owns(gain.from)).filter(realized).collect();
     let mut table = section(book, &disposals);
     if table.rows.is_empty() {
         table.note(format!("Nothing was sold in {year}."));

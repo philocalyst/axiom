@@ -11,36 +11,36 @@ use axiom_model::{Amount, Book, Entity, Law, Subject, Watch};
 
 use super::laws_table;
 use crate::claims;
-use crate::lens::{Lens, on_balance_sheet};
 use crate::places::path;
+use crate::view::{View, on_balance_sheet};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> Report<'s> {
-    let book = lens.book();
+pub fn report<'s>(view: View<'s, '_, '_>, entity: Id<Entity>) -> Report<'s> {
+    let book = view.book();
     let name = book.name(book.entities[entity].path);
-    if !lens.owns_entity(entity) {
+    if !view.owns_entity(entity) {
         return Report::new(format!("Why {name}"))
             .with(Section::note_only(format!("{name} is outside this owner's scope.")));
     }
-    let open = claims::open(lens, run.holdings.iter());
+    let open = claims::open(view, view.run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
     Report::new(format!("Why {name}"))
-        .with(places_section(lens, run, entity))
-        .with(laws_table(book, &governing_laws(book, run, entity)))
-        .with(ties_section(lens, run, entity))
-        .with(claims::section(lens, "Claims with it", &with_it))
+        .with(places_section(view, entity))
+        .with(laws_table(book, &governing_laws(book, view.run, entity)))
+        .with(ties_section(view, entity))
+        .with(claims::section(view, "Claims with it", &with_it))
 }
 
 /// What the entity holds in each place that is on the balance sheet.
-fn places_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> Section<'s> {
-    let book = lens.book();
+fn places_section<'s>(view: View<'s, '_, '_>, entity: Id<Entity>) -> Section<'s> {
+    let book = view.book();
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
-    for holding in run.holdings.iter().filter(|holding| on_balance_sheet(book.places[holding.place].class)) {
+    for holding in view.run.holdings.iter().filter(|holding| on_balance_sheet(book.places[holding.place].class)) {
         // `why ENTITY` is about that entity's financial holdings even when the
-        // caller's lens is the household. Allocate with the same cent
+        // caller's view is the household. Allocate with the same cent
         // boundaries used by registers so shared places neither leak the
         // household total nor lose a cent across owners.
-        let held = lens
+        let held = view
             .plan()
             .allocate(holding.place, holding.qty())
             .find_map(|(share, qty)| (share.owner == entity).then_some(qty));
@@ -68,19 +68,19 @@ fn governing_laws(book: &Book<'_>, run: &Run, entity: Id<Entity>) -> Vec<Id<Law>
 }
 
 /// Money tied to the entity: it may leave the owner's places only as its laws allow.
-fn ties_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> Section<'s> {
-    let book = lens.book();
+fn ties_section<'s>(view: View<'s, '_, '_>, entity: Id<Entity>) -> Section<'s> {
+    let book = view.book();
     let mut ties =
         Section::new([Column::left("Place"), Column::right("Amount"), Column::left("Since"), Column::left("From")])
             .headed("Held for it");
     let mut remaining = Qty::ZERO;
-    for holding in &run.holdings {
-        if !lens.owns(holding.place) {
+    for holding in &view.run.holdings {
+        if !view.owns(holding.place) {
             continue;
         }
         for lot in holding.lots.iter().filter(|lot| lot.tied == Some(entity)) {
-            let held = Amount::new(lens.place_qty(holding.place, lot.qty), holding.unit);
-            remaining += lens.value(held).unwrap_or_default();
+            let held = Amount::new(view.place_qty(holding.place, lot.qty), holding.unit);
+            remaining += view.value(held).unwrap_or_default();
             let source = lot.txn.source_txn().and_then(|txn| book.txns.get(txn)).map(|txn| txn.loc);
             let cells = [
                 Cell::text(path(book, holding.place)),

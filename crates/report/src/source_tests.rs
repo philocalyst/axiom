@@ -1751,11 +1751,11 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
 #[test]
 fn balances_apply_assertion_pads_through_each_requested_day() {
     with_run(GAPS, day(2025, 12, 31), |book, run| {
-        let whose = crate::lens::Whose::default();
+        let whose = crate::view::Whose::default();
         let plan = axiom_engine::Plan::new(book);
-        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let view = crate::view::View::new(&plan, &whose, run, run.today);
         let days = [day(2025, 1, 1), day(2025, 3, 31), day(2025, 6, 30), day(2025, 9, 30)];
-        let balances = crate::balances::Balances::of(lens, run, &days);
+        let balances = crate::balances::Balances::of(view, &days);
         let place = book.place("assets/k").unwrap();
         let balances: Vec<_> =
             (0..days.len()).map(|column| balances.subtree(book, column, place).get(book.base)).collect();
@@ -1784,11 +1784,11 @@ opening 2025-01-01
 2025-01-04 ^deposit returned
 ";
     with_run(source, day(2025, 1, 5), |book, run| {
-        let whose = crate::lens::Whose::default();
+        let whose = crate::view::Whose::default();
         let plan = axiom_engine::Plan::new(book);
-        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let view = crate::view::View::new(&plan, &whose, run, run.today);
         let days = [day(2025, 1, 1), day(2025, 1, 2), day(2025, 1, 3), day(2025, 1, 4)];
-        let balances = crate::balances::Balances::of(lens, run, &days);
+        let balances = crate::balances::Balances::of(view, &days);
         let broker = book.place("assets/broker").unwrap();
         let checking = book.place("assets/checking").unwrap();
         let fast = book.commodity("FAST").unwrap();
@@ -1849,10 +1849,10 @@ fn basis_consumption_and_later_days_preserve_the_native_purchase_economics() {
         assert_eq!(rows(book, run, balance), ["=checking | 1,000.00 USD", "=house | 1 house",]);
 
         let plan = axiom_engine::Plan::new(book);
-        let whose = crate::lens::Whose::default();
-        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let whose = crate::view::Whose::default();
+        let view = crate::view::View::new(&plan, &whose, run, run.today);
         let days = [day(2025, 1, 1), day(2025, 2, 28), day(2026, 4, 16), day(2026, 5, 1)];
-        let balances = crate::balances::Balances::of(lens, run, &days);
+        let balances = crate::balances::Balances::of(view, &days);
         let checking = book.place("checking").unwrap();
         let house = book.place("house").unwrap();
         let house_unit = book.assets[asset].unit;

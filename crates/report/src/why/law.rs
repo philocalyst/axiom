@@ -5,20 +5,20 @@ use axiom_engine::{Run, Violation};
 use axiom_model::{Book, Law, Owner};
 
 use super::{effects_table, recent, trigger_words};
-use crate::lens::Lens;
 use crate::table::{cause_cell, doc_headline, doc_lines, headline, plural};
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<'s> {
-    let book = lens.book();
+pub fn report<'s>(view: View<'s, '_, '_>, id: Id<Law>) -> Report<'s> {
+    let book = view.book();
     let law = &book.laws[id];
     let violations: Vec<_> =
-        run.violations.iter().filter(|violation| violation.law == id && lens.governs(violation.subject)).collect();
+        view.run.violations.iter().filter(|violation| violation.law == id && view.governs(violation.subject)).collect();
     let effects: Vec<_> =
-        run.effects.iter().filter(|effect| effect.law == id && lens.owns_entity(effect.owner)).collect();
+        view.run.effects.iter().filter(|effect| effect.law == id && view.owns_entity(effect.owner)).collect();
 
     let mut about = Section::new([Column::left("Law"), Column::left(book.name(law.name).to_string())]);
-    let ran = run.checks.get(id.index()).copied().unwrap_or(0) as usize;
+    let ran = view.run.checks.get(id.index()).copied().unwrap_or(0) as usize;
     let recorded = format!("{}, {}", plural(violations.len(), "violation"), plural(effects.len(), "effect"));
     let mut facts = vec![
         ("When", Cell::text(trigger_words(law.trigger))),
@@ -26,7 +26,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<
         ("Written", Cell::Source(law.loc)),
         ("Recorded", Cell::text(recorded)),
     ];
-    if lens.whose.is_everyone() {
+    if view.whose.is_everyone() {
         facts.insert(3, ("Ran", Cell::text(plural(ran, "time"))));
     }
     for (what, cell) in facts {
@@ -36,10 +36,10 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<
         about.note(Cell::text(line));
     }
 
-    let caused = effects_table(book, run, &effects, "Recent effects");
+    let caused = effects_table(book, view.run, &effects, "Recent effects");
     Report::new(format!("Why {}", book.name(law.name)))
         .with(about)
-        .with(broken_section(book, run, &violations))
+        .with(broken_section(book, view.run, &violations))
         .with(caused)
 }
 

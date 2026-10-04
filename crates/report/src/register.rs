@@ -13,12 +13,11 @@ use axiom_model::{
     Amount, Asset, Book, Commodity, Contract, Derivation, Entity, Flow, Object, Origin, Place, Role, Subject,
 };
 
-use crate::flow::{movement_place, scoped_movement_qty};
 use crate::history::{Change, Posting, all_postings, pad_ends};
-use crate::lens::Lens;
 use crate::places::{path, route};
 use crate::resolve;
 use crate::table::gap_words;
+use crate::view::View;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// What a register is of.
@@ -58,33 +57,27 @@ impl Of {
     }
 }
 
-/// Builds a register using owner scope and display signs from the shared lens.
-pub(crate) fn view_with_lens<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
+/// Builds a register using owner scope and display signs from the shared view.
+pub(crate) fn report<'s>(
+    view: View<'s, '_, '_>,
     target: &str,
     from: Option<Day>,
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
-    let window = Window::new(from, to, run);
-    Ok(match Of::named(lens.book(), target)? {
-        Of::Place(place) => place_register(lens, run, place, window),
-        Of::Entity(entity, shown) => entity_register(lens, run, entity, &shown, window),
-        Of::Asset(asset) => asset_register(lens, run, asset, window),
-        Of::Contract(contract) => contract_register(lens, run, contract, window),
+    let window = Window::new(from, to, view.run);
+    Ok(match Of::named(view.book(), target)? {
+        Of::Place(place) => place_register(view, place, window),
+        Of::Entity(entity, shown) => entity_register(view, entity, &shown, window),
+        Of::Asset(asset) => asset_register(view, asset, window),
+        Of::Contract(contract) => contract_register(view, contract, window),
     })
 }
 
 /// A place is somebody's: another owner's register is not part of whose money this is.
-pub(crate) fn place_register<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    place: Id<Place>,
-    window: Window,
-) -> Report<'s> {
-    let book = lens.book();
-    let register = match lens.owns(place) {
-        true => section_with_sign(lens, run, place, window),
+pub(crate) fn place_register<'s>(view: View<'s, '_, '_>, place: Id<Place>, window: Window) -> Report<'s> {
+    let book = view.book();
+    let register = match view.owns(place) {
+        true => section_with_sign(view, place, window),
         false => Section::note_only(format!(
             "{} belongs to {}, whose money this is not.",
             path(book, place),
@@ -123,17 +116,11 @@ fn foreign<'s>(book: &Book<'s>, name: &str, owner: Id<Entity>) -> Report<'s> {
 /// A party or owner register is a history of everything it touched, including flows it owns that have no account end
 /// under its name, and the gaps accepted against its place: that keeps market revaluations and unexplained `?`
 /// balances visible from the other end.
-fn entity_register<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    entity: Id<Entity>,
-    shown: &str,
-    window: Window,
-) -> Report<'s> {
-    let book = lens.book();
+fn entity_register<'s>(view: View<'s, '_, '_>, entity: Id<Entity>, shown: &str, window: Window) -> Report<'s> {
+    let book = view.book();
     let place = book.entities[entity].place;
     let is_owner = place.is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)));
-    if is_owner && !lens.owns_entity(entity) {
+    if is_owner && !view.owns_entity(entity) {
         return Report::new(format!("Register: {shown}")).with(Section::note_only(format!(
             "{} is outside this owner's scope.",
             book.name(book.entities[entity].path)
@@ -141,7 +128,7 @@ fn entity_register<'s>(
     }
     // At the party's end of a flow: the place it owns, or the outside it stands for.
     let at_party = |end: Id<Place>| {
-        place_owned_by(lens, end, entity)
+        place_owned_by(view, end, entity)
             || matches!(book.places[end].role, Role::Outside(Some(party)) if party == entity)
     };
     let touching = |flow: &Flow| {
@@ -149,17 +136,17 @@ fn entity_register<'s>(
             || flow.payee == Some(entity)
             || at_party(flow.from)
             || at_party(flow.to)
-            || place_owned_by(lens, movement_place(lens, flow), entity)
+            || place_owned_by(view, view.movement_place(flow), entity)
     };
     let nothing = format!("No flows touch {shown} in this window.");
-    listing(lens, run, shown, window, nothing, touching, |pad| place == Some(pad.counter))
+    listing(view, shown, window, nothing, touching, |pad| place == Some(pad.counter))
 }
 
-fn asset_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Asset>, window: Window) -> Report<'s> {
-    let book = lens.book();
+fn asset_register<'s>(view: View<'s, '_, '_>, id: Id<Asset>, window: Window) -> Report<'s> {
+    let book = view.book();
     let asset = &book.assets[id];
     let name = book.name(asset.name);
-    if !lens.owns_entity(asset.owner) {
+    if !view.owns_entity(asset.owner) {
         return foreign(book, name, asset.owner);
     }
     let touching = |flow: &Flow| {
@@ -168,43 +155,41 @@ fn asset_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Asset>, wind
             || flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(id)))
             || matches!(flow.origin, Origin::Derived(Derivation::Disposal(found)) if found == id)
     };
-    listing(lens, run, name, window, format!("Nothing happened to {name} in this window."), touching, |_| false)
+    listing(view, name, window, format!("Nothing happened to {name} in this window."), touching, |_| false)
 }
 
-fn contract_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Contract>, window: Window) -> Report<'s> {
-    let book = lens.book();
+fn contract_register<'s>(view: View<'s, '_, '_>, id: Id<Contract>, window: Window) -> Report<'s> {
+    let book = view.book();
     let contract = &book.contracts[id];
     let name = book.name(contract.name);
-    if !lens.owns_entity(contract.owner) {
+    if !view.owns_entity(contract.owner) {
         return foreign(book, name, contract.owner);
     }
     let touching = |flow: &Flow| contract_flow(flow.origin, id);
-    listing(lens, run, name, window, format!("Nothing happened under {name} in this window."), touching, |_| false)
+    listing(view, name, window, format!("Nothing happened under {name} in this window."), touching, |_| false)
 }
 
 /// What touches a thing, from the first day of the window to its last: the flows `touching` picks, and the gaps `gap`
 /// picks, each the place register's row but for its balance. `nothing` says why a register is empty.
 fn listing<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
+    view: View<'s, '_, '_>,
     name: &str,
     window: Window,
     nothing: String,
     touching: impl Fn(&Flow) -> bool,
     gap: impl Fn(&Pad) -> bool,
 ) -> Report<'s> {
-    let book = lens.book();
-    let flows = all_postings(book, run).filter(|posting| {
-        window.holds(posting.flow.day) && lens.owns(movement_place(lens, posting.flow)) && touching(posting.flow)
-    });
-    let gaps = run.pads.iter().filter(|pad| window.holds(pad.day) && lens.owns(pad.place) && gap(pad));
+    let book = view.book();
+    let flows = all_postings(book, view.run)
+        .filter(|posting| window.holds(posting.flow.day) && view.owns_flow(posting.flow) && touching(posting.flow));
+    let gaps = view.run.pads.iter().filter(|pad| window.holds(pad.day) && view.owns(pad.place) && gap(pad));
     let mut entries: Vec<(Day, Source)> = flows.map(|posting| (posting.flow.day, Source::Flow(posting))).collect();
     entries.extend(gaps.map(|pad| (pad.day, Source::Gap(pad))));
     entries.sort_by_key(|&(day, _)| day);
     let columns = ["Date", "Flow", "Payee", "Note"].map(Column::left).into_iter().chain([Column::right("Amount")]);
     let mut section = Section::new(columns);
     for (day, source) in &entries {
-        section.push(entry_row(lens, run, window.cutoff, *day, source));
+        section.push(entry_row(view, window.cutoff, *day, source));
     }
     if section.rows.is_empty() {
         section.note(nothing);
@@ -214,8 +199,8 @@ fn listing<'s>(
 
 /// One flow or gap of a thing's register: the day, what moved from where to where and what for, whom it was paid to,
 /// what is said of it, and how much.
-fn entry_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, cutoff: Day, day: Day, source: &Source<'_>) -> Row<'s> {
-    let book = lens.book();
+fn entry_row<'s>(view: View<'s, '_, '_>, cutoff: Day, day: Day, source: &Source<'_>) -> Row<'s> {
+    let book = view.book();
     let (flow, amount) = match *source {
         Source::Flow(posting) => {
             let flow = posting.flow;
@@ -223,18 +208,18 @@ fn entry_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, cutoff: Day, day: Day, s
                 .purpose
                 .map_or(Cell::Blank, |purpose| Cell::Purpose(book.name(book.purposes[purpose.purpose].name)));
             let out = posting.out();
-            let qty = scoped_movement_qty(lens, flow, out.qty);
+            let qty = view.flow_qty(flow, out.qty);
             (Cell::list(" ", [Cell::text(route(book, flow)), purpose]), Amount::new(qty, out.unit))
         }
         Source::Gap(pad) => {
             let (from, to) =
                 if pad.amount.qty >= Qty::ZERO { (pad.counter, pad.place) } else { (pad.place, pad.counter) };
-            let qty = lens.place_qty(pad.place, pad.amount.qty).abs();
+            let qty = view.place_qty(pad.place, pad.amount.qty).abs();
             (Cell::text(format!("{} → {}", path(book, from), path(book, to))), Amount::new(qty, pad.amount.unit))
         }
     };
     let counts = source.counts(cutoff);
-    let note = note(book, run, source, counts).unwrap_or(Cell::Blank);
+    let note = note(book, view.run, source, counts).unwrap_or(Cell::Blank);
     let cells = [Cell::Day(day), flow, payee(book, source), note, Cell::amount(book, amount)];
     Row::new(cells).style(if counts { Style::Normal } else { Style::Muted })
 }
@@ -255,13 +240,13 @@ pub(crate) fn contract_flow(origin: Origin, contract: Id<Contract>) -> bool {
     }
 }
 
-fn place_owned_by(lens: Lens<'_, '_, '_, '_>, place: Id<Place>, entity: Id<Entity>) -> bool {
-    lens.plan().owners_of(place).iter().any(|owner| owner.owner == entity && !owner.share.is_zero())
+fn place_owned_by(view: View<'_, '_, '_>, place: Id<Place>, entity: Id<Entity>) -> bool {
+    view.plan().owners_of(place).iter().any(|owner| owner.owner == entity && !owner.share.is_zero())
 }
 
-fn section_with_sign<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>, window: Window) -> Section<'s> {
-    let (book, sign) = (lens.book(), lens.display_sign(place));
-    let steps = steps(lens, run, place, window.cutoff);
+fn section_with_sign<'s>(view: View<'s, '_, '_>, place: Id<Place>, window: Window) -> Section<'s> {
+    let (book, sign) = (view.book(), view.display_sign(place));
+    let steps = steps(view, place, window.cutoff);
     let split = window.from.map_or(0, |from| steps.partition_point(|step| step.day < from));
     let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
     let columns = [
@@ -273,7 +258,7 @@ fn section_with_sign<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>
         Column::right("Balance"),
     ];
     let mut section = Section::new(columns);
-    let mut running = Running::after(lens, place, &steps[..split]);
+    let mut running = Running::after(view, place, &steps[..split]);
     if let Some(from) = window.from {
         for (&unit, &qty) in running.shown.iter().filter(|(_, qty)| !qty.is_zero()) {
             let cells = [
@@ -288,8 +273,8 @@ fn section_with_sign<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>
         }
     }
     for step in &steps[split..] {
-        let (unit, amount, balance) = running.advance(lens, place, step);
-        section.push(step_row(book, run, step, shown(amount, unit), shown(balance, unit)));
+        let (unit, amount, balance) = running.advance(view, place, step);
+        section.push(step_row(book, view.run, step, shown(amount, unit), shown(balance, unit)));
     }
     if section.rows.is_empty() {
         section.note(format!("Nothing touches {} in this window.", path(book, place)));
@@ -309,29 +294,29 @@ struct Running {
 
 impl Running {
     /// What `place` holds once `steps` are over.
-    fn after(lens: Lens<'_, '_, '_, '_>, place: Id<Place>, steps: &[Step<'_>]) -> Running {
+    fn after(view: View<'_, '_, '_>, place: Id<Place>, steps: &[Step<'_>]) -> Running {
         let mut raw: BTreeMap<Id<Commodity>, Qty> = BTreeMap::new();
         for step in steps {
             let Change::Moved(moved) = step.change;
             *raw.entry(moved.unit).or_default() += step.counted();
         }
-        let shown = raw.iter().map(|(&unit, &qty)| (unit, lens.place_qty(place, qty))).collect();
+        let shown = raw.iter().map(|(&unit, &qty)| (unit, view.place_qty(place, qty))).collect();
         Running { raw, shown }
     }
 
     /// Takes one step: the commodity it moves, how much as the place shows it, and what the place then holds.
-    fn advance(&mut self, lens: Lens<'_, '_, '_, '_>, place: Id<Place>, step: &Step<'_>) -> (Id<Commodity>, Qty, Qty) {
+    fn advance(&mut self, view: View<'_, '_, '_>, place: Id<Place>, step: &Step<'_>) -> (Id<Commodity>, Qty, Qty) {
         let Change::Moved(moved) = step.change;
         let raw = self.raw.entry(moved.unit).or_default();
         let balance = self.shown.entry(moved.unit).or_default();
         let amount = if step.counts {
-            let before = lens.place_qty(place, *raw);
+            let before = view.place_qty(place, *raw);
             *raw += moved.qty;
-            let after = lens.place_qty(place, *raw);
+            let after = view.place_qty(place, *raw);
             *balance = after;
             after - before
         } else {
-            lens.place_qty(place, moved.qty)
+            view.place_qty(place, moved.qty)
         };
         (moved.unit, amount, *balance)
     }
@@ -391,24 +376,24 @@ impl Step<'_> {
 
 /// Every step touching `place` up to `cutoff`, in order. A flow a law derived follows the flow it came from, and a pad,
 /// made at the end of its day, follows that day's flows.
-fn steps<'a>(lens: Lens<'a, '_, '_, '_>, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec<Step<'a>> {
-    let book = lens.book();
-    let journal = book.touching[place].iter().map(|&id| Posting::at(book, run, id));
-    let derived = (0..run.offspring.len()).map(|at| Posting::derived(run, Id::new(at as u32)));
+fn steps<'a>(view: View<'a, '_, 'a>, place: Id<Place>, cutoff: Day) -> Vec<Step<'a>> {
+    let book = view.book();
+    let journal = book.touching[place].iter().map(|&id| Posting::at(book, view.run, id));
+    let derived = (0..view.run.offspring.len()).map(|at| Posting::derived(view.run, Id::new(at as u32)));
     let derived = derived.filter(|posting| posting.flow.from == place || posting.flow.to == place);
     let flows = journal.chain(derived).flat_map(|posting| {
-        let in_scope = lens.owns(place);
+        let in_scope = view.owns(place);
         posting.changes_at(place).filter(move |_| in_scope).map(move |change| Step {
             day: posting.flow.day,
             change,
             counts: posting.is_real_on(cutoff),
             with: posting.counterparty(place),
             source: Source::Flow(posting),
-            order: posting.sequence(run),
+            order: posting.sequence(view.run),
         })
     });
-    let pads = run.pads.iter().flat_map(|pad| {
-        let in_scope = lens.owns(place) && lens.governs(Subject::Place(pad.place));
+    let pads = view.run.pads.iter().flat_map(|pad| {
+        let in_scope = view.owns(place) && view.governs(Subject::Place(pad.place));
         let with = if pad.place == place { pad.counter } else { pad.place };
         let here = pad_ends(pad).into_iter().filter(move |&(at, _)| at == place && in_scope);
         here.map(move |(_, moved)| Step {
