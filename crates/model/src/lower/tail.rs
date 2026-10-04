@@ -6,11 +6,10 @@
 //! read where those statements are.
 
 use axiom_core::calendar::{self, Period, Window};
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Ratio, Run, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
-use super::flow::FlowCx;
 use super::record::CodeIndex;
 use crate::book::{Commodity, Entity, Text};
 use crate::declare::World;
@@ -104,10 +103,10 @@ pub(crate) fn no_selectors(world: &World<'_>) -> Run<Select> {
 
 /// The line a tail is on: which of the clauses written after it the line takes, and what it says of the others.
 #[derive(Clone, Copy)]
-pub(crate) enum Line<'c, 'a, 's> {
+pub(crate) enum Line<'c> {
     /// A flow in the journal: every clause but `until`, a statement's (`until-position`). A relative `for` or `due`
-    /// counts from its day.
-    Flow(&'c FlowCx<'a, 's>),
+    /// counts from its day, a computed `basis` is one of its record's `roots`.
+    Flow { day: Day, roots: &'c Map<ast::ExprId, NodeId>, code_index: &'c CodeIndex },
     /// A contract's term line, which promises a flow: its codes, purpose, description and waiver. What an occurrence
     /// says of itself (`for`, `due`, `via`, `basis`, `since`, `against`, `@`) is left unread, as it always has been, and
     /// a purpose whose object names nothing (said) is kept without it.
@@ -127,7 +126,7 @@ pub(crate) fn read_tail<'s>(
     world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
-    line: Line<'_, '_, 's>,
+    line: Line<'_>,
     clauses: ast::Many<ast::Clause<'s>>,
 ) -> (Run<Sym>, Tail) {
     let start = world.book.codes.len();
@@ -138,8 +137,15 @@ pub(crate) fn read_tail<'s>(
     (Run::of(start..world.book.codes.len()), tail)
 }
 
-impl<'s> Line<'_, '_, 's> {
-    fn read(self, world: &mut World<'s>, home: Home, file: &ast::File<'s>, clause: &ast::Clause<'s>, tail: &mut Tail) {
+impl Line<'_> {
+    fn read<'s>(
+        self,
+        world: &mut World<'s>,
+        home: Home,
+        file: &ast::File<'s>,
+        clause: &ast::Clause<'s>,
+        tail: &mut Tail,
+    ) {
         use Line::{Also, Flow, Measure, Term};
         match (self, clause.kind) {
             (_, ClauseKind::Code(code)) => {
@@ -147,7 +153,7 @@ impl<'s> Line<'_, '_, 's> {
                 world.book.codes.push(symbol);
             }
             (_, ClauseKind::Description(text)) => tail.description = Some(world.book.quoted_text(text.0)),
-            (Flow(_) | Term | Also | Measure(_), ClauseKind::Purpose(written)) => {
+            (Flow { .. } | Term | Also | Measure(_), ClauseKind::Purpose(written)) => {
                 // An object that names nothing is said; a term line keeps the purpose without it, any other is wrong.
                 let reach = if matches!(self, Term) { Reach::Parties } else { Reach::Anywhere };
                 let purpose = world.purpose(home, Word::of(file, written.name.0));
@@ -159,38 +165,38 @@ impl<'s> Line<'_, '_, 's> {
                     _ => tail.valid = false,
                 }
             }
-            (Flow(_) | Term | Also, ClauseKind::Waive(waive)) => {
+            (Flow { .. } | Term | Also, ClauseKind::Waive(waive)) => {
                 let reason = waive.reason.map(|text| world.book.quoted_text(text.0));
                 tail.waive = Some(Waive { loc: waive.at, reason });
             }
-            (Flow(_) | Also | Measure(_), ClauseKind::For(ast::For::Whom(name))) => {
+            (Flow { .. } | Also | Measure(_), ClauseKind::For(ast::For::Whom(name))) => {
                 match world.entity(home, Word::of(file, name.0)).or_report(world) {
                     Some(entity) => tail.detail.hold = Some(entity),
                     None => tail.valid = false,
                 }
             }
-            (Flow(_) | Also, ClauseKind::Since(day)) => tail.detail.since = Some(day),
-            (Flow(_) | Also, ClauseKind::Due(ast::Due::On(day))) => tail.detail.due = Some(day),
-            (Flow(_) | Also, ClauseKind::Basis(ast::Amount::Literal(literal))) => {
+            (Flow { .. } | Also, ClauseKind::Since(day)) => tail.detail.since = Some(day),
+            (Flow { .. } | Also, ClauseKind::Due(ast::Due::On(day))) => tail.detail.due = Some(day),
+            (Flow { .. } | Also, ClauseKind::Basis(ast::Amount::Literal(literal))) => {
                 self.read_basis(world, file, literal, tail)
             }
-            (Flow(&FlowCx { code_index, .. }) | Measure(code_index), ClauseKind::Against(code)) => {
+            (Flow { code_index, .. } | Measure(code_index), ClauseKind::Against(code)) => {
                 tail.detail.against = code_index.resolve(world, code, clause.at, CodeUse::Against);
                 tail.valid &= tail.detail.against.is_some();
             }
-            (Flow(_), ClauseKind::For(ast::For::Period(first, last))) => {
+            (Flow { .. }, ClauseKind::For(ast::For::Period(first, last))) => {
                 tail.recognized = Days::new(first, last);
                 tail.valid &= tail.recognized.is_some();
             }
-            (Flow(cx), ClauseKind::For(ast::For::Last(relative))) => {
-                tail.recognized = Some(previous_period(cx.day, relative))
+            (Flow { day, .. }, ClauseKind::For(ast::For::Last(relative))) => {
+                tail.recognized = Some(previous_period(day, relative))
             }
-            (Flow(cx), ClauseKind::Due(ast::Due::After(span))) => tail.detail.due = Some(cx.day + span),
-            (Flow(_), ClauseKind::Via(name)) => match world.entity(home, Word::of(file, name.0)).or_report(world) {
+            (Flow { day, .. }, ClauseKind::Due(ast::Due::After(span))) => tail.detail.due = Some(day + span),
+            (Flow { .. }, ClauseKind::Via(name)) => match world.entity(home, Word::of(file, name.0)).or_report(world) {
                 Some(entity) => tail.payee = Some(entity),
                 None => tail.valid = false,
             },
-            (Flow(cx), ClauseKind::Basis(ast::Amount::Computed(expr))) => match cx.roots.get(&expr) {
+            (Flow { roots, .. }, ClauseKind::Basis(ast::Amount::Computed(expr))) => match roots.get(&expr) {
                 Some(&root) => tail.basis_root = Some(root),
                 None => {
                     world.diags.push(
@@ -200,15 +206,15 @@ impl<'s> Line<'_, '_, 's> {
                     tail.valid = false;
                 }
             },
-            (Flow(_), ClauseKind::Price(literal)) => read_price(world, file, literal, clause.at, tail),
+            (Flow { .. }, ClauseKind::Price(literal)) => read_price(world, file, literal, clause.at, tail),
             _ => self.refuse(clause, tail, &mut world.diags),
         }
     }
 
     /// What a line says of a clause it does not take; a term line and an ending say nothing.
-    fn refuse(self, clause: &ast::Clause<'s>, tail: &mut Tail, diags: &mut Vec<Diagnostic>) {
+    fn refuse(self, clause: &ast::Clause<'_>, tail: &mut Tail, diags: &mut Vec<Diagnostic>) {
         let (code, message, label) = match (self, clause.kind) {
-            (Line::Flow(_), _) => (
+            (Line::Flow { .. }, _) => (
                 "until-position",
                 "`until` is only valid on a statement change or waiver",
                 "it has no effect on a flow",
@@ -241,7 +247,7 @@ impl<'s> Line<'_, '_, 's> {
 
     /// `basis 400 USD`: what was paid for it, in the base currency. A unit that names no commodity is said as a
     /// missing unit, and on an `also` line as unknown first.
-    fn read_basis(self, world: &mut World<'s>, file: &ast::File<'s>, literal: ast::Literal<'s>, tail: &mut Tail) {
+    fn read_basis<'s>(self, world: &mut World<'s>, file: &ast::File<'s>, literal: ast::Literal<'s>, tail: &mut Tail) {
         let at = file.loc(literal.0);
         let unit = match literal.unit().map(|unit| world.commodity_of(Word::of(file, unit.0))) {
             Some(Ok(unit)) => Some(unit),
@@ -273,13 +279,6 @@ impl<'s> Line<'_, '_, 's> {
                 tail.valid = false;
             }
         }
-    }
-}
-
-impl<'s> FlowCx<'_, 's> {
-    /// Reads a flow's tail: the codes it adds to the pool, and what the rest of it says.
-    pub fn lower_tail(&self, world: &mut World<'s>, clauses: ast::Many<ast::Clause<'s>>) -> (Run<Sym>, Tail) {
-        read_tail(world, self.home, self.file, Line::Flow(self), clauses)
     }
 }
 

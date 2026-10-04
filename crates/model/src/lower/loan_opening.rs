@@ -26,9 +26,8 @@
 use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Run, Set};
 use axiom_syntax as ast;
 
-use super::flow::empty_codes;
+use super::flow::{empty_codes, journal_txn};
 use super::infer::classify;
-use super::record::journal_txn;
 use super::staged::Staged;
 use crate::book::{Amount, Book, Contract, Loan, Place};
 use crate::collect::{Collected, Written};

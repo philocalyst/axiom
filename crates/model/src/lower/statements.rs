@@ -5,12 +5,8 @@ use axiom_core::{Day, Days, Dec, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run,
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity, Subject};
 
-use super::flow::{
-    Codes, Ends, FlowCx, ResolvedEnd, Shape, empty_codes, keep_program, make_resolved_flow, push_flow_expressions,
-    push_tail_roots,
-};
+use super::flow::{Codes, Ends, Recording, ResolvedEnd, Shape, empty_codes, push_flow_expressions, push_tail_roots};
 use super::record::CodeIndex;
-use super::staged::Staged;
 use super::tail::{Line, Tail, read_tail};
 use crate::args::Args;
 use crate::book::{
@@ -612,25 +608,19 @@ pub(super) fn lower_basis<'s>(at: &mut Stated<'_, '_, 's>, written: ast::Amount<
     let Some(asset) = basis_asset(at) else {
         return;
     };
-    let (file, statement, loc) = (at.file(), at.statement, at.loc);
+    let (file, statement) = (at.file(), at.statement);
     let mut exprs = Vec::new();
     if let ast::Amount::Computed(expr) = written {
         exprs.push((expr, Ty::AMOUNT));
     }
     push_tail_roots(file, statement.tail, &mut exprs);
-    let name = at.world.book.names.intern("journal");
-    let compiled = super::compile_roots(at.world, file, at.home(), Ty::Asset, name, &[], &exprs);
-    let Some((program, roots)) = compiled else {
+    let mut rec = Recording::open(at.world, at.site, statement.date, at.loc, at.code_index);
+    if !rec.compile(Ty::Asset, &exprs, &[]) {
         return;
-    };
-    let mut staged = Staged::open(at.world);
-    let txn = Id::new(staged.book.txns.len() as u32);
-    let cx =
-        FlowCx { file, home: at.site.home, day: statement.date, txn, loc, roots: &roots, code_index: at.code_index };
-    let diagnostic_start = staged.diags.len();
-    let (header_codes, mut tail) = cx.lower_tail(&mut staged, statement.tail);
+    }
+    let (header_codes, mut tail) = rec.tail(statement.tail);
     tail.detail.since = since.or(tail.detail.since);
-    let basis_root = match basis_cost(&mut staged, file, written, (&program, &roots)) {
+    let basis_root = match basis_cost(&mut rec.staged, file, written, (&rec.program, &rec.roots)) {
         None => return,
         Some(Cost::Stated(qty)) => {
             tail.detail.basis = Some(qty);
@@ -641,25 +631,18 @@ pub(super) fn lower_basis<'s>(at: &mut Stated<'_, '_, 's>, written: ast::Amount<
     if !tail.valid {
         return;
     }
-    let Some(flow) = arrival_flow(&mut staged, &cx, asset, header_codes, tail) else {
+    let Some(flow) = arrival_flow(&mut rec, asset, header_codes, tail) else {
         return;
     };
     let waive = flow.waive;
-    staged.book.flows.push(flow);
-    let mut flow_roots = Vec::new();
-    push_flow_expressions(&mut flow_roots, 0, None, None, basis_root);
-    if staged.diags.len() != diagnostic_start {
+    rec.staged.book.flows.push(flow);
+    push_flow_expressions(&mut rec.flow_roots, 0, None, None, basis_root);
+    if rec.failed() {
         return;
     }
-    let program_id = keep_program(&mut staged, program, flow_roots, None);
-    let record = Txn {
-        program: program_id,
-        codes: header_codes,
-        waive,
-        ..super::record::journal_txn(&staged, statement.date, loc)
-    };
-    staged.book.txns.push(record);
-    staged.commit();
+    let program = rec.keep_program(None);
+    let txn = Txn { program, codes: header_codes, waive, ..rec.transaction() };
+    rec.keep(txn);
 }
 
 /// The asset a basis statement names, when it names one and has nothing indented under it.
@@ -724,20 +707,14 @@ fn basis_cost<'s>(
 }
 
 /// The flow that brings the asset in: one of it, from the unknown party to its place.
-fn arrival_flow<'s>(
-    staged: &mut Staged<'_, 's>,
-    cx: &FlowCx<'_, 's>,
-    asset: Id<Asset>,
-    header_codes: Run<Sym>,
-    tail: Tail,
-) -> Option<Flow> {
-    let asset = &staged.book.assets[asset];
+fn arrival_flow(rec: &mut Recording<'_, '_, '_>, asset: Id<Asset>, header_codes: Run<Sym>, tail: Tail) -> Option<Flow> {
+    let asset = &rec.staged.book.assets[asset];
     let (place, owner, unit) = (asset.place, asset.owner, asset.unit);
-    let unknown = staged.book.roots.unknown;
-    let Some(unknown_place) = staged.book.entities[unknown].place else {
-        staged.diags.push(
+    let unknown = rec.staged.book.roots.unknown;
+    let Some(unknown_place) = rec.staged.book.entities[unknown].place else {
+        rec.staged.diags.push(
             Diagnostic::error("basis-source", "the unknown party has no flow endpoint")
-                .label(cx.loc, "cannot record this asset's arrival"),
+                .label(rec.loc, "cannot record this asset's arrival"),
         );
         return None;
     };
@@ -747,8 +724,8 @@ fn arrival_flow<'s>(
     let quantity = Amount::new(Qty(1), unit);
     let shape =
         Shape { ends: Ends { from, to }, out: quantity, arrive: quantity, infer: Infer::Known, mode: Mode::Actual };
-    let codes = Codes { header: header_codes, local: empty_codes(staged) };
-    let mut flow = make_resolved_flow(staged, cx, shape, codes, tail, cx.loc)?;
+    let codes = Codes { header: header_codes, local: empty_codes(&rec.staged) };
+    let mut flow = rec.flow(shape, codes, tail, rec.loc)?;
     flow.owner = owner;
     Some(flow)
 }
