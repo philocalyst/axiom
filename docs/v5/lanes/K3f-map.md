@@ -264,14 +264,18 @@ references the build says 0 fail of 600; the baseline held to the same reference
 `compare` of the baseline against the build: 493 same, 107 differ as the references say, 0 differ and should not, 0 should differ
 and do not.
 
-**Mutants.** 94 one-line mutants of the code of K3c, K3d and this lane, each built and run against the oracle and then the unit
-tests of the crates it touches. This lane's: 43 in the first run (32 killed by the oracle, 5 by named tests, 6 survived); the six
-were each answered: 70 (a bill returned owes again) by a generator that returns payments into a payable and a unit test; 77 (a
-payment into a debt place replaces what it counts of itself) by the credit-note test; 82 (a bill settled takes back what it counted)
-by the test of a returned bill's spending; 84 by the transfer-purpose `flow` test; 88 (a loan's tab is settled by what is paid to
-its lender) by the loan-and-bill test; 93 and 95 (what is open of a bill is negative) by `a_law_reads_what_is_open_of_a_bill`. Two
-mutants the first list had (79, 81) were removed: 79 was a redundant clause (the code was simplified, not the mutant), 81 an
-argument the code no longer has. Final: every mutant killed by the oracle or by a test named in `claims.py`; none survives.
+**Mutants.** `claims.py` holds 94 one-line mutants: the 64 of K3c's and K3d's, and this lane's 30. The run covered this lane's (33 at
+the time) and the 10 of K3c's and K3d's whose code the lane changes: 43 mutants, each built and run against the oracle and then the
+unit tests of the crates it touches (the other 54 are in code the lane does not touch and were not run again). First run: 32 killed
+by the oracle, 5 by named tests, 6 survived. The six, each answered: "a bill that is returned owes again" by a generator that returns
+payments into a payable, and a unit test; "a payment into a place that holds a debt replaces what it counts of itself" by the
+credit-note test; "a bill settled takes back what it counted, as a claim forgiven does" by the test of a returned bill's spending
+(and the code now says it in one expression); "what is open of a bill is negative" by `a_law_reads_what_is_open_of_a_bill`; and two
+the lane's code answered rather than the tests, because they were not mutants of anything: "a payment to a place that is no party's
+pays its bills" (a clause the code did not need, removed) and "a bill made `since` another day is made on the day written" (an
+argument a bill does not have, removed). The ones killed by tests were run again against the strengthened tests ("a loan's tab is
+settled by what is paid to its lender" among them): killed by the tests every time. Final: every mutant killed by the oracle or by a
+test; none survives.
 
 **`fuzz.py ... diff`** (1,000 mutants of the examples, seed 5): panics old = new = 0, output differs 0, regressions 0.
 **`splits.py all`**: 300 projects, 8,413 commands, 0 projects differ.
