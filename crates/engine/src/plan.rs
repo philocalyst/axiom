@@ -142,7 +142,7 @@ impl<'b, 's> Plan<'b, 's> {
             occurrence_txns: occurrence_txns(book),
             period_start: timeline::start(book, &events),
             schedule_start: schedule_start(book, &events),
-            first_fact: timeline::first_fact(book),
+            first_fact: book.first_fact(),
             last_fact: timeline::last_fact(book, &events),
             events,
             laws,

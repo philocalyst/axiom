@@ -83,7 +83,7 @@ impl Amortization<'_> {
     /// The cause of a statement that says `gap` more is owed than the schedule does, if exactly one explains it.
     fn explain(&self, said: &Said, day: Day, gap: Qty) -> Cause {
         let (mut missed, mut short, mut extra) = (Vec::new(), Vec::new(), Vec::new());
-        for payment in self.payments().filter(|payment| payment.day <= day) {
+        for payment in self.payments().filter(|payment| (said.begins..=day).contains(&payment.day)) {
             let paid = payment.paid;
             let due = payment.day;
             match said.lines.binary_search_by_key(&due, |&(day, _)| day).ok().map(|at| said.lines[at].1) {

@@ -1226,6 +1226,18 @@ impl<'s> Book<'s> {
         self.lookup.laws.resolve(&self.names, name, |_| true)
     }
 
+    /// The day the book begins: that of its earliest fact, which is a flow (an opening's too), a written occurrence, an assertion,
+    /// a split or a claim change. None for a book that has said none yet. What its contracts promise is owed from then, and a loan
+    /// made before it is opened then.
+    pub fn first_fact(&self) -> Option<Day> {
+        let first_flow = self.flows.as_slice().first().map(|flow| flow.day);
+        let first_occurrence = self.txns.values().filter(|txn| txn.occurrence.is_some()).map(|txn| txn.day).min();
+        let first_assert = self.asserts.first().map(|assert| assert.day);
+        let first_split = self.splits.first().map(|split| split.day);
+        let first_claim_change = self.claim_changes.first().map(|change| change.day);
+        [first_flow, first_occurrence, first_assert, first_split, first_claim_change].into_iter().flatten().min()
+    }
+
     /// Whether `kind` is `ancestor` or inherits from it.
     pub fn is_a(&self, kind: Id<Kind>, ancestor: Id<Kind>) -> bool {
         self.kinds.covers(ancestor, kind)

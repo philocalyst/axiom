@@ -71,6 +71,9 @@ pub struct Said {
     pub prepaid: Vec<(Day, Qty)>,
     /// The lines that keep a due day, by due day, in order, each with the amount it states if it states one.
     pub lines: Vec<(Day, Option<Qty>)>,
+    /// The first day of the book. A payment due before it is not the book's: no line can keep it (a line is a fact, and this
+    /// is the first), so it is not one that was missed.
+    pub begins: Day,
 }
 
 impl Said {
@@ -78,8 +81,20 @@ impl Said {
     /// its own payments, and the lines that keep its due days.
     pub(super) fn of(book: &Book<'_>, id: Id<Contract>, contract: &Contract) -> Said {
         let Some(loan) = contract.loan else { return Said::default() };
+        let begins = book.first_fact().unwrap_or(Day::MIN);
+        Said {
+            prepaid: Said::paid_into(book, id, &loan),
+            lines: Said::kept(book, id, &loan),
+            begins,
+            ..Said::rated(contract)
+        }
+    }
+
+    /// What is said of the loan of `contract` while the journal is being lowered, before any fact of it: only the rates
+    /// its statements have said so far.
+    pub(super) fn rated(contract: &Contract) -> Said {
         let rates = contract.rates.iter().map(|change| (change.day, change.rate)).collect();
-        Said { rates, prepaid: Said::paid_into(book, id, &loan), lines: Said::kept(book, id, &loan) }
+        Said { rates, ..Said::default() }
     }
 
     /// What was paid into the loan's debt tab by a flow of the journal: all of it is principal. (An occurrence's flows are made when
@@ -269,6 +284,11 @@ impl<'p> Amortization<'p> {
             let last = self.entries.partition_point(|entry| entry.day <= day).checked_sub(1);
             last.map_or(principal, |last| self.entries[last].paid.open)
         })
+    }
+
+    /// What is owed when `day` begins: after everything before it, and all of it on the day the loan was made or before.
+    pub fn owed_before(&self, day: Day) -> Qty {
+        self.open_on(day.add_days(-1)).unwrap_or(self.annuity.principal().qty)
     }
 
     /// The payments, in order, each with the day it is due.
