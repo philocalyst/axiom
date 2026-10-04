@@ -22,8 +22,8 @@
 
 use axiom_core::{Day, Diagnostic, Id, Loc, Qty};
 use axiom_model::{
-    Amount, Asset, Basis, Class, Contract, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot, RuntimeTxn, Select,
-    Subject, Table, Watch,
+    Amount, Asset, Basis, Class, Commodity, Contract, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot,
+    Purposed, RuntimeTxn, Select, Subject, Table, Watch,
 };
 
 use crate::eval::{Occasion, Realized};
@@ -37,12 +37,6 @@ use crate::scope::{holds, stays_with_owner};
 use crate::settle::{Claiming, Relief};
 use crate::state::Missing;
 use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, PendingCarry, show};
-
-fn fresh_slice(m: &Motion, qty: Qty, is_base: bool, now: (axiom_core::Day, RuntimeTxn)) -> Slice {
-    let mut slice = Slice::fresh(qty, is_base, now);
-    slice.codes = m.code_runs;
-    slice
-}
 
 /// Whether the parcels' basis starts over at what they fetched. It does unless
 /// the value only changes place: a same-commodity transfer within one owner's
@@ -332,7 +326,7 @@ impl Ledger<'_, '_, '_> {
             true => self.owe(m),
             false => self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty),
         }
-        let fresh = fresh_slice(m, m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn));
+        let fresh = Slice::fresh(m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn), m.code_runs);
         self.scratch.relief.slices.push(fresh);
     }
 
@@ -357,9 +351,9 @@ impl Ledger<'_, '_, '_> {
         // What arrives must land even when nothing left (`all` of an empty
         // holding): value never vanishes from a balanced flow.
         if shortfall > Qty::ZERO {
-            self.scratch.relief.slices.push(fresh_slice(m, shortfall, is_base, now));
+            self.scratch.relief.slices.push(Slice::fresh(shortfall, is_base, now, m.code_runs));
         } else if self.scratch.relief.slices.is_empty() {
-            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
+            self.scratch.relief.slices.push(Slice::fresh(m.out.qty, is_base, now, m.code_runs));
         }
     }
 
@@ -437,7 +431,7 @@ impl Ledger<'_, '_, '_> {
         if restarts && proceeds.is_some() {
             self.charge_costs(m);
             if !m.opening {
-                self.realize(m);
+                self.realize(m, (m.from, m.out.unit), self.reimbursed_purpose(m).or(m.purpose));
             }
         }
         !restarts && !m.is_exchange()
@@ -478,50 +472,37 @@ impl Ledger<'_, '_, '_> {
         Some(if m.out.unit == self.plan.book.base { fetched } else { fetched - self.exchange_cost(m) })
     }
 
-    /// Records a gain, and fires `on gain`, for every relieved lot. Plain money
-    /// never realizes: its gain is zero by definition. So in a pro-rata place
-    /// holding plain contributions and a zero-basis growth lot, a withdrawal
-    /// relieves both and only the lot's share is a gain.
-    fn realize(&mut self, m: &Motion) {
-        let book = self.plan.book;
-        let ambiguous = self.scratch.relief.ambiguous;
-        let purpose = self.reimbursed_purpose(m).or(m.purpose);
+    /// Records a gain, and fires `on gain`, for every lot that left `from`, against what its slice fetched (`worth`), for
+    /// the flow's sale and for an asset's. Plain money never realizes: its gain is zero by definition. So in a pro-rata
+    /// place holding plain contributions and a zero-basis growth lot, a withdrawal relieves both and only the lot's share
+    /// is a gain.
+    fn realize(&mut self, m: &Motion, (from, unit): (Id<Place>, Id<Commodity>), purpose: Option<Purposed>) {
+        let (book, ambiguous) = (self.plan.book, self.scratch.relief.ambiguous);
         for at in 0..self.scratch.relief.slices.len() {
-            let slice = self.scratch.relief.slices[at];
-            if slice.origin != Origin::Lot {
+            let Slice { lot, origin: Origin::Lot, worth: proceeds, .. } = self.scratch.relief.slices[at] else {
                 continue;
-            }
-            let row = Gain {
-                cause: m.cause,
-                day: m.day,
-                from: m.from,
-                to: m.to,
-                unit: m.out.unit,
-                qty: slice.qty,
-                basis: slice.basis,
-                proceeds: slice.worth,
-                acquired: slice.acquired,
-                ambiguous,
             };
-            self.record.gains.push(row);
+            let Parcel { qty, basis, acquired, held_since, part, .. } = lot;
+            let (cause, day, to) = (m.cause, m.day, m.to);
+            self.record.gains.push(Gain { cause, day, from, to, unit, qty, basis, proceeds, acquired, ambiguous });
+            let held = day.since(held_since);
             let realized = Realized {
-                gain: slice.worth - slice.basis,
-                proceeds: slice.worth,
-                basis: slice.basis,
-                held: m.day.since(slice.held_since),
-                held_since: slice.held_since,
-                acquired: slice.acquired,
-                quantity: slice.qty,
-                part: slice.part,
+                gain: proceeds - basis,
+                proceeds,
+                basis,
+                held,
+                held_since,
+                quantity: qty,
+                part,
                 codes: m.code_runs,
             };
             let on = Occasion {
-                amount: Some(Amount::new(slice.qty, m.out.unit)),
+                amount: Some(Amount::new(qty, unit)),
                 realized: Some(realized),
                 purpose,
                 ..Occasion::flow(m)
             };
-            self.fire(book.rules.at(Watch::Gain(m.from)), &on);
+            self.fire(book.rules.at(Watch::Gain(from)), &on);
         }
     }
 
@@ -584,26 +565,17 @@ impl Ledger<'_, '_, '_> {
             for slice in &self.scratch.relief.slices {
                 let qty = shares.take(slice.qty);
                 let kept = if keeps || (stays && slice.origin != Origin::Fresh) { slice.tied } else { restricted };
-                // Parcels that keep their identity keep their day and purchase; the rest start over.
-                let (acquired, txn) = if keeps { (slice.acquired, slice.txn) } else { (since, m.txn) };
-                let codes = if keeps { slice.codes } else { m.code_runs };
-                slot.land(
-                    Parcel {
-                        qty,
-                        basis: slice.carried,
-                        acquired,
-                        held_since: if keeps { slice.held_since } else { since },
-                        wash_matched: keeps && slice.wash_matched,
-                        txn,
-                        // An ordinary asset-place transfer carries the same
-                        // acquisition anchor through every split slice.
-                        part: if keeps { slice.part } else { fresh_part },
-                        codes,
-                        tied: hold.unwrap_or(kept),
+                // Parcels that keep their identity keep their day, purchase, part and codes (an asset-place transfer carries
+                // one acquisition anchor through every split slice); the rest start over.
+                let lot = match keeps {
+                    true => slice.lot,
+                    false => Parcel {
+                        part: fresh_part,
+                        codes: m.code_runs,
+                        ..Parcel::new(qty, slice.carried, (since, m.txn))
                     },
-                    held,
-                    &book.codes,
-                );
+                };
+                slot.land(Parcel { qty, basis: slice.carried, tied: hold.unwrap_or(kept), ..lot }, held, &book.codes);
             }
         }
         let part_ready = if let Some((asset, part)) = acquisition {
@@ -647,8 +619,6 @@ impl Ledger<'_, '_, '_> {
         if self.world.assets.asset(asset)?.part_count() != 0 {
             return None;
         }
-        let ordinal = self.flow_ordinal(m);
-        let id = PartId { origin: m.txn, ordinal };
         let basis = self
             .scratch
             .relief
@@ -659,21 +629,10 @@ impl Ledger<'_, '_, '_> {
             self.report_asset_state_error(m, crate::AssetError::Overflow);
             return None;
         };
-        let Some(cost) = self.capital_cost(m) else {
-            self.record.report(
-                Diagnostic::error("asset-cost", "the acquisition cost could not be valued in the book's base currency")
-                    .label(m.loc, "asset part was not recorded"),
-            );
-            return None;
-        };
         let part = Part {
-            id,
-            flow: self.source_flow(m),
-            kind: PartKind::Acquisition,
-            recorded: self.event_key(m),
             day: m.detail().since.unwrap_or(m.day),
-            cost,
             basis,
+            ..self.part(m, PartKind::Acquisition, "asset part")?
         };
         if let Err(error) = self.world.assets.validate_part(asset, &part) {
             self.report_asset_state_error(m, error);
@@ -704,42 +663,14 @@ impl Ledger<'_, '_, '_> {
     }
 
     fn add_acquisition_part(&mut self, m: &Motion, asset: Id<Asset>) {
-        let Some(cost) = self.capital_cost(m) else {
-            self.record.report(
-                Diagnostic::error("asset-cost", "the acquisition cost could not be valued in the book's base currency")
-                    .label(m.loc, "asset acquisition was not recorded"),
-            );
-            return;
-        };
-        let part = Part {
-            id: PartId { origin: m.txn, ordinal: self.flow_ordinal(m) },
-            flow: self.source_flow(m),
-            kind: PartKind::Acquisition,
-            recorded: self.event_key(m),
-            day: m.day,
-            cost,
-            basis: cost,
-        };
+        let Some(part) = self.part(m, PartKind::Acquisition, "asset acquisition") else { return };
         if let Err(error) = self.world.assets.validate_part(asset, &part) {
             self.report_asset_state_error(m, error);
             return;
         }
         let declaration = &self.plan.book.assets[asset];
-        self.world.holdings.entry(declaration.place, declaration.unit).land(
-            Parcel {
-                qty: Qty(1),
-                basis: cost,
-                acquired: m.day,
-                held_since: m.day,
-                wash_matched: false,
-                txn: m.txn,
-                part: Some(part.id),
-                codes: m.code_runs,
-                tied: None,
-            },
-            Held::Lots,
-            &self.plan.book.codes,
-        );
+        let unit = Parcel { part: Some(part.id), codes: m.code_runs, ..Parcel::new(Qty(1), part.cost, (m.day, m.txn)) };
+        self.world.holdings.entry(declaration.place, declaration.unit).land(unit, Held::Lots, &self.plan.book.codes);
         if let Err(error) = self.add_asset_part(asset, part) {
             self.report_asset_state_error(m, error);
         }
@@ -756,22 +687,7 @@ impl Ledger<'_, '_, '_> {
         if m.from == declaration.place && m.out.unit == declaration.unit {
             return;
         }
-        let Some(cost) = self.capital_cost(m) else {
-            self.record.report(
-                Diagnostic::error("asset-cost", "the improvement cost could not be valued in the book's base currency")
-                    .label(m.loc, "improvement part was not recorded"),
-            );
-            return;
-        };
-        let part = Part {
-            id: PartId { origin: m.txn, ordinal: self.flow_ordinal(m) },
-            flow: self.source_flow(m),
-            kind: PartKind::Improvement,
-            recorded: self.event_key(m),
-            day: m.day,
-            cost,
-            basis: cost,
-        };
+        let Some(part) = self.part(m, PartKind::Improvement, "improvement part") else { return };
         if let Err(error) = self.add_asset_part(asset, part) {
             self.report_asset_state_error(m, error);
         }
@@ -816,8 +732,18 @@ impl Ledger<'_, '_, '_> {
         }
     }
 
-    fn flow_ordinal(&self, m: &Motion) -> u32 {
-        m.flow_ordinal
+    /// The part a capital flow makes of an asset, at what it cost, on its day: what was bought, or an improvement. A cost
+    /// that cannot be valued is said, with what was not recorded (`what`), and makes none.
+    fn part(&mut self, m: &Motion, kind: PartKind, what: &str) -> Option<Part> {
+        let Some(cost) = self.capital_cost(m) else {
+            let paid = if kind == PartKind::Acquisition { "acquisition" } else { "improvement" };
+            let said = format!("the {paid} cost could not be valued in the book's base currency");
+            self.record.report(Diagnostic::error("asset-cost", said).label(m.loc, format!("{what} was not recorded")));
+            return None;
+        };
+        let (id, flow, recorded) =
+            (PartId { origin: m.txn, ordinal: m.flow_ordinal }, self.source_flow(m), self.event_key(m));
+        Some(Part { id, flow, kind, recorded, day: m.day, cost, basis: cost })
     }
 
     fn event_key(&self, m: &Motion) -> EventKey {
@@ -892,40 +818,8 @@ impl Ledger<'_, '_, '_> {
             Occasion { amount: Some(Amount::new(quantity, declaration.unit)), purpose: m.purpose, ..Occasion::flow(m) };
         self.fire(book.rules.at(Watch::Out(declaration.place)), &on_out);
         let mut shares = Shares::new(proceeds, quantity);
-        for at in 0..self.scratch.relief.slices.len() {
-            let slice = self.scratch.relief.slices[at];
-            let fetched = shares.take(slice.qty);
-            let gain = fetched - slice.basis;
-            self.record.gains.push(Gain {
-                cause: m.cause,
-                day: m.day,
-                from: declaration.place,
-                to: m.to,
-                unit: declaration.unit,
-                qty: slice.qty,
-                basis: slice.basis,
-                proceeds: fetched,
-                acquired: slice.acquired,
-                ambiguous: self.scratch.relief.ambiguous,
-            });
-            let on_gain = Occasion {
-                amount: Some(Amount::new(slice.qty, declaration.unit)),
-                realized: Some(Realized {
-                    gain,
-                    proceeds: fetched,
-                    basis: slice.basis,
-                    held: m.day.since(slice.held_since),
-                    held_since: slice.held_since,
-                    acquired: slice.acquired,
-                    quantity: slice.qty,
-                    part: slice.part,
-                    codes: m.code_runs,
-                }),
-                purpose: m.purpose,
-                ..Occasion::flow(m)
-            };
-            self.fire(book.rules.at(Watch::Gain(declaration.place)), &on_gain);
-        }
+        self.scratch.relief.slices.iter_mut().for_each(|slice| slice.worth = shares.take(slice.qty));
+        self.realize(m, (declaration.place, declaration.unit), m.purpose);
         if let Err(error) = self.world.assets.dispose(asset, m.txn, self.source_flow(m), boundary) {
             self.report_asset_state_error(m, error);
         }

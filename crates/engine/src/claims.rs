@@ -19,10 +19,10 @@ use axiom_model::{Amount, ClaimChange, Flow, Place, Policy, RuntimeTxn, Select};
 use crate::explain;
 use crate::histories::Position;
 use crate::ledger::Ledger;
-use crate::lots::{Request, Slice};
+use crate::lots::Request;
 use crate::motion::{Amounts, Motion};
 use crate::recognition::{Counting, Counts, Piece, Share};
-use crate::{Cause, Promise, WriteOff};
+use crate::{Cause, Parcel, Promise, WriteOff};
 
 impl Ledger<'_, '_, '_> {
     /// An occurrence nothing kept, found missing on `found`: if the party owed it, what it owed is claimed, and whether it was
@@ -95,7 +95,7 @@ impl Ledger<'_, '_, '_> {
         let mut lines: Vec<(Id<Flow>, Qty)> = Vec::new();
         for slice in &self.scratch.relief.slices {
             let line = slice.part.and_then(|part| book.txn_flow(part.origin, part.ordinal)).unwrap_or(claim);
-            let Slice { qty, basis, acquired, .. } = *slice;
+            let Parcel { qty, basis, acquired, .. } = slice.lot;
             self.record.written_off.push(WriteOff { change: at, claim: line, place, unit, qty, basis, acquired });
             match lines.iter_mut().find(|(seen, _)| *seen == line) {
                 Some((_, total)) => *total += qty,

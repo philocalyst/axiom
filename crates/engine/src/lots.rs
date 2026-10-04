@@ -41,11 +41,6 @@ const NONE: u32 = u32::MAX;
 /// half of them are exhausted.
 const SWEEP_AT: usize = 32;
 
-fn empty_codes() -> FlowCodes {
-    let empty = axiom_core::Run::new(Id::new(0), 0);
-    FlowCodes { header: empty, local: empty }
-}
-
 fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
     let in_left = |code: &Sym| pool[left.header].contains(code) || pool[left.local].contains(code);
     let in_right = |code: &Sym| pool[right.header].contains(code) || pool[right.local].contains(code);
@@ -86,19 +81,11 @@ impl Parcel {
     }
 }
 
-/// Part of the value in flight: what left a place, and what it carries on.
+/// Part of the value in flight: the parcel that left a place (with the basis relieved with it), where it came from, and what
+/// the flow decides of it on the way.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Slice {
-    pub qty: Qty,
-    /// Basis relieved with it at the source.
-    pub basis: Qty,
-    pub acquired: Day,
-    pub held_since: Day,
-    pub wash_matched: bool,
-    pub txn: RuntimeTxn,
-    pub part: Option<PartId>,
-    pub codes: FlowCodes,
-    pub tied: Option<Id<Entity>>,
+    pub lot: Parcel,
     pub origin: Origin,
     /// What it fetched, in base-currency quanta: what a sale realizes against.
     pub worth: Qty,
@@ -119,42 +106,21 @@ pub(crate) enum Origin {
 }
 
 impl Slice {
-    fn new(qty: Qty, basis: Qty, origin: Origin, (acquired, txn): (Day, RuntimeTxn)) -> Slice {
-        Slice {
-            qty,
-            basis,
-            acquired,
-            held_since: acquired,
-            wash_matched: false,
-            txn,
-            part: None,
-            codes: empty_codes(),
-            tied: None,
-            origin,
-            worth: Qty::ZERO,
-            carried: Qty::ZERO,
-        }
+    fn of(lot: Parcel, origin: Origin) -> Slice {
+        Slice { lot, origin, worth: Qty::ZERO, carried: Qty::ZERO }
     }
 
-    /// The parcel this slice was before it left: what a return puts back.
-    pub fn parcel(&self) -> Parcel {
-        Parcel {
-            qty: self.qty,
-            basis: self.basis,
-            acquired: self.acquired,
-            held_since: self.held_since,
-            wash_matched: self.wash_matched,
-            txn: self.txn,
-            part: self.part,
-            codes: self.codes,
-            tied: self.tied,
-        }
+    /// Value that nothing gave up, of the codes `codes`: base currency is at its face, anything else has no basis of its own.
+    pub fn fresh(qty: Qty, is_base: bool, now: (Day, RuntimeTxn), codes: FlowCodes) -> Slice {
+        Slice::of(Parcel { codes, ..Parcel::new(qty, if is_base { qty } else { Qty::ZERO }, now) }, Origin::Fresh)
     }
+}
 
-    /// Value that nothing gave up: base currency is at its face, anything else
-    /// has no basis of its own.
-    pub fn fresh(qty: Qty, is_base: bool, now: (Day, RuntimeTxn)) -> Slice {
-        Slice::new(qty, if is_base { qty } else { Qty::ZERO }, Origin::Fresh, now)
+/// A slice is read as the parcel it carries.
+impl Deref for Slice {
+    type Target = Parcel;
+    fn deref(&self) -> &Parcel {
+        &self.lot
     }
 }
 
@@ -453,7 +419,7 @@ impl Slot {
         let slice = match source {
             Source::Plain => {
                 self.holding.plain -= qty;
-                Slice::new(qty, req.held.plain_basis(qty), Origin::Plain, req.now)
+                Slice::of(Parcel::new(qty, req.held.plain_basis(qty), req.now), Origin::Plain)
             }
             Source::Lot(at) => {
                 let lot = &mut self.holding.lots[at];
@@ -462,14 +428,7 @@ impl Slot {
                 } else {
                     lot.basis.share(qty, lot.qty).expect("a part of a basis fits")
                 };
-                let slice = Slice {
-                    tied: lot.tied,
-                    part: lot.part,
-                    codes: lot.codes,
-                    held_since: lot.held_since,
-                    wash_matched: lot.wash_matched,
-                    ..Slice::new(qty, basis, Origin::Lot, (lot.acquired, lot.txn))
-                };
+                let slice = Slice::of(Parcel { qty, basis, ..*lot }, Origin::Lot);
                 lot.qty -= qty;
                 lot.basis -= basis;
                 if lot.qty.is_zero() {
@@ -690,17 +649,7 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             let basis = held.plain_basis(plain);
             self.holding.plain = Qty::ZERO;
-            self.insert(Parcel {
-                qty: plain,
-                basis,
-                acquired: now.0,
-                held_since: now.0,
-                wash_matched: false,
-                txn: now.1,
-                part: None,
-                codes: empty_codes(),
-                tied: None,
-            });
+            self.insert(Parcel::new(plain, basis, now));
         }
         let lots = &mut self.holding.lots[self.first..];
         let whole: Qty = lots.iter().filter(|lot| selection.admits(lot)).map(|lot| lot.qty).sum();
@@ -1102,17 +1051,7 @@ mod tests {
     }
 
     fn lot(qty: i64, basis: i64, acquired: i32) -> Parcel {
-        Parcel {
-            qty: Qty(qty),
-            basis: Qty(basis),
-            acquired: Day(acquired),
-            held_since: Day(acquired),
-            wash_matched: false,
-            txn: journal(acquired as u32),
-            part: None,
-            codes: empty_codes(),
-            tied: None,
-        }
+        Parcel::new(Qty(qty), Qty(basis), (Day(acquired), journal(acquired as u32)))
     }
 
     fn slot_of(unit: u32, plain: i64, lots: &[Parcel], held: Held) -> Slot {
@@ -1496,7 +1435,7 @@ mod tests {
         let original = names.intern("original-purchase");
         let mut pool = Arena::new();
         let first = pool.push(original);
-        let codes = FlowCodes { header: axiom_core::Run::new(first, 1), local: empty_codes().local };
+        let codes = FlowCodes { header: axiom_core::Run::new(first, 1), local: FlowCodes::default().local };
         let mut parcel = lot(7, 700, 10);
         parcel.codes = codes;
         let mut source = Slot::new(Id::new(0), Id::new(0), NONE);
@@ -1505,18 +1444,7 @@ mod tests {
         let mut relief = Relief::default();
         let request = Request::of(Qty(3), Some(Policy::Fifo), &pool, (Day(20), journal(20)));
         source.relieve(&request, &mut relief);
-        let slice = relief.slices[0];
-        let moved = Parcel {
-            qty: slice.qty,
-            basis: slice.basis,
-            acquired: slice.acquired,
-            held_since: slice.held_since,
-            wash_matched: slice.wash_matched,
-            txn: slice.txn,
-            part: slice.part,
-            codes: slice.codes,
-            tied: slice.tied,
-        };
+        let moved = relief.slices[0].lot;
         let mut target = Slot::new(Id::new(1), Id::new(0), NONE);
         target.land(moved, Held::Lots, &pool);
 
@@ -1532,9 +1460,9 @@ mod tests {
         let first = pool.push(mark);
         let second = pool.push(mark);
         let other = pool.push(different);
-        let one = FlowCodes { header: axiom_core::Run::new(first, 1), local: empty_codes().local };
-        let equal = FlowCodes { header: axiom_core::Run::new(second, 1), local: empty_codes().local };
-        let distinct = FlowCodes { header: axiom_core::Run::new(other, 1), local: empty_codes().local };
+        let one = FlowCodes { header: axiom_core::Run::new(first, 1), local: FlowCodes::default().local };
+        let equal = FlowCodes { header: axiom_core::Run::new(second, 1), local: FlowCodes::default().local };
+        let distinct = FlowCodes { header: axiom_core::Run::new(other, 1), local: FlowCodes::default().local };
         let mut slot = Slot::new(Id::new(0), Id::new(0), NONE);
         let mut first_parcel = lot(2, 2, 10);
         first_parcel.codes = one;
@@ -1569,17 +1497,7 @@ mod tests {
         assert_eq!(relief.slices[0].part, Some(first));
 
         let slice = relief.slices[0];
-        let moved = Parcel {
-            qty: slice.qty,
-            basis: slice.carried,
-            acquired: slice.acquired,
-            held_since: slice.held_since,
-            wash_matched: slice.wash_matched,
-            txn: slice.txn,
-            part: slice.part,
-            codes: slice.codes,
-            tied: slice.tied,
-        };
+        let moved = Parcel { basis: slice.carried, ..slice.lot };
         assert_eq!(moved.part, Some(first), "ordinary transfer carries the part key");
     }
 

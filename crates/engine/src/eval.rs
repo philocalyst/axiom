@@ -238,10 +238,8 @@ pub(crate) struct Realized {
     /// The quantity of this individual parcel, which may be only part of the
     /// flow when a sale relieves multiple lots.
     pub quantity: Qty,
-    /// Original parcel acquisition date for wash-sale holding-period tacking.
-    pub acquired: Day,
     /// Effective holding-period start, which may be tacked from an earlier
-    /// replacement lot even though `acquired` remains the actual buy date.
+    /// replacement lot even though the lot was bought later.
     pub held_since: Day,
     pub held: Span,
     pub part: Option<PartId>,
