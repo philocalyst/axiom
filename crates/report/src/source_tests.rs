@@ -535,26 +535,19 @@ asset laptop : thing
 ";
 
     with_run(source, day(2026, 1, 5), |book, run| {
-        let contract =
-            crate::tests::report(book, run, &Query::Register { place: "figma", from: None, to: None }, None).unwrap();
-        assert!(
-            contract
-                .sections
-                .iter()
-                .flat_map(|s| &s.rows)
-                .any(|row| { row.cells.iter().any(|cell| matches!(cell, crate::Cell::Word("terms active"))) })
-        );
-
-        let party =
-            crate::tests::report(book, run, &Query::Register { place: "entity:figma", from: None, to: None }, None)
-                .unwrap();
-        assert!(
-            !party
-                .sections
-                .iter()
-                .flat_map(|s| &s.rows)
-                .any(|row| { row.cells.iter().any(|cell| matches!(cell, crate::Cell::Word("terms active"))) })
-        );
+        let register = |place| {
+            let query = Query::Register { place, from: None, to: None };
+            crate::tests::report(book, run, &query, None).unwrap()
+        };
+        // The contract has written nothing yet, so its register says so; the party is at the end of the opening of its
+        // savings, which the contract's register does not list.
+        let contract = register("figma");
+        assert!(contract.sections[0].rows.is_empty());
+        assert_eq!(crate::tests::cell(&contract.sections[0].notes[0]), "Nothing happened under figma in this window.");
+        let party = register("entity:figma");
+        let rows = lines(&party.sections[0]);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].contains("opening → savings"), "{rows:?}");
 
         let why_contract = crate::tests::report(book, run, &Query::Why { target: "figma" }, None).unwrap();
         assert_eq!(crate::tests::heading(&why_contract.sections[0]), Some("Contract"));
@@ -1750,7 +1743,7 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
         );
         assert_eq!(
             rows(book, run, register("market")),
-            ["2025-03-31 |  | assets/k → market | 1,000.00 USD | revalued via market | actual | @1"]
+            ["2025-03-31 | assets/k → market |  | revalued via market | 1,000.00 USD"]
         );
     });
 }
