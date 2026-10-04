@@ -1885,3 +1885,75 @@ rest in `written_amount`, `written_part` and `implied_end`). That breaks section
 is one change in `core`, not 264 boxes: a `Diagnostic` that holds its parts behind one `Box` (with `Deref` to them, so every
 reader of `.code` and `.labels` stays as it is) makes every `Err` one pointer wide and the lint silent everywhere. It is an
 entry for C6 (U43's neighbourhood), or for now if the coordinator wants the count down before C2.
+
+## 12. C2, delivered (2026-10-05)
+
+From the v5 head `9590f36` (56,143) to the end of C2 (55,938): **−205**; model 19,120 to 18,908 (−212), core +8, session
+−1. Counted strictly: every line in the table is a line that no longer exists, net of the lines written to replace it.
+
+| entry | planned | delivered | why it differs |
+|---|---:|---:|---|
+| `Diagnostic` behind one `Box` (the coordinator's, first) | — | **+9** | two `Deref` impls; clippy 277 to 59 warnings (58 at the end of C2), every `result_large_err` gone, `session`'s allowance with them |
+| U7 one group lowering | −1,130 | **−198** | `Recording`, the context of a dated record (staged world, site, day, transaction, program and roots, what its flows compute), with its skeleton (`open`, `compile`, `failed`, `keep_program`, `keep`, `reject`) and its steps as methods (`end`, `quantity`, `amount`, `tail`, `flow`, `header_flow`, `items`, `push`): −84; the journal's flows pushed with what computes them and the items under a header as one group: −31; the occurrence's inputs, template match and drafts: −51; the loan's origination: −29; −3 for two names clippy asked for. The contract's template and the law's `also` line keep their own lowering: what is real in them (a holding and a party for ends, `Derived` and `Interest` quantities, a term line's tail, no day, roles that stand where a contract's filler does) is most of their code, and a `Header` trait over the three would be longer than the three |
+| U8 a statement's subject | −110 | **0** | the five resolvers take the same words in different orders and say different things when nothing matches (a value takes an asset before a loan's debt before an end; an ending a contract, with its date checked, before an asset); one resolver with the precedences as data is as long as the five |
+| U9 a statement verb as a row | −110 | **0** | since C1 each verb's opening is four lines (`at.unsupported`), and the dispatch thirty; a row per verb is as long |
+| U10 a contract, lowered once | −100 | **−16** | the contract made in one literal over the reserved one; `node_doc`, `schedule_owner`, `resolve_commodity` gone. The second walk of the body for its roots stays: compiling roots as the body is met would change the order of a template's nodes (the Book dump's program arena) for no line saved |
+| **C2** | **−1,450** | **−205** (−214 by the entries) | 14% |
+
+Not taken, measured: the 24 signatures that pass `home` and `file` apart would take a `Site` (−48 signature lines), but their
+bodies read both, so the net is about −25 for 27 functions and their callers in laws, values, params, fill and the tail; it
+goes with C3, which rewrites those passes. The two selector readers (a journal end's and an `also` line's) differ in what they
+say (the journal says a failed lookup twice, the second time generically): sharing them changes output.
+
+Everything is byte-identical to `9590f36`: `diff/` (cases, cases2, cases3), the Book dump of all 577 projects, goldens,
+mistakes, the declared-lines corpus (208 of 208); the release suite passes.
+
+**Revised landing.** C1 delivered 42% of its plan and C2 14%; the two together 32%. Applied to what the ledger has left (C3
+−1,190, C4 −1,295 in lane U-E, C5 −1,755, C6 −1,925: −6,165), about **−2,000**, and C7's second round perhaps −500: the tree
+lands near **53,500**. The distance to 27,000 is **28,938** today.
+
+## 13. What gets under 40,000, and what gets under 27,000
+
+The facts, for the user's decision. The tree is 55,938 lines (model 18,908, engine 12,863, report 6,886, syntax 6,438, sync
+4,339, core 3,502, cli 2,487, session 501). The duplication a unification can remove has been the smaller part of every
+estimate: K0a to K6 delivered 25% to 50% of their plans, C1 42%, C2 14%. What remains of the ledger, at those ratios, is
+about −2,500 with C7.
+
+**Structural moves the ledger lacks** (no feature goes; estimates by the same method that over-estimated by half, so read
+them as at most):
+
+| move | where | lines |
+|---|---|---:|
+| diagnostics as rows: every hand-built diagnostic (about 1,370 builder lines: 754 model, 304 syntax, 155 engine, 71 report, 59 sync) a code with its words and a call that names it; the words stay byte for byte | all | −500 |
+| report views as queries over one table writer (register, flow, balance, available, budget, tax, claims, contracts and history are 2,600 lines, each building its rows); partly U37 and U38 | report | −600 |
+| one evaluator of a law's program (`eval.rs`, `fire.rs`, `totals.rs` and `calc.rs` are 3,070 lines that evaluate programs as a law fires, as a window is totalled and as a value is read; not yet read closely enough to say they are one walk) | engine | −400 |
+| a site instead of `home` and `file` (measured above) | model | −25 |
+| **all** | | **−1,500** |
+
+With the ledger: about **52,000**. That is where unification ends; under 40,000 is a choice of features.
+
+**What the features cost** (code lines today, the crates' own counting; a feature's lines include the diagnostics that
+explain it, and some overlap):
+
+| feature | lines | where |
+|---|---:|---|
+| sync: reading bank exports, recognizing, writing journal lines | 5,230 | sync 4,339, model `sync_lower` 854, cli 39 |
+| user-written laws and norms (the language of `law`, `require`, `count`, budgets as laws) | ~6,000 | model `laws/` and `law.rs` about 3,000; engine `eval`, `fire`, `totals`, `calc` 3,070 |
+| why and explain | ~2,100 | report `why*` 1,300, engine `explain` 826 |
+| contracts, loans and promises (schedules, occurrences, loans, deposits, shares) | ~2,800 | model `lower/contracts*` 1,186, `promise` 278, loan opening; engine `occurrence` 782, `loan_balance`, `offspring` |
+| lots, parts and basis (relief policies, wash sales, asset parts) | ~2,500 | engine `lots` 1,135, `assets` 519, post's parts (C4, lane U-E) |
+| kinds, slots, relators and addresses | ~2,000 | model `slots`, `fill`, `relator`, `addresses`, `spelled`, much of `props` |
+| the diagnostics' own quality (did-you-mean, fixes, snippets, second labels) | ~2,500 | cli `render` 560, model `problem` 444, the builders above |
+| the habit forecast | ~900 | report `forecast*` 613, engine's monitor and promising in part |
+| reading v3 and v4 books (`fmt --upgrade`, legacy forms, their errors) | ~800 | syntax `upgrade` 316, `legacy` 78, part of `malformed` 204, cli `fmt` 231 |
+
+**Under 40,000** (−16,000): the ledger and the structural moves (−4,000) and about 12,000 of features: sync (5,230), why and
+explain (2,100), the forecast (900), the v3/v4 readers (800), relators and addresses (2,000) and the diagnostics' quality
+(about 1,000 of it) come to about 12,000.
+
+**Under 27,000** (−29,000): all of that, and user-written laws (6,000), contracts and loans (2,800), lots and basis (2,500)
+and the rest of the diagnostics' quality (1,500) come to about 27,000: a book that records flows, balances and reports them,
+with the tax rules of `std` and `us` written in Rust rather than in its own language (which adds back some of what the laws
+save).
+That is a different product from the one the user asked for (addresses, relators, the habit forecast, gorgeous diagnostics:
+section 10), which is why section 0 said 27,000 is not a number this feature set reaches.
