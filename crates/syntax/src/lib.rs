@@ -13,8 +13,7 @@
 //! | `lex`       | one line's tokens, with two of lookahead                   |
 //! | `parser`    | parser state and the helpers every rule shares             |
 //! | `structure` | item dispatch, one-line directives, indented blocks        |
-//! | `journal`   | dated lines: flows and what statements are about, openings |
-//! | `statement` | statements: subject, verb, what each verb takes            |
+//! | `statement` | dated lines: the one table of verbs, flows, statements, openings |
 //! | `refs`      | typed indices: which piece of the file, and where in it    |
 //! | `dates`     | dates in full or short of what the folder or heading gives |
 //! | `flow`      | flow headers, ends, legs, items, tails, lot selectors      |
@@ -34,7 +33,6 @@ mod dates;
 mod decl;
 mod expr;
 mod flow;
-mod journal;
 mod law;
 mod lex;
 mod lines;
