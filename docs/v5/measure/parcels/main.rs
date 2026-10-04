@@ -90,12 +90,17 @@ fn written_off(_: &Book<'_>, _: &Run) {
     println!("== written off 0");
 }
 
-/// What a place is called: a tab has no name, so it is the party it is with and which way the debt runs.
+/// What a place is called: a tab has no name, so it is the party it is with and which way the debt runs: a party's, the owner's
+/// bills (a claim, held as parcels), or the owner's loan (a balance).
 fn label(book: &Book<'_>, place: axiom_core::Id<Place>) -> String {
     let at = &book.places[place];
     match at.role {
         Role::Tab(party) => {
-            let way = if at.class == Class::Debt { "owed-by" } else { "owed-by-party" };
+            let way = match (at.class, book.is_claim(place)) {
+                (Class::Debt, true) => "owed-by",
+                (Class::Debt, false) => "loan",
+                _ => "owed-by-party",
+            };
             format!("tab({},{way},{})", book.name(book.entities[party].path), book.name(book.entities[at.owner].path))
         }
         _ => book.name(at.path).to_string(),

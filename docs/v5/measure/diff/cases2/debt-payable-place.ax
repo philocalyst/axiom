@@ -1,0 +1,13 @@
+use std
+base USD
+entity me : person
+entity ben : org
+entity power-co : org
+account checking : bank
+account owed-to-ben : payable
+2026-01-01 market -> checking 1_000 USD
+2026-01-02 owed-to-ben -> power-co 300 USD due 2026-02-01 ^p1
+2026-01-03 owed-to-ben -> power-co 200 USD due 2026-02-01 ^p2
+2026-01-20 checking -> owed-to-ben 200 USD ^p2
+2026-01-25 checking -> owed-to-ben 50 USD
+2026-02-01 owed-to-ben = 250 USD

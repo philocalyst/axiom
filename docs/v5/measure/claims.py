@@ -34,7 +34,9 @@ with a little noise (ordinary flows) between its lines:
     boxes    claims of a commodity that has no policy (`ann -> owed-boxes 12 BOX ...`), settled in part
     lots     purchases of a security on several days and sales by a policy, a selector, or none
     assets   a purchase, improvements, a law that consumes each month, a sale
-    debts    bills the owner owes (`me owes pge ...`), paid, and a loan paid in kind
+    debts    bills the owner owes (`me owes pge ...`, some itemized, with a purpose or none), paid by the exact amount, by a
+             code, oldest first, more than they come to, written off, returned; bills a declared `payable` place holds and
+             payments into it; and a loan paid in kind and a deposit that is owed to the owner
     mixed    a claim family with a lots family beside it
 
 The reference simulates the book it wrote: the claims it made, in the order the fold reaches them (a day's movements in the
@@ -74,8 +76,9 @@ REPORTS = ["check", "balance", "lots", "claims", "gains", "available", "flow"]
 DEFAULT_BOOKS = os.environ.get("CLAIMS_DEFAULT_BOOKS", "accrual")
 
 # What each purpose's law counts, by tally.
-TALLIES = {"design": "receipts", "retail": "retail-receipts"}
+TALLIES = {"design": "receipts", "retail": "retail-receipts", "electricity": "bill-spending"}
 NAMED = {tally: purpose for purpose, tally in TALLIES.items()}
+
 
 PRELUDE = """use std
 base USD
@@ -86,6 +89,7 @@ entity cy : org
 entity stripe : org
 entity pge : org
 entity bank : org
+entity ben : org
 entity seller : org
 entity buyer : org
 commodity BOX : commodity
@@ -104,8 +108,13 @@ purpose retail : income
     on flow
     count amount as retail-receipts
 purpose shopping : spending
+purpose electricity : spending
+  law bill-law
+    on flow
+    count amount as bill-spending
 account checking : bank
 account owed : receivable
+account owed-to-ben : payable
 account queue : fifo-claim
 account owed-boxes : receivable
 account stockroom : asset
@@ -226,7 +235,22 @@ class Sim:
         self.plain[place] -= left
         return taken
 
-    def pay(self, party, legs, select, tail, label):
+    def pay_into(self, place, qty, tail):
+        """A payment into a place that holds what the owner owes: it settles the bills its codes name, else the one whose open
+        amount is exactly what it settles, else the oldest, and what is more than is owed is a credit with the party (a positive
+        balance). Says what it took, by the purpose of each line."""
+        live = self.live(place)
+        candidates = [p for p in live if p.code in tail] or live
+        need = min(qty, sum(p.qty for p in candidates))
+        left, taken = need, []
+        for parcel in sorted(candidates, key=lambda p: (p.qty != need, p.when, p.order)):
+            took = parcel.take(min(parcel.qty, left))
+            left -= sum(part for _, _, part in took)
+            taken += [(purpose, part) for _, purpose, part in took]
+        self.plain[place] += qty - need
+        return taken
+
+    def pay(self, party, legs, select, tail, label, place=None):
         """A payment from `party`, written as `legs` ((`owner` | `third`, quantity, purpose) in the order written): under the
         later rules it settles the claims on the party, as far as they go, and what remains is an ordinary flow; under the old a
         payment from a party settled nothing. Under `k3c` the legs that reach the owner each settle by their own amount;
@@ -235,7 +259,7 @@ class Sim:
         of the claims, by the purpose of each line."""
         if self.rules == "old":
             return [(kind, qty, purpose, []) for kind, qty, purpose in legs]
-        place = "tab:" + party
+        place = place or "tab:" + party
         in_all = self.rules == "new" and any(kind == "owner" for kind, _, _ in legs)
         rest = sum(qty for kind, qty, _ in legs if kind == "owner" or in_all)
         taken, settled = [], []
@@ -358,8 +382,10 @@ def run_events(events, rules, books="accrual"):
             elif e["kind"] == "pay":
                 select = tuple(e["select"]) if e.get("select") else None
                 legs = [(kind, qty * 100, purpose) for kind, qty, purpose in e["legs"]]
-                settled = sim.pay(e["party"], legs, select, e.get("tail", ()), e["label"])
+                settled = sim.pay(e["party"], legs, select, e.get("tail", ()), e["label"], e.get("place"))
                 sim.fired[e["label"]] = sim.paid_by(d, settled, e["label"])
+            elif e["kind"] == "into":
+                sim.recognizes(d, sim.pay_into(e["place"], e["qty"] * 100, e.get("tail", ())))
             elif e["kind"] == "settle":
                 select = tuple(e["select"]) if e.get("select") else None
                 sim.recognizes(d, sim.settle(e["place"], e["qty"] * scale, select, e.get("tail", ())))
@@ -590,25 +616,107 @@ def assets_family(book):
     return ASSET_KINDS.format(consume=rng.choice([5, 10, 25]))
 
 
-def debts_family(book):
+def bills_family(book):
+    """Bills the owner owes parties, a few with lines, and what pays them."""
     rng = book.rng
-    for _ in range(rng.randint(1, 4)):
-        d, code = day(rng, 2, 80), book.code("b")
-        qty = rng.choice([50, 142, 300])
-        book.add(d, f"me owes pge {amount(qty)} USD due {text(d + datetime.timedelta(days=30))} ^{code}")
-        if rng.random() < 0.6:
-            book.add(d + datetime.timedelta(days=rng.randint(3, 40)), f"checking -> pge {amount(qty)} USD ^{code}")
-    book.add(datetime.date(2026, 1, 3), "bank owes me 2_000 USD due 2026-12-31 ^deposit")
+    bills = []
+    for _ in range(rng.randint(2, 5)):
+        d, code, party = day(rng, 2, 100), book.code("b"), rng.choice(["pge", "ben"])
+        due = d + datetime.timedelta(days=rng.choice([10, 30, 45]))
+        qty = rng.choice(AMOUNTS)
+        purposes = ["electricity", "electricity", None]
+        if rng.random() < 0.25:
+            first, kinds = rng.choice(AMOUNTS), [rng.choice(purposes), rng.choice(purposes)]
+            lines = [[first, kinds[0]], [qty, kinds[1]]]
+            tag = lambda purpose: f" #{purpose}" if purpose else ""
+            line = (f"me owes {party} due {text(due)} ^{code}\n  {amount(first)} USD{tag(kinds[0])}\n"
+                    f"  {amount(qty)} USD{tag(kinds[1])}")
+            qty += first
+            book.forms["itemized bill"] += 1
+        else:
+            kind = rng.choice(purposes)
+            lines = [[qty, kind]]
+            line = f"me owes {party} {amount(qty)} USD due {text(due)}{f' #{kind}' if kind else ''} ^{code}"
+            book.forms["bill with a purpose" if kind else "bill with no purpose"] += 1
+        book.add(d, line, dict(kind="make", place="debt:" + party, code=code, qty=qty, lines=lines, unit="USD"))
+        bills.append((d, code, party, qty))
+    for _ in range(rng.choice([0, 1, 1, 2, 3])):
+        d0, code0, party, qty0 = rng.choice(bills)
+        total = sum(c[3] for c in bills if c[2] == party)
+        choice = rng.random()
+        need = (qty0 if choice < 0.3 else max(1, qty0 // 2) if choice < 0.5 else total + 50 if choice < 0.6
+                else qty0 + rng.choice(AMOUNTS))
+        label = book.code("pay-")
+        tail, line_tail = [label], f" ^{label}"
+        if rng.random() < 0.35:
+            tail, line_tail = [label, code0], f" ^{label} ^{code0}"
+            book.forms["payment names a bill"] += 1
+        own = rng.choice([None, None, "electricity"])
+        when = d0 + datetime.timedelta(days=rng.randint(1, 50))
+        book.add(when, f"checking -> {party} {amount(need)} USD{f' #{own}' if own else ''}{line_tail}",
+                 dict(kind="pay", party=party, place="debt:" + party, legs=[["owner", need, own]], select=None,
+                      tail=tail, label=label))
+        book.forms["bill paid"] += 1
+        if rng.random() < 0.25:
+            book.add(when + datetime.timedelta(days=rng.randint(1, 10)), f"^{label} returned",
+                     dict(kind="return", label=label))
+            book.forms["payment of a bill returned"] += 1
+    for d, code, _, _ in bills:
+        if rng.random() < 0.4:
+            when = d + datetime.timedelta(days=rng.choice([0, 0, 5, 20, 40]))
+            book.add(when, f'^{code} waived "off {code}"', dict(kind="writeoff", code=code, declared=False))
+            book.forms["bill forgiven"] += 1
     if rng.random() < 0.5:
-        book.add(datetime.date(2026, 2, 1), "contract mortgage with bank\n  loan 3_000 USD on 2026-01-01 at 0% over 3m\n  monthly on 1 from checking\n  from 2026-02-01")
+        place_bills(book)
+
+
+def place_bills(book):
+    """Bills held in a declared `payable` place, and payments into it."""
+    rng = book.rng
+    made = []
+    for _ in range(rng.randint(1, 3)):
+        d, code, qty, kind = day(rng, 2, 60), book.code("p"), rng.choice(AMOUNTS), rng.choice(["electricity", None])
+        due = d + datetime.timedelta(days=30)
+        book.add(d, f"owed-to-ben -> pge {amount(qty)} USD due {text(due)}{f' #{kind}' if kind else ''} ^{code}",
+                 dict(kind="make", place="owed-to-ben", code=code, qty=qty, lines=[[qty, kind]], unit="USD"))
+        made.append((code, qty))
+    held = sum(qty for _, qty in made)
+    for _ in range(rng.randint(1, 3)):
+        code, qty = rng.choice(made)
+        choice = rng.random()
+        need = qty if choice < 0.3 else max(1, qty // 2) if choice < 0.5 else held + 40 if choice < 0.6 else qty + 100
+        tail, line_tail = [], ""
+        if rng.random() < 0.5:
+            tail, line_tail = [code], f" ^{code}"
+            book.forms["payment into a payable names a bill"] += 1
+        book.add(day(rng, 61, 150), f"checking -> owed-to-ben {amount(need)} USD{line_tail}",
+                 dict(kind="into", place="owed-to-ben", qty=need, tail=tail))
+        book.forms["payment into a payable"] += 1
+    for code, _ in made:
+        if rng.random() < 0.3:
+            book.add(day(rng, 100, 150), f'^{code} waived "off {code}"', dict(kind="writeoff", code=code, declared=False))
+            book.forms["bill in a payable forgiven"] += 1
+
+
+def debts_family(book):
+    """Bills, a deposit the owner is owed, and a loan paid in kind: the debts that are parcels, a claim beside them, and the
+    one that stays a balance. Says the loan's contract, which is written before the journal."""
+    rng = book.rng
+    bills_family(book)
+    book.add(datetime.date(2026, 1, 3), "bank owes me 2_000 USD due 2026-12-31 ^deposit",
+             dict(kind="make", place="tab:bank", code="deposit", qty=2000, lines=[[2000, None]], unit="USD"))
+    contract = ""
+    if rng.random() < 0.5:
+        contract = "contract mortgage with bank\n  loan 3_000 USD on 2026-01-01 at 0% over 3m\n  monthly on 1 from checking\n  from 2026-02-01\n"
         for m in (2, 3, 4):
             if rng.random() < 0.7:
                 book.add(datetime.date(2026, m, 1), "mortgage")
         book.forms["loan"] += 1
     book.forms["debts"] += 1
+    return contract
 
 
-FAMILIES = [("tab", 22), ("place", 28), ("boxes", 10), ("lots", 12), ("assets", 8), ("debts", 10), ("mixed", 10)]
+FAMILIES = [("tab", 22), ("place", 28), ("boxes", 10), ("lots", 12), ("assets", 8), ("debts", 24), ("mixed", 10)]
 
 
 def project(seed, index):
@@ -627,7 +735,7 @@ def project(seed, index):
     elif family == "assets":
         extra = assets_family(book)
     elif family == "debts":
-        debts_family(book)
+        extra = debts_family(book)
     else:
         (tab_family if rng.random() < 0.5 else place_family)(book)
         lots_family(book)
@@ -740,7 +848,9 @@ def spec_of(path):
 
 # ─── What a build says of the claims ─────────────────────────────────────────────────────────────────────────
 
-CLAIM_PLACES = {"owed", "queue", "owed-boxes"}
+CLAIM_PLACES = {"owed", "queue", "owed-boxes", "owed-to-ben"}
+# What the owner owes is held as negative parcels: the open quantity of a bill is the parcel's, the other way round.
+DEBT_PLACES = {"owed-to-ben"}
 
 
 def held(output):
@@ -759,18 +869,20 @@ def held(output):
             continue
         lot = re.match(r"  lot qty (-?\d+) basis .* codes \[(.*)\]$", line)
         if lot and place and (place in CLAIM_PLACES or place.startswith("tab(")):
-            if place.startswith("tab(") and "owed-by-party" not in place:
+            if place.startswith("tab(") and ",loan," in place:
                 continue
-            qty = int(lot.group(1))
+            qty = int(lot.group(1)) * (-1 if place in DEBT_PLACES or ",owed-by," in place else 1)
             if qty > 0:
                 for code in lot.group(2).split():
                     open_[code] += qty
     forgiven = Counter()
     for line in dump.split("\n"):
-        found = re.match(r"written-off change \d+ \S+ (\S+) qty (\d+) basis (\d+)", line)
+        found = re.match(r"written-off change \d+ (\S+) \S+ qty (\d+) basis (\d+)", line)
         if found:
             forgiven["total"] += int(found.group(2))
             forgiven["basis"] += int(found.group(3))
+            # a debt's parcel has no basis: what is owed is not value held
+            forgiven["debts"] += int(found.group(2)) * (found.group(1) in DEBT_PLACES or ",owed-by," in found.group(1))
     diagnostics = Counter(re.findall(r"^diagnostic \w+ (\S+) ", dump, re.M))
     return open_, plain, forgiven, diagnostics, dump
 
@@ -838,7 +950,7 @@ def conserved(dump):
 def check_one(path, output, rules, reports=True):
     """The failures of one project's output against the reference for `rules`: a list of words."""
     spec = spec_of(path)
-    if spec["family"] not in ("tab", "place", "boxes", "mixed"):
+    if spec["family"] not in ("tab", "place", "boxes", "mixed", "debts") or (spec["family"] == "debts" and rules != "new"):
         return []
     if not any(e["kind"] in ("make", "settle", "writeoff", "pay") for e in spec["events"]):
         return []
@@ -859,8 +971,8 @@ def check_one(path, output, rules, reports=True):
             failures.append(f"empty write-offs {diagnostics.get('claim-writeoff-empty', 0)} wanted {sim.empty}")
         if forgiven["total"] != sum(sim.forgiven.values()):
             failures.append(f"forgiven {forgiven['total']} wanted {sum(sim.forgiven.values())}")
-        if forgiven["basis"] != forgiven["total"]:
-            failures.append(f"forgiven basis {forgiven['basis']} wanted {forgiven['total']}")
+        if forgiven["basis"] != forgiven["total"] - forgiven["debts"]:
+            failures.append(f"forgiven basis {forgiven['basis']} wanted {forgiven['total'] - forgiven['debts']}")
         if diagnostics.get("ambiguous-lots", 0) and spec["family"] != "mixed":
             failures.append("a claim place is ambiguous")
         shown, wanted = ({k: v for k, v in c.items() if v} for c in (flow_view(output), sim.net))
@@ -892,7 +1004,7 @@ def verdict(directory, tag, rules, show=5):
     return failed
 
 
-MOVES_WITH_CLAIMS = CLAIM_PLACES | {"ann", "bob", "cy", "stripe", "market", "stockroom"}
+MOVES_WITH_CLAIMS = CLAIM_PLACES | {"ann", "bob", "cy", "stripe", "market", "stockroom", "pge", "ben"}
 
 
 def holding_blocks(dump):
@@ -926,15 +1038,11 @@ def unmoved(left, right):
 
 
 def predicted_to_differ(spec):
-    """Whether the two sets of rules leave a project in different states (so that the two builds should differ)."""
-    if spec["family"] not in ("tab", "place", "boxes", "mixed"):
-        return False
-    old, new = expected(spec, "k3c"), expected(spec, "new")
-    differ = +old[1] != +new[1] or {p: v for p, v in old[2].items() if v} != {p: v for p, v in new[2].items() if v}
-    forgave = sum(old[0].forgiven.values()) != sum(new[0].forgiven.values())
-    counted = Counter(old[0].counted) != Counter(new[0].counted)
-    netted = Counter(old[0].net) != Counter(new[0].net) or sum(old[0].replaced.values()) != sum(new[0].replaced.values())
-    return differ or forgave or counted or netted or old[0].empty != new[0].empty
+    """Whether the lane under test leaves a project in a different state from its baseline, so that the two builds should
+    differ. The baseline of lane K3f is lane K3d's build, which already settles what a party pays, counts a claim by the owner's
+    books and forgives one: only what the owner owes differs, for a bill was a balance that nothing settled and is a parcel now,
+    which `claims` lists and a payment to the party (or into the place that holds it) settles."""
+    return spec["family"] == "debts" and any(e["kind"] == "make" for e in spec["events"])
 
 
 def may_differ(spec):
@@ -1023,7 +1131,7 @@ MUTANTS = [
     ("crates/engine/src/post.rs", "[m.code_runs.header, m.code_runs.local]", "[m.code_runs.header]", "the flow's own line's codes are not read"),
     ("crates/engine/src/claims.rs", "let made = [Select::Txn(change.target)];", "let made: [Select; 0] = [];",
      "a write-off forgives every claim in the place"),
-    ("crates/engine/src/claims.rs", "            self.world.holdings.credit(line.from, unit, qty);\n", "", "the forgiven value goes nowhere"),
+    ("crates/engine/src/claims.rs", "            self.world.holdings.credit(party, unit, self.plan.sides.display(place, qty));\n", "", "the forgiven value goes nowhere"),
     ("crates/engine/src/claims.rs", "if forgiven == 0 {", "if forgiven == 1 {", "an empty write-off is said when one parcel was forgiven"),
     ("crates/engine/src/claims.rs", "let Slice { qty, basis, acquired, .. } = *slice;", "let Slice { qty, acquired, .. } = *slice;\n            let basis = Qty::ZERO;",
      "a write-off records no basis"),
@@ -1033,22 +1141,20 @@ MUTANTS = [
      "let claimed = false;", "a code on a claim and its payment is ambiguous for a write-off"),
     ("crates/model/src/lower/statements.rs", "if !flows().any(|flow| book.makes_claim(flow)) {", "if !flows().any(|flow| book.is_claim(flow.to)) {",
      "a claim place funded by the owner's own money is a claim on a party"),
-    ("crates/model/src/said.rs", "self.is_claim(flow.to) && self.places[flow.from].class == Class::Outside", "self.is_claim(flow.to)",
+    ("crates/model/src/said.rs", "if from == Class::Outside && self.is_claim(flow.to) {", "if self.is_claim(flow.to) {",
      "a claim made of the owner's own money can be forgiven"),
     ("crates/model/src/declare.rs", "        self.say(kinds.claim, builtin::CLAIM, true);\n", "", "the kind of a tab does not say `claim`"),
-    ("crates/report/src/history.rs", "        && by(book.claim_changes.last().map(|change| change.day))\n", "",
-     "a view dated before a write-off is the run's final state"),
     ("crates/engine/src/settle.rs", "if m.target.class == Class::Asset && !self.plan.traits.place(m.to).claim {",
      "if m.target.class == Class::Asset {", "a flow that makes a claim settles the claims before it"),
     ("crates/engine/src/settle.rs", "let need = open.min(m.out.qty);", "let need = open;", "a payment settles more than it paid"),
     ("crates/engine/src/settle.rs", "let named = self.name_claims(m, tab);", "let named = false;",
      "the codes of a payment from a party name no claim"),
-    ("crates/engine/src/settle.rs", "        settlement.parcels.iter().for_each(|&parcel| slot.land_with_codes(parcel, false, codes));\n", "",
+    ("crates/engine/src/settle.rs", "        settlement.parcels.iter().for_each(|&parcel| slot.restore(parcel, codes));\n", "",
      "a returned payment does not open its claims"),
-    ("crates/engine/src/settle.rs", "        self.world.holdings.credit(m.to, settlement.unit, -reopened);\n", "",
-     "a returned payment makes value when it opens its claims"),
-    ("crates/engine/src/post.rs", "        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);\n        let fresh",
-     "        self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n        let fresh", "a payment that settles claims makes value"),
+    ("crates/engine/src/settle.rs", "        let claiming = Claiming { settlement, dir };\n        self.credit_party(m, &claiming);\n",
+     "        let claiming = Claiming { settlement, dir };\n", "a returned payment makes value when it opens its claims"),
+    ("crates/engine/src/post.rs", "            false => self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty),",
+     "            false => self.world.holdings.credit(m.from, m.out.unit, -m.out.qty),", "a payment that settles claims makes value"),
     ("crates/engine/src/post.rs", "            self.world.holdings.credit(m.from, m.out.unit, paid - m.out.qty);\n",
      "            self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);\n", "a leg to a third party that settles claims makes value"),
     ("crates/engine/src/settle.rs", "        let settlement = self.record.settled.remove(&flow)?;\n", "        let settlement = self.record.settled.get(&flow)?.clone();\n",
@@ -1066,8 +1172,8 @@ MUTANTS = [
      "let toward = self.leg(flow).is_some_and(|leg| leg == Leg::Owner(owner));", "a leg to a third party is not what the party pays in all"),
     ("crates/engine/src/settle.rs", "paid.filter(|_| m.target.class == Class::Outside)", "None::<Id<Entity>>",
      "a leg to a third party is never paid on the owner's behalf"),
-    ("crates/engine/src/traits.rs", "partition_point(|&(found, by, _)| (found, by) < (party, owner))",
-     "partition_point(|&(found, by, _)| (found, by) <= (party, owner))", "the tab of a party is not found"),
+    ("crates/engine/src/traits.rs", "partition_point(|&(found, by, way, _)| (found, by, way) < key)",
+     "partition_point(|&(found, by, way, _)| (found, by, way) <= key)", "the tab of a party is not found"),
     ("crates/engine/src/lots.rs", "lots.iter().take_while(|lot| lot.txn == lots[0].txn).count()", "1",
      "the lines of an invoice are claims of their own"),
     ("crates/engine/src/recognition.rs", "            (Dealing::Making, Books::Cash) if self.purpose.is_some() => {}\n", "",
@@ -1082,8 +1188,8 @@ MUTANTS = [
      "a payment counts what it moved as well as the claims it settled"),
     ("crates/engine/src/recognition.rs", "(Dealing::Forgiving { tab, qty, dir }, Books::Accrual) if self.purpose.is_some() =>",
      "(Dealing::Forgiving { tab, qty, dir }, Books::Cash) if self.purpose.is_some() =>", "a write-off reverses in cash books and not in accrual"),
-    ("crates/engine/src/recognition.rs", "let dealing = Dealing::Forgiving { tab: claim.to, qty, dir: Dir::Out };", "let dealing = Dealing::Forgiving { tab: claim.to, qty, dir: Dir::In };",
-     "a write-off adds what the claim recognized"),
+    ("crates/engine/src/recognition.rs", "let dealing = Dealing::Forgiving { tab, qty, dir: claim_dir(plan.book.places[tab].class).reversed() };",
+     "let dealing = Dealing::Forgiving { tab, qty, dir: claim_dir(plan.book.places[tab].class) };", "a write-off adds what the claim recognized"),
     ("crates/engine/src/recognition.rs", "book.txn_flow(part.origin, part.ordinal)?", "book.txn_flow(part.origin, 0)?",
      "every parcel of a claim is for its first line's purpose"),
     ("crates/engine/src/recognition.rs", "let Some(purpose) = claim_purpose(book, parcel) else { continue };",
@@ -1101,17 +1207,150 @@ MUTANTS = [
      "let settlement = Settlement { tab: m.from, unit: m.out.unit, parcels, reaches: Reaches::Owner };", "a flow out of a claim place reaches the owner's money"),
     ("crates/engine/src/settle.rs", "            self.record.settlements.push((flow, claiming.settlement.clone()));\n", "",
      "the readers are not told what a payment settled", "cli"),
-    ("crates/engine/src/settle.rs", "Dir::In => self.settlement.parcels.iter().map(|parcel| parcel.qty).sum(),", "Dir::In => Qty::ZERO,",
+    ("crates/engine/src/settle.rs", "Dir::In => self.settled(),", "Dir::In => Qty::ZERO,",
      "a payment that settled claims debits the party for them as well"),
     ("crates/engine/src/post.rs", "Counts::Claim { dir, .. } => dir,", "Counts::Claim { .. } => Dir::Out,", "a claim settled counts the way the payment goes"),
-    ("crates/engine/src/recognition.rs", "Dealing::Settling { settlement, dir: Dir::In, moved: posted.out }", "Dealing::Settling { settlement, dir: Dir::In, moved: Qty::ZERO }",
+    ("crates/engine/src/recognition.rs", "Dealing::Settling { settlement, dir, moved: posted.out }", "Dealing::Settling { settlement, dir, moved: Qty::ZERO }",
      "the readers count a payment that settled claims without what it moved", "cli"),
-    ("crates/report/src/flow.rs", "Some(Qty(if piece.takes_back() { -volume } else { volume }))", "Some(Qty(volume))",
+    ("crates/report/src/flow.rs", "Some(Qty(if piece.takes_back(book) { -volume } else { volume }))", "Some(Qty(volume))",
      "a claim taken back is more of a purpose that passes through"),
     ("crates/engine/src/explain.rs", "let of_other_days = KEEPS_FLOW_DAYS && !flow.recognized.overlaps(read_days);",
      "let of_other_days = KEEPS_FLOW_DAYS && flow.recognized.overlaps(read_days);", "a limit's explanation names the flows of other days"),
     ("crates/engine/src/plan.rs", "let made = traits.place(to).claim && outside(from);", "let made = traits.place(to).claim;",
      "a flow from a place of the owner into a claim place makes a claim"),
+    # Lane K3f: what the owner owes
+    ("crates/engine/src/lots.rs",
+     "        if self.owes {\n            self.mirror();",
+     "        if false {\n            self.mirror();",
+     "a debt is relieved as if it were held"),
+    ("crates/engine/src/lots.rs",
+     "        self.qty = -self.qty;\n        for lot",
+     "        for lot",
+     "the mirror leaves the balance of a debt as it was"),
+    ("crates/engine/src/lots.rs",
+     "self.land_with_codes(Parcel { qty: -owed.qty, basis: -owed.basis, ..owed }, false, codes);",
+     "self.land_with_codes(owed, false, codes);",
+     "a bill is a parcel of a positive quantity"),
+    ("crates/engine/src/lots.rs",
+     "true => self.holding.plain - self.qty,",
+     "true => self.qty - self.holding.plain,",
+     "what a debt admits is its balance and not what is owed"),
+    ("crates/engine/src/lots.rs",
+     "        let admitted: Qty = found.iter().map(|c| c.qty).sum();\n        if self.owes { -admitted } else { admitted }",
+     "        found.iter().map(|c| c.qty).sum()",
+     "what a selector admits of a debt is negative"),
+    ("crates/engine/src/lots.rs",
+     "            true => self.owe(parcel, codes),\n            false => self.land_with_codes(parcel, false, codes),",
+     "            true => self.land_with_codes(parcel, false, codes),\n            false => self.land_with_codes(parcel, false, codes),",
+     "a payment that is returned lands the bill positive"),
+    ("crates/engine/src/post.rs",
+     "        let holds = |end: &Place, at: Id<Place>| end.class == Class::Asset || self.plan.traits.place(at).claim;",
+     "        let holds = |end: &Place, _: Id<Place>| end.class == Class::Asset;",
+     "a bill is a flow between two places that hold no parcels"),
+    ("crates/engine/src/post.rs",
+     "match self.plan.traits.place(m.from).claim && m.course == Course::Forward {",
+     "match self.plan.traits.place(m.from).claim {",
+     "a bill that is returned owes again"),
+    ("crates/engine/src/settle.rs",
+     "let tab = self.plan.traits.tab_of(m.to, m.source.owner, Class::Debt)?;",
+     "let tab = self.plan.traits.tab_of(m.to, m.source.owner, Class::Asset)?;",
+     "a payment to a party settles the claims on the party"),
+    ("crates/engine/src/settle.rs",
+     "let debt = m.target.class == Class::Debt && self.plan.traits.place(m.to).claim;",
+     "let debt = self.plan.traits.place(m.to).claim;",
+     "a payment into a place that is a claim of the owner's settles it"),
+    ("crates/engine/src/settle.rs",
+     "        if claiming.dir == Dir::Out {\n            self.world.holdings.credit(m.to,",
+     "        if claiming.dir == Dir::In {\n            self.world.holdings.credit(m.to,",
+     "the party is credited what settled a bill"),
+    ("crates/engine/src/settle.rs",
+     "forward.flatten().or_else(|| self.paid_into_debt(m))",
+     "forward.flatten()",
+     "nothing is paid into a place that holds what the owner owes"),
+    ("crates/engine/src/settle.rs",
+     "let forward = (m.course == Course::Forward).then(",
+     "let forward = (m.course == Course::Back).then(",
+     "a payment that is returned settles"),
+    ("crates/engine/src/settle.rs",
+     "Some(Payment { tab, rest: m.out.qty, reaches: Reaches::Owner })",
+     "Some(Payment { tab, rest: m.out.qty, reaches: Reaches::Elsewhere })",
+     "what a payment to a party settles is not what it paid"),
+    ("crates/engine/src/settle.rs",
+     "debt.then_some(Payment { tab: m.to, rest: m.out.qty, reaches: Reaches::Elsewhere })",
+     "debt.then_some(Payment { tab: m.to, rest: m.out.qty, reaches: Reaches::Owner })",
+     "a payment into a place that holds a debt replaces what it counts of itself"),
+    ("crates/engine/src/settle.rs",
+     "let from_owner = m.source.class == Class::Asset && !self.plan.traits.place(m.from).claim;",
+     "let from_owner = true;",
+     "anything paid to a party pays its bills"),
+    ("crates/engine/src/settle.rs",
+     "!matches!(m.target.role, Role::Outside(Some(_))) || !self.plan.traits.has_tab(m.to)",
+     "!self.plan.traits.has_tab(m.to)",
+     "a payment to a place that is no party's pays its bills"),
+    ("crates/engine/src/settle.rs",
+     "        let dir = claim_dir(self.plan.book.places[settlement.tab].class).reversed();\n        let claiming",
+     "        let dir = claim_dir(self.plan.book.places[settlement.tab].class);\n        let claiming",
+     "a payment returned counts the way it was paid"),
+    ("crates/engine/src/settle.rs",
+     "        let day = m.detail().since.unwrap_or(m.day);\n        let part",
+     "        let day = m.day;\n        let part",
+     "a bill made `since` another day is made on the day written"),
+    ("crates/engine/src/settle.rs",
+     "        let part = Some(PartId { origin: m.txn, ordinal: m.flow_ordinal });",
+     "        let part = Some(PartId { origin: m.txn, ordinal: 0 });",
+     "every parcel of a bill is for its first line's purpose"),
+    ("crates/engine/src/recognition.rs",
+     "        Class::Debt => Dir::Out,\n        Class::Asset | Class::Outside => Dir::In,",
+     "        Class::Debt => Dir::In,\n        Class::Asset | Class::Outside => Dir::Out,",
+     "a claim counts the other way"),
+    ("crates/engine/src/recognition.rs",
+     "Counts::Claim { tab, dir } => dir == claim_dir(book.places[tab].class).reversed(),",
+     "Counts::Claim { dir, .. } => dir == Dir::Out,",
+     "a bill settled takes back what it counted, as a claim forgiven does", "cli"),
+    ("crates/engine/src/claims.rs",
+     "self.world.holdings.credit(party, unit, self.plan.sides.display(place, qty));",
+     "self.world.holdings.credit(party, unit, qty);",
+     "the value a bill forgiven gives back goes the wrong way"),
+    ("crates/engine/src/claims.rs",
+     "let party = if place == line.to { line.from } else { line.to };",
+     "let party = line.from;",
+     "the party of a bill forgiven is where the money came from"),
+    ("crates/model/src/said.rs",
+     "} else if (from, to) == (Class::Debt, Class::Outside) && self.is_claim(flow.from) {",
+     "} else if false {",
+     "a bill is not a claim that can be forgiven"),
+    ("crates/model/src/book.rs",
+     "                if self.places[place].class == Class::Debt { (flow.from, flow.to) } else { (flow.to, flow.from) };",
+     "                (flow.to, flow.from);",
+     "a bill says nothing of who is owed and when"),
+    ("crates/engine/src/plan.rs",
+     "let unmade = traits.place(from).claim && outside(to);",
+     "let unmade = traits.place(from).claim && outside(to) && book.places[from].class == Class::Asset;",
+     "a bill is counted as an ordinary flow"),
+    ("crates/engine/src/traits.rs",
+     "Role::Tab(party) if book.is_claim(id) =>",
+     "Role::Tab(party) =>",
+     "a loan's tab is settled by what is paid to its lender"),
+    ("crates/model/src/lower/contracts.rs",
+     "    let debt = world.tab(party, owner, world.book.roots.kinds.debt, prop.loc);",
+     "    let debt = world.tab(party, owner, world.book.roots.kinds.debt_claim, prop.loc);",
+     "a loan is a bill"),
+    ("crates/report/src/claims.rs",
+     "mine: book.places[holding.place].class == Class::Asset,",
+     "mine: true,",
+     "what the owner owes is owed to it", "cli"),
+    ("crates/report/src/claims.rs",
+     "let left = lens.plan().sides().display(holding.place, lens.place_qty(holding.place, lot.qty));",
+     "let left = lens.place_qty(holding.place, lot.qty);",
+     "a bill is listed as a negative amount", "cli"),
+    ("crates/report/src/flow.rs",
+     "let signed = Amount::new(if dir == Dir::In { taken } else { -taken }, unit);",
+     "let signed = Amount::new(-taken, unit);",
+     "a bill forgiven adds to what was spent", "cli"),
+    ("crates/engine/src/eval.rs",
+     "let open = self.env.plan.sides.display(place, lot.qty);",
+     "let open = lot.qty;",
+     "what is open of a bill is negative"),
 ]
 
 
