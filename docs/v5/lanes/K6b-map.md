@@ -367,13 +367,14 @@ purpose, among them one that inherits its law; an asset), laws derive an item al
 `when` guards on the amount, in chains, in cycles (`derive-cycle`, held to the reference's count) and in ladders of nine and ten laws
 (`derive-depth`). It checks the CLI (`check`, `balance`, `flow`, `flow --by party`, `claims`, `tax 2026`, seven registers, `forecast`, `available`),
 and the engine's own dump (`forecasts/main.rs`: every flow posted, the derived after today, holdings at each month end, the diagnostics). The fund
-`available` draws is slow money, so its hypothetical flow derives and what the laws owe for it is held to the reference's. On the corpora I
-kept: 600 projects (seed 7: 22 rejected for a flow of a place to itself or a chain too long to read) through the CLI of the final build, 0 differ, and
+`available` draws is slow money, so its hypothetical flow derives and what the laws owe for it is held to the reference's. On the last corpus run:
+600 projects (seed 7: 22 rejected for a flow of a place to itself or a chain too long to read) through the CLI of the final build, 0 differ, and
 through the dump, 0 differ (25,961 flows posted, 4,462 derived after today, 12,656 derived flows written out for the `written` books); the
-owners are all used (every kind, account, entity, purpose, asset in the world 22 to 161 times; 107 projects are cycles, 77 ladders, of which
-208 projects say `derive-cycle` and 51 `derive-depth`, each held to the reference's count); 442 pending flows stay pending, 897 settle, 446
-are void; 1,183 are returned (a third of those after today, so the return is after the forecast's checkpoint); and the forecast's promised
-occurrences derive 1,588 flows that `ahead`'s fold derives again, equal on every month end.
+owners are all used (every kind, account, entity, purpose and asset of the world is the owner of a law in 22 to 161 projects); 208
+projects say `derive-cycle` (107 are the cycle family, the pool's books close chains too) and 51 `derive-depth` (77 are ladders of eight to
+ten laws), each held to the reference's count; 442 pending flows stay pending, 897 settle, 446 are void; 1,183 are returned, in the projects
+that write ahead (a third of the projects) the return can be after the forecast's checkpoint; and the forecast's promised occurrences derive
+1,588 flows that `ahead`'s fold derives again, equal on every month end.
 
 **Mutants**: 40 changes of one piece of the code under test (`derived.py mutate`), the oracle's two layers first and the crates' own tests after.
 Of the 40: **26 are killed by the engine's dump, 6 by the CLI's views** (the ones that change an order or what a view lists), **5 by a named unit
