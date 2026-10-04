@@ -28,7 +28,7 @@ use crate::fill::{self, Filled, Said};
 use crate::holders::Holder;
 use crate::problem;
 use crate::scope::Home;
-use crate::slots::{Range, Slot};
+use crate::slots::{Range, Slot, View};
 use crate::spelled;
 use crate::values::describe;
 
@@ -99,8 +99,14 @@ macro_rules! says_all {
 
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
-const BUILTINS: [(&str, &[Target], Reader); 24] = [
+const BUILTINS: [(&str, &[Target], Reader); 25] = [
     ("holds", &[Target::Place], says_all!(slot::HOLDS, holds)),
+    ("owner", &[Target::Kind], |a| {
+        let kinds = a.owner_kinds()?;
+        let Holder::Kind(kind) = a.thing else { unreachable!("`owner` is a built-in only under kinds") };
+        a.world.book.kinds[kind].owners = kinds.into();
+        Ok(())
+    }),
     ("select", &[Target::Place, Target::Commodity, Target::Asset], says!(slot::SELECT, policy, code)),
     ("opened", &[Target::Place], says!(slot::OPENED, day)),
     ("closed", &[Target::Place], says!(slot::CLOSED, day)),
@@ -400,6 +406,23 @@ impl<'a, 's> Args<'_, 'a, 's> {
         };
         let word = self.arg(wanted, unit)?;
         self.world.commodity_of(word)
+    }
+
+    /// `person, household`: the kinds of entity that may own what a kind of account classifies.
+    fn owner_kinds(&mut self) -> Result<Vec<Id<Kind>>, Diagnostic> {
+        let mut kinds = Vec::new();
+        loop {
+            let word = self.name("a kind of entity")?;
+            let kind = self.world.kind(self.home, word)?;
+            if self.world.book.kinds[kind].sort != Sort::Entity {
+                let error = Diagnostic::error("property-type", "`owner` needs a kind of entity");
+                return Err(error.label(word.loc, "this is not a kind of entity"));
+            }
+            kinds.push(kind);
+            if self.peek().is_none() {
+                return Ok(kinds);
+            }
+        }
     }
 
     fn currency(&mut self) -> Result<Id<Commodity>, Diagnostic> {
@@ -807,13 +830,8 @@ fn read_builtin_lines<'a, 's>(
     let own = Target::of(under.sort);
     let targets: &[Target] = if matches!(under.holder, Holder::Kind(_)) { &[Target::Kind, own] } else { &[own] };
     for line in at.lines {
-        if line.name.0 == "owner" {
-            if targets.len() != 1 || !matches!(targets[0], Target::Entity | Target::Place | Target::Asset) {
-                diags.push(
-                    Diagnostic::error("unknown-property", "`owner` is not a property of this kind")
-                        .label(line.loc, "owner is set on an entity, account, or asset"),
-                );
-            }
+        if line.name.0 == "owner" && !matches!((under.holder, under.sort), (Holder::Kind(_), Sort::Place(_))) {
+            owner_line(world, under, line, diags);
             continue;
         }
         if !BUILTINS.iter().any(|(name, _, _)| *name == line.name.0) {
@@ -830,6 +848,41 @@ fn read_builtin_lines<'a, 's>(
             diags.push(problem);
         }
     }
+}
+
+/// An `owner` line under anything but a kind of account: an entity, an account or an asset has its owners read where it is
+/// declared, and an account's are held to the kinds its kind says may own it. It is no property of the rest.
+fn owner_line(world: &World<'_>, under: NativeTarget, line: &Line<'_>, diags: &mut Vec<Diagnostic>) {
+    match under.holder {
+        Holder::Place(place) => diags.extend(owners_that_may_not(world, place, line)),
+        Holder::Entity(_) | Holder::Asset(_) => {}
+        _ => diags.push(
+            Diagnostic::error("unknown-property", "`owner` is not a property of this kind")
+                .label(line.loc, "owner is set on an entity, account, or asset"),
+        ),
+    }
+}
+
+/// `wrong-kind` for each owner of the account that its kind does not say may own it.
+fn owners_that_may_not(world: &World<'_>, place: Id<Place>, line: &Line<'_>) -> Vec<Diagnostic> {
+    let book = &world.book;
+    let Place { kind, owner, shares, .. } = &book.places[place];
+    let range = book.owners_of(*kind);
+    if range.is_empty() {
+        return Vec::new();
+    }
+    let owners: Vec<_> = match shares.is_empty() {
+        true => vec![(*owner, line.loc)],
+        false => shares.iter().map(|share| (share.entity, share.loc)).collect(),
+    };
+    let (takes, fitting) = (View::Kinds(range).describe(book), fill::fitting(world, range));
+    let found = |entity: Id<Entity>| article(book.name(book.kinds[book.entities[entity].kind].name));
+    let misfits = owners.into_iter().filter(|&(entity, _)| !book.may_own(*kind, entity));
+    let said = |(entity, loc)| {
+        let word = Word { text: book.name(book.entities[entity].path), loc };
+        problem::wrong_kind("owner", word, &found(entity), &takes, &fitting)
+    };
+    misfits.map(said).collect()
 }
 
 /// Asset `part of` edges are followed by the engine when it walks an asset's

@@ -482,6 +482,7 @@ impl Fixture {
             system: None,
             slots: axiom_core::Run::default(),
             laws: Box::new([]),
+            owners: Box::new([]),
             doc: None,
             loc: None,
         };

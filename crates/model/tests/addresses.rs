@@ -264,6 +264,41 @@ fn what_is_suggested_for_an_unknown_address_is_an_address_that_means_the_account
     });
 }
 
+/// A kind of account that says who may own it, and a beneficiary, as a 529 plan does.
+const PLAN: &str = "kind plan : asset\n  owner person, household\n  has beneficiary person\n";
+
+#[test]
+fn a_word_before_the_name_is_no_owner_when_the_kind_says_it_may_not_own() {
+    built(&format!("{PLAN}account acme/plan\n  beneficiary riley\n"), |_, diagnostics| {
+        let [error] = diagnostics else { panic!("{diagnostics:#?}") };
+        assert_eq!(
+            (&*error.code, error.message.as_str()),
+            ("wrong-kind", "`acme` fits no slot of `acme/plan` that is still free")
+        );
+        assert_eq!(error.notes, ["a plan still has: `owner` takes a person or a household"]);
+    });
+    clean(&format!("{PLAN}account family/plan\n  beneficiary riley\naccount acme/deposit-box : deposit\n"), |book| {
+        let owner = |name: &str| book.places[book.place(name).unwrap()].owner;
+        assert_eq!(owner("family/plan"), entity(book, "family"));
+        assert_eq!(owner("acme/deposit-box"), entity(book, "acme"), "a kind that says nothing takes any entity");
+    });
+}
+
+#[test]
+fn an_owner_line_is_held_to_the_same_range() {
+    let lines = format!("{PLAN}account college : plan\n  owner jordan 50%, acme 50%\n  beneficiary riley\n");
+    built(&lines, |_, diagnostics| {
+        let [error] = diagnostics else { panic!("{diagnostics:#?}") };
+        assert_eq!(error.code, "wrong-kind");
+        assert_eq!(error.message, "`acme` is an employer, and `owner` takes a person or a household");
+        assert!(error.notes[0].contains("`family`") && !error.notes[0].contains("`acme`"), "{:?}", error.notes);
+    });
+    let fine = format!(
+        "{PLAN}account college : plan\n  owner jordan 50%, family 50%\n  beneficiary riley\naccount till : deposit\n  owner acme\n"
+    );
+    clean(&fine, |_| ());
+}
+
 #[test]
 fn a_path_that_ends_in_an_accounts_name_is_an_address_attempt_and_makes_no_party_whatever_its_first_word() {
     // `jordanq` is no entity, but `401k` is an account's name: the path was meant as an address, and a party named

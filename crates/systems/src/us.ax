@@ -72,6 +72,7 @@ purpose nondeductible : spending
 /// IRA does, says `taxed-by-kind true`.
 kind tax-deferred : asset
   deferred
+  owner taxpayer
   has taxed-by-kind bool
   has deductible    bool
   taxed-by-kind     false

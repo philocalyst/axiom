@@ -484,6 +484,7 @@ Built-in properties:
 |----|----------|---------|
 | account, asset, business | `owner ENTITY [SHARE], …` | default `me`; `owner me 60%, theo 40%` gives each its share of what it earns and bears |
 | | `holds UNIT, … \| any` | commodities it may hold; a measure never |
+| kind of account | `owner KIND, …` | the kinds of entity that may own its accounts, as a word before the name or an `owner` line; none says any (`us` says `owner taxpayer` of `tax-deferred`) |
 | | `select fifo\|lifo\|hifo\|prorata\|exact` | relief policy |
 | | `opened DATE` | flows before are errors (`ends` closes it) |
 | | `liquidity SPAN` | time to turn into cash |
