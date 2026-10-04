@@ -1,4 +1,4 @@
-// raises property-type
+// raises property-argument
 use std
 base USD
 entity me : person

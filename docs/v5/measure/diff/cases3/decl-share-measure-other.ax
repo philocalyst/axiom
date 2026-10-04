@@ -1,4 +1,4 @@
-// raises contract-share-measure
+// raises contract-share-unit
 use std
 base USD
 entity me : person

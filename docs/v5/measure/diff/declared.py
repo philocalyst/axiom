@@ -222,7 +222,8 @@ CASES = [
     ("share-total", "contract-share-total", contract("share 60% for acme", "share 50% for shop")),
     ("share-measure-no-area", "contract-share-measure", contract("share 120 SQF for acme")),
     ("share-measure-unit", "contract-share-unit", contract("area 1_000 SQF", "share 120 USD for acme")),
-    ("share-measure-other", "contract-share-measure", contract("area 1_000 SQF", "share 5 VTI for acme")),
+    # The baseline said this three times over (the measure, the rate, the unit); U4 says the cause, once.
+    ("share-measure-other", "contract-share-unit", contract("area 1_000 SQF", "share 5 VTI for acme")),
     ("share-fraction-zero", "zero-fraction", contract("share 1/0 for acme")),
     # input (lower.rs inputs)
     ("input-empty", "contract-input", contract("input")),
@@ -297,13 +298,10 @@ FLAGS = [("restricted", "kind locked : deposit"), ("deferred", "kind later : dep
 
 
 # Where a built-in says something else than the generic `property-argument` or `property-type`: `holds`, `lives` and
-# `citizen` read every argument, so one too many is a value of the wrong kind; `share` checks its own rate. And
-# `currency USD` is refused today: the reader asks for a name and a currency is lexed as a unit (a bug, found by this
-# corpus: no book can write `currency`).
+# `citizen` read every argument, so one too many is a value of the wrong kind; `share` checks its own rate.
 SAYS = {
     "builtin-holds-extra": "property-type",
     "builtin-lives-extra": "property-type",
-    "builtin-currency-extra": "property-type",
     "builtin-citizen-extra": "unknown-system",
     "builtin-share-type": "share-rate",
 }
