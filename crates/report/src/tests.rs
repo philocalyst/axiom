@@ -19,7 +19,7 @@ use axiom_model::builtin;
 use axiom_model::*;
 
 use crate::lens::{Lens, Whose};
-use crate::why::Found;
+use crate::why::Target;
 use crate::{Cell, FlowBy, Query, Report, Row, Section, Style};
 use crate::{
     Context, Folded, available, balance, budget, claims, contracts, flow, gains, limits, lots, register, tax, why,
@@ -57,10 +57,12 @@ impl Household {
         views(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, &query)
     }
 
-    fn why<'a>(&'a self, found: Found) -> Report<'a> {
+    fn why<'a>(&'a self, target: Target) -> Report<'a> {
         let whose = Whose::default();
         let plan = axiom_engine::Plan::new(&self.book);
-        crate::why::explain_with_lens(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, found)
+        target
+            .report(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run)
+            .expect("the page of a thing that was found")
     }
 
     fn report<'a>(&'a self, query: Query) -> Report<'a> {
@@ -119,7 +121,7 @@ fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Rep
             lots::view_from(at(day), scope, run.holdings.iter())
         }
         Query::Forecast { .. } => unimplemented!("a hand-built run has no checkpoint to go on from"),
-        Query::Why { target } => return why::target_with_lens(lens, run, target),
+        Query::Why { target } => return why::Target::of(lens, run, target)?.report(lens, run),
         Query::Line { loc } => why::line_with_lens(lens, run, *loc),
     })
 }
@@ -1168,7 +1170,7 @@ fn the_summary_counts_the_places_that_were_declared_or_used() {
 #[test]
 fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed() {
     let house = household().with_headroom();
-    let report = house.why(Found::Place(house.place("assets/retirement")));
+    let report = house.why(Target::Place(house.place("assets/retirement")));
     let headings: Vec<_> =
         report.sections.iter().map(|section| section.heading.as_ref().map_or_else(String::new, cell)).collect();
     assert_eq!(headings, ["Composition", "Parcels", "Limits", "Governed by", "Recent flows"]);
@@ -1194,13 +1196,13 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
 #[test]
 fn why_an_entity_shows_its_places_ties_and_claims() {
     let house = household();
-    let grant = house.why(Found::Entity(house.entity("nsf")));
+    let grant = house.why(Target::Entity(house.entity("nsf")));
     let ties = grant.sections.iter().find(|section| heading(section) == Some("Held for it")).unwrap();
     assert_eq!(lines(ties), ["assets/bank/checking | 500.00 USD | 2025-06-01 | @1", "=Remaining | 500.00 USD |  |"]);
-    let client = house.why(Found::Entity(house.entity("acme")));
+    let client = house.why(Target::Entity(house.entity("acme")));
     let claims = client.sections.iter().find(|section| heading(section) == Some("Claims with it")).unwrap();
     assert!(lines(claims)[0].starts_with("!acme | ^inv-12"));
-    let jordan = house.why(Found::Entity(house.entity("jordan")));
+    let jordan = house.why(Target::Entity(house.entity("jordan")));
     // What is held, not what was earned: the statement of income and spending is `flow`.
     assert_eq!(lines(&jordan.sections[0]), ["assets/bank/jordan-checking | 4,300.00 USD"]);
 }
@@ -1209,7 +1211,7 @@ fn why_an_entity_shows_its_places_ties_and_claims() {
 fn why_a_system_says_what_each_of_its_laws_counted() {
     let house = household();
     let us = house.book.systems.iter().next().unwrap().0;
-    let report = house.why(Found::System(us));
+    let report = house.why(Target::System(us));
     assert_eq!(report.sections[0].notes.iter().map(cell).collect::<Vec<_>>(), ["Nobody in this book lives here."]);
     assert_eq!(
         lines(&report.sections[1]),
@@ -1222,7 +1224,7 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
 #[test]
 fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
     let house = household();
-    let report = house.why(Found::Laws(Box::new([Id::new(0), Id::new(3)])));
+    let report = house.why(Target::Laws(Box::new([Id::new(0), Id::new(3)])));
     assert_eq!(cell(&report.title), "`budget` is written in 2 places");
     assert_eq!(
         lines(&report.sections[0]),

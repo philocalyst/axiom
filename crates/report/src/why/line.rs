@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use axiom_core::{Id, Loc, Sym};
+use axiom_core::{Id, Loc, Map, Sym};
 use axiom_engine::{Cause, Run};
 use axiom_model::{Action, Amount, Book, Flow, Promised, Provenance, Purposed, Subject, Terms};
 
@@ -27,9 +27,7 @@ pub fn line<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Loc) -> Report<'s> {
     }
 
     let mut caused = Section::new([Column::left("What it caused"), Column::left("Law")]);
-    for id in flows {
-        consequences(lens, run, id, &mut caused);
-    }
+    consequences(lens, run, &flows, &mut caused);
     Report::new("Why this line").with(written).with(caused.headed("Consequences"))
 }
 
@@ -258,11 +256,19 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
         .collect()
 }
 
-/// What one flow did downstream: gains, obligations, tallies, violations.
-fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, section: &mut Section<'s>) {
+/// What the flows did downstream: gains, obligations, tallies, violations. Each of the run's records is read once, whatever
+/// the number of flows, and they are told in the order of the flows, each one's gains first, then its effects, then its
+/// violations, as the records stand in the run.
+fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], section: &mut Section<'s>) {
     let book = lens.book();
-    let cause = Cause::Flow(id);
-    for gain in run.gains.iter().filter(|gain| gain.cause == cause && lens.owns(gain.from)) {
+    let rank: Map<Id<Flow>, usize> = flows.iter().enumerate().map(|(rank, &id)| (id, rank)).collect();
+    let ranked = |cause: Cause| match cause {
+        Cause::Flow(id) => rank.get(&id).copied(),
+        _ => None,
+    };
+    let mut told: Vec<(usize, u8, Row<'s>)> = Vec::new();
+    for gain in run.gains.iter().filter(|gain| lens.owns(gain.from)) {
+        let Some(at) = ranked(gain.cause) else { continue };
         let realized = lens.place_qty(gain.from, gain.gain());
         let ambiguity = if gain.ambiguous { " (no lot policy: FIFO assumed)" } else { "" };
         let text = format!(
@@ -271,22 +277,25 @@ fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, section
             book.show(Amount::new(gain.qty, gain.unit)),
             path(book, gain.from)
         );
-        section.push(Row::new([Cell::text(text), Cell::Blank]));
+        told.push((at, 0, Row::new([Cell::text(text), Cell::Blank])));
     }
-    for effect in run.effects.iter().filter(|effect| effect.cause == cause && lens.owns_entity(effect.owner)) {
+    for effect in run.effects.iter().filter(|effect| lens.owns_entity(effect.owner)) {
+        let Some(at) = ranked(effect.cause) else { continue };
         let name = book.name(effect.name);
         let text = match effect.owed() {
             Some(owed) => format!("owes {} to {}: {name}", book.show(effect.amount), creditor(book, owed)),
             None => format!("counts {} as {name}", book.show(effect.amount)),
         };
-        section.push(Row::new([Cell::text(text), Cell::text(book.name(book.laws[effect.law].name))]));
+        told.push((at, 1, Row::new([Cell::text(text), Cell::text(book.name(book.laws[effect.law].name))])));
     }
-    for violation in
-        run.violations.iter().filter(|violation| violation.cause == cause && lens.governs(violation.subject))
-    {
+    for violation in run.violations.iter().filter(|violation| lens.governs(violation.subject)) {
+        let Some(at) = ranked(violation.cause) else { continue };
         let message = run.diagnostics[violation.diagnostic as usize].message.clone();
         let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
-        section
-            .push(Row::new([Cell::text(message), Cell::text(book.name(book.laws[violation.law].name))]).style(style));
+        let law = Cell::text(book.name(book.laws[violation.law].name));
+        told.push((at, 2, Row::new([Cell::text(message), law]).style(style)));
     }
+    // Stable: the records of one flow keep the order they have in the run.
+    told.sort_by_key(|&(at, kind, _)| (at, kind));
+    section.rows.extend(told.into_iter().map(|(.., row)| row));
 }

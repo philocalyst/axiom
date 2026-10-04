@@ -117,7 +117,10 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
                 Ok(super::lots::view_from(self.lens(at), scope, ledger.holdings()))
             }
             Query::Forecast { until, paths } => Ok(self.forecast(*until, *paths)),
-            Query::Why { target } => super::why::target_with_lens(self.lens(run.today), run, target),
+            Query::Why { target } => {
+                let lens = self.lens(run.today);
+                super::why::Target::of(lens, run, target)?.report(lens, run)
+            }
             Query::Line { loc } => Ok(super::why::line_with_lens(self.lens(run.today), run, *loc)),
         }
     }
