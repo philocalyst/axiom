@@ -223,6 +223,20 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 
 ## Lane U, in numbers
 
+C1, one site, one tail, one property reader (to `e65eb8a`): **56,146**, −963 from the v5 head `bce9735` (57,109); model
+19,123 (−969), syntax 6,438 (−4), core 3,494 (+10, phase 1a). Per entry, planned (with L-d) against delivered: U4
+−960/**−437**, U3 −200/**−82**, U2 −270/**−150**, U1 −840/**−350** (the world keeps its diagnostics, −259; a statement is
+lowered in its context, −91), U5 −100/**0** and U6 −80/**0** (neither pays on reading; UNIFY §11 says why): **−1,019 of
+−2,450**. Added: the Book dump's derives (+21) and the `purpose-of-its-own` hint (+26, the coordinator's `grant-purpose`
+finding). Against `bce9735`: 107 `diff/` outputs (86 declared-line errors in other words with the same codes, three share
+cascades said once, 18 `contracts` tables without "kepts"), 104 Books (those diagnostics, measure codes in the pool, one
+ending's interning, the hint), three goldens/mistakes (the hint, in 02-household and 03-violations too: they write `purpose
+education` on the scholarship grant); everything else byte-identical; the declared-lines corpus 208/208 on both; the release
+suite green. `bench/` against `bce9735`: `check` at 1m 5.01 s (median of five interleaved runs) against 4.95 s, 672 MB both;
+every other command within the machine's noise (±15% both ways), memory the same. The bench books exit 1 on both binaries
+(1,022 errors at 100k, 764 of them `assertion`), and their grants write `purpose pN-edu` (the hint now says so 24 times):
+`bench/nativeize.py` is behind the language. Revised landing: about **51,000** (UNIFY §11); distance to 27,000: **29,146**.
+
 Phase 1a, the instruments (`claude/great-wozniak-pnqn7x-v5-unify`; the plan is `UNIFY.md` there). **The count is restated:**
 `quality.py` used to stop reading a file at its first inline test module, so the 1,948 lines of code after one were not counted
 (`law.rs` 498, `book.rs` 374, `journal.rs` 369, `calendar.rs` 328, `declare.rs` 205, `problem.rs` 97, `sync/world.rs` 74,

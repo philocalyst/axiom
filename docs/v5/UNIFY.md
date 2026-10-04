@@ -1837,3 +1837,42 @@ for `Day`, `Neg` for `Dec`, a type name; 55,376); the declared-lines corpus (208
 claim on a baseline binary of `b3b98fc`); the relief model test and its fourteen mutants, all killed; the relief books.
 The corpus found that `currency USD` cannot be written (the built-in's reader asks for a name, a currency is lexed as a
 unit): a bug for lane D or for U4, whose `Want::Commodity` reads units.
+
+## 11. C1, delivered (2026-10-04)
+
+From the v5 head `bce9735` (57,109) to `e65eb8a` (56,146): **−963**, of which the entries **−1,019** and two additions
+(the Book dump's `Debug` derives +21, the `purpose-of-its-own` hint +26) and phase 1a's `core` (+10).
+
+| entry | planned (with L-d) | delivered | why it differs |
+|---|---:|---:|---|
+| U4 one reader of a property line | −960 | **−437** | the built-ins' reader (`Args`) became the one reader instead of a `Signature` table; `format` and `source` lines are strings, not expressions, and keep their reader (−100 of the plan); the plan counted lines U1 also counted |
+| U3 a written amount and quantity | −200 | **−82** | `written_amount`/`written_part` replace six readers; the template's share and the journal's dropped root stay as a caller's choice, not a type |
+| U2 one tail | −270 | **−150** | one `read_tail` with a `Line` for the flow, term, `also`, measure and ending; a value's tail (`via` is a place) and a waiver's (its code is its name) mean other things; the parser's own clause table stays (sharing it moves refusals between parser and lowering) |
+| U1 the lowering site | −840 | **−350** | the four parameters were two: `world` and `diags` always travel together, so the world keeps its diagnostics (−259); `home` and `file` already travel in the passes' own contexts (`Site`, `Written`, `Stated`, `FlowCx`, `Placement`); a statement is lowered in its context (−91); 24 signatures still pass `home` and `file` apart (about −40, left for C2, which rewrites those passes) |
+| U5 the relator on `fill::fill` | −100 | **0** | on reading, the relator shares one line with `fill::thing` (the kind test); its fills are names, not values, and its five errors are its own codes and words: carrying both vocabularies through `fill` adds what it removes |
+| U6 one walk | −80 | **0** | the walks left are short queries already on `Collected` (`values_written`, `scopes`, `named_by_openings`, `originations`); `mentions` keeps its own walk for its order (first mention across kinds of item) |
+| **C1** | **−2,450** | **−1,019** | |
+
+Follow-ons taken in C1: `Tail::merge` as one struct; `implied_end` and `written_part` return their problem (the readers that
+said into a list to be thrown away); `loan_endpoint` takes back what it said; a claim's two parties read in one line; a
+statement's unsupported case is a method of its context; `contracts`' "0 kepts" (the count under its column); two unused
+imports; the declared-lines corpus claims what the v5 head raises (`currency`, fixed there) and what U4 says once.
+
+What C1 changed, all of it: 107 outputs of `diff/` (86 declared-line errors in other words, codes the same; three share
+cascades said once, two of them by their cause, `contract-share-unit`, not their first; 18 `contracts` tables), 104 Books
+(the same diagnostics, the measures' codes in the pool, one ending's description interned where written, and the hint),
+three goldens/mistakes (the hint). Every other output is byte-identical to `bce9735`.
+
+**Revised landing.** C1 delivered 42% of its plan, the K lanes' own ratio (section 0). The ledger's estimates counted the lines
+an entry touches as the lines it deletes; what unifies needs its own lines for the cases it still tells apart. Applied to what
+is left: C2 about −800 (of −1,450; U7's signature savings are taken), C3 −650 (of −1,190), C4 −900 (of −1,295; U21 removes a
+store and its guards, the likeliest to hold), C5 −1,000 (of −1,755), C6 −1,100 (of −1,925), C7 perhaps −700: the tree lands
+at about **51,000**, not 46,050. The distance to 27,000 is **29,146** today and about 24,000 then.
+
+`bench/` (C2's baseline): `check` at 1m 5.01 s against 4.95 s on `bce9735` (median of five interleaved runs), 672 MB both; the
+rest within the machine's noise. Found on the way, for their owners: the bench books exit 1 on both binaries (1,022 errors at
+100k) and write `purpose pN-edu` on their grants (`bench/nativeize.py`); 02-household and 03-violations write `purpose
+education` on the scholarship, so 03's expected `purpose` violation fires because `grant-purpose` is unset; 10-budgeter's
+`check` warns October's `#fun` at 297.01 USD (the total at its second firing) where `budget` says 323.02, the window total
+counted twice, which U29 (one recognized series) is to make one; the engine's dead code since the K merges
+(`Assets::into_states`, the guards' `before`, `part_straight_line`) is U21's and U33's.
