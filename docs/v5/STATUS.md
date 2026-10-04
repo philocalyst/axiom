@@ -31,8 +31,8 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | K3f debts as parcels | a bill you owe is a parcel on a Debt tab, a payment to the party settles it; `owed_by_you`, the `payable` gate and `makes_debt` go | brief written (after K6, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | **K5d** loans | a loan is one schedule walked once when the promises compile (`Annuity::step` over Pay, Prepay, Reset, Rate: pure, 40-byte state); a payment is a split of `#principal` to the debt tab and `#interest` (of the asset a `for` names) to the lender; `resets`, `prepay shortens\|recasts`, a rate written `DATE LOAN now at PERCENT`; a statement of the loan's balance is held to the schedule with the likely cause named. `deposit` not built (needs K3f) | **merged** (`34adb26`) |
-| K5e a loan that began before the book | the debt tab opens with what the schedule says is owed, against the opening balances | running (map first) |
-| L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | brief written (after the kernels) |
+| **K5e** a loan that began before the book | a loan made before the book's first fact, with no `opening` of its debt and no origination line, opens its debt tab on the first fact's day with what its schedule says is owed (`Book::first_fact` is now one definition; a payment due before the book began is no payment that was missed) | **merged** (`25566a5`) |
+| L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | running (map first) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written) |
 
 Test baseline before any lane: 734 passed, 4 failed, 8 ignored. Lane C on top: 777 passed, the same 4 failed, 13
@@ -56,7 +56,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 55,100 non-test lines (K7b: -63, K5d: +725): the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 55,250 non-test lines (K7b: -63, K5d: +725, K5e: +207): the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -172,6 +172,16 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K5e, in numbers
+
+| | |
+|---|---|
+| what it is | `model/lower/loan_opening.rs`: a loan whose `on` is before `Book::first_fact()` (the one definition now; it left the engine's timeline), with no `opening` line naming it and no `DATE NAME` line originating it (even a rejected one), opens its debt tab with `Promises::owed_before`, the schedule's balance before that day (the lowering has the terms, the rates already said and the reset indices; nothing the journal does to the loan precedes the first fact). The flow is out of the debt tab against the opening entity, `Mode::Opening`, `Origin::Derived(Derivation::Opening(contract))`, lowered right after the record that makes the first fact; **dated on the first fact's own day, not the day before** (a flow before the first fact cannot be placed in the day-sorted arena, and one dated the day before would move the first fact and the monitor's start; the amount is still the balance before that day). `note[loan-opening]` once per loan names the loan, the day, the amount and the line that overrides it (`mortgage 312_441.12 USD` in an `opening`: a debt is written positive). A book with no fact opens each loan on the day it was made (and the monitor then watches from there: one `missed-occurrence`). `Amortization::explain` no longer names a payment due before the book as missed |
+| lines | **+207 non-test** (model +213, engine -8, report +2); `loan_opening.rs` +154 (the map priced it at 110: the rejected-origination pre-scan, a `Begins` enum, and the edit placed as a line of the opening) |
+| behaviour | no golden or existing mistake moved (four new mistake books 112 to 115); `11-sam` and `v4-sketch` print the debt they own (311,345.99 owed on `rocket` after three kept payments; net worth is negative because the condo has no price in the book); `explore-v5/02-family` 134 to 130 errors and `03-triplex` 66 to 65 |
+| proof | 7,500 generated books whose first fact is after the loan's day (first fact an opening, a line, a flow or a statement; a user opening that agrees or differs; rates said before the book; resets; both prepay modes; missed payments; 67 loans paid off before the book) agree with the independent reference, 0 differ (the baseline differs on 4,050); K5d's 4,500 books still agree; 31 mutants, 30 killed (16 by the oracle, 14 by tests), 1 equivalent; fuzz 3,000 mutants of examples 04 to 10: 0 differ; `splits.py` 27,690 commands 0 differ; `claims.py` identical; `check` on `bench/` 100k 0.318 to 0.310 s, 1m 2.860 to 2.882 s |
+| left | **a loan made in the book with no origination line** (`02-family`'s `mortgage-2` and `car-loan`: the tab stays at zero): proposal `warning[loan-not-originated]` with the origination line as the edit, not an implied flow, because where the cash arrived is a fact only the book knows; two inputs the lowering's walk cannot see (a late line that is itself the first fact and keeps a payment due before it; a waiver dated on or after the first fact for a due day before it); the opening follows the record that makes the first fact on the same day (right because a day's balances do not depend on the order of its flows, an ordering argument and not a structural guarantee); `Promises::owed_before` and `Promises::compile` are two walks of one loan sharing `walk`; **`Insertion` reads bytes** to word an edit (a code action belongs in the diagnostic's own vocabulary so an editor, the MCP server and the GUI can place it: not built) |
 
 ## K5d, in numbers
 
