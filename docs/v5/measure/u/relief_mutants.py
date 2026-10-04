@@ -51,8 +51,14 @@ MUTANTS = [
      "if take < total && policy.is_none() {"),
     # the merge
     ("money-merges-by-basis-not-per-unit", LOTS,
-     "a == b && ap == bp && aw == bw && ab.0 as i128 * bq.0 as i128 == bb.0 as i128 * aq.0 as i128",
-     "a == b && ap == bp && aw == bw && ab == bb"),
+     "Held::Money => self.basis.0 as i128 * other.qty.0 as i128 == other.basis.0 as i128 * self.qty.0 as i128,",
+     "Held::Money => self.basis == other.basis,"),
+    ("purchases-merge-by-their-day", LOTS,
+     "Held::Lots => (self.txn, self.acquired, self.held_since) == (other.txn, other.acquired, other.held_since),",
+     "Held::Lots => (self.acquired, self.held_since) == (other.acquired, other.held_since),"),
+    ("a-merge-ignores-the-codes", LOTS, "\n            && same_codes(self.codes, other.codes, pool)", ""),
+    ("a-merge-ignores-the-tie", LOTS, "(self.tied, self.part, self.wash_matched) == (other.tied, other.part, other.wash_matched)",
+     "(self.part, self.wash_matched) == (other.part, other.wash_matched)"),
     ("a-merge-drops-the-basis", LOTS, "            lots[at].basis += parcel.basis;\n", ""),
     ("ranges-select-the-rest", LOTS, "ranges.any(|days| days.contains(lot.acquired))", "ranges.any(|days| !days.contains(lot.acquired))"),
 ]

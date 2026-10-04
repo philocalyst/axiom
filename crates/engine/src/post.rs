@@ -29,14 +29,14 @@ use axiom_model::{
 use crate::eval::{Occasion, Realized};
 use crate::explain;
 use crate::ledger::Ledger;
-use crate::lots::{Held, Origin, Request, Selection, Shares, Slice};
+use crate::lots::{CarryLotAddition, Held, Origin, Request, Selection, Shares, Slice};
 use crate::motion::{Course, Motion, Moves};
 use crate::plan::Plan;
 use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
 use crate::scope::{holds, stays_with_owner};
 use crate::settle::{Claiming, Relief};
 use crate::state::Missing;
-use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, show};
+use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, PendingCarry, show};
 
 fn fresh_slice(m: &Motion, qty: Qty, is_base: bool, now: (axiom_core::Day, RuntimeTxn)) -> Slice {
     let mut slice = Slice::fresh(qty, is_base, now);
@@ -606,12 +606,6 @@ impl Ledger<'_, '_, '_> {
                 );
             }
         }
-        for slice in &self.scratch.relief.slices {
-            let part = if keeps { slice.part } else { fresh_part };
-            if let Some(part) = part {
-                self.world.holdings.index_part_slot(m.to, m.arrive.unit, part);
-            }
-        }
         let part_ready = if let Some((asset, part)) = acquisition {
             match self.add_asset_part(asset, part) {
                 Ok(()) => true,
@@ -626,7 +620,7 @@ impl Ledger<'_, '_, '_> {
         self.sample_temporal(m.day);
         if !keeps && part_ready {
             if let Some(part) = fresh_part {
-                self.match_pending_carries(part, owner, m.arrive.unit, since, m.arrive.qty, m);
+                self.match_pending_carries(part, m);
                 self.sample_temporal(m.day);
             }
         }
@@ -681,7 +675,7 @@ impl Ledger<'_, '_, '_> {
             cost,
             basis,
         };
-        if let Err(error) = self.validate_asset_part(asset, &part) {
+        if let Err(error) = self.world.assets.validate_part(asset, &part) {
             self.report_asset_state_error(m, error);
             return None;
         }
@@ -726,7 +720,7 @@ impl Ledger<'_, '_, '_> {
             cost,
             basis: cost,
         };
-        if let Err(error) = self.validate_asset_part(asset, &part) {
+        if let Err(error) = self.world.assets.validate_part(asset, &part) {
             self.report_asset_state_error(m, error);
             return;
         }
@@ -746,7 +740,6 @@ impl Ledger<'_, '_, '_> {
             Held::Lots,
             &self.plan.book.codes,
         );
-        self.world.holdings.index_part_slot(declaration.place, declaration.unit, part.id);
         if let Err(error) = self.add_asset_part(asset, part) {
             self.report_asset_state_error(m, error);
         }
@@ -865,10 +858,6 @@ impl Ledger<'_, '_, '_> {
             self.report_asset_state_error(m, crate::AssetError::UnknownAsset);
             return;
         };
-        let Some(anchor) = state.parts().first().map(|part| part.id) else {
-            self.report_asset_state_error(m, crate::AssetError::MissingAcquisition);
-            return;
-        };
         if state.disposed.is_some() {
             self.report_asset_state_error(m, crate::AssetError::AlreadyDisposed);
             return;
@@ -877,17 +866,6 @@ impl Ledger<'_, '_, '_> {
             self.report_asset_state_error(m, crate::AssetError::NotHeldAtBoundary);
             return;
         }
-        let basis = match (state.total_basis(), self.world.holdings.part_basis(anchor)) {
-            (Ok(total), Ok(held)) if total == held => total,
-            (Err(error), _) | (_, Err(error)) => {
-                self.report_asset_state_error(m, error);
-                return;
-            }
-            _ => {
-                self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
-                return;
-            }
-        };
         let quantity = self.world.holdings.qty(declaration.place, declaration.unit);
         if quantity.is_negative() || quantity.is_zero() {
             self.report_asset_state_error(m, crate::AssetError::UnknownPart);
@@ -909,15 +887,6 @@ impl Ledger<'_, '_, '_> {
         let request = Request::of(quantity, policy, &book.codes, (m.day, m.txn));
         self.world.holdings.relieve(declaration.place, declaration.unit, &request, &mut self.scratch.relief);
         self.sample_temporal(m.day);
-        if self.scratch.relief.shortfall > Qty::ZERO {
-            self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
-            return;
-        }
-        let relieved: Qty = self.scratch.relief.slices.iter().map(|slice| slice.basis).sum();
-        if relieved != basis {
-            self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
-            return;
-        }
 
         let on_out =
             Occasion { amount: Some(Amount::new(quantity, declaration.unit)), purpose: m.purpose, ..Occasion::flow(m) };
@@ -957,80 +926,56 @@ impl Ledger<'_, '_, '_> {
             };
             self.fire(book.rules.at(Watch::Gain(declaration.place)), &on_gain);
         }
-        if let Err(error) = self.dispose_asset(asset, m.txn, self.source_flow(m), boundary) {
+        if let Err(error) = self.world.assets.dispose(asset, m.txn, self.source_flow(m), boundary) {
             self.report_asset_state_error(m, error);
         }
         self.sample_temporal(m.day);
     }
 
-    /// Matches future replacement acquisitions against losses already waiting
-    /// in the canonical carry queue. The parcel has been landed and indexed,
-    /// and a declared asset part (if any) has been added before this runs.
-    fn match_pending_carries(
-        &mut self,
-        part: PartId,
-        owner: Id<Entity>,
-        unit: Id<axiom_model::Commodity>,
-        acquired: axiom_core::Day,
-        quantity: Qty,
-        motion: &Motion,
-    ) {
-        let mut left = quantity;
+    /// Carries the losses that wait for a purchase (`fire::carry_loss`) into the shares `m` just bought, `part`: the
+    /// oldest loss first, each a share of its amount for the shares it finds.
+    fn match_pending_carries(&mut self, part: PartId, m: &Motion) {
+        let (owner, unit, acquired) = (m.target.owner, m.arrive.unit, m.detail().since.unwrap_or(m.day));
+        let mut left = m.arrive.qty;
         let mut matched = Vec::new();
-        for index in 0..self.world.assets.pending_carries().len() {
-            let Some(request) = self.world.assets.pending_carry(index) else { continue };
+        for (index, request) in self.world.assets.pending_carries().iter().enumerate() {
+            let window = crate::Assets::within_carry_window(request.sold, acquired, request.within);
             if left.is_zero()
-                || request.owner != owner
-                || request.unit != unit
+                || (request.owner, request.unit) != (owner, unit)
                 || request.from == part
                 || acquired < request.sold
-                || !crate::Assets::within_carry_window(request.sold, acquired, request.within)
+                || !window
             {
                 continue;
             }
             let take = request.quantity.min(left);
-            if take.is_zero() {
-                continue;
-            }
-            let mut shares = Shares::new(request.amount, request.quantity);
-            let amount = shares.take(take);
-            matched.push((index, request, take, amount));
+            matched.push((index, *request, take, Shares::new(request.amount, request.quantity).take(take)));
             left -= take;
         }
         if matched.is_empty() {
             return;
         }
-        let additions: Vec<_> = matched
-            .iter()
-            .map(|(_, request, taken, amount)| crate::lots::CarryLotAddition {
-                part,
-                acquired,
-                held_since: request.held_since,
-                quantity: *taken,
-                amount: *amount,
-            })
-            .collect();
-        if let Err(error) = self.carry_basis_to_parts(&additions) {
-            self.report_asset_state_error(motion, error);
-            return;
+        let addition = |&(_, request, quantity, amount): &(usize, PendingCarry, Qty, Qty)| CarryLotAddition {
+            part,
+            acquired,
+            held_since: request.held_since,
+            quantity,
+            amount,
+        };
+        let additions: Vec<_> = matched.iter().map(addition).collect();
+        if let Err(error) = self.carry_basis_to_parts(unit, &additions) {
+            return self.report_asset_state_error(m, error);
         }
-        self.sample_temporal(motion.day);
-        // `index` values refer to the pre-update queue. Removing in reverse
-        // order preserves the remaining indices; all updated amounts were
-        // precomputed while the basis guard was still untouched.
+        self.sample_temporal(m.day);
+        // The queue is changed from the back, so the positions of the ones still to change hold.
         for (index, request, taken, amount) in matched.into_iter().rev() {
-            let quantity = request.quantity - taken;
-            let remaining = request.amount - amount;
-            if let Err(error) = self.world.assets.update_pending_carry(index, quantity, remaining) {
-                self.report_asset_state_error(motion, error);
-                return;
+            if let Err(error) =
+                self.world.assets.update_pending_carry(index, request.quantity - taken, request.amount - amount)
+            {
+                return self.report_asset_state_error(m, error);
             }
-            self.record.adjustments.push(crate::Adjustment {
-                day: motion.day,
-                law: request.law,
-                kind: crate::AdjustmentKind::Carried { from: request.from, to: Some(part) },
-                amount,
-            });
+            let kind = crate::AdjustmentKind::Carried { from: request.from, to: Some(part) };
+            self.record.adjustments.push(crate::Adjustment { day: m.day, law: request.law, kind, amount });
         }
     }
 
@@ -1295,24 +1240,26 @@ opening 2025-01-01
         assert_eq!(condo_parts[1].kind, PartKind::Improvement);
         assert_eq!(initial.assets[asset.index()].total_cost().unwrap().0, 110_000);
 
-        let improvement = condo_parts[1].id;
-        let consumed = ledger.consume_asset_part(asset, improvement, axiom_core::Qty(2_000)).unwrap();
-        assert_eq!((consumed.applied.0, consumed.excess.0), (2_000, 0));
-        let carry = ledger.carry_asset_basis(cabin_part, Some((asset, improvement)), axiom_core::Qty(500)).unwrap();
-        assert_eq!(carry.to, Some(improvement));
-        ledger
-            .dispose_asset(
-                asset,
-                cabin_part.origin,
-                None,
-                DisposalBoundary::After(EventKey { day: day(2025, 3, 1), sequence: 0 }),
-            )
-            .unwrap();
+        let (acquisition, improvement) = (condo_parts[0].id, condo_parts[1].id);
+        assert_eq!(ledger.consume_asset_part(asset, improvement, axiom_core::Qty(2_000)), Ok(axiom_core::Qty(2_000)));
+        // A loss carried into the condo (a wash sale) goes to what was bought, its acquisition.
+        let since = day(2024, 1, 1);
+        let carried = crate::lots::CarryLotAddition {
+            part: acquisition,
+            acquired: since,
+            held_since: since,
+            quantity: axiom_core::Qty(1),
+            amount: axiom_core::Qty(500),
+        };
+        ledger.carry_basis_to_parts(book.assets[asset].unit, &[carried]).unwrap();
+        let boundary = DisposalBoundary::After(EventKey { day: day(2025, 3, 1), sequence: 0 });
+        ledger.world.assets.dispose(asset, cabin_part.origin, None, boundary).unwrap();
         let run = ledger.finish();
 
         let state = &run.assets[asset.index()];
         assert_eq!(state.total_cost().unwrap().0, 110_000);
         assert_eq!(state.total_basis().unwrap().0, 108_500);
+        assert_eq!((state.parts()[0].basis.0, state.parts()[1].basis.0), (100_500, 8_000));
         assert!(state.held_at(EventKey { day: day(2025, 3, 1), sequence: 0 }));
         assert!(!state.held_at(EventKey { day: day(2025, 3, 1), sequence: 1 }));
         let checking = book.place("assets/checking").unwrap();
@@ -1326,5 +1273,41 @@ opening 2025-01-01
             .unwrap();
         assert_eq!(condo.qty().0, 1, "basis parts never duplicate the physical asset unit");
         assert_eq!(condo.lots.iter().map(|lot| lot.basis.0).sum::<i64>(), 108_500);
+    }
+
+    /// What a law consumes of a part is capped by what that part has left: the improvement gives up its own basis and no
+    /// more, and the acquisition keeps all of its (moved here from the part table's own test, as the cap is the fold's).
+    #[test]
+    fn consumption_is_part_specific_and_reports_excess_without_negative_basis() {
+        let text = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+purpose improvement : capital
+  of asset
+account assets/checking
+entity contractor
+asset condo : property
+
+opening 2025-01-01
+  checking 5_000 USD
+  condo basis 1_000 USD since 2024-01-01
+2025-02-15 checking -> contractor 100 USD #improvement of condo
+";
+        let book = book(text);
+        let plan = Plan::new(&book);
+        let (initial, mut ledger) = plan.run_with_view(Options { today: day(2025, 3, 31), relaxed: false });
+        let asset = book.asset("condo").unwrap();
+        let improvement = initial.assets[asset.index()].parts()[1].id;
+        assert_eq!(ledger.consume_asset_part(asset, improvement, axiom_core::Qty(12_000)), Ok(axiom_core::Qty(10_000)));
+        let run = ledger.finish();
+        let state = &run.assets[asset.index()];
+        assert_eq!((state.parts()[0].basis.0, state.parts()[1].basis.0), (100_000, 0), "no part goes below nothing");
+        let condo = |holding: &&crate::Holding| {
+            (holding.place, holding.unit) == (book.assets[asset].place, book.assets[asset].unit)
+        };
+        let lots = &run.holdings.iter().find(condo).unwrap().lots;
+        assert_eq!(lots.iter().map(|lot| lot.basis.0).sum::<i64>(), 100_000);
     }
 }

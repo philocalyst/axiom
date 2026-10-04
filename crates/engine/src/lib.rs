@@ -36,7 +36,6 @@
 #![forbid(unsafe_code)]
 
 mod assets;
-mod assets_runtime;
 mod budget;
 mod calc;
 mod checkpoint;
@@ -107,8 +106,7 @@ use axiom_model::{
 };
 
 pub use assets::{
-    AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId,
-    PartKind, PendingCarry,
+    AssetError, AssetState, Assets, Disposal, DisposalBoundary, EventKey, Part, PartId, PartKind, PendingCarry,
 };
 pub use axiom_model::Cause;
 pub use checkpoint::Checkpoint;

@@ -1,15 +1,18 @@
-//! Canonical, part-aware state for assets.
+//! An asset's parts: its acquisition and each improvement, what each cost and what is left of its basis.
 //!
-//! The asset table is part of the ledger's clonable world. It is not a second
-//! holdings ledger: each part is keyed by the same [`RuntimeTxn`] identity as
-//! the parcel that represents the asset unit, and the owning ledger updates
-//! both atomically. The parcel remains the aggregate the holdings need; this
-//! table preserves the composition of its cost basis for part-aware laws.
+//! The asset's unit is one parcel, keyed by its acquisition's [`PartId`], and that parcel holds the asset's whole basis: an
+//! improvement has no quantity, so it cannot be a parcel of its own (K3c's map, section 4). The part table says how that
+//! basis is made up, which a parcel cannot: what each part cost, what of it is left (a law consumes each part by its own
+//! basis), and when each was recorded and goes into service. So the parts' basis adds up to the parcel's, and the fold keeps
+//! it so by writing both in one step ([`Ledger::consume_asset_part`], [`Ledger::add_asset_part`],
+//! [`Ledger::carry_basis_to_parts`]): the parcels are checked and written first, and a part is written only once they have
+//! been. The table is part of the ledger's clonable world, an arena by asset with an index by part.
 
 use axiom_core::{Day, Id, Qty, Span};
 use axiom_model::{Asset, Book, Commodity, Entity, Flow, FlowCodes, Law, RuntimeTxn};
 
-use crate::Cause;
+use crate::lots::CarryLotAddition;
+use crate::{Cause, Ledger};
 
 /// Stable identity of one asset part within its originating runtime flow.
 ///
@@ -128,16 +131,6 @@ impl AssetState {
         self.parts.len()
     }
 
-    /// Original cost for one explicitly selected law subject part.
-    pub fn cost(&self, part: PartId) -> Result<Qty, AssetError> {
-        self.measure(part, |part| part.cost)
-    }
-
-    /// Remaining basis for one explicitly selected law subject part.
-    pub fn basis(&self, part: PartId) -> Result<Qty, AssetError> {
-        self.measure(part, |part| part.basis)
-    }
-
     /// Aggregate cost for reports that ask about the whole asset.
     pub fn total_cost(&self) -> Result<Qty, AssetError> {
         self.total(|part| part.cost)
@@ -146,10 +139,6 @@ impl AssetState {
     /// Aggregate basis for the asset's holdings parcel.
     pub fn total_basis(&self) -> Result<Qty, AssetError> {
         self.total(|part| part.basis)
-    }
-
-    fn measure(&self, id: PartId, value: impl Fn(&Part) -> Qty) -> Result<Qty, AssetError> {
-        self.parts.iter().find(|part| part.id == id).map(value).ok_or(AssetError::UnknownPart)
     }
 
     fn total(&self, value: impl Fn(&Part) -> Qty) -> Result<Qty, AssetError> {
@@ -228,10 +217,6 @@ impl Assets {
         self.states.iter()
     }
 
-    pub(crate) fn into_states(self) -> Vec<AssetState> {
-        self.states
-    }
-
     pub(crate) fn into_run_parts(self) -> (Vec<AssetState>, Vec<PendingCarry>) {
         (self.states, self.pending_carries)
     }
@@ -275,10 +260,6 @@ impl Assets {
             self.pending_carries.push(carry);
         }
         Ok(())
-    }
-
-    pub(crate) fn pending_carry(&self, index: usize) -> Option<PendingCarry> {
-        self.pending_carries.get(index).copied()
     }
 
     pub(crate) fn update_pending_carry(&mut self, index: usize, quantity: Qty, amount: Qty) -> Result<(), AssetError> {
@@ -373,192 +354,78 @@ impl Assets {
         (part.id == id).then_some((asset, part))
     }
 
-    /// Lowers one part's basis. Over-consumption is represented as `excess`
-    /// for the caller's typed diagnostic; the stored basis never goes below
-    /// zero and no other part changes.
-    pub fn consume(&mut self, asset: Id<Asset>, part_id: PartId, requested: Qty) -> Result<Consumption, AssetError> {
-        Ok(self.prepare_consumption(asset, part_id, requested)?.apply())
-    }
-
-    /// Validates a consumption without changing canonical asset state. Ledger
-    /// callers pair this with a prepared parcel adjustment before committing
-    /// either store.
-    pub(crate) fn prepare_consumption(
-        &mut self,
-        asset: Id<Asset>,
-        part_id: PartId,
-        requested: Qty,
-    ) -> Result<ConsumptionGuard<'_>, AssetError> {
-        if requested.is_negative() {
-            return Err(AssetError::NegativeAmount);
-        }
-        let state =
-            self.states.get_mut(asset.index()).filter(|state| state.asset == asset).ok_or(AssetError::UnknownAsset)?;
+    /// A part of `asset` that is still held, and the asset's acquisition, whose parcels hold its basis: what a law may
+    /// consume of.
+    fn held(&self, asset: Id<Asset>, id: PartId) -> Result<(PartId, Part), AssetError> {
+        let state = self.asset(asset).ok_or(AssetError::UnknownAsset)?;
         if state.disposed.is_some() {
             return Err(AssetError::Disposed);
         }
-        let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
-        if owner != asset {
-            return Err(AssetError::UnknownPart);
-        }
-        let part = state.parts.get_mut(index).ok_or(AssetError::UnknownPart)?;
-        let before = part.basis;
-        let applied = Qty(requested.0.min(part.basis.0));
-        let basis = Qty(part.basis.0.checked_sub(applied.0).ok_or(AssetError::Overflow)?);
-        Ok(ConsumptionGuard {
-            part,
-            before,
-            result: Consumption { asset, part: part_id, requested, applied, excess: Qty(requested.0 - applied.0) },
-            basis,
-        })
+        let part = self.part(id).filter(|&(owner, _)| owner == asset).ok_or(AssetError::UnknownPart)?.1;
+        Ok((state.parts[0].id, *part))
     }
 
-    /// Adds a carried loss to a selected acquisition part. `None` records an
-    /// unreceived carry without changing basis. The engine owns the pending
-    /// carry queue and decides when the search window has closed.
-    pub fn carry(
-        &mut self,
-        from: PartId,
-        to: Option<(Id<Asset>, PartId)>,
-        amount: Qty,
-    ) -> Result<CarryUpdate, AssetError> {
-        Ok(self.prepare_carry(from, to, amount)?.apply())
+    fn part_mut(&mut self, id: PartId) -> &mut Part {
+        let (asset, index) = self.part_index[&id];
+        &mut self.states[asset.index()].parts[index]
     }
 
-    /// Validates both sides of a basis carry without mutation.
-    pub(crate) fn prepare_carry(
-        &mut self,
-        from: PartId,
-        to: Option<(Id<Asset>, PartId)>,
-        amount: Qty,
-    ) -> Result<CarryGuard<'_>, AssetError> {
-        if amount.is_negative() {
-            return Err(AssetError::NegativeAmount);
+    /// Adds a loss carried into a part, if it is an asset's: what is carried into is what was bought, its acquisition.
+    fn add_basis(&mut self, id: PartId, amount: Qty) -> Result<(), AssetError> {
+        let Some(&(asset, index)) = self.part_index.get(&id) else { return Ok(()) };
+        match (index, self.states[asset.index()].disposed) {
+            (0, None) => {}
+            (0, Some(_)) => return Err(AssetError::Disposed),
+            _ => return Err(AssetError::UnknownPart),
         }
-        if self.part(from).is_none() {
-            return Err(AssetError::UnknownPart);
-        }
-        let target = if let Some((asset, part_id)) = to {
-            let state = self
-                .states
-                .get_mut(asset.index())
-                .filter(|state| state.asset == asset)
-                .ok_or(AssetError::UnknownAsset)?;
-            if state.disposed.is_some() {
-                return Err(AssetError::Disposed);
-            }
-            let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
-            if owner != asset {
-                return Err(AssetError::UnknownPart);
-            }
-            let part = state.parts.get_mut(index).ok_or(AssetError::UnknownPart)?;
-            let before = part.basis;
-            let basis = Qty(part.basis.0.checked_add(amount.0).ok_or(AssetError::Overflow)?);
-            Some((part, before, basis))
-        } else {
-            None
-        };
-        Ok(CarryGuard { result: CarryUpdate { from, to: to.map(|(_, part)| part), amount }, target })
-    }
-
-    /// Prepares a positive basis addition to one declared asset part. The
-    /// corresponding physical parcel is adjusted by `assets_runtime` under a
-    /// second disjoint mutable guard before either store is committed.
-    pub(crate) fn prepare_basis_additions(
-        &mut self,
-        additions: &[(Id<Asset>, PartId, Qty)],
-    ) -> Result<AssetBasisBatchGuard<'_>, AssetError> {
-        let mut changes = Vec::with_capacity(additions.len());
-        for &(asset, part_id, amount) in additions {
-            if amount.is_negative() {
-                return Err(AssetError::NegativeAmount);
-            }
-            if amount.is_zero() {
-                continue;
-            }
-            if changes.iter().any(|change: &AssetBasisChange| change.part_id == part_id) {
-                return Err(AssetError::DuplicatePart);
-            }
-            let state =
-                self.states.get(asset.index()).filter(|state| state.asset == asset).ok_or(AssetError::UnknownAsset)?;
-            if state.disposed.is_some() {
-                return Err(AssetError::Disposed);
-            }
-            let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
-            if owner != asset {
-                return Err(AssetError::UnknownPart);
-            }
-            let part = state.parts.get(index).ok_or(AssetError::UnknownPart)?;
-            let basis = Qty(part.basis.0.checked_add(amount.0).ok_or(AssetError::Overflow)?);
-            changes.push(AssetBasisChange { asset: asset.index(), part_id, part: index, basis });
-        }
-        Ok(AssetBasisBatchGuard { assets: self, changes })
-    }
-
-    /// The nearest acquisition of `unit` owned by `owner` within `within`,
-    /// considering only parts the canonical holdings still report live. Day
-    /// distance is measured in civil days; equal distances prefer the earlier
-    /// acquisition, then stable asset/part order.
-    pub fn nearest_acquisition(
-        &self,
-        book: &Book<'_>,
-        owner: Id<Entity>,
-        unit: Id<Commodity>,
-        sale_day: Day,
-        within: Span,
-        exclude: Option<PartId>,
-        mut is_live: impl FnMut(Id<Asset>, PartId) -> bool,
-    ) -> Result<Option<(Id<Asset>, PartId)>, AssetError> {
-        if within.months < 0 || within.days < 0 {
-            return Err(AssetError::NegativeSpan);
-        }
-        let candidates = book.assets.iter().filter_map(|(asset_id, asset)| {
-            self.asset(asset_id).map(|state| (asset_id, asset.owner, asset.unit, state))
-        });
-        nearest_from(candidates, owner, unit, sale_day, within, exclude, &mut is_live)
+        let part = self.part_mut(id);
+        part.basis = part.basis.0.checked_add(amount.0).map(Qty).ok_or(AssetError::Overflow)?;
+        Ok(())
     }
 }
 
-fn nearest_from<'a>(
-    candidates: impl IntoIterator<Item = (Id<Asset>, Id<Entity>, Id<Commodity>, &'a AssetState)>,
-    owner: Id<Entity>,
-    unit: Id<Commodity>,
-    sale_day: Day,
-    within: Span,
-    exclude: Option<PartId>,
-    is_live: &mut impl FnMut(Id<Asset>, PartId) -> bool,
-) -> Result<Option<(Id<Asset>, PartId)>, AssetError> {
-    if within.months < 0 || within.days < 0 {
-        return Err(AssetError::NegativeSpan);
-    }
-    let mut best: Option<(u64, Day, Id<Asset>, PartId)> = None;
-    for (asset_id, candidate_owner, candidate_unit, state) in candidates {
-        if candidate_owner != owner || candidate_unit != unit {
-            continue;
+impl Ledger<'_, '_, '_> {
+    /// Adds a part to an asset's table: its acquisition, whose parcel has just landed with its basis, or an improvement,
+    /// whose basis the acquisition's parcels take on.
+    pub(crate) fn add_asset_part(&mut self, asset: Id<Asset>, part: Part) -> Result<(), AssetError> {
+        self.world.assets.validate_part(asset, &part)?;
+        if part.kind == PartKind::Improvement {
+            let anchor = self.world.assets.states[asset.index()].parts[0].id;
+            self.world.holdings.adjust(self.plan.book.assets[asset].unit, anchor, part.basis)?;
         }
-        for part in &state.parts {
-            if part.kind != PartKind::Acquisition || Some(part.id) == exclude || !is_live(asset_id, part.id) {
-                continue;
-            }
-            let in_window = if part.day <= sale_day {
-                shift(part.day, within).is_none_or(|end| end >= sale_day)
-            } else {
-                shift(sale_day, within).is_none_or(|end| end >= part.day)
-            };
-            if !in_window {
-                continue;
-            }
-            let days = (part.day.0 as i64 - sale_day.0 as i64).unsigned_abs();
-            let candidate = (days, part.day, asset_id, part.id);
-            if best.is_none_or(|current| {
-                candidate.0 < current.0
-                    || (candidate.0 == current.0 && (candidate.1, candidate.2.index()) < (current.1, current.2.index()))
-            }) {
-                best = Some(candidate);
-            }
-        }
+        self.world.assets.add_part(asset, part)
     }
-    Ok(best.map(|(_, _, asset, part)| (asset, part)))
+
+    /// Consumes up to `requested` of one part's basis, in the part and in the asset's parcels: the part's own basis caps
+    /// it. Says how much it consumed; what it could not is the caller's to say.
+    pub(crate) fn consume_asset_part(
+        &mut self,
+        asset: Id<Asset>,
+        part: PartId,
+        requested: Qty,
+    ) -> Result<Qty, AssetError> {
+        if requested.is_negative() {
+            return Err(AssetError::NegativeAmount);
+        }
+        let (anchor, held) = self.world.assets.held(asset, part)?;
+        let applied = requested.min(held.basis);
+        self.world.holdings.adjust(self.plan.book.assets[asset].unit, anchor, -applied)?;
+        self.world.assets.part_mut(part).basis -= applied;
+        Ok(applied)
+    }
+
+    /// Carries a sale's loss into the shares of `unit` that replaced the sold ones ([`Holdings::carry`]), and into the part
+    /// of an asset's acquisition among them.
+    ///
+    /// [`Holdings::carry`]: crate::lots::Holdings::carry
+    pub(crate) fn carry_basis_to_parts(
+        &mut self,
+        unit: Id<Commodity>,
+        additions: &[CarryLotAddition],
+    ) -> Result<(), AssetError> {
+        self.world.holdings.carry(unit, additions)?;
+        additions.iter().try_for_each(|addition| self.world.assets.add_basis(addition.part, addition.amount))
+    }
 }
 
 /// Calendar addition with a clamped month day and checked arithmetic. An
@@ -573,86 +440,6 @@ fn shift(day: Day, span: Span) -> Option<Day> {
         (1..=of_month).rev().find(|&candidate| Day::from_ymd(target_year, target_month, candidate).is_some())?;
     let month_day = Day::from_ymd(target_year, target_month, target_day)?;
     Some(Day(month_day.0.checked_add(span.days)?))
-}
-
-/// The result of a `consume`, including the amount that could not be applied.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Consumption {
-    pub asset: Id<Asset>,
-    pub part: PartId,
-    pub requested: Qty,
-    pub applied: Qty,
-    pub excess: Qty,
-}
-
-pub(crate) struct ConsumptionGuard<'a> {
-    part: &'a mut Part,
-    before: Qty,
-    result: Consumption,
-    basis: Qty,
-}
-
-impl ConsumptionGuard<'_> {
-    pub fn before(&self) -> Qty {
-        self.before
-    }
-
-    pub fn result(&self) -> Consumption {
-        self.result
-    }
-
-    /// Commits the prepared change while the exclusive part borrow is held.
-    pub fn apply(self) -> Consumption {
-        self.part.basis = self.basis;
-        self.result
-    }
-}
-
-/// The recorded relationship between a sale part and a receiving part.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct CarryUpdate {
-    pub from: PartId,
-    pub to: Option<PartId>,
-    pub amount: Qty,
-}
-
-pub(crate) struct CarryGuard<'a> {
-    result: CarryUpdate,
-    target: Option<(&'a mut Part, Qty, Qty)>,
-}
-
-struct AssetBasisChange {
-    asset: usize,
-    part_id: PartId,
-    part: usize,
-    basis: Qty,
-}
-
-pub(crate) struct AssetBasisBatchGuard<'a> {
-    assets: &'a mut Assets,
-    changes: Vec<AssetBasisChange>,
-}
-
-impl AssetBasisBatchGuard<'_> {
-    pub fn apply(self) {
-        for change in self.changes {
-            self.assets.states[change.asset].parts[change.part].basis = change.basis;
-        }
-    }
-}
-
-impl CarryGuard<'_> {
-    pub fn before(&self) -> Option<Qty> {
-        self.target.as_ref().map(|(_, before, _)| *before)
-    }
-
-    /// Commits the prepared change while the exclusive part borrow is held.
-    pub fn apply(self) -> CarryUpdate {
-        if let Some((part, _, basis)) = self.target {
-            part.basis = basis;
-        }
-        self.result
-    }
 }
 
 /// Typed failures that the ledger can turn into law/source diagnostics.
@@ -679,7 +466,6 @@ pub enum AssetError {
 mod tests {
     use super::*;
     use axiom_core::Span;
-    use axiom_model::{Commodity, Entity};
 
     fn part(origin: u32, ordinal: u32, kind: PartKind, day: i32, sequence: u64, cost: i64, basis: i64) -> Part {
         Part {
@@ -704,8 +490,7 @@ mod tests {
         let state = assets.asset(asset).unwrap();
         assert_eq!(state.total_cost(), Ok(Qty(45_000)));
         assert_eq!(state.total_basis(), Ok(Qty(43_000)));
-        assert_eq!(state.cost(original_id), Ok(Qty(40_000)));
-        assert_eq!(state.basis(original_id), Ok(Qty(38_000)));
+        assert_eq!(assets.part(original_id).map(|(_, part)| (part.cost, part.basis)), Some((Qty(40_000), Qty(38_000))));
         assert_eq!(state.part_count(), 2);
         assert_eq!(state.in_service(original_id, Some(Day(5))), Ok(Day(5)));
         assert_eq!(state.in_service(state.parts()[1].id, Some(Day(5))), Ok(Day(20)));
@@ -714,21 +499,12 @@ mod tests {
         assert!(state.property_applies(state.parts()[1].id, true).unwrap());
     }
 
-    #[test]
-    fn consumption_is_part_specific_and_reports_excess_without_negative_basis() {
-        let mut assets = Assets::new(1);
-        let original = part(1, 0, PartKind::Acquisition, 10, 1, 40_000, 3_000);
-        let original_id = original.id;
-        assets.add_part(Id::new(0), original).unwrap();
-        assets.add_part(Id::new(0), part(2, 1, PartKind::Improvement, 20, 2, 5_000, 5_000)).unwrap();
-        let result = assets.consume(Id::new(0), original_id, Qty(4_000)).unwrap();
-        assert_eq!((result.applied, result.excess), (Qty(3_000), Qty(1_000)));
-        assert_eq!(assets.asset(Id::new(0)).unwrap().basis(original_id), Ok(Qty::ZERO));
-        assert_eq!(assets.asset(Id::new(0)).unwrap().total_basis(), Ok(Qty(5_000)));
+    fn basis(assets: &Assets, id: PartId) -> Option<Qty> {
+        assets.part(id).map(|(_, part)| part.basis)
     }
 
     #[test]
-    fn carry_updates_only_the_selected_part_and_reports_unreceived_loss() {
+    fn carry_updates_only_the_acquisition_carried_into() {
         let mut assets = Assets::new(2);
         let source = part(1, 0, PartKind::Acquisition, 10, 1, 10_000, 10_000);
         let source_id = source.id;
@@ -736,68 +512,26 @@ mod tests {
         let target = part(2, 0, PartKind::Acquisition, 20, 2, 11_000, 11_000);
         let target_id = target.id;
         assets.add_part(Id::new(1), target).unwrap();
-        assert_eq!(
-            assets.carry(source_id, Some((Id::new(1), target_id)), Qty(2_500)),
-            Ok(CarryUpdate { from: source_id, to: Some(target_id), amount: Qty(2_500) })
-        );
-        assert_eq!(assets.asset(Id::new(1)).unwrap().basis(target_id), Ok(Qty(13_500)));
-        assert_eq!(assets.carry(source_id, None, Qty(1_000)).unwrap().to, None);
-        assert_eq!(assets.asset(Id::new(0)).unwrap().basis(source_id), Ok(Qty(10_000)));
+        let improvement = part(3, 1, PartKind::Improvement, 21, 3, 500, 500);
+        assets.add_part(Id::new(1), improvement).unwrap();
+        assert_eq!(assets.add_basis(target_id, Qty(2_500)), Ok(()));
+        assert_eq!((basis(&assets, target_id), basis(&assets, source_id)), (Some(Qty(13_500)), Some(Qty(10_000))));
+        let security = PartId { origin: RuntimeTxn::Adjustment { place: Id::new(9), day: Day(1) }, ordinal: 0 };
+        assert_eq!(assets.add_basis(security, Qty(1_000)), Ok(()), "a security's shares have no part table");
+        assert_eq!(assets.add_basis(improvement.id, Qty(1)), Err(AssetError::UnknownPart), "only what was bought");
+        assert_eq!(assets.asset(Id::new(1)).unwrap().total_basis(), Ok(Qty(14_000)));
     }
 
-    #[test]
-    fn acquisition_search_uses_owner_unit_window_and_deterministic_nearest_tie() {
-        let (owner, other_owner) = (Id::<Entity>::new(0), Id::new(1));
-        let (unit, other_unit) = (Id::<Commodity>::new(0), Id::new(1));
-        let mut before_state = AssetState::new(Id::new(0));
-        let mut after_state = AssetState::new(Id::new(1));
-        let mut wrong_owner_state = AssetState::new(Id::new(2));
-        let mut wrong_unit_state = AssetState::new(Id::new(3));
-        let before = part(1, 0, PartKind::Acquisition, 90, 1, 100, 100);
-        let before_id = before.id;
-        before_state.parts.push(before);
-        let after = part(2, 0, PartKind::Acquisition, 110, 2, 100, 100);
-        let after_id = after.id;
-        after_state.parts.push(after);
-        wrong_owner_state.parts.push(part(3, 0, PartKind::Acquisition, 101, 3, 100, 100));
-        wrong_unit_state.parts.push(part(4, 0, PartKind::Acquisition, 99, 4, 100, 100));
-        let candidates = [
-            (Id::new(0), owner, unit, &before_state),
-            (Id::new(1), owner, unit, &after_state),
-            (Id::new(2), other_owner, unit, &wrong_owner_state),
-            (Id::new(3), owner, other_unit, &wrong_unit_state),
-        ];
-        let nearest = nearest_from(candidates, owner, unit, Day(100), Span::days(20), None, &mut |_, _| true).unwrap();
-        assert_eq!(
-            nearest,
-            Some((Id::new(0), before_id)),
-            "equal distances prefer the earlier acquisition after unit/owner filters"
-        );
-        let tied =
-            nearest_from(candidates, owner, unit, Day(100), Span::days(10), Some(before_id), &mut |_, _| true).unwrap();
-        assert_eq!(tied, Some((Id::new(1), after_id)));
-        let none = nearest_from(candidates, owner, unit, Day(100), Span::days(5), None, &mut |_, _| true).unwrap();
-        assert_eq!(none, None);
-    }
-
+    /// The window of a wash sale is a calendar span either side of the sale: a month from January 31 is February 29.
     #[test]
     fn acquisition_window_uses_calendar_shifts_without_span_ordering_shortcuts() {
-        let owner = Id::<Entity>::new(0);
-        let unit = Id::<Commodity>::new(0);
         let sale = Day::parse(b"2024-03-31").unwrap();
         let acquired = Day::parse(b"2024-02-29").unwrap();
-        let mut state = AssetState::new(Id::new(0));
-        let mut acquisition = part(8, 0, PartKind::Acquisition, acquired.0, 1, 100, 100);
-        acquisition.day = acquired;
-        state.parts.push(acquisition);
-        let candidates = [(Id::new(0), owner, unit, &state)];
-        let within_days = nearest_from(candidates, owner, unit, sale, Span::days(31), None, &mut |_, _| true).unwrap();
-        assert_eq!(within_days, Some((Id::new(0), acquisition.id)));
-
-        let january = Day::parse(b"2024-01-31").unwrap();
-        let february = Day::parse(b"2024-02-29").unwrap();
-        let month_clamped = shift(january, Span::months(1));
-        assert_eq!(month_clamped, Some(february));
+        assert!(Assets::within_carry_window(acquired, sale, Span::days(31)));
+        assert!(!Assets::within_carry_window(acquired, sale, Span::days(30)));
+        let (january, february) = (Day::parse(b"2024-01-31").unwrap(), Day::parse(b"2024-02-29").unwrap());
+        assert_eq!(shift(january, Span::months(1)), Some(february));
+        assert!(Assets::within_carry_window(january, february, Span::months(1)));
     }
 
     #[test]
@@ -811,14 +545,14 @@ mod tests {
         let original_id = original.id;
         assets.add_part(asset, original).unwrap();
         assert_eq!(assets.add_part(asset, original), Err(AssetError::DuplicatePart));
-        assert_eq!(assets.asset(asset).unwrap().cost(original_id), Ok(Qty(i64::MAX)));
+        let cost_and_basis = |assets: &Assets| assets.part(original_id).map(|(_, part)| (part.cost, part.basis));
+        assert_eq!(cost_and_basis(&assets), Some((Qty(i64::MAX), Qty(i64::MAX))));
 
         let improvement = part(3, 1, PartKind::Improvement, 12, 2, 1, 1);
         assets.add_part(asset, improvement).unwrap();
         assert_eq!(assets.asset(asset).unwrap().total_cost(), Err(AssetError::Overflow));
-        assert_eq!(assets.carry(original_id, Some((asset, original_id)), Qty(1)), Err(AssetError::Overflow));
-        assert_eq!(assets.asset(asset).unwrap().basis(original_id), Ok(Qty(i64::MAX)));
-        assert_eq!(assets.asset(asset).unwrap().cost(original_id), Ok(Qty(i64::MAX)));
+        assert_eq!(assets.add_basis(original_id, Qty(1)), Err(AssetError::Overflow));
+        assert_eq!(cost_and_basis(&assets), Some((Qty(i64::MAX), Qty(i64::MAX))));
     }
 
     #[test]
