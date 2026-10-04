@@ -862,7 +862,9 @@ nothing, is plain and always one parcel.
   deferrals). `basis AMOUNT` overrides both. It is tied to the paying party when
   that party's kind is `restricted`, and to the `for` entity when the flow names
   one.
-- **Transfers** between an owner's holdings move parcels unchanged.
+- **Transfers** between an owner's holdings move parcels unchanged, except from a place that is not `deferred` into one
+  that says `basis zero`: that is a contribution, and arrives with no basis (an HSA funded from checking is pre-tax). A
+  contribution that is not deductible, such as a nondeductible IRA contribution, says `basis AMOUNT` on the flow.
 - **Relief** chooses which parcels leave: ties first, then the policy (the
   selector's, the account's, its kind's, then the commodity kind's; currencies are
   FIFO). Parcels that differ with no policy are ambiguous: an error listing each

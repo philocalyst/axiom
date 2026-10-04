@@ -1098,7 +1098,10 @@ fn a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot
     let (equity, salary, checking, retirement, usd) = (f.equity, f.salary, f.checking, f.retirement, f.usd);
     f.say(retirement, builtin::SELECT, Policy::Prorata.code());
     f.flow(1, equity, checking, 6_300_00);
-    f.flow(2, checking, retirement, 6_300_00);
+    // A transfer from a taxed place into a `basis zero` one is a contribution with no basis (an HSA funded from checking
+    // is pre-tax); an after-tax contribution to a retirement account says so with `basis`.
+    let after_tax = f.flow(2, checking, retirement, 6_300_00);
+    f.detail(after_tax, Detail { basis: Some(Qty(6_300_00)), ..Detail::default() });
     f.flow(3, salary, retirement, 1_000_00);
     f.flow(9, salary, retirement, 1_200_00);
     f.flow(10, retirement, checking, 1_500_00);
