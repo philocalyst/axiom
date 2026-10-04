@@ -65,6 +65,8 @@ purposed flow 1.3% on a book with no claims: a flow with no claim place at eithe
 K5c's: `Monitor` and `Promising` each keep a heap of streams (a generic `Streams<R>` if it deletes more than it adds),
 `Ledger::promise_through` is an API for one reader.
 
+K5d's own leftovers: **`engine/loan_balance.rs` (191 lines) is prose in code** and the oracle reads the cause from the wording of a note: the structured disagreement (statement, schedule, day, the candidate causes) should travel in `Run`, the report words it, and the oracle reads the structure; `Cause::Short` papers over the difference between the book's payment and the schedule's; reading the book to build the schedule costs a pass over every transaction (once per loan at compile, once per disagreeing statement).
+
 K3c's and K4b's own notes: `name_claims` returns a `bool` and writes `scratch.selectors`, the caller then chooses
 `if named { &scratch.selectors } else { m.select() }`, twice; `Request` is built by hand in three places with mostly
 default fields (give it a constructor per use). And the K4b list belongs to K4c, not to you.

@@ -30,7 +30,8 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K7b** facts out | the fold records every position's balance as steps (`engine/histories.rs`), so `balance --at/--monthly/--value` is a binary search; the postings count through one pivot; `why` asks one question of a target; the free-function path is gone | **merged** (`990ddb5`) |
 | K3f debts as parcels | a bill you owe is a parcel on a Debt tab, a payment to the party settles it; `owed_by_you`, the `payable` gate and `makes_debt` go | brief written (after K6, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
-| K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | running (map first) |
+| **K5d** loans | a loan is one schedule walked once when the promises compile (`Annuity::step` over Pay, Prepay, Reset, Rate: pure, 40-byte state); a payment is a split of `#principal` to the debt tab and `#interest` (of the asset a `for` names) to the lender; `resets`, `prepay shortens\|recasts`, a rate written `DATE LOAN now at PERCENT`; a statement of the loan's balance is held to the schedule with the likely cause named. `deposit` not built (needs K3f) | **merged** (`34adb26`) |
+| K5e a loan that began before the book | the debt tab opens with what the schedule says is owed, against the opening balances | running (map first) |
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | brief written (after the kernels) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written) |
 
@@ -55,7 +56,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 54,500 non-test lines (K7b: -63): the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 55,100 non-test lines (K7b: -63, K5d: +725): the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -140,6 +141,21 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
     and budget rows (-60), U5 `flow --by party` as the periods table (-40); each changes the bytes of the views it names (none changes a golden but
     U6, one `why` layout, which changes three). Say if you want any.
 
+15. **A loan's interest now counts, and the mortgage-interest deduction is yours to decide (K5d).** `07-landlord`'s loan is `for house`, so its
+    interest is `#interest of house`, which the rental law already counted: tax 2025 `rental-expenses` 11,495.08 to 28,682.62 (17,187.54 of
+    interest over 11 payments: the figure the README's independent verifier gives), `rental-net` 13,229.92 to -3,957.62, `total-tax`
+    16,315.89 to 12,534.62, **owed 1,735.89 becomes a refund of 2,045.38**; liabilities 16,917.95 to 14,200.00 and net worth 152,248.65 to
+    154,966.60 (the principal of every payment now leaves the debt), `check` 18 errors to 7 (its eleven month-end statements agree with the
+    schedule to the cent). The itemized **mortgage-interest deduction reads `#mortgage-interest`, which no loan writes**; options:
+    (a) a loan `for` a home-kind asset writes `#mortgage-interest` instead (then the rental law stops counting it unless `rental.ax` changes too);
+    (b) `purpose mortgage-interest : interest` in `us.ax`, so one posting counts for both; (c) the deduction reads `#interest of ASSET` for a
+    home-kind asset and the asset's shares (03-triplex: 64.06% rentals) decide the personal part. The examples disagree today (`05-family`
+    books the house's interest as `#mortgage-interest` and the car's as `#interest`). Not invented.
+16. **A loan's last payment is what is left, as ACTUS says** (K5d): the old engine paid the level payment again and left cents on the debt;
+    the legs add up to the old payment on every payment but the last (2,286 payments of 12 loans asserted). The differences are -3.23 and
+    -0.02 on `05-family`'s mortgage (2053) and car (2028), +0.80 on `11-sam`'s (2054): no output reaches those dates. `purpose principal :
+    transfer` is now a built-in name (a book declaring its own `principal` purpose collides, as `claim` did for kinds).
+
 ## What the grammar accepts and the engine does nothing with
 
 Found by K5a's map (`K5a-map.md` §0, §1, §6) and K4b's: **written, checked, and read by nothing.** None of this is a
@@ -156,6 +172,18 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K5d, in numbers
+
+| | |
+|---|---|
+| what it is | `Annuity::step(State, Event) -> (State, Paid)` for Pay, Prepay (shortens: the number of payments a payment needs is the loan's own recurrence stepped, no new rounding site; recasts: the payment refigured), Reset (`index + margin` held by the caps) and Rate (a statement's number): pure, total, no allocation, 40-byte state asserted, the four rounding sites named in the module doc and each tested. **The schedule is walked once, at `Promises::compile`**, over every event the book states in day order (reset, rate, payment, prepayment), into a flat pool of 32-byte entries that the occurrence, the monitor, the reports and the statement check all read, so the fold, the monitor and the forecast cannot disagree; `Residual` shrank. A payment is a K4b split: header `#principal` to the debt tab, leg `#interest` to the lender, principal the remainder. `value LOAN = X` is held to the schedule: `error[loan-balance]` names both numbers, the payments around the day and, **when exactly one candidate explains the gap to the cent**, the cause (a missed payment, a short one, an extra counted as principal, an unrecorded prepayment) with the edit that mends it; a tie or no cause says so. `DATE LOAN now at 6.25%` was silently dropped (and `unknown-property` on a contract named like a kind): now `Contract.rates`, and `contract-rate-change` on a contract with no loan |
+| the finding | a loan's payment never touched its debt tab: `07-landlord`'s twelve statements all failed (11 of its 18 errors) |
+| lines | **+725 non-test** against a planned +350 (engine +209, model +468, report +48): `loan_balance.rs` 191, `amortization.rs` 187, `annuity.rs` 115, `causes.rs` 75; it deleted 13 lines, because the old path was a 91-line `Annuity` and a cursor with nothing to remove |
+| speed | `check` on `bench/` (no loans) 100k 0.358 to 0.362 s, 1m 3.811 to 3.912 s (nine more interleaved runs: 3.906 vs 3.827 s fastest, 4.245 vs 4.107 s median): noise; RSS 665 MB both |
+| behaviour | see Waiting on you 15 and 16: only the six `07-landlord` goldens moved; `05-family` check and balance identical (its `contracts` view shows the schedule's balance, `forecast` balances move monthly); `explore-v5/03-triplex` gained four `loan-balance` errors because its contract says "first payment 2022-10-01" in a comment and wrote no `from`: **fixed in the book (one line, `from 2022-10-01`); its four statements now agree to the cent** and `check` has 66 errors; `11-sam` and `v4-sketch` print **negative liabilities** (their loan predates the book and nothing opens the debt: lane K5e) |
+| proof | `loans.py`, an independent ACTUS annuity in Python integers over 8 cadences: 4,500 projects, 0 disagreements on every payment's interest, principal and balance, prepayments, month-end balances, what kept lines post and what the forecast promises, the monitor's missed days and the 1,704 `loan-balance` diagnostics with the cause named; the K5b promise oracle ported to the schedule: 800 projects, 0 failures; fuzz 5,000 mutants of books with no loan, 0 differences; `splits.py` 74 of 1,000 projects differ, all with a loan; `claims.py` byte-identical; **62 of 80 mutants run**: 39 killed by the oracle, 14 by named tests, 9 survived of which 7 are now killed by tests written for them, 1 equivalent, 1 dead code deleted; **19 mutants (causes, the occurrence's reading, the lowering split, reconcile, loan_balance) are written and not run** |
+| left | a loan that predates the book (K5e); `deposit` (Part B: needs K3f); the mortgage-interest choice (Waiting on you 15); **`engine/loan_balance.rs` is 191 lines of prose in code and the oracle learns the cause from the wording of a note** (the structured disagreement should travel in `Run` and the report should word it: K12b); a short payment is the book's and not the schedule's (`Cause::Short` papers over it: `contracts` shows 404,691.86 for a mortgage with no payment kept) |
 
 ## K7b, in numbers
 
