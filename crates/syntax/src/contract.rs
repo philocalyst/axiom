@@ -67,10 +67,7 @@ impl<'s> Parser<'s> {
             self.report(missing_schedule(header.loc));
         }
         let template = Body { legs: self.since(legs), items: self.since(items) };
-        let arrows = self.legs_point(template.legs, Arrows::Tolerated(Junction::Out));
-        if arrows.is_ok() {
-            self.note_bare_legs(template.legs);
-        }
+        let arrows = self.template_arrows(template.legs);
         let contract = Contract {
             name,
             kind,
@@ -88,6 +85,13 @@ impl<'s> Parser<'s> {
             damaged: body.is_err() || arrows.is_err(),
         };
         self.emit(&header, contract, ItemKind::Contract);
+        Ok(())
+    }
+
+    /// The legs of a contract's template may lead with an arrow or not, and those that name none are written the v4 way.
+    fn template_arrows(&mut self, legs: Many<Leg<'s>>) -> Parse<()> {
+        self.legs_point(legs, Arrows::Tolerated(Junction::Out))?;
+        self.note_bare_legs(legs);
         Ok(())
     }
 
