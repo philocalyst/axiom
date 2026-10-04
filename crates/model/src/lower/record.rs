@@ -825,7 +825,7 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         let template = &templates[template_at];
         let side = template_leg.map_or_else(|| template_side(&rec.staged, template), |_| template.side);
         let base_flow = template_leg.map_or_else(|| template.header.flow.clone(), |leg| leg.flow.clone());
-        if endpoint.select.len() != 0 {
+        if !endpoint.select.is_empty() {
             rec.staged.diags.push(
                 Diagnostic::error("selector-target", "selectors narrow the source endpoint of a flow")
                     .label(leg.loc, "a contract split end names the recipient"),
@@ -1049,13 +1049,11 @@ fn lower_loan_origin<'s>(
     rec.keep(txn);
 }
 
-/// Who lends a loan, whose debt it is, and the owner's account the principal arrives in: the one owner cash account its
-/// payment schedule names.
-fn loan_funding(
-    book: &Book<'_>,
-    contract: &Contract,
-    loc: Loc,
-) -> Result<(Id<Entity>, Id<Entity>, Id<Place>), Diagnostic> {
+/// Who lends a loan, whose debt it is, and the owner's account the principal arrives in.
+type Funding = (Id<Entity>, Id<Entity>, Id<Place>);
+
+/// What funds a loan: its lender, its owner, and the one owner cash account its payment schedule names.
+fn loan_funding(book: &Book<'_>, contract: &Contract, loc: Loc) -> Result<Funding, Diagnostic> {
     let holding = |message: &str, label: &str| Diagnostic::error("loan-origination-holding", message).label(loc, label);
     let template = [&contract.terms, &contract.standing]
         .into_iter()
