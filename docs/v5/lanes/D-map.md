@@ -217,3 +217,34 @@ warnings`, `cargo test --workspace --release`; `sh tests/golden.sh` and `sh test
 at the end the differential run (`docs/v5/measure/diff/` `run.sh` then `compare.sh`, `fuzz.py ... diff`, `splits.py`) against the
 baseline, every difference listed with the item it belongs to; `check` on `bench/` 100k and 1m, three runs, fastest, with the
 load average.
+
+---
+
+## As built (appended when the code items were done)
+
+Eleven commits after the map, one for each item but 6 and 7 (which are also one each) and none for 8 (waiting for L1, which has
+not merged into v5: `git log claude/great-wozniak-pnqn7x-v5` ends at `b04b597`). Where the code showed the map or the brief wrong:
+
+| item | what the code showed | what was built |
+|---|---|---|
+| 7, 1 | as mapped | the report test says `each year` and the sibling is merged into it; the prorata test states `basis 6_300 USD`; LANGUAGE §9 says why. Both known failures pass |
+| 10b | the debug failure is `holders.rs:82`, as mapped | `Fixture::book_with_kinds`; both tests pass in a debug build (`CARGO_INCREMENTAL=0`, `target/debug` deleted) |
+| 10a | as mapped | `Args::unit`; `currency USD` accepted; `holds` uses it too |
+| 4 | **one line was not enough**: what settles a claim reads its purpose from the journal line that made it (`recognition::claim_purpose`), and a claim the monitor makes has no line, so in cash books the payment would never have counted it | the line goes, and `claim_purpose` reads the contract template's header for a monitor-made parcel. A law counting the purpose counts the rent in accrual books on its **due day** (the claim keeps its occurrence's days), found 16 days later; in cash books on the day it is paid. The brief's "when it is found" is the day it is *made*, not the day it is *counted*. No golden moves |
+| 6 | `Books::Accrual`'s doc was already right (K3d); LANGUAGE §7's contract paragraph was the stale one; **`match` is gone** from grammar and model | docs; `Counting::made(at)` and a test of `AccrualAt::Due`. `claim`, `debt-claim`: `duplicate-kind`; `principal`: `ambiguous-purpose` (a purpose declared in `std.ax`, not a built-in root) |
+| 9b | the suggestion was unpasteable only when the other words do not reach the nearest account; the account's own address spells its custodian (`jordan/fidelity/roth-ira`) | the written words and the name when they mean it, else the account's address; mistake 116 |
+| 3 | the monitor already warned once for each contract; what it lacked was the run, since-when and the edit | runs by `chunk_by`; `until DATE` for a run of several days, last of a contract with no end and not a loan; mistakes 117 to 119; 05-family-check, 07-landlord-check, 112 to 115 move (headline), 07's `paycheck` gains the edit |
+| 9a | `me` (the undeclared root entity) is not a taxpayer: `101-ambiguous-address` broke until `me` always could own; the explicit `owner` line needed the same check | `Kind.owners`, `Book::may_own`, a kind-level `owner` line, `us.ax` `owner taxpayer` on `tax-deferred`; mistakes 120, 121 (new), 122 (the ambiguity 102 used to show), and 102 moves to `too-many` because its premise was the bug |
+| 2 | no golden moves: `08-expat`'s conversions are v3 and do not reach the fold | `exchange_of` and `exchange_costs_of` in `statement.rs`; README numbers tested (9,500.00; 1,027.63 less 5.57); a leg that arrives is no cost |
+| 5 | **the tax numbers of 05 and 07 do not move**: the home law counts what the old law counted; only 05-family-check's "laws enforced" goes 23 to 24. A building divided among parts of both kinds is **not built** (the engine walks `part of` upward and never divides a flow of the whole by area) | a law of `kind home`; `mortgage-interest` goes; 12 + 12 journal lines; `verify05.py` passes |
+
+Proof, against the baseline binary built at `46a6c07`: goldens and mistakes byte-identical except the lists above; the diff harness
+(552 outputs) differs in 31, all `missed-occurrence` headlines, two of them with the `until` edit and one of them (`promise-no-from`) a
+contract with a kept day between two runs; `fuzz.py` with the headline blocks left out and `us.ax` line numbers normalized: 2,000 mutants,
+0 panics, every difference one of the three (the headline, the law count 23 to 24 and `us.ax` line numbers, `owner` listed among a
+kind's properties); `splits.py`: exchange 400, split 600 and statements 500 projects 0 differ, `equiv` 500 splits 0 not the plain
+transfers; `check` on `bench/` 100k is byte-identical (1,022 errors both) and 1m is no slower (fastest of three, load 8 to 10:
+4.72s to 4.89s against 4.86s to 4.95s; 0.44s to 0.47s against 0.44s to 0.46s at 100k). Workspace tests: 1,322 passed, 0 failed.
+
+Item 8, prepared and not done: with `grace 30d` on `manager-fee` (tried on a scratch copy, not in `examples/`) `07-landlord`'s
+`check` goes from 7 errors to 5.
