@@ -18,7 +18,7 @@ use crate::journal::{
     Assert, ClaimChange, Derivation, Detail, EndEvent, Event, Filed, Flow, FlowView, Infer, Measure, Origin, Prices,
     Program, Purposed, Reading, RuntimeDetail, RuntimeFlow, RuntimeTxn, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, Rules, Value};
+use crate::law::{Fault, Law, Owner, Rules, Value};
 use crate::names::{Found, Names, Scoped};
 use crate::slots::{Schema, Slot};
 use crate::split::{Item, Promised, Says, Sign};
@@ -1528,6 +1528,24 @@ impl<'s> Book<'s> {
     pub fn txn_flow(&self, txn: RuntimeTxn, ordinal: u32) -> Option<Id<Flow>> {
         let flows = self.txns.get(txn.source_txn()?)?.flows;
         (ordinal < flows.len()).then(|| Id::new(flows.start().index() as u32 + ordinal))
+    }
+
+    /// A law in the words of the book: the `also` of a kind, or a law by its name and where it is written.
+    pub fn law_words(&self, law: Id<Law>) -> String {
+        let law = &self.laws[law];
+        let of = match law.owner {
+            Owner::Kind(kind) => format!("kind `{}`", self.name(self.kinds[kind].name)),
+            Owner::Place(place) => format!("account `{}`", self.name(self.places[place].path)),
+            Owner::Entity(entity) => format!("entity `{}`", self.name(self.entities[entity].path)),
+            Owner::Purpose(purpose) => format!("purpose `#{}`", self.name(self.purposes[purpose].name)),
+            Owner::Asset(asset) => format!("asset `{}`", self.name(self.assets[asset].name)),
+            Owner::Contract(contract) => format!("contract `{}`", self.name(self.contracts[contract].name)),
+            Owner::System(_) | Owner::Book => "the project".to_owned(),
+        };
+        match self.name(law.name) {
+            "also" => format!("the `also` of {of}"),
+            name => format!("law `{name}` of {of}"),
+        }
     }
 
     /// `1,234.56 USD`

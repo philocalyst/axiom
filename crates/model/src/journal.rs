@@ -483,6 +483,8 @@ pub struct Offspring {
     pub flow: Flow,
     /// What fired the law: the flow it was derived from.
     pub parent: Cause,
+    /// The flow that started the chain: the first cause back along `parent` that is no offspring.
+    pub root: Cause,
     pub law: Id<Law>,
 }
 

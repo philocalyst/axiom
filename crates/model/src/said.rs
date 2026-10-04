@@ -120,6 +120,15 @@ impl Book<'_> {
         }
     }
 
+    /// The party a place is the outside of, if it is: who a flow into or out of it is paid to or paid by.
+    pub fn party_at(&self, place: Id<Place>) -> Option<Id<Entity>> {
+        match self.places[place].role {
+            Role::Outside(party) => party,
+            Role::Tab(party) => Some(party),
+            Role::Account { .. } | Role::Holding(_) | Role::Issuer(_) | Role::Asset(_) => None,
+        }
+    }
+
     /// The household an entity belongs to.
     pub fn member(&self, entity: Id<Entity>) -> Option<Id<Entity>> {
         self.fact(builtin::MEMBER, entity)

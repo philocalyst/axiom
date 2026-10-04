@@ -907,10 +907,12 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
     /// A flow amount has a static unit only when its governing place declares
     /// exactly one accepted commodity. Otherwise the expression must state a
     /// conversion with `value(amount, UNIT)` before comparing unlike units.
+    ///
+    /// An asset's law is about the flows that are for the asset (`#repair of house`), which are money: its own unit
+    /// is what its parts count in, not what a flow moves.
     fn flow_amount_ty(&self) -> Ty {
         let unit = match self.owner {
             Some(Owner::Place(place)) => self.world.book.holds_only(place),
-            Some(Owner::Asset(asset)) => Some(self.world.book.assets[asset].unit),
             _ => None,
         };
         unit.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))

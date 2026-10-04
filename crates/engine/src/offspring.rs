@@ -24,14 +24,12 @@
 //!   returned, so `Record::returnable` holds a few chains and costs nothing for any other. A return posts them backwards.
 
 use axiom_core::{Diagnostic, Id, Loc};
-use axiom_model::{
-    Amount, Book, Cause, Derived, Fault, Flow, Law, Mode, Offspring, Owner, Place, Rule, RuntimeTxn, Subject,
-};
+use axiom_model::{Amount, Book, Cause, Derived, Fault, Flow, Law, Mode, Offspring, Place, Rule, Subject};
 
 use crate::State;
 use crate::eval::Context;
 use crate::ledger::Ledger;
-use crate::motion::{Amounts, Course, Motion};
+use crate::motion::{Course, Motion};
 
 /// What a flow derived, each offspring with its number.
 pub(crate) type Chain = Box<[(Id<Offspring>, Offspring)]>;
@@ -104,7 +102,6 @@ struct Waiting {
 }
 
 /// What the flow being posted has derived, and what is waiting to post.
-#[derive(Default)]
 pub(crate) struct Brood {
     /// Derived by the flow being posted, in the order its laws fired.
     fresh: Vec<Waiting>,
@@ -112,14 +109,28 @@ pub(crate) struct Brood {
     waiting: Vec<Waiting>,
     /// What the flow being posted descends through.
     lineage: Lineage,
-    /// The flow that began the chain, which a cycle is said to begin with.
-    root: Loc,
+    /// The flow that began the chain, and where it was written, which a cycle is said to begin with.
+    root: Cause,
+    started: Loc,
+}
+
+impl Default for Brood {
+    /// Nothing is posting: the chain has no flow to begin with until [`Brood::begin`] says which.
+    fn default() -> Brood {
+        Brood {
+            fresh: Vec::new(),
+            waiting: Vec::new(),
+            lineage: Lineage::ROOT,
+            root: Cause::Time,
+            started: Loc::default(),
+        }
+    }
 }
 
 impl Brood {
     /// A flow no law derived is about to post.
-    fn begin(&mut self, root: Loc) {
-        (self.lineage, self.root) = (Lineage::ROOT, root);
+    fn begin(&mut self, root: &Motion) {
+        (self.lineage, self.root, self.started) = (Lineage::ROOT, root.cause, root.loc);
     }
 
     /// What the flow that just posted derived goes on top of what waits, the first it derived on top: it posts before
@@ -134,7 +145,7 @@ impl Ledger<'_, '_, '_> {
     /// Applies a flow: moves its value and fires every law that watches it, then posts what they derived, each by
     /// the same path. A flow run backwards has the flows it derived run backwards with it, and derives nothing.
     pub(crate) fn post(&mut self, m: &Motion) {
-        self.scratch.brood.begin(m.loc);
+        self.scratch.brood.begin(m);
         self.post_flow(m);
         match m.course {
             Course::Forward => self.post_brood(m),
@@ -196,7 +207,8 @@ impl Ledger<'_, '_, '_> {
         let (template, amount) = made;
         let Some(m) = ctx.motion.filter(|m| m.derives()) else { return };
         let Some(view) = m.view else { return };
-        let derived = &self.plan.book.derived[template];
+        let book = self.plan.book;
+        let derived = &book.derived[template];
         if !derived.follows_a_posted_flow() {
             return self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
         }
@@ -206,8 +218,10 @@ impl Ledger<'_, '_, '_> {
         let Some(lineage) = self.descend(rule.law) else { return };
         let subject = self.subject_place(rule.subject, m);
         let flow = derived.flow_from(&view, rule.law, amount, Some(subject));
-        let flow = Flow { day: m.day, mode: Mode::Actual, recognized: ctx.over, ..flow };
-        let offspring = Offspring { flow, parent: m.cause, law: rule.law };
+        // Paid to the party at the end it is paid to, as a line that wrote the flow would say.
+        let payee = book.party_at(flow.to).or_else(|| book.party_at(flow.from));
+        let flow = Flow { day: m.day, mode: Mode::Actual, recognized: ctx.over, payee, ..flow };
+        let offspring = Offspring { flow, parent: m.cause, root: self.scratch.brood.root, law: rule.law };
         self.scratch.brood.fresh.push(Waiting { offspring, template, lineage });
     }
 
@@ -220,7 +234,7 @@ impl Ledger<'_, '_, '_> {
             Err(Stopped::Unbounded(stopped)) => stopped,
         };
         if self.record.stopped.insert((lineage, law)) {
-            let diagnostic = stopped_chain(self.plan.book, stopped, &lineage, law, self.scratch.brood.root);
+            let diagnostic = stopped_chain(self.plan.book, stopped, &lineage, law, self.scratch.brood.started);
             self.record.report(diagnostic);
         }
         None
@@ -251,17 +265,17 @@ fn stopped_chain(book: &Book, stopped: Unbounded, lineage: &Lineage, law: Id<Law
     };
     let mut diagnostic = Diagnostic::error(code, message).context(root, "the flow that started it");
     for (at, &derived) in lineage.laws().iter().enumerate() {
-        let (loc, said) = (book.laws[derived].loc, format!("{}. {} derives from it", at + 1, describe(book, derived)));
+        let (loc, said) = (book.laws[derived].loc, format!("{}. {} derives from it", at + 1, book.law_words(derived)));
         diagnostic = diagnostic.context(loc, said);
     }
     let again = match stopped {
         Unbounded::Cycle => format!(
             "{}. and {} would derive again from what that made: not made",
             lineage.laws().len() + 1,
-            describe(book, law)
+            book.law_words(law)
         ),
         Unbounded::TooDeep => {
-            format!("{}. and {} would be one law too many: not made", lineage.laws().len() + 1, describe(book, law))
+            format!("{}. and {} would be one law too many: not made", lineage.laws().len() + 1, book.law_words(law))
         }
     };
     let note = "a law derives once from a flow, and once from each flow another law derives from it, so a chain that \
@@ -270,20 +284,4 @@ fn stopped_chain(book: &Book, stopped: Unbounded, lineage: &Lineage, law: Id<Law
         .label(book.laws[law].loc, again)
         .note(note)
         .help("narrow one of the laws with `when`, so that it does not watch the flow that closes the chain")
-}
-
-/// A law in the words of the book: the `also` of a kind, or a law by its name and where it is written.
-fn describe(book: &Book, law: Id<Law>) -> String {
-    let law = &book.laws[law];
-    let (owner, name) = (&law.owner, book.name(law.name));
-    let of = match *owner {
-        Owner::Kind(kind) => format!("kind `{}`", book.name(book.kinds[kind].name)),
-        Owner::Place(place) => format!("account `{}`", book.name(book.places[place].path)),
-        Owner::Entity(entity) => format!("entity `{}`", book.name(book.entities[entity].path)),
-        Owner::Purpose(purpose) => format!("purpose `#{}`", book.name(book.purposes[purpose].name)),
-        Owner::Asset(asset) => format!("asset `{}`", book.name(book.assets[asset].name)),
-        Owner::Contract(contract) => format!("contract `{}`", book.name(book.contracts[contract].name)),
-        Owner::System(_) | Owner::Book => "the project".to_owned(),
-    };
-    if name == "also" { format!("the `also` of {of}") } else { format!("law `{name}` of {of}") }
 }

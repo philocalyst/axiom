@@ -313,3 +313,31 @@ fn an_occurrence_a_line_keeps_and_one_a_forecast_promises_derive_the_same() {
         assert_eq!(ledger.balance(book.place("checking").unwrap(), book.base).0, written);
     });
 }
+
+#[test]
+fn an_assets_also_reads_the_money_that_was_for_it_and_its_amount_is_money_not_the_assets_unit() {
+    let text = "base USD
+commodity USD
+  precision 2
+kind property : thing
+purpose improvement : capital
+  of asset
+purpose fee : spending
+account checking
+entity contractor
+asset condo : property
+  also + 5% of amount #fee
+opening 2026-01-01
+  checking 1_000.00 USD
+  condo basis 500.00 USD since 2025-01-01
+2026-02-05 checking -> contractor 100.00 USD #improvement of condo
+2026-02-06 checking -> contractor 40.00 USD #improvement
+";
+    with_run(text, day(2026, 3, 1), |book, run| {
+        // Only the line that names the condo is for it; the other has no asset and no fee follows it.
+        assert_eq!(run.offspring.len(), 1);
+        assert_eq!(run.offspring[0].flow.out.qty, Qty(500));
+        assert_eq!(cents(book, run, "checking"), 100_000 - 10_000 - 500 - 4_000);
+        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+    });
+}
