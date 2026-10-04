@@ -221,6 +221,14 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
 
+## Lane U, in numbers
+
+Phase 1a, the instruments (`claude/great-wozniak-pnqn7x-v5-unify`; the plan is `UNIFY.md` there). **The count is restated:**
+`quality.py` used to stop reading a file at its first inline test module, so the 1,948 lines of code after one were not counted
+(`law.rs` 498, `book.rs` 374, `journal.rs` 369, `calendar.rs` 328, `declare.rs` 205, `problem.rs` 97, `sync/world.rs` 74,
+`peg.rs` 3); it now skips the module to its matching brace. **Baseline: 55,367** at `a21eee9` (53,419 by the old counter):
+model 19,777, engine 12,463, report 6,804, syntax 5,634, sync 4,339, core 3,484, cli 2,350, session 502, systems 14.
+
 ## K5e, in numbers
 
 | | |

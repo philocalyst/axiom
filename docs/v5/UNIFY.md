@@ -83,9 +83,9 @@ test module in the middle and code after it; that code is not counted:
 (Counted by skipping each test module to its matching brace instead of truncating the file at it, the change question 1
 proposes for `quality.py`. `pub struct Amount` in `book.rs`, `Value` in `law.rs`, `Flow` in `journal.rs` and `Window` in
 `calendar.rs` are among the hidden code.) The ledger rewrites five of these files, so the hidden lines surface the day U
-touches them, and an honest plan counts them from the start. **I plan against the true count**
-and propose (question 1) that the first commit of phase 1 makes `quality.py` match braces, restating the baseline. Moving a test
-module to dodge or to cause the count is not something U does either way.
+touches them, and an honest plan counts them from the start. **I plan against the true count.**
+Decided (section 10): `quality.py` now skips a test module to its matching brace, and the baseline is **55,367** at `a21eee9`.
+Moving a test module to dodge or to cause the count is not something U does either way.
 
 ### 1.2 By crate
 
@@ -1784,3 +1784,48 @@ Every commit: Book dump identical, declared-lines corpus identical, mistakes, go
 10. **U46.** `DateLayout` moves from `core` (the vocabulary every crate speaks) to `sync` (its one reader): net zero. Agreed?
 11. **K12b's two behaviour items** (`owner` written without a range; `unknown-address` suggesting the closest name rather than
     the closest address): lane D, or not at all? U does not change them.
+
+---
+
+## 10. Decided (the coordinator's answers, 2026-10-04)
+
+The plan is approved as the execution plan, C1 to C6, with a seventh checkpoint added. What changes in the sections above:
+
+- **The count** (question 1): `quality.py` skips an inline test module to its matching brace (comments, strings, raw strings
+  and char literals do not count, a lifetime is not a char). The baseline is **55,367** at `a21eee9`: model 19,777, engine
+  12,463, report 6,804, syntax 5,634, sync 4,339, core 3,484, cli 2,350, session 502, systems 14.
+- **The ceiling** (question 2): 27,000 stays the target; the coordinator carries the gap to the user. Nothing that removes
+  something the user has is pulled: **L-a, L-b, L-c, L-f, L-g, L-h, L-i, L-j and L-k stay out** (the user asked for addresses,
+  relators, the habit forecast and gorgeous diagnostics; L-a is a counting trick).
+- **L-d is in** (question 3), on one condition: a declared line's shape error is generated from its `Signature` and is at least
+  as helpful as today's. It names the property, the position, what the shape expected and what was found, and its `help:` line
+  is the signature itself as the example, so the table is also the documentation. Codes are unchanged. U4 and U5 therefore
+  take the generic form (−960 and −100), the `Said` columns of 8.2 become one generated message per slot, and the
+  declared-lines corpus is the list of every message that changes, before and after, for review.
+- **L-e** is decided last, as the final entry of C7, and only if the tree is still above the ceiling then.
+- **The landing to plan against**: the ledger with L-d, about **46,050** counted truly (45,500 if L-e is pulled at the end of
+  C7). The job from here is to beat it.
+- **K3f** (question 4): its own lane beside C1-C3, merged before C4; the coordinator launches it when K6b has merged.
+  **K4c's and K3e's layouts** (question 5): their own lanes after U, held to their benchmarks. **L2/L3** (question 6): signed
+  off as PROPOSAL §6 describes them (positions under their agent, an optional counterparty, purposes without a direction root,
+  the `account` keyword going); their briefs are written after C2/C3 against `Lowering::group`.
+- **`Lowering` and `View`** (question 7): acceptable as single domain concepts, each the context of one phase that really
+  travels together (the law compiler's `Compiler` is the model), never a grab-bag; each struct's doc says so.
+- **U36, U30, U46** (questions 8 to 10): yes. **K12b's two behaviour items** (question 11) are bug fixes and go to lane D.
+
+New requirements:
+
+1. **Every checkpoint report** gives, per ledger entry, the lines planned against the lines delivered, and a revised landing
+   for the whole plan. For each entry, look for what else became deletable once it landed (follow-on deletions) and take it in
+   the same checkpoint.
+2. **C7, round two**, after C6: the census and the concept inventory run again on the unified tree (the first round removes the
+   duplication that can be seen; the second finds what it was hiding), its ledger written and executed. Its plan is part of
+   C6's report. L-e is its last entry, if the ceiling is still not met.
+3. **The ceiling is a gate on the whole lane**: at the end of each checkpoint, the report says how far the tree is from 27,000
+   and what the next biggest un-taken unification is.
+
+Phase 1a, the instruments, runs now (K6b, L1 and lane D are still running): the count; `core`'s eight `clippy` errors; the
+declared-lines corpus (`docs/v5/measure/diff/cases3/`) and its run on a baseline binary built from the v5 head; the sale-heavy
+and prorata bench books (`bench/gen.py`) and K3e's model-based relief test (a test module; `lots.rs`'s code unchanged); the
+mutation lists the instruments can already be held to. The Book dump waits for C1: it needs L1's `Debug` derives and K6b's
+`Book` fields.
