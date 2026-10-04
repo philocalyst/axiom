@@ -82,7 +82,8 @@ impl Said {
         Said { rates, prepaid: Said::paid_into(book, id, &loan), lines: Said::kept(book, id, &loan) }
     }
 
-    /// What was paid into the loan's debt tab by a flow of the journal that is no occurrence's: all of it is principal.
+    /// What was paid into the loan's debt tab by a flow of the journal: all of it is principal. (An occurrence's flows are made when
+    /// it is posted and are in no book, so none of them is counted twice.)
     /// A tab is one for the lender and the owner, so two loans of the same pair share it, and the earlier takes what is paid.
     fn paid_into(book: &Book<'_>, id: Id<Contract>, loan: &Loan) -> Vec<(Day, Qty)> {
         let first = book.contracts.iter().find(|(_, other)| other.loan.is_some_and(|other| other.debt == loan.debt));
@@ -92,7 +93,6 @@ impl Said {
                 && flow.mode == Mode::Actual
                 && flow.infer == Infer::Known
                 && flow.arrive.unit == loan.principal.unit
-                && book.txns.get(flow.txn).is_some_and(|txn| txn.occurrence.is_none())
         };
         let flows = book.touching[loan.debt].iter().map(|&flow| &book.flows[flow]);
         let own = first.is_some_and(|(first, _)| first == id);
