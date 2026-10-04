@@ -3,8 +3,8 @@
 2025-04-05 checking -> fidelity 5.5076 VTI @ 272.35 USD
 
 /// Swapping bitcoin for ether on the exchange. The 0.6% fee is inside the rate, so fewer ether arrive.
-2025-04-08 coinbase 0.15 BTC -> coinbase              @ 46.37788167 ETH
-2025-04-09 checking          -> utility-co 162.43 USD
+2025-04-08 coinbase ->            0.15 BTC   @ 46.37788167 ETH
+2025-04-09 checking -> utility-co 162.43 USD
 
 /// Moving 6 ETH to a self-custody wallet to stake it. The network fee is paid in ETH: a small disposal.
 2025-04-10 coinbase          -> wallet          6 ETH

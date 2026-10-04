@@ -141,6 +141,9 @@ impl<'a, 's> Upgrade<'a, 's> {
             (Some(source), Some(target), false) => {
                 self.priced(flow, &mut h, assumed)?;
                 self.written_from(flow, &mut h, source, target);
+                if source == target {
+                    self.bought_or_sold(&mut h);
+                }
                 Junction::Out
             }
             (Some(source), None, true) => {
@@ -154,6 +157,26 @@ impl<'a, 's> Upgrade<'a, 's> {
             _ => Junction::Out,
         };
         Ok((h, toward))
+    }
+
+    /// An exchange inside one end that v4 wrote with the end twice, `S -> S 1 VTI @ 120 USD` or `S 1 VTI -> S @ 120 USD`, is a
+    /// purchase `S <- 1 VTI @ 120 USD` or a sale `S -> 1 VTI @ 120 USD`: the verb says what happened, and the end is
+    /// written once. What names a lot on the way in is left alone.
+    fn bought_or_sold(&self, h: &mut Header) {
+        // The end must be written on the object side (a v5 sale has none there) and not name a lot.
+        let twice = !h.object.is_empty() && !h.object.contains('[');
+        let priced = h.tail.split_whitespace().any(|word| word == "@");
+        match (twice && priced, h.held.is_empty(), h.amount.is_empty()) {
+            (true, true, false) => {
+                h.verb = Junction::In.spelling().into();
+                h.object.clear();
+            }
+            (true, false, true) => {
+                h.amount = take(&mut h.held);
+                h.object.clear();
+            }
+            _ => {}
+        }
     }
 
     /// Whose line it is: the book's own end is written first, so a payment that arrives from a party is `<-`. A line

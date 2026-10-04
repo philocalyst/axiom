@@ -119,6 +119,16 @@ error[deadline]: grant money left unspent at the deadline
     │             ────┬────
     │                 ╰── 900.00 USD
 
+warning[v4-syntax]: a line is written the v4 way
+   ╭─[03-violations.ax:64:21]
+   │
+64 │ 2026-03-04 checking 1_000 USD -> brokerage 4 VTI @ 285.70 USD
+   │                     ──────────────┬─────────────
+   │                                   ╰── an amount on both sides of the arrow
+   │
+   = help: an exchange states one amount and its price: `checking -> broker 5.58 VTI @ 268.57 USD`
+   = help: `axiom fmt --upgrade` writes them the v5 way, and checks that the book says the same
+
 note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2027-04-15
    ╭─[03-violations.ax:50:1]
    │
@@ -138,4 +148,4 @@ note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, du
            substantially equal payments, and others in §72(t)(2)), keep the withdrawal and mark it
            `!` with the reason.
 
-✗ 7 errors · 1 priced
+✗ 7 errors · 1 warning · 1 priced

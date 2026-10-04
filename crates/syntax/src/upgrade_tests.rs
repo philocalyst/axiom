@@ -160,3 +160,20 @@ fn comments_and_blank_lines_are_kept() {
     let found = written(v4);
     assert!(found.contains("// January\n\n") && found.contains("// pay") && found.contains("/// Rent.\n"));
 }
+
+#[test]
+fn an_exchange_inside_one_end_is_a_purchase_or_a_sale_of_it() {
+    assert_eq!(
+        written("2026-02-02 broker -> broker 1 VTI @ 116.92 USD\n"),
+        "2026-02-02 broker <- 1 VTI @ 116.92 USD\n"
+    );
+    assert_eq!(
+        written("2026-02-02 broker 1 VTI -> broker @ 116.92 USD\n"),
+        "2026-02-02 broker -> 1 VTI @ 116.92 USD\n"
+    );
+    // Two amounts state the price once first, and the sale of a lot keeps naming it.
+    assert_eq!(
+        written("2026-02-05 broker[2026-01-20] 1.620 VTI -> broker 481.14 USD\n"),
+        "2026-02-05 broker[2026-01-20] -> 1.620 VTI @ 297.00 USD\n"
+    );
+}
