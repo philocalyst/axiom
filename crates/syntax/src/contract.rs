@@ -68,6 +68,9 @@ impl<'s> Parser<'s> {
         }
         let template = Body { legs: self.since(legs), items: self.since(items) };
         let arrows = self.legs_point(template.legs, Arrows::Tolerated(Junction::Out));
+        if arrows.is_ok() {
+            self.note_bare_legs(template.legs);
+        }
         let contract = Contract {
             name,
             kind,

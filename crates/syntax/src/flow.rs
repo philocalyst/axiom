@@ -32,10 +32,10 @@ impl<'s> Parser<'s> {
     /// `S <- O A` is the flow `O -> S A`: the model reads what moved, and the arrow only says whose side it is written from.
     fn taken(&mut self, subject: Side<'s>, object: Side<'s>, tail: Many<Clause<'s>>, arrow: Loc) -> Parse<Flow<'s>> {
         if subject.end.is_none() {
-            return self.fail(no_subject(arrow));
+            return self.fail(no_subject(arrow, &object));
         }
         if subject.amount.is_some() {
-            return self.fail(amount_before_take(arrow));
+            return self.fail(amount_before_take(arrow, &subject, &object));
         }
         let (from, to) = (Side { end: object.end, amount: None }, Side { end: subject.end, amount: object.amount });
         Ok(Flow { from, to, tail, body: Body::default(), junction: Junction::In, through: None })
@@ -437,16 +437,22 @@ impl<'s> Parser<'s> {
     /// read.
     fn note_old(&mut self, flow: &Flow<'s>, arrow: Loc) {
         let legs = !flow.body.legs.is_empty();
-        let written = |side: &Side<'s>| side.amount.and_then(Quantity::literal).is_some();
+        let written = |side: &Side<'s>| side.amount.and_then(Quantity::literal);
         let ends = flow.from.end.is_some() && flow.to.end.is_some();
+        // Each is pointed at by what makes it old: the amounts, or the arrow that has nothing before or after it.
+        let at = |amount: Literal<'s>| self.loc_of(amount.0);
         let form = match (written(&flow.from), written(&flow.to), legs) {
-            (true, true, _) if ends => Some(Form::TwoAmounts),
-            (true, false, true) => Some(Form::DanglingAmount),
+            (Some(left), Some(right), _) if ends => Some((Form::TwoAmounts, at(left).to(at(right)))),
+            (Some(left), None, true) => Some((Form::DanglingAmount, at(left).to(arrow))),
             _ => (flow.junction == Junction::Out && flow.from.end.is_none() && flow.through.is_none())
-                .then_some(Form::NoSubject),
+                .then_some((Form::NoSubject, arrow)),
         };
-        if let Some(form) = form {
-            self.old.note(form, arrow, 1);
+        if let Some((form, loc)) = form {
+            self.old.note(form, loc, 1);
+        }
+        // The legs of a split or a through-split lead with an arrow; the others may leave it off.
+        if flow.junction == Junction::Out && flow.through.is_none() {
+            self.note_bare_legs(flow.body.legs);
         }
     }
 
@@ -489,12 +495,12 @@ impl<'s> Parser<'s> {
         }
         if !named || !to || from {
             return self.fail(match flow.junction {
-                Junction::In => takes_nothing(arrow),
+                Junction::In => takes_nothing(arrow, flow.to.end),
                 Junction::Out => missing_legs(arrow, flow.from.end.is_some()),
             });
         }
         if !self.slice(flow.tail).iter().any(|clause| matches!(clause.kind, ClauseKind::Price(_))) {
-            return self.fail(exchange_no_price(arrow, flow.junction));
+            return self.fail(exchange_no_price(arrow, flow));
         }
         flow.within();
         Ok(())
@@ -504,17 +510,16 @@ impl<'s> Parser<'s> {
     /// told it need not still has to point the right way.
     pub fn legs_point(&mut self, legs: Many<Leg<'s>>, arrows: Arrows) -> Parse<()> {
         let problem = self.slice(legs).iter().find_map(|leg| self.arrow_problem(leg, arrows));
-        if let Some(diag) = problem {
-            return self.fail(diag);
+        problem.map_or(Ok(()), |diag| self.fail(diag))
+    }
+
+    /// Notes the legs of a line that was kept and that name no arrow, which v4 wrote and v5 does not.
+    pub fn note_bare_legs(&mut self, legs: Many<Leg<'s>>) {
+        let mut bare = self.slice(legs).iter().filter(|leg| leg.arrow.is_none()).map(|leg| leg.loc);
+        if let Some(first) = bare.next() {
+            let more = bare.count();
+            self.old.note(Form::BareLeg, first, 1 + more as u32);
         }
-        if let Arrows::Tolerated(_) = arrows {
-            let mut bare = self.slice(legs).iter().filter(|leg| leg.arrow.is_none()).map(|leg| leg.loc);
-            if let Some(first) = bare.next() {
-                let more = bare.count();
-                self.old.note(Form::BareLeg, first, 1 + more as u32);
-            }
-        }
-        Ok(())
     }
 
     fn arrow_problem(&self, leg: &Leg<'s>, arrows: Arrows) -> Option<Diagnostic> {
@@ -663,30 +668,39 @@ pub(crate) fn starts_end<'s>(token: Tok<'s>, after: impl FnOnce() -> Tok<'s>) ->
     }
 }
 
-fn no_subject(arrow: Loc) -> Diagnostic {
+/// What a side says in its own words, as far as they are plain: its end and its amount, `acme 3_200 USD`.
+fn said(side: &Side<'_>) -> String {
+    let (end, amount) =
+        (side.end.map(|end| end.name.0), side.amount.and_then(Quantity::literal).map(|amount| amount.0));
+    [end, amount].into_iter().flatten().collect::<Vec<_>>().join(" ")
+}
+
+fn no_subject(arrow: Loc, object: &Side<'_>) -> Diagnostic {
     Diagnostic::error("expected-subject", "a `<-` line starts with the end that takes")
         .label(arrow, "nothing is written before this arrow")
-        .help("name the account that receives: `checking <- acme 5_750 USD`")
+        .help(format!("name the account that takes it: `checking <- {}`", said(object)))
 }
 
-fn amount_before_take(arrow: Loc) -> Diagnostic {
+fn amount_before_take(arrow: Loc, subject: &Side<'_>, object: &Side<'_>) -> Diagnostic {
+    let words = Side { end: object.end, amount: subject.amount };
+    let end = subject.end.map_or("checking", |end| end.name.0);
     Diagnostic::error("amount-before-take", "a `<-` line states its amount after the end it takes from")
         .label(arrow, "the amount belongs to the right of this arrow")
-        .help("write `checking <- acme 5_750 USD`, with the amount last")
+        .help(format!("write `{end} <- {}`, with the amount last", said(&words)))
 }
 
-fn takes_nothing(arrow: Loc) -> Diagnostic {
+fn takes_nothing(arrow: Loc, subject: Option<End<'_>>) -> Diagnostic {
+    let end = subject.map_or("checking", |end| end.name.0);
     Diagnostic::error("takes-nothing", "nothing follows this `<-`")
         .label(arrow, "what does it take, and from whom?")
-        .help("name the end it takes from and an amount: `checking <- acme 5_750 USD`")
-        .help("or an amount and a price: `fidelity <- 7 VTI @ 285.70 USD`")
+        .help(format!("name the end it takes from and an amount: `{end} <- acme 5_750 USD`"))
+        .help(format!("or an amount and a price: `{end} <- 7 VTI @ 285.70 USD`"))
 }
 
-fn exchange_no_price(arrow: Loc, junction: Junction) -> Diagnostic {
-    let example = match junction {
-        Junction::Out => "fidelity -> 1.62 VTI @ 297.00 USD",
-        Junction::In => "fidelity <- 7 VTI @ 285.70 USD",
-    };
+fn exchange_no_price(arrow: Loc, flow: &Flow<'_>) -> Diagnostic {
+    let (end, amount) = (flow.from.end.or(flow.to.end), flow.to.amount.and_then(Quantity::literal));
+    let (end, amount) = (end.map_or("fidelity", |end| end.name.0), amount.map_or("7 VTI", |amount| amount.0));
+    let example = format!("{end} {} {amount} @ 297.00 USD", flow.junction.spelling());
     Diagnostic::error("exchange-no-price", "this line has one end and an amount, but no price and no legs")
         .label(arrow, "nothing says what the amount was exchanged for, or where it goes")
         .help(format!("an exchange says its price: `{example}`"))

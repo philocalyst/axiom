@@ -417,10 +417,13 @@ impl<'s> Parser<'s> {
             Verb::Now(Change::Amendment) => items.is_empty(),
             _ => false,
         };
-        match says_nothing {
-            true => self.fail(no_amount_or_items(header, what_it_says(&statement.verb))),
-            false => Ok(()),
+        if says_nothing {
+            return self.fail(no_amount_or_items(header, what_it_says(&statement.verb)));
         }
+        if !legs_only {
+            self.note_bare_legs(statement.body.legs);
+        }
+        Ok(())
     }
 
     /// The claim an opening's line states: there are no lines under it.
