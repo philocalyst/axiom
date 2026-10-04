@@ -61,6 +61,13 @@ item says is not in this lane.
    error that is the port's. Their READMEs name numbers; list where the port changes one and whether the README or the book is
    right (an independent verifier is in the README of each where it exists). Regenerate the goldens only for what these edits move.
 
+9. **Two bug fixes K12b listed (K3b-map section 7 and the K12b brief).** (a) `owner` has no range: an `owner` slot accepts
+   `acme/529`, placing `acme` as the owner of an account without a `wrong-kind` error. Give the slot the range it means (an
+   entity that can own: the kind says), so the line is refused with the usual `wrong-kind` and the edit. (b) `unknown-address`
+   suggests the closest *name*, not the closest *address* the leading words point at (K3b-map section 4's design): the
+   suggestion must be something that can be pasted in place of what was written. A mistake book each, the old behaviour in the
+   map. Lane U rewrites `resolve.rs`, `fill.rs` and the address passes after you, so keep both fixes small and tested.
+
 ## The proof
 
 - The workspace tests: all green, **including the two that were the known failures** (items 1 and 7). `cargo fmt --check`.
