@@ -1,6 +1,6 @@
 /// The servicer's statement splits the payment: principal, interest and escrow.
 2025-01-01 checking -> mortgage 465.28 USD ^mortgage-2025-01 // principal
-2025-01-01 checking -> lender 2_019.18 USD #mortgage-interest // interest
+2025-01-01 checking -> lender 2_019.18 USD #interest of house // interest
 2025-01-01 checking -> escrow 690.00 USD // taxes and insurance
 2025-01-02 card -> netflix 17.99 USD
 

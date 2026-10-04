@@ -326,6 +326,49 @@ law to-is-counterparty
     });
 }
 
+/// What a tally of the `us` system counted in `text`, each count in whole cents: the owner's own home and a rental it lets.
+fn counted_in_us(text: &str, tally: &str) -> Vec<i64> {
+    let sources = [
+        ("std.ax", include_str!("../../systems/src/std.ax"), true),
+        ("us.ax", include_str!("../../systems/src/us.ax"), true),
+        ("us/rental.ax", include_str!("../../systems/src/us/rental.ax"), true),
+        ("axiom.ax", text, false),
+    ];
+    with_run_sources(&sources, day(2026, 4, 15), |book, run| {
+        let counted = run.effects.iter().filter(|effect| book.name(effect.name) == tally);
+        counted.map(|effect| effect.amount.qty.0).collect()
+    })
+}
+
+#[test]
+fn the_interest_of_a_home_is_itemized_once_whoever_wrote_it_and_a_rentals_is_a_rental_cost() {
+    let text = "\
+base USD
+use us/rental
+entity me : person
+  born 1988-02-10
+  lives us
+entity lender : lender
+account checking : bank
+asset house : home
+asset flat : rental-home
+  in-service 2024-01-01
+  land 10_000 USD
+contract mortgage with lender
+  loan 100_000 USD on 2025-01-01 at 6% over 10y for house
+  monthly on 1 from checking
+opening 2025-01-01
+  checking 50_000 USD
+2025-01-15 checking -> lender 1_000 USD #interest of house
+2025-01-20 checking -> lender 400 USD #interest of flat
+2025-02-01 mortgage
+";
+    // The loan's first payment has 500.00 of interest (6% of 100,000.00 for a month) and the line written by hand 1,000.00:
+    // each is counted once, as a deduction of the home, and the flat's 400.00 is a cost of renting it and no deduction.
+    assert_eq!(counted_in_us(text, "itemized"), [1_000_00, 500_00]);
+    assert_eq!(counted_in_us(text, "rental-expenses"), [400_00]);
+}
+
 #[test]
 fn hsa_basis_zero_contribution_and_against_medical_reimbursement() {
     let source = |withdrawal: &str| {

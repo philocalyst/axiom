@@ -106,4 +106,4 @@ note[nonqualified-hsa-penalty]: waived: 124.00 USD would be owed to irs as nonqu
    = note: waived: reimburses 2025-05-09 dentist, receipt kept
 
 4 warnings · 2 priced · 1 waived
-✓ 864 flows · 67 places · 23 laws enforced · net worth 46,463.25 USD · 2 holdings unpriced
+✓ 864 flows · 67 places · 24 laws enforced · net worth 46,463.25 USD · 2 holdings unpriced

@@ -17,7 +17,7 @@ journal/2025/*    dated native flows and month-end statements
 ```
 
 The source uses the native v4 model. A journal movement is a dated flow such as
-`checking -> lender 2_019.18 USD #mortgage-interest`; the source and destination,
+`checking -> lender 2_019.18 USD #interest of house`; the source and destination,
 amount, purpose, and optional code are explicit. Opening values are `opening`
 statements, and market changes are dated account statements `via market`.
 
