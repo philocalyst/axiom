@@ -1,10 +1,10 @@
 //! Making a claim of what a party owed and nothing kept, and forgiving a claim: `^code waived`.
 //!
 //! A due day that is missed (`monitor`) and that the party owed is a claim on it: the occurrence's header, paid into the
-//! tab the owner keeps with the party, on the day it was found missing, with no purpose: a claim with no purpose has no
-//! recognition (`recognition`), so what pays it counts as the payment says. A later payment from the party settles it as
-//! any payment does (`settle`: by code, then the exact amount, then the oldest). What the owner owes is not made a claim here:
-//! a debt is a plain balance and a payment to the party does not settle it.
+//! tab the owner keeps with the party, on the day it was found missing, with the purpose the contract gives it. Its purpose
+//! is its recognition (`recognition`): accrual books count it when it is made, cash books when what pays it settles it. A
+//! later payment from the party settles it as any payment does (`settle`: by code, then the exact amount, then the oldest).
+//! What the owner owes is not made a claim here: a debt is a plain balance and a payment to the party does not settle it.
 //!
 //! A claim is a parcel in a claim place, so forgiving it is relief: every parcel the named transaction made is taken out
 //! of the place that holds it, and the value goes back to the place it came from, as if the party had never been paid
@@ -37,7 +37,6 @@ impl Ledger<'_, '_, '_> {
         let claimed = header.is_some();
         if let Some(mut header) = header {
             header.flow.to = tab;
-            header.flow.purpose = None;
             let book = self.plan.book;
             let (view, amounts) = (book.runtime_flow_view(&header, &details), Amounts::written(&header.flow));
             let day = found.max(self.clock.day);

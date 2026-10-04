@@ -12,7 +12,7 @@
 //! its reader what it cost before there was a rule.
 
 use axiom_core::{Day, Days, Id, Qty};
-use axiom_model::{Book, Books, Commodity, Dir, Flow, Place, Purposed};
+use axiom_model::{Book, Books, Commodity, Dir, Flow, Place, Purposed, RuntimeTxn};
 
 use crate::motion::Motion;
 use crate::plan::Plan;
@@ -206,9 +206,13 @@ impl Counting<'_> {
     }
 }
 
-/// What the claim a parcel is was made for: the purpose of the line that made it, if it was a line of the journal.
+/// What the claim a parcel is was made for: the purpose of the line that made it, if it was a line of the journal, or of the
+/// header of the occurrence the monitor found missing (`Book::claim_of` says the same of its due day and its party).
 pub fn claim_purpose(book: &Book, parcel: &Parcel) -> Option<Purposed> {
     let part = parcel.part?;
+    if let RuntimeTxn::ContractOccurrence { contract, schedule, source: None, .. } = part.origin {
+        return book.contracts[contract].terms_of(schedule)?.template.first()?.header.flow.purpose;
+    }
     book.flows[book.txn_flow(part.origin, part.ordinal)?].purpose
 }
 
