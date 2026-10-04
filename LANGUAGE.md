@@ -100,7 +100,11 @@ the start of a line item. Case separates names (lowercase) from units (uppercase
 appears on a journal line.
 
 Keywords are recognized by position and not reserved. `empty` is the zero of every
-unit; a bare `0` where an amount belongs is an error whose fix is `empty`.
+unit; a bare `0` where an amount belongs is an error whose fix is `empty`. Three names
+are the language's own, and a book may not declare them again: the kinds `claim` and
+`debt-claim` (the places that hold what others owe, and what is owed, §7), which a
+second declaration refuses as `duplicate-kind`, and the purpose `principal` (the
+principal leg of a loan's payment, §7), which a second one makes `ambiguous-purpose`.
 
 ## 2. Reading a journal
 
@@ -184,7 +188,9 @@ declaration, except that a contract may share its party's name (§7).
 **Split flows.** When the header names only one end, the indented legs are the
 other side; their total is the header amount, or the sum of the legs, and at most
 one leg is `...` (the remainder). A leg `= AMOUNT` makes its account's balance
-equal that amount after the flow. Many-to-many is an error.
+equal that amount after the flow. A `?` leg beside a `...` leg is `cannot-infer`:
+both would take what the others leave, so write the amount of one of them, or
+assert the balance that solves it. Many-to-many is an error.
 
 **A leg between two parties passes through the transaction's owner.** When the
 header's end and a leg's end are both parties, the value is the owner's on the
@@ -484,7 +490,7 @@ Built-in properties:
 | account, entity | `known-as PATTERN, …` | how it appears on statements (§14); a name is its own by default |
 | entity | `lives SYSTEM, …` | residences; `now lives` moves them |
 | | `citizen SYSTEM` | taxed by it wherever it lives |
-| | `books cash\|accrual` | when claims are income or spending (default cash) |
+| | `books cash\|accrual` | when claims are income or spending: when they are settled (`cash`, the default) or when they are made (`accrual`, §7) |
 | | `member ENTITY` | belongs to that household |
 | | `owner ENTITY` | on a business: owned by that owner |
 | | `of OWNER` | a client of that owner: what it pays is that owner's |
@@ -655,7 +661,8 @@ payment is recognized over that span; ending early makes the unused part a claim
 the party, pro rata), `share` (§10), `also` (§10), `deposit` (paid at the start,
 into the holding named, and owed back at the end: a tenant's deposit to you is held
 for the tenant; yours to a landlord is a claim on it). In accrual books an
-occurrence is income or spending on its due day, and the payment settles it.
+occurrence the party owed and nothing kept is a claim made when it is found missing,
+counted on the day the occurrence fell due; the payment settles it and counts nothing.
 
 **Loans** follow the ACTUS annuity. `loan AMOUNT on DATE at RATE over SPAN` is a
 debt of the owner to the party, and its life is one schedule, worked out once from

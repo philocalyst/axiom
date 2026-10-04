@@ -18,10 +18,9 @@ use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::{Parcel, Posted};
 
-/// When accrual books count a claim: LANGUAGE §7 says "when invoiced", that is when the claim is made; §6 and the doc of
-/// [`Books::Accrual`] said when it is due. §7 is the normative text and the simpler, so a claim counts when it is made.
-/// The other reading is the days a claim is recognized over (`Counting::made`), which is the one place [`ACCRUAL_AT`]
-/// reaches.
+/// When accrual books count a claim: LANGUAGE §6 and §7 and the doc of [`Books::Accrual`] say "when invoiced", that is when
+/// the claim is made. The other reading, the day it falls due, is the days a claim is recognized over (`Counting::made`), which
+/// is the one place [`ACCRUAL_AT`] reaches: changing the reading is changing that constant.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AccrualAt {
     /// The day the claim is made.
@@ -153,7 +152,7 @@ impl Counting<'_> {
         let own = |share, recognized| Piece { purpose: self.purpose, share, recognized, counts: Counts::Flow };
         match (self.dealing, self.books) {
             (Dealing::Making, Books::Cash) if self.purpose.is_some() => {}
-            (Dealing::Making, _) => out.push(own(Share::Whole, self.made())),
+            (Dealing::Making, _) => out.push(own(Share::Whole, self.made(ACCRUAL_AT))),
             (Dealing::Ordinary, _) => out.push(own(Share::Whole, self.recognized)),
             (Dealing::Forgiving { tab, qty, dir }, Books::Accrual) if self.purpose.is_some() => out.push(Piece {
                 share: Share::Part(qty),
@@ -172,9 +171,9 @@ impl Counting<'_> {
         }
     }
 
-    /// The days a claim made in accrual books counts over.
-    fn made(&self) -> Days {
-        match ACCRUAL_AT {
+    /// The days a claim made in accrual books counts over, as `at` reads when it counts.
+    fn made(&self, at: AccrualAt) -> Days {
+        match at {
             AccrualAt::Made => self.recognized,
             AccrualAt::Due => self.due.map_or(self.recognized, |due| Days::on(due.max(self.day))),
         }
@@ -219,4 +218,33 @@ pub fn claim_purpose(book: &Book, parcel: &Parcel) -> Option<Purposed> {
 /// Whether two purposes are the same to the totals: the same node, of the same thing.
 fn same_purpose(left: Option<Purposed>, right: Purposed) -> bool {
     left.is_some_and(|left| left.purpose == right.purpose && left.of == right.of)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claim_due(due: Option<Day>) -> Counting<'static> {
+        let day = Day(10);
+        Counting { books: Books::Accrual, purpose: None, day, recognized: Days::on(day), due, dealing: Dealing::Making }
+    }
+
+    /// `AccrualAt::Made` is the reading the books follow; `Due` is the one-line alternative, and counts a claim on the day it
+    /// falls due, never before the day it is made.
+    #[test]
+    fn a_claim_counts_over_the_day_it_is_made_or_the_day_it_falls_due_as_the_reading_says() {
+        let owed = claim_due(Some(Day(40)));
+        assert_eq!((owed.made(AccrualAt::Made), owed.made(AccrualAt::Due)), (Days::on(Day(10)), Days::on(Day(40))));
+        assert_eq!(
+            claim_due(None).made(AccrualAt::Due),
+            Days::on(Day(10)),
+            "a claim that says no day falls due when made"
+        );
+        assert_eq!(
+            claim_due(Some(Day(5))).made(AccrualAt::Due),
+            Days::on(Day(10)),
+            "one already past due counts today"
+        );
+        assert_eq!(ACCRUAL_AT, AccrualAt::Made, "the books count a claim when it is made (LANGUAGE §7)");
+    }
 }
