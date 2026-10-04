@@ -7,18 +7,24 @@
 //! push; and cloning is two flat copies.
 //!
 //! A slot is the public [`Holding`] plus what keeps a sale from scanning it.
-//! Lots are kept oldest first, so FIFO takes from the front (past a cursor over
-//! the exhausted ones) and LIFO from the back, each in time proportional to the
-//! lots it uses. HIFO asks a heap ordered by basis per unit, built when first
-//! needed and kept up to date by every change to a lot. `exact` takes the lot
-//! of exactly the size asked, else the oldest, and settles a claim. Only
-//! `prorata`, selectors and ties have to look at every lot.
+//! Relief is one ranking and one way of taking: every policy orders what may
+//! leave by [`Candidate::rank`] (the tie's colour, what the policy takes first,
+//! then basis per unit and position) and takes in that order, all of one
+//! before the next, or pro rata across a colour. Sorting every lot for every
+//! sale is what that means, and on a position bought 100,000 times it is
+//! 150 times slower than not looking: so when nothing is tied and no selector
+//! narrows, the first candidates of FIFO, LIFO and HIFO come from where they
+//! already are. Lots are kept oldest first, so FIFO takes from the front (past
+//! a cursor over the exhausted ones) and LIFO from the back, and HIFO asks a
+//! heap in the ranking's order, built when first needed and told of every
+//! change to a lot. Everything else (`exact`, `prorata`, selectors, ties) is
+//! gathered and sorted.
 //!
 //! Exhausted lots are left in place while the fold runs and swept out when
 //! control returns to the caller, so the holdings a caller sees are always
 //! clean.
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::hash::{Hash, Hasher};
 use std::iter::successors;
@@ -47,14 +53,9 @@ fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
         && pool[right.header].iter().chain(&pool[right.local]).all(in_left)
 }
 
-/// What makes two parcels interchangeable. Parcels merge exactly when their
-/// identities are equal, and relief between candidates with equal identities is
-/// never ambiguous: taking any of them is the same as taking any other.
+/// What makes two parcels interchangeable: parcels merge exactly when their identities are equal.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Identity {
-    /// Plain value has no acquisition transaction and must not borrow a fake
-    /// journal key merely to participate in ambiguity checks.
-    Plain { basis: Qty, qty: Qty },
     /// Money: what matters is who it is tied to and how much of each unit is
     /// already accounted for. Where and when it arrived does not matter, so a
     /// 401k's hundreds of zero-basis deferrals are one lot.
@@ -74,7 +75,6 @@ pub(crate) enum Identity {
 impl PartialEq for Identity {
     fn eq(&self, other: &Identity) -> bool {
         match (*self, *other) {
-            (Identity::Plain { basis: ab, qty: aq }, Identity::Plain { basis: bb, qty: bq }) => (ab, aq) == (bb, bq),
             (
                 Identity::Money { tied: a, basis: ab, qty: aq, part: ap, wash_matched: aw },
                 Identity::Money { tied: b, basis: bb, qty: bq, part: bp, wash_matched: bw },
@@ -204,9 +204,28 @@ pub(crate) struct Candidate {
     /// The transaction that made it; plain money has none.
     pub txn: Option<RuntimeTxn>,
     pub tied: Option<Id<Entity>>,
-    /// What the claim it belongs to holds: its own quantity, until `Exact` adds up the lines of one transaction.
+    /// What the claim it belongs to holds: its own quantity, until `exact` adds up the lines of one transaction.
     claim: Qty,
-    identity: Identity,
+}
+
+impl Candidate {
+    /// Where the candidate stands in the order relief takes, which is one order for every policy: its colour, then what
+    /// the policy takes first (for `exact` the claims of the size asked; for HIFO outside money, plain value), then the
+    /// heap's order ([`Ranked`]): dearest per unit, then oldest. A policy that does not weigh basis ranks every candidate
+    /// the same per unit, so position decides, and LIFO counts positions from the newest.
+    fn rank(&self, policy: Option<Policy>, req: &Request) -> (Colour, bool, Reverse<Ranked>) {
+        let (plain, at) = match self.source {
+            Source::Plain => (true, -1),
+            Source::Lot(at) => (false, at as i64),
+        };
+        let (first, ranked) = match policy {
+            Some(Policy::Hifo) => (plain && !req.money, Ranked { basis: self.basis.0, qty: self.qty.0, at }),
+            Some(Policy::Lifo) => (false, Ranked { at: -at, ..Ranked::SAME }),
+            Some(Policy::Exact) => (!plain && self.claim == req.exact, Ranked { at, ..Ranked::SAME }),
+            _ => (false, Ranked { at, ..Ranked::SAME }),
+        };
+        (req.colour(self.tied), !first, Reverse(ranked))
+    }
 }
 
 /// What relief is asked for.
@@ -268,10 +287,6 @@ enum Colour {
     Refused,
 }
 
-impl Colour {
-    const ALL: [Colour; 4] = [Colour::Own, Colour::Permitted, Colour::Free, Colour::Refused];
-}
-
 impl Request<'_> {
     fn colour(&self, tied: Option<Id<Entity>>) -> Colour {
         match tied {
@@ -285,19 +300,6 @@ impl Request<'_> {
     /// Whether parcels of `colour` may leave for this request at all.
     fn allows(&self, colour: Colour) -> bool {
         colour != Colour::Refused || self.spender.is_none()
-    }
-
-    /// Whether a holding can have parcels of `colour` that may leave, given
-    /// whether any of its parcels is tied at all: the colours nobody asked
-    /// about are skipped.
-    fn possible(&self, colour: Colour, tied: bool) -> bool {
-        self.allows(colour)
-            && match colour {
-                Colour::Free => true,
-                Colour::Own => tied && self.spender.is_some(),
-                Colour::Permitted => tied && self.permits.iter().any(|&(_, permit)| permit),
-                Colour::Refused => tied,
-            }
     }
 }
 
@@ -344,17 +346,21 @@ impl Deref for Slot {
     }
 }
 
-/// A lot as HIFO ranks it: dearest per unit first, then oldest.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// A candidate as the ranking orders it, greatest first: dearest per unit, then the earliest position. It is the heap's
+/// order, and the last key of every policy's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Ranked {
     basis: i64,
     qty: i64,
-    at: u32,
+    at: i64,
 }
 
 impl Ranked {
+    /// What a policy that does not weigh basis gives every candidate: one basis per unit.
+    const SAME: Ranked = Ranked { basis: 0, qty: 1, at: 0 };
+
     fn of(at: usize, lot: &Parcel) -> Ranked {
-        Ranked { basis: lot.basis.0, qty: lot.qty.0, at: at as u32 }
+        Ranked { basis: lot.basis.0, qty: lot.qty.0, at: at as i64 }
     }
 }
 
@@ -459,11 +465,11 @@ impl Slot {
         self.ranked = None;
     }
 
-    /// Tells the heap that lot `at` has a new quantity and basis. It ranks untied lots only.
+    /// Tells the heap, if there is one, that lot `at` has a new quantity and basis. A tied lot it is told of is never its
+    /// top while it is live: the heap is read only when nothing is tied.
     fn revalue(&mut self, at: usize) {
-        let lot = &self.holding.lots[at];
-        if let Some(ranked) = self.ranked.as_mut().filter(|_| lot.tied.is_none()) {
-            ranked.push(Ranked::of(at, lot));
+        if let Some(ranked) = self.ranked.as_mut() {
+            ranked.push(Ranked::of(at, &self.holding.lots[at]));
         }
     }
 
@@ -559,183 +565,114 @@ impl Slot {
         }
         let policy = selection.policy().or(req.policy);
         let in_order = !selection.constrains()
+            && !self.is_tied()
             && match policy {
-                None => !self.is_tied(),
                 Some(Policy::Hifo) => !req.money,
-                Some(policy) => policy != Policy::Prorata,
+                Some(Policy::Exact | Policy::Prorata) => false,
+                None | Some(Policy::Fifo | Policy::Lifo) => true,
             };
-        if in_order {
-            self.relieve_in_order(req, policy, out);
-        } else {
-            self.relieve_scanning(req, &selection, policy, out);
-        }
+        out.shortfall = match in_order {
+            true => self.take_in_order(req, policy, out),
+            false => self.take_ranked(req, &selection, policy, out),
+        };
         self.holding.plain -= out.shortfall;
         self.qty -= req.need;
         self.sweep_ends();
     }
 
-    /// FIFO, LIFO and HIFO (and no policy at all): from the end of the holding
-    /// that the policy names, touching only the lots it uses. Ties are colours:
-    /// the spender's own lots go first, then lots tied to an entity whose laws
-    /// permit the flow, untied ones next, and the rest last.
-    fn relieve_in_order(&mut self, req: &Request, policy: Option<Policy>, out: &mut Relief) {
+    /// FIFO, LIFO, HIFO outside money and no policy, from a holding where nothing is tied and no selector narrows what may
+    /// leave: the first candidates in the order of the ranking are plain value and then the oldest lot past the cursor, the
+    /// newest from the back (plain value last), or the dearest per unit from the heap, so only what leaves is looked at. Says
+    /// what was not covered.
+    fn take_in_order(&mut self, req: &Request, policy: Option<Policy>, out: &mut Relief) -> Qty {
         let takeable = self.qty - self.holding.plain.min(Qty::ZERO);
         let candidates = usize::from(self.holding.plain > Qty::ZERO) + self.live();
         out.ambiguous = policy.is_none() && candidates > 1 && req.need < takeable;
         if out.ambiguous && (req.explain)() {
             self.gather(req.money, &Selection { selectors: &[], codes: req.codes }, &mut out.candidates);
         }
-        let mut left = req.need;
-        let (lifo, tied) = (policy == Some(Policy::Lifo), self.is_tied());
-        for colour in Colour::ALL {
-            if left.is_zero() || !req.possible(colour, tied) {
-                continue;
-            }
-            let of_colour = |lot: &Parcel| !tied || req.colour(lot.tied) == colour;
-            let plain_here = colour == Colour::Free;
-            if policy == Some(Policy::Exact) {
-                self.take_exact(&mut left, of_colour, req, out);
-            }
-            if plain_here && !lifo {
-                self.take_plain(&mut left, req, out);
-            }
-            match (policy, colour) {
-                (Some(Policy::Hifo), Colour::Free) => self.take_dearest(&mut left, req, out),
-                (Some(Policy::Hifo), _) => self.take_priciest(&mut left, of_colour, req, out),
-                _ => self.take_run(&mut left, lifo, of_colour, req, out),
-            }
-            if plain_here && lifo {
-                self.take_plain(&mut left, req, out);
-            }
-        }
-        out.shortfall = left;
-    }
-
-    fn take_plain(&mut self, left: &mut Qty, req: &Request, out: &mut Relief) {
-        let qty = self.holding.plain.min(*left);
-        if qty > Qty::ZERO {
-            self.take(Source::Plain, qty, req, out);
-            *left -= qty;
-        }
-    }
-
-    /// The oldest claim `keep` admits that holds exactly what was asked, as far as `left` goes: the claim a payment is the
-    /// size of, which is settled before an older one that is not. A claim is the lots of one transaction, which land
-    /// together (an invoice's lines), so it is a run of lots.
-    fn take_exact(&mut self, left: &mut Qty, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
-        let mut at = self.first;
-        while at < self.holding.lots.len() {
-            let lots = &self.holding.lots[at..];
-            let end = at + lots.iter().take_while(|lot| lot.txn == lots[0].txn).count();
-            let held: Qty = self.holding.lots[at..end].iter().filter(|&lot| keep(lot)).map(|lot| lot.qty).sum();
-            if held == req.exact {
-                for line in at..end {
-                    let lot = &self.holding.lots[line];
-                    let qty = lot.qty.min(*left);
-                    if keep(lot) && !qty.is_zero() {
-                        self.take(Source::Lot(line), qty, req, out);
-                        *left -= qty;
-                    }
-                }
-                return;
-            }
-            at = end;
-        }
-    }
-
-    /// The lots `keep` admits, from the front or from the back, until `left` is covered.
-    fn take_run(
-        &mut self,
-        left: &mut Qty,
-        lifo: bool,
-        keep: impl Fn(&Parcel) -> bool,
-        req: &Request,
-        out: &mut Relief,
-    ) {
-        let live = |lot: &Parcel| !lot.qty.is_zero() && keep(lot);
-        let mut at = if lifo { self.holding.lots.len() } else { self.first };
+        let lifo = policy == Some(Policy::Lifo);
+        let mut left = if lifo { req.need } else { self.take_plain(req.need, req, out) };
         while !left.is_zero() {
-            let lots = &self.holding.lots;
-            let found = if lifo {
-                lots[..at].iter().rposition(live)
-            } else {
-                lots[at..].iter().position(live).map(|found| at + found)
-            };
-            let Some(found) = found else { return };
-            let qty = self.holding.lots[found].qty.min(*left);
-            self.take(Source::Lot(found), qty, req, out);
-            *left -= qty;
-            at = if lifo { found } else { found + 1 };
-        }
-    }
-
-    /// The dearest lots `keep` admits, found by looking at every lot: only for the few tied ones.
-    fn take_priciest(&mut self, left: &mut Qty, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
-        while !left.is_zero() {
-            let live = self.holding.lots.iter().enumerate().filter(|(_, lot)| !lot.qty.is_zero() && keep(lot));
-            let dearest = live.max_by(|(a, x), (b, y)| Ranked::of(*a, x).cmp(&Ranked::of(*b, y)));
-            let Some((at, lot)) = dearest else { return };
-            let qty = lot.qty.min(*left);
+            let Some(at) = self.next(policy) else { break };
+            let qty = self.holding.lots[at].qty.min(left);
             self.take(Source::Lot(at), qty, req, out);
-            *left -= qty;
+            left -= qty;
         }
+        if lifo { self.take_plain(left, req, out) } else { left }
     }
 
-    /// Untied lots dearest per unit first: whatever the heap says is on top and still true.
-    fn take_dearest(&mut self, left: &mut Qty, req: &Request, out: &mut Relief) {
-        while !left.is_zero() {
-            let lots = &self.holding.lots;
-            let ranked = self.ranked.get_or_insert_with(|| {
-                let untied = lots.iter().enumerate().filter(|(_, lot)| !lot.qty.is_zero() && lot.tied.is_none());
-                Box::new(untied.map(|(at, lot)| Ranked::of(at, lot)).collect())
-            });
-            let Some(&top) = ranked.peek() else { return };
-            ranked.pop();
-            let current = lots.get(top.at as usize).is_some_and(|lot| lot.qty.0 == top.qty && lot.basis.0 == top.basis);
-            if current {
-                let qty = Qty(top.qty).min(*left);
-                self.take(Source::Lot(top.at as usize), qty, req, out);
-                *left -= qty;
+    /// Takes what plain value holds of `left`, and says what is still wanted.
+    fn take_plain(&mut self, left: Qty, req: &Request, out: &mut Relief) -> Qty {
+        let qty = self.holding.plain.min(left);
+        if qty <= Qty::ZERO {
+            return left;
+        }
+        self.take(Source::Plain, qty, req, out);
+        left - qty
+    }
+
+    /// The lot the policy takes next: the dearest per unit, the newest live one, or the oldest past the cursor.
+    fn next(&mut self, policy: Option<Policy>) -> Option<usize> {
+        let lots = &self.holding.lots;
+        match policy {
+            Some(Policy::Hifo) => self.dearest(),
+            Some(Policy::Lifo) => lots.iter().rposition(|lot| !lot.qty.is_zero()),
+            _ => {
+                self.first += lots[self.first..].iter().take_while(|lot| lot.qty.is_zero()).count();
+                (self.first < lots.len()).then_some(self.first)
             }
         }
     }
 
-    /// Everything else: look at every lot, weigh ties, then the policy.
-    fn relieve_scanning(&mut self, req: &Request, selection: &Selection, policy: Option<Policy>, out: &mut Relief) {
-        let mut candidates = std::mem::take(&mut out.gathered);
-        candidates.clear();
-        self.gather(req.money, selection, &mut candidates);
-        let colour = |c: &Candidate| req.colour(c.tied);
-        candidates.retain(|c| req.allows(colour(c)));
-        if policy == Some(Policy::Exact) {
-            whole_claims(&mut candidates, colour);
-        }
-        candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, req.exact, a, b)));
+    /// The lot of the highest basis per unit, the oldest of those: the heap's top, once the entries its lots outgrew are
+    /// discarded. The heap is built when first asked, and every change to a lot pushes the lot as it is now.
+    fn dearest(&mut self) -> Option<usize> {
+        let lots = &self.holding.lots;
+        let ranked = self.ranked.get_or_insert_with(|| {
+            let live = lots.iter().enumerate().filter(|(_, lot)| !lot.qty.is_zero());
+            Box::new(live.map(|(at, lot)| Ranked::of(at, lot)).collect())
+        });
+        let current = |top: &Ranked| {
+            lots.get(top.at as usize).is_some_and(|lot| (lot.basis.0, lot.qty.0) == (top.basis, top.qty))
+        };
+        std::iter::from_fn(|| ranked.pop()).find(current).map(|top| top.at as usize)
+    }
 
+    /// Every other relief (a selector, a tie, `exact`, pro rata, HIFO of money): the candidates the selectors admit, in the
+    /// order of the ranking, taken a colour at a time and each colour [`share`]d. Says what was not covered.
+    fn take_ranked(&mut self, req: &Request, selection: &Selection, policy: Option<Policy>, out: &mut Relief) -> Qty {
+        let mut ranked = std::mem::take(&mut out.gathered);
+        ranked.clear();
+        self.gather(req.money, selection, &mut ranked);
+        ranked.retain(|c| req.allows(req.colour(c.tied)));
+        if policy == Some(Policy::Exact) {
+            whole_claims(&mut ranked, |c| req.colour(c.tied));
+        }
+        ranked.sort_unstable_by_key(|c| c.rank(policy, req));
         let mut plan = std::mem::take(&mut out.plan);
         plan.clear();
-        let mut rest = candidates.as_slice();
         let mut left = req.need;
-        while left > Qty::ZERO && !rest.is_empty() {
-            let first = colour(&rest[0]);
-            let (group, tail) = rest.split_at(rest.iter().take_while(|c| colour(c) == first).count());
-            rest = tail;
+        for group in ranked.chunk_by(|a, b| req.colour(a.tied) == req.colour(b.tied)) {
+            if left.is_zero() {
+                break;
+            }
             let total: Qty = group.iter().map(|c| c.qty).sum();
             let take = left.min(total);
-            if take < total && policy.is_none() && !interchangeable(group) {
+            if take < total && policy.is_none() && group.len() > 1 {
                 out.ambiguous = true;
                 if (req.explain)() {
                     out.candidates.extend_from_slice(group);
                 }
             }
-            allocate(group, take, policy == Some(Policy::Prorata), &mut plan);
+            share(group, take, policy, &mut plan);
             left -= take;
         }
-        out.shortfall = left;
         for &(source, qty) in &plan {
             self.take(source, qty, req, out);
         }
-        (out.plan, out.gathered) = (plan, candidates);
+        (out.plan, out.gathered) = (plan, ranked);
+        left
     }
 
     /// The parcels the selection admits, plain money first.
@@ -744,24 +681,12 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             // Plain money has no transaction or acquisition day of its own.
             let basis = if money { plain } else { Qty::ZERO };
-            out.push(Candidate {
-                source: Source::Plain,
-                qty: plain,
-                basis,
-                acquired: Day::MIN,
-                txn: None,
-                tied: None,
-                claim: plain,
-                identity: if money {
-                    Identity::Money { tied: None, basis, qty: plain, part: None, wash_matched: false }
-                } else {
-                    Identity::Plain { basis, qty: plain }
-                },
-            });
+            let (acquired, txn, tied) = (Day::MIN, None, None);
+            out.push(Candidate { source: Source::Plain, qty: plain, basis, acquired, txn, tied, claim: plain });
         }
         let lots = self.holding.lots.iter().enumerate();
         let admitted = lots.filter(|(_, lot)| !lot.qty.is_zero() && selection.admits(lot));
-        out.extend(admitted.map(|(at, lot)| Candidate::new(Source::Lot(at), lot, money)));
+        out.extend(admitted.map(|(at, lot)| Candidate::new(Source::Lot(at), lot)));
     }
 
     /// Whether a lot still held carries `code`: a code a flow writes names a claim here only if one does.
@@ -926,10 +851,10 @@ fn carries(lot: &Parcel, code: Sym, pool: &Arena<Sym>) -> bool {
 }
 
 impl Candidate {
-    fn new(source: Source, parcel: &Parcel, money: bool) -> Candidate {
-        let (qty, basis, acquired, tied) = (parcel.qty, parcel.basis, parcel.acquired, parcel.tied);
-        let txn = Some(parcel.txn);
-        Candidate { source, qty, basis, acquired, txn, tied, claim: qty, identity: identity(parcel, money) }
+    fn new(source: Source, parcel: &Parcel) -> Candidate {
+        let (qty, basis, acquired, tied, txn) =
+            (parcel.qty, parcel.basis, parcel.acquired, parcel.tied, Some(parcel.txn));
+        Candidate { source, qty, basis, acquired, txn, tied, claim: qty }
     }
 }
 
@@ -945,34 +870,12 @@ fn whole_claims(candidates: &mut [Candidate], colour: impl Fn(&Candidate) -> Col
     }
 }
 
-/// Candidates in the order the policy consumes them. Storage order is oldest
-/// first, so FIFO is the identity, and it also orders "no policy", pro-rata
-/// (whose order does not matter) and ties in the others. `Exact` puts the
-/// candidates of a claim that holds exactly `exact` first, oldest of them first.
-fn by_policy(policy: Option<Policy>, exact: Qty, a: &Candidate, b: &Candidate) -> Ordering {
-    match policy {
-        Some(Policy::Lifo) => b.source.cmp(&a.source),
-        Some(Policy::Hifo) => basis_per_unit(b, a).then(a.source.cmp(&b.source)),
-        Some(Policy::Exact) => (b.claim == exact).cmp(&(a.claim == exact)).then(a.source.cmp(&b.source)),
-        _ => a.source.cmp(&b.source),
-    }
-}
-
-/// Compares `a.basis / a.qty` with `b.basis / b.qty` without dividing.
-fn basis_per_unit(a: &Candidate, b: &Candidate) -> Ordering {
-    (a.basis.0 as i128 * b.qty.0 as i128).cmp(&(b.basis.0 as i128 * a.qty.0 as i128))
-}
-
-/// Whether taking any part of the group is the same as taking any other.
-fn interchangeable(group: &[Candidate]) -> bool {
-    group.iter().all(|c| c.identity == group[0].identity)
-}
-
-fn allocate(group: &[Candidate], take: Qty, prorata: bool, plan: &mut Vec<(Source, Qty)>) {
-    if prorata {
+/// Plans what leaves a group of one colour, `take` of it in all, in the order of the ranking: all of each before the next,
+/// or, pro rata, a share of each by its quantity, the shares adding up to `take` exactly.
+fn share(group: &[Candidate], take: Qty, policy: Option<Policy>, plan: &mut Vec<(Source, Qty)>) {
+    if policy == Some(Policy::Prorata) {
         let mut shares = Shares::new(take, group.iter().map(|c| c.qty).sum());
-        plan.extend(group.iter().map(|c| (c.source, shares.take(c.qty))));
-        return;
+        return plan.extend(group.iter().map(|c| (c.source, shares.take(c.qty))));
     }
     let mut left = take;
     for c in group {
@@ -1719,6 +1622,19 @@ mod tests {
         assert!(!relieve(&mut differ.clone(), 20, &PLAIN).ambiguous, "taking everything leaves no choice");
         let days = slot_of(1, 0, &[lot(10, 1_000, 5), lot(10, 1_000, 6)], false);
         assert!(relieve(&mut days.clone(), 6, &PLAIN).ambiguous, "each purchase is its own lot outside the base");
+        // The same when every candidate is looked at: a selector, or a tie.
+        let (all, only_first) = ([Select::Range(Days::ALWAYS)], [Select::Range(span(5, 5))]);
+        assert!(relieve(&mut days.clone(), 6, &Ask { selectors: &all, ..PLAIN }).ambiguous);
+        assert!(!relieve(&mut days.clone(), 6, &Ask { selectors: &only_first, ..PLAIN }).ambiguous, "one admitted");
+        assert!(!relieve(&mut days.clone(), 20, &Ask { selectors: &all, ..PLAIN }).ambiguous, "all of them");
+        let tied = slot_of(1, 0, &[lot(10, 1_000, 5), Parcel { tied: Some(Id::new(2)), ..purchase(99) }], false);
+        let permits = [(Id::new(2), true)];
+        let relief = relieve(&mut tied.clone(), 6, &Ask { permits: &permits, ..PLAIN });
+        assert!(!relief.ambiguous, "each colour holds one lot, and the permitted one goes first");
+        assert_eq!(taken(&relief), [(6, 900)]);
+        let untied_too =
+            slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99), Parcel { tied: Some(Id::new(2)), ..lot(1, 1, 7) }], false);
+        assert!(relieve(&mut untied_too.clone(), 6, &PLAIN).ambiguous, "two untied lots differ, beside a tied one");
     }
 
     #[test]
@@ -1795,7 +1711,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_identity_is_reflexive_without_a_fabricated_transaction_key() {
+    fn plain_value_is_one_candidate_without_a_fabricated_transaction_key() {
         let mut slot = slot_of(1, 0, &[], false);
         slot.credit(Qty(5));
         let candidates = {
@@ -1805,7 +1721,10 @@ mod tests {
         };
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].txn, None);
-        assert_eq!(candidates[0].identity, candidates[0].identity);
+        let relief = relieve(&mut slot.clone(), 2, &PLAIN);
+        assert!(!relief.ambiguous, "part of plain value alone is no choice");
+        let tied = Ask { permits: &[(Id::new(4), true)], ..PLAIN };
+        assert!(!relieve(&mut slot, 2, &Ask { selectors: &[Select::Policy(Policy::Prorata)], ..tied }).ambiguous);
     }
 
     #[test]
