@@ -1,82 +1,68 @@
-// Who is where, who owes whom, and what each kind of place means.
+// Who is where, who owes whom, and what each kind of thing is for.
+//
+// Money sits in accounts. Whom it goes to is a party, and what it is for is a purpose: there are
+// no income, expense or equity accounts, so a merchant carries the purpose of what it sells
+// (`entity farmers-market #groceries`), and a payment to no one in particular says its purpose
+// itself (`wallet -> ? 8.74 USD #dining`).
 
 // ─── Kinds ──────────────────────────────────────────────────────────────────
 
-/// A friend or a roommate. What they owe Alex is a claim on the place their entity points
-/// to (a `receivable`), and what Alex owes them is a claim of theirs (a `payable`).
+/// A friend or a roommate. What they owe Alex is a claim on them (`ben owes me`), and what Alex owes them is a
+/// claim of theirs (`me owes ben`): both are listed by `axiom claims`, and neither is money to spend.
 kind friend : entity
-
-/// What a garden grant may pay for.
-kind garden : expense
 
 
 // ─── Me: money ──────────────────────────────────────────────────────────────
 
-account assets/bank/checking : bank
-account assets/bank/savings  : bank
+account checking : bank
+account savings  : bank
 
 /// Cash in the wallet: tips in, small things out.
-account assets/cash/wallet : cash
+account wallet : cash
 
 /// One card for everything, paid in full on the 22nd.
-account liabilities/visa : credit-card
+account visa : credit-card
 
 
-// ─── What people owe me, and what I owe them ────────────────────────────────
+// ─── What money is for ──────────────────────────────────────────────────────
 //
-// A flow into a `receivable` with `due` makes a claim, and each is kept apart from the
-// others by the flow that made it: a month's rent share, a bill's share, a loan, a trip.
-// A payment `for #code` settles the claim the code marked, in part or in full. `axiom
-// claims` lists what is still open, how old it is and when it fell due, and none of it
-// counts as money to spend.
+// std and `us` declare rent, utilities, groceries, dining, transport, phone, fun, travel,
+// medical, wages and the tax purposes. The rest are this book's.
 
-/// Ben: his thirds of the rent and the shared bills, and his share of the trip.
-account assets/owed/by-ben : receivable
+/// Cash tips are wages: taxable income when received (IRC §61), reported to the employer monthly and
+/// to the IRS on the return, so the wage laws count them.
+purpose tips : wages
 
-/// Cleo: the same.
-account assets/owed/by-cleo : receivable
+purpose car : spending
+purpose clothing : spending
+purpose gifts : spending
+purpose payroll-tax : spending
 
-/// Riley: the loan, and a share of the trip.
-account assets/owed/by-riley : receivable
+/// What leaves one owner for another and comes back: a loan to a friend is a transfer, not spending.
+purpose loan : transfer
 
-/// The Lantern: what I bought for the job and am waiting to be paid back for. It is not income
-/// when it arrives: it settles the claim.
-account assets/owed/by-lantern : receivable
+/// What I buy for the job and am paid back for: spending that the claim on the Lantern takes back, so it is nobody's expense.
+purpose job-supplies : spending
 
-/// Ben pays the electricity, in his name: my third is what I owe him.
-account liabilities/owed-to-ben : payable
+/// What comes back from someone who owes it, or from the collective: it settles a claim and is not income. (The
+/// Lantern's party kind says its payments are wages, so a payment that is not says so.)
+purpose reimbursement : transfer
 
-/// Cleo's Costco runs: my third is what I owe her.
-account liabilities/owed-to-cleo : payable
+/// What the collective is given.
+purpose donations : income
 
+/// What a garden grant may pay for: the purpose the grant names, and everything under it.
+purpose garden : spending
+purpose soil : garden
+purpose seeds : garden
+purpose lumber : garden
+purpose irrigation : garden
+purpose tools : garden
+purpose fencing : garden
+purpose water : garden
 
-// ─── Income ─────────────────────────────────────────────────────────────────
-
-/// Pay and card tips from The Lantern, through payroll.
-account income/wages : wages
-
-/// Cash tips: taxable income when received (IRC §61), reported to the employer
-/// monthly and to the IRS on the return.
-account income/tips : wages
-
-
-// ─── Expenses ───────────────────────────────────────────────────────────────
-
-account expenses/rent
-account expenses/utilities
-account expenses/groceries
-account expenses/dining
-account expenses/transport
-account expenses/phone
-account expenses/car
-account expenses/health
-account expenses/entertainment
-account expenses/clothing
-account expenses/gifts
-account expenses/travel
-
-account expenses/taxes/federal : federal-tax
-account expenses/taxes/payroll
+/// Not a garden supply: the grant may not pay for it.
+purpose volunteer-food : spending
 
 
 // ─── The collective ─────────────────────────────────────────────────────────
@@ -84,102 +70,60 @@ account expenses/taxes/payroll
 // Everything below belongs to green-table, not to me, though I am the one who
 // enters it. The grant's money comes with strings (std's `grant` kind): it stays
 // tied to the foundation in the collective's account, and may only be spent on
-// places of kind `garden`, before the deadline.
+// the purpose `garden`, before the deadline.
 
 /// The collective's account, opened with what earlier plant sales left.
-account assets/bank/collective-checking : bank
+account collective-checking : bank
   owner green-table
 
 /// The cash box at events.
-account assets/cash/collective-cash : cash
-  owner green-table
-
-account income/donations
-  owner green-table
-account income/grants
-  owner green-table
-
-/// Everything under here is a garden supply or a garden cost: the grant may pay it.
-account expenses/garden/soil : garden
-  owner green-table
-account expenses/garden/seeds : garden
-  owner green-table
-account expenses/garden/lumber : garden
-  owner green-table
-account expenses/garden/irrigation : garden
-  owner green-table
-account expenses/garden/tools : garden
-  owner green-table
-account expenses/garden/fencing : garden
-  owner green-table
-account expenses/garden/water : garden
-  owner green-table
-
-/// Not a garden supply: the grant may not pay for it.
-account expenses/volunteer-food
+account collective-cash : cash
   owner green-table
 
 /// The Riverfront Foundation's grant: 6,000.00 USD for garden supplies and
 /// tools, to be spent by 2025-10-31. Money from it stays tied to it wherever it
 /// lands; what is left at the deadline is owed back.
 entity riverfront : grant
-  via income/grants
-  purpose garden
+  grant-purpose garden
   until   2025-10-31
 
 
 // ─── People and merchants ───────────────────────────────────────────────────
 
-/// The Lantern, my employer. Pay arrives from `income/wages`.
+/// The Lantern, my employer: it pays wages, and it owes me what I buy for the job.
 entity lantern : employer
-  via income/wages
 
-/// The Lantern, as the one that owes me for what I bought for it.
-entity lantern-owes : org
-  via assets/owed/by-lantern
+entity ssa #payroll-tax
 
-/// Ben and Cleo, my roommates, and Riley, a friend: each is a place people owe me on.
+/// Ben and Cleo, my roommates, and Riley, a friend.
 entity ben : friend
-  via assets/owed/by-ben
 entity cleo : friend
-  via assets/owed/by-cleo
 entity riley : friend
-  via assets/owed/by-riley
 
-entity landlord : org
-  via expenses/rent
-entity fiberco, power-co : org
-  via expenses/utilities
-entity costco, farmers-market : org
-  via expenses/groceries
-entity mint-mobile : org
-  via expenses/phone
-entity progressive, carmax-finance : org
-  via expenses/car
-entity marketplace-plan : org
-  via expenses/health
-entity mountain-cabins : org
-  via expenses/travel
-entity pizza-place : org
-  via expenses/volunteer-food
-entity hardware-hank, shed-co : org
-  via expenses/garden/tools
-entity water-dept : org
-  via expenses/garden/water
-entity bayview-soil : org
-  via expenses/garden/soil
-entity seed-savers : org
-  via expenses/garden/seeds
-entity northside-lumber : org
-  via expenses/garden/lumber
-entity drip-depot : org
-  via expenses/garden/irrigation
+entity landlord #rent
+entity fiberco #utilities
+entity power-co #utilities
+entity costco #groceries
+entity farmers-market #groceries
+entity mint-mobile #phone
+entity progressive #car
+entity carmax-finance #car
+entity marketplace-plan #medical
+entity mountain-cabins #travel
+entity pizza-place #volunteer-food
+entity hardware-hank #tools
+entity shed-co #tools
+entity water-dept #water
+entity bayview-soil #soil
+entity seed-savers #seeds
+entity northside-lumber #lumber
+entity drip-depot #irrigation
 
 
 // ─── Codes ──────────────────────────────────────────────────────────────────
 
-/// A month's rent share, a month's small shared bills (groceries and internet), a bill in
-/// someone else's name, a loan and a trip: each code ties a payment to what it settles.
+/// A month's rent share, a month's small shared bills (groceries and internet), a loan and a trip: each
+/// code ties a payment to the claim it settles.
 code rent-* shared-* trip-* loan-*
   on receivable
 

@@ -1,77 +1,66 @@
-2025-08-01 checking -> 3_150.00 USD / landlord #rent-2025-08 due 2025-08-08
-  rent                    1_050.00 USD
-  ben                     1_050.00 USD
-  cleo                    1_050.00 USD
-2025-08-02 ben -> checking 1_050.00 USD for #rent-2025-08
-2025-08-03 wallet <- income/tips 230.75 USD
-2025-08-03 checking -> car 128 USD / progressive
-2025-08-06 wallet -> dining 7.07 USD
-2025-08-07 visa   ->        77.95 USD #shared-2025-08 due 2025-09-21
-  -> groceries 25.99 USD
-  -> ben       25.98 USD
-  -> cleo      25.98 USD
-2025-08-08 me <- lantern 1_430.62 USD   // 999.00 wages + 431.62 card tips
-  -> taxes/federal 177.40 USD
-  -> taxes/payroll 109.44 USD
-  -> checking      ...
-2025-08-08 visa -> phone 45 USD / mint-mobile
-2025-08-09 checking -> 69.99 USD / fiberco #shared-2025-08 due 2025-09-23
-  utilities               23.33 USD
-  ben                     23.33 USD
-  cleo                    23.33 USD
-2025-08-10 wallet      <- income/tips 135.77 USD
-2025-08-12 owed-to-ben -> utilities   52.97 USD  #power-2025-08 due 2025-09-11  // my third of 158.90, from power-co
-2025-08-12 checking -> car 330.50 USD / carmax-finance
-2025-08-13 wallet -> dining 19.72 USD
-2025-08-14 visa   -> dining 55.37 USD
-2025-08-15 riley -> checking 250 USD for #loan-riley
-2025-08-15 checking -> health 189.40 USD / marketplace-plan
+2025-08-01 checking ->   landlord         3_150.00 USD #rent
+2025-08-01 ben      owes me               1_050.00 USD #rent ^rent-2025-08 due 2025-08-08
+2025-08-01 cleo     owes me               1_050.00 USD #rent ^rent-2025-08 due 2025-08-08
+2025-08-02 checking <-   ben              1_050.00 USD ^rent-2025-08
+2025-08-03 wallet   <-   ?                230.75 USD   #tips
+2025-08-03 checking ->   progressive      128 USD
+2025-08-06 wallet   ->   ?                7.07 USD     #dining
+2025-08-07 visa     ->   ?                77.95 USD    #groceries
+2025-08-07 ben      owes me               25.98 USD    #groceries ^shared-2025-08 due 2025-09-21
+2025-08-07 cleo     owes me               25.98 USD    #groceries ^shared-2025-08 due 2025-09-21
+2025-08-08 checking <-   lantern          1_430.62 USD #wages                                    // 999.00 wages + 431.62 card tips
+2025-08-08 checking ->   irs              177.40 USD
+2025-08-08 checking ->   ssa              109.44 USD
+2025-08-08 visa     ->   mint-mobile      45 USD
+2025-08-09 checking ->   fiberco          69.99 USD
+2025-08-09 ben      owes me               23.33 USD    #utilities ^shared-2025-08 due 2025-09-23
+2025-08-09 cleo     owes me               23.33 USD    #utilities ^shared-2025-08 due 2025-09-23
+2025-08-10 wallet   <-   ?                135.77 USD   #tips
+2025-08-12 me       owes ben              52.97 USD    #utilities ^power-2025-08 due 2025-09-11  // my third of 158.90, from power-co
+2025-08-12 checking ->   carmax-finance   330.50 USD
+2025-08-13 wallet   ->   ?                19.72 USD    #dining
+2025-08-14 visa     ->   ?                55.37 USD    #dining
+2025-08-15 checking <-   riley            250 USD      ^loan-riley
+2025-08-15 checking ->   marketplace-plan 189.40 USD
 
 /// A weekend at a cabin with Ben, Cleo and Riley: the cabin, gas and food, 1,182.80 USD on my card. Four ways: my share is an expense,
-/// and each of the others owes 295.70 USD by September 15 (a claim on each, marked `#trip-2025-08`).
-2025-08-16 visa -> 1_182.80 USD / mountain-cabins #trip-2025-08 due 2025-09-15
-  travel                  295.70 USD
-  ben                     295.70 USD
-  cleo                    295.70 USD
-  riley                   295.70 USD
-2025-08-17 wallet <- income/tips 167.80 USD
-2025-08-17 visa -> groceries 67.19 USD / farmers-market
-2025-08-18 wallet -> transport 6.49 USD
+/// and each of the others owes 295.70 USD by September 15 (a claim on each, marked `^trip-2025-08`).
+2025-08-16 visa   ->   mountain-cabins 1_182.80 USD
+2025-08-16 ben    owes me              295.70 USD   #travel ^trip-2025-08 due 2025-09-15
+2025-08-16 cleo   owes me              295.70 USD   #travel ^trip-2025-08 due 2025-09-15
+2025-08-16 riley  owes me              295.70 USD   #travel ^trip-2025-08 due 2025-09-15
+2025-08-17 wallet <-   ?               167.80 USD   #tips
+2025-08-17 visa   ->   farmers-market  67.19 USD
+2025-08-18 wallet ->   ?               6.49 USD     #transport
 
 /// Cleo is two weeks late in August: the claim is overdue for eleven days.
-2025-08-19 cleo -> checking 1_050.00 USD for #rent-2025-08
-2025-08-19 visa -> entertainment 44.85 USD
-2025-08-21 visa ->               118.29 USD #shared-2025-08 due 2025-10-05
-  -> groceries 39.43 USD
-  -> ben       39.43 USD
-  -> cleo      39.43 USD
-2025-08-22 me <- lantern 1_433.23 USD   // 999.00 wages + 434.23 card tips
-  -> taxes/federal 177.72 USD
-  -> taxes/payroll 109.64 USD
-  -> checking      ...
-2025-08-22 collective-checking <- income/donations 45 USD
-2025-08-22 checking            -> visa             399.31 USD
-2025-08-24 wallet              <- income/tips      225.65 USD
-2025-08-24 ben -> checking 295.70 USD for #trip-2025-08
-2025-08-24 wallet   -> checking 1_000 USD
-2025-08-26 visa     -> clothing 96.86 USD
-2025-08-27 wallet   -> dining   9.98 USD
-2025-08-28 checking -> savings  700 USD
+2025-08-19 checking            <-   cleo     1_050.00 USD ^rent-2025-08
+2025-08-19 visa                ->   ?        44.85 USD    #fun
+2025-08-21 visa                ->   ?        118.29 USD   #groceries
+2025-08-21 ben                 owes me       39.43 USD    #groceries ^shared-2025-08 due 2025-10-05
+2025-08-21 cleo                owes me       39.43 USD    #groceries ^shared-2025-08 due 2025-10-05
+2025-08-22 checking            <-   lantern  1_433.23 USD #wages  // 999.00 wages + 434.23 card tips
+2025-08-22 checking            ->   irs      177.72 USD
+2025-08-22 checking            ->   ssa      109.64 USD
+2025-08-22 collective-checking <-   ?        45 USD       #donations
+2025-08-22 checking            ->   visa     399.31 USD
+2025-08-24 wallet              <-   ?        225.65 USD   #tips
+2025-08-24 checking            <-   ben      295.70 USD   ^trip-2025-08
+2025-08-24 wallet              ->   checking 1_000 USD
+2025-08-26 visa                ->   ?        96.86 USD    #clothing
+2025-08-27 wallet              ->   ?        9.98 USD     #dining
+2025-08-28 checking            ->   savings  700 USD
 
 /// The garden's water for the summer.
-2025-08-30 collective-checking -> water 148.20 USD / water-dept
-2025-08-31 wallet <- income/tips 249.28 USD
-2025-08-31 ben -> checking 88.74 USD for #shared-2025-08
-2025-08-31 cleo -> checking 88.74 USD for #shared-2025-08
-2025-08-31 checking -> owed-to-ben 52.97 USD for #power-2025-08
-2025-08-31 by-ben              = 0.00 USD
-2025-08-31 by-cleo             = 295.70 USD
-2025-08-31 owed-to-ben         = 0.00 USD
-2025-08-31 owed-to-cleo        = 0.00 USD
-2025-08-31 visa                = 1_688.31 USD
-2025-08-31 checking            = 7_471.12 USD
-2025-08-31 savings             = 7_300.00 USD
-2025-08-31 collective-checking = 2_776.86 USD
+2025-08-30 collective-checking -> water-dept   148.20 USD
+2025-08-31 wallet              <- ?            249.28 USD #tips
+2025-08-31 checking            <- ben          88.74 USD  ^shared-2025-08
+2025-08-31 checking            <- cleo         88.74 USD  ^shared-2025-08
+2025-08-31 checking            -> ben          52.97 USD  ^power-2025-08
+2025-08-31 visa                =  1_688.31 USD
+2025-08-31 checking            =  7_471.12 USD
+2025-08-31 savings             =  7_300.00 USD
+2025-08-31 collective-checking =  2_776.86 USD
 
 /// The wallet holds 23.00 USD less than the ledger says: a round of drinks on someone else's tab and I did not write it down.
 2025-08-31 wallet = 367.90 USD !

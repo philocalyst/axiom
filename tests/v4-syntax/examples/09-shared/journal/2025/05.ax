@@ -1,74 +1,63 @@
-2025-05-01 checking -> 3_150.00 USD / landlord #rent-2025-05 due 2025-05-08
-  rent                    1_050.00 USD
-  ben                     1_050.00 USD
-  cleo                    1_050.00 USD
-2025-05-02 lantern -> 1_355.78 USD   // 999.00 wages + 356.78 card tips
-  taxes/federal           168.12 USD
-  taxes/payroll           103.72 USD
-  checking                ...
-2025-05-02 ben -> checking 1_050.00 USD for #rent-2025-05
-2025-05-03 checking -> car 128 USD / progressive
+2025-05-01 checking -> landlord 3_150.00 USD #rent
+2025-05-01 ben owes me 1_050.00 USD #rent due 2025-05-08 ^rent-2025-05
+2025-05-01 cleo owes me 1_050.00 USD #rent due 2025-05-08 ^rent-2025-05
+2025-05-02 lantern -> checking 1_355.78 USD #wages   // 999.00 wages + 356.78 card tips
+2025-05-02 checking -> irs 168.12 USD
+2025-05-02 checking -> ssa 103.72 USD
+2025-05-02 ben -> checking 1_050.00 USD ^rent-2025-05
+2025-05-03 checking -> progressive 128 USD
 
 /// A drip irrigation system.
-2025-05-03 collective-checking -> irrigation 986.40 USD / drip-depot
-2025-05-04 income/tips -> wallet 254.95 USD
-2025-05-05 cleo -> checking 1_050.00 USD for #rent-2025-05
-2025-05-06 wallet -> dining 14.90 USD
-2025-05-07 visa -> 113.18 USD #shared-2025-05 due 2025-06-21
-  groceries               37.72 USD
-  ben                     37.73 USD
-  cleo                    37.73 USD
-2025-05-08 visa -> phone 45 USD / mint-mobile
-2025-05-09 checking -> 69.99 USD / fiberco #shared-2025-05 due 2025-06-23
-  utilities               23.33 USD
-  ben                     23.33 USD
-  cleo                    23.33 USD
-2025-05-11 income/tips -> wallet 148.65 USD
-2025-05-12 owed-to-ben -> utilities 21.37 USD #power-2025-05 due 2025-06-11   // my third of 64.10, from power-co
-2025-05-12 checking -> car 330.50 USD / carmax-finance
-2025-05-13 wallet -> dining 20.53 USD
-2025-05-14 visa -> dining 27.54 USD
-2025-05-15 riley -> checking 250 USD for #loan-riley
-2025-05-15 checking -> health 189.40 USD / marketplace-plan
-2025-05-16 lantern -> 1_385.79 USD   // 962.00 wages + 423.79 card tips
-  taxes/federal           171.84 USD
-  taxes/payroll           106.01 USD
-  checking                ...
-2025-05-17 visa -> groceries 59.83 USD / farmers-market
+2025-05-03 collective-checking -> drip-depot 986.40 USD
+2025-05-04 ? -> wallet 254.95 USD #tips
+2025-05-05 cleo -> checking 1_050.00 USD ^rent-2025-05
+2025-05-06 wallet -> ? 14.90 USD #dining
+2025-05-07 visa -> ? 113.18 USD #groceries
+2025-05-07 ben owes me 37.73 USD #groceries due 2025-06-21 ^shared-2025-05
+2025-05-07 cleo owes me 37.73 USD #groceries due 2025-06-21 ^shared-2025-05
+2025-05-08 visa -> mint-mobile 45 USD
+2025-05-09 checking -> fiberco 69.99 USD
+2025-05-09 ben owes me 23.33 USD #utilities due 2025-06-23 ^shared-2025-05
+2025-05-09 cleo owes me 23.33 USD #utilities due 2025-06-23 ^shared-2025-05
+2025-05-11 ? -> wallet 148.65 USD #tips
+2025-05-12 me owes ben 21.37 USD #utilities due 2025-06-11 ^power-2025-05   // my third of 64.10, from power-co
+2025-05-12 checking -> carmax-finance 330.50 USD
+2025-05-13 wallet -> ? 20.53 USD #dining
+2025-05-14 visa -> ? 27.54 USD #dining
+2025-05-15 riley -> checking 250 USD ^loan-riley
+2025-05-15 checking -> marketplace-plan 189.40 USD
+2025-05-16 lantern -> checking 1_385.79 USD #wages   // 962.00 wages + 423.79 card tips
+2025-05-16 checking -> irs 171.84 USD
+2025-05-16 checking -> ssa 106.01 USD
+2025-05-17 visa -> farmers-market 59.83 USD
 
 /// The spring plant sale: 612.50 USD in cash, paid into the collective's cash box.
-2025-05-17 income/donations -> collective-cash 612.50 USD
+2025-05-17 ? -> collective-cash 612.50 USD #donations
 
 /// Pizza for the volunteers at the plant sale. Not a garden supply, so it must be paid from the collective's own money, not the grant's.
-2025-05-17 collective-checking -> volunteer-food 84.50 USD / pizza-place
-2025-05-18 income/tips -> wallet 258.47 USD
-2025-05-18 wallet -> transport 8.63 USD
-2025-05-19 visa -> entertainment 78.55 USD
+2025-05-17 collective-checking -> pizza-place 84.50 USD
+2025-05-18 ? -> wallet 258.47 USD #tips
+2025-05-18 wallet -> ? 8.63 USD #transport
+2025-05-19 visa -> ? 78.55 USD #fun
 
 /// Cash box to the bank.
 2025-05-19 collective-cash -> collective-checking 600 USD
-2025-05-21 visa -> 86.04 USD #shared-2025-05 due 2025-07-05
-  groceries               28.68 USD
-  ben                     28.68 USD
-  cleo                    28.68 USD
-2025-05-22 income/donations -> collective-checking 100 USD
+2025-05-21 visa -> ? 86.04 USD #groceries
+2025-05-21 ben owes me 28.68 USD #groceries due 2025-07-05 ^shared-2025-05
+2025-05-21 cleo owes me 28.68 USD #groceries due 2025-07-05 ^shared-2025-05
+2025-05-22 ? -> collective-checking 100 USD #donations
 2025-05-22 checking -> visa 450.72 USD
 2025-05-24 wallet -> checking 750 USD
-2025-05-25 income/tips -> wallet 200.11 USD
-2025-05-26 visa -> clothing 87.25 USD
-2025-05-27 wallet -> dining 18.95 USD
+2025-05-25 ? -> wallet 200.11 USD #tips
+2025-05-26 visa -> ? 87.25 USD #clothing
+2025-05-27 wallet -> ? 18.95 USD #dining
 2025-05-28 checking -> savings 700 USD
-2025-05-30 lantern -> 1_455.59 USD   // 1_036.00 wages + 419.59 card tips
-  taxes/federal           180.49 USD
-  taxes/payroll           111.35 USD
-  checking                ...
-2025-05-31 ben -> checking 89.74 USD for #shared-2025-05
-2025-05-31 cleo -> checking 89.74 USD for #shared-2025-05
-2025-05-31 checking -> owed-to-ben 21.37 USD for #power-2025-05
-2025-05-31 by-ben = 0.00 USD
-2025-05-31 by-cleo = 0.00 USD
-2025-05-31 owed-to-ben = 0.00 USD
-2025-05-31 owed-to-cleo = 0.00 USD
+2025-05-30 lantern -> checking 1_455.59 USD #wages   // 1_036.00 wages + 419.59 card tips
+2025-05-30 checking -> irs 180.49 USD
+2025-05-30 checking -> ssa 111.35 USD
+2025-05-31 ben -> checking 89.74 USD ^shared-2025-05
+2025-05-31 cleo -> checking 89.74 USD ^shared-2025-05
+2025-05-31 checking -> ben 21.37 USD ^power-2025-05
 2025-05-31 visa = 497.39 USD
 2025-05-31 checking = 5_475.21 USD
 2025-05-31 savings = 5_200.00 USD

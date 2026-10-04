@@ -1,73 +1,65 @@
-2025-06-01 wallet <- income/tips 210.22 USD
-2025-06-01 checking -> 3_150.00 USD / landlord #rent-2025-06 due 2025-06-08
-  rent                    1_050.00 USD
-  ben                     1_050.00 USD
-  cleo                    1_050.00 USD
+2025-06-01 wallet   <-   ?        210.22 USD   #tips
+2025-06-01 checking ->   landlord 3_150.00 USD #rent
+2025-06-01 ben      owes me       1_050.00 USD #rent ^rent-2025-06 due 2025-06-08
+2025-06-01 cleo     owes me       1_050.00 USD #rent ^rent-2025-06 due 2025-06-08
 
 /// Ben pays half in June and says he will do the rest after payday: the claim is settled in part.
-2025-06-02 ben -> checking 500.00 USD for #rent-2025-06
+2025-06-02 checking <- ben 500.00 USD ^rent-2025-06
 
-/// The Lantern asked me to buy an apron and a tablet stand (bar-supply). I paid on my card and filed an expense report: it is not
-/// my expense, it is a claim on the Lantern, due July 15. When they pay it is not income: it settles the claim.
-2025-06-02 visa -> lantern-owes 138.50 USD #expense-2025-06 due 2025-07-15
-2025-06-03 checking -> car 128 USD / progressive
-2025-06-05 cleo -> checking 1_050.00 USD for #rent-2025-06
-2025-06-06 wallet -> dining 10.39 USD
-2025-06-07 visa   ->        102.97 USD #shared-2025-06 due 2025-07-22
-  -> groceries 34.33 USD
-  -> ben       34.32 USD
-  -> cleo      34.32 USD
-2025-06-08 wallet <- income/tips 205.26 USD
-2025-06-08 visa -> phone 45 USD / mint-mobile
-2025-06-09 checking -> 69.99 USD / fiberco #shared-2025-06 due 2025-07-24
-  utilities               23.33 USD
-  ben                     23.33 USD
-  cleo                    23.33 USD
-2025-06-09 collective-checking <- income/donations 45 USD
-2025-06-12 owed-to-ben         -> utilities        32.10 USD #power-2025-06 due 2025-07-12  // my third of 96.30, from power-co
-2025-06-12 checking -> car 330.50 USD / carmax-finance
-2025-06-13 me <- lantern 1_497.72 USD   // 1_036.00 wages + 461.72 card tips
-  -> taxes/federal 185.72 USD
-  -> taxes/payroll 114.58 USD
-  -> checking      ...
-2025-06-13 wallet -> dining 23.84 USD
-2025-06-14 visa   -> dining 50.70 USD
+/// The Lantern asked me to buy an apron and a tablet stand (bar-supply). I paid on my card and filed an expense report: it is not my expense, it is a claim on the Lantern,
+/// due July 15 (`#job-supplies` on the card and on the claim: the claim takes the spending back). When they pay it is not income, it settles the claim: the Lantern's
+/// payments are wages unless the line says what this one is for, so it says `#reimbursement`.
+2025-06-02 visa                ->   ?              138.50 USD   #job-supplies
+2025-06-02 lantern             owes me             138.50 USD   #job-supplies ^expense-2025-06 due 2025-07-15
+2025-06-03 checking            ->   progressive    128 USD
+2025-06-05 checking            <-   cleo           1_050.00 USD ^rent-2025-06
+2025-06-06 wallet              ->   ?              10.39 USD    #dining
+2025-06-07 visa                ->   ?              102.97 USD   #groceries
+2025-06-07 ben                 owes me             34.32 USD    #groceries ^shared-2025-06 due 2025-07-22
+2025-06-07 cleo                owes me             34.32 USD    #groceries ^shared-2025-06 due 2025-07-22
+2025-06-08 wallet              <-   ?              205.26 USD   #tips
+2025-06-08 visa                ->   mint-mobile    45 USD
+2025-06-09 checking            ->   fiberco        69.99 USD
+2025-06-09 ben                 owes me             23.33 USD    #utilities ^shared-2025-06 due 2025-07-24
+2025-06-09 cleo                owes me             23.33 USD    #utilities ^shared-2025-06 due 2025-07-24
+2025-06-09 collective-checking <-   ?              45 USD       #donations
+2025-06-12 me                  owes ben            32.10 USD    #utilities ^power-2025-06 due 2025-07-12  // my third of 96.30, from power-co
+2025-06-12 checking            ->   carmax-finance 330.50 USD
+2025-06-13 checking            <-   lantern        1_497.72 USD #wages                                    // 1_036.00 wages + 461.72 card tips
+2025-06-13 checking            ->   irs            185.72 USD
+2025-06-13 checking            ->   ssa            114.58 USD
+2025-06-13 wallet              ->   ?              23.84 USD    #dining
+2025-06-14 visa                ->   ?              50.70 USD    #dining
 
 /// A tool shed.
-2025-06-14 collective-checking -> tools 1_225.00 USD / shed-co
-2025-06-15 wallet <- income/tips 157.74 USD
-2025-06-15 checking -> health 189.40 USD / marketplace-plan
-2025-06-16 riley -> checking 250 USD for #loan-riley
-2025-06-17 visa -> groceries 40.46 USD / farmers-market
-2025-06-18 wallet -> transport     3.39 USD
-2025-06-19 visa   -> entertainment 61.13 USD
+2025-06-14 collective-checking -> shed-co          1_225.00 USD
+2025-06-15 wallet              <- ?                157.74 USD   #tips
+2025-06-15 checking            -> marketplace-plan 189.40 USD
+2025-06-16 checking            <- riley            250 USD      ^loan-riley
+2025-06-17 visa                -> farmers-market   40.46 USD
+2025-06-18 wallet              -> ?                3.39 USD     #transport
+2025-06-19 visa                -> ?                61.13 USD    #fun
 
 /// A hose, 129.99 USD, on my own card: I bought it for the garden and the collective pays me back.
-2025-06-20 visa -> tools 129.99 USD / hardware-hank
-2025-06-21 visa -> 58.05 USD #shared-2025-06 due 2025-08-05
-  -> groceries 19.35 USD
-  -> ben       19.35 USD
-  -> cleo      19.35 USD
-2025-06-22 wallet   <- income/tips 139.63 USD
-2025-06-22 checking -> visa        497.39 USD
-2025-06-24 wallet   -> checking    900 USD
-2025-06-26 visa     -> clothing    71.67 USD
-2025-06-27 me       <- lantern     1_325.72 USD  // 999.00 wages + 326.72 card tips
-  -> taxes/federal 164.39 USD
-  -> taxes/payroll 101.42 USD
-  -> checking      ...
-2025-06-27 wallet   -> dining      10.26 USD
-2025-06-28 checking -> savings     700 USD
-2025-06-29 wallet   <- income/tips 156.90 USD
-2025-06-30 ben -> checking 77.00 USD for #shared-2025-06
-2025-06-30 cleo -> checking 77.00 USD for #shared-2025-06
-2025-06-30 checking -> owed-to-ben 32.10 USD for #power-2025-06
-2025-06-30 by-ben              = 550.00 USD
-2025-06-30 by-cleo             = 0.00 USD
-2025-06-30 owed-to-ben         = 0.00 USD
-2025-06-30 owed-to-cleo        = 0.00 USD
-2025-06-30 visa                = 698.47 USD
-2025-06-30 checking            = 5_489.16 USD
-2025-06-30 savings             = 5_900.00 USD
-2025-06-30 collective-checking = 3_610.05 USD
-2025-06-30 wallet              = 299.49 USD
+2025-06-20 visa                ->   hardware-hank 129.99 USD
+2025-06-21 visa                ->   ?             58.05 USD    #groceries
+2025-06-21 ben                 owes me            19.35 USD    #groceries ^shared-2025-06 due 2025-08-05
+2025-06-21 cleo                owes me            19.35 USD    #groceries ^shared-2025-06 due 2025-08-05
+2025-06-22 wallet              <-   ?             139.63 USD   #tips
+2025-06-22 checking            ->   visa          497.39 USD
+2025-06-24 wallet              ->   checking      900 USD
+2025-06-26 visa                ->   ?             71.67 USD    #clothing
+2025-06-27 checking            <-   lantern       1_325.72 USD #wages  // 999.00 wages + 326.72 card tips
+2025-06-27 checking            ->   irs           164.39 USD
+2025-06-27 checking            ->   ssa           101.42 USD
+2025-06-27 wallet              ->   ?             10.26 USD    #dining
+2025-06-28 checking            ->   savings       700 USD
+2025-06-29 wallet              <-   ?             156.90 USD   #tips
+2025-06-30 checking            <-   ben           77.00 USD    ^shared-2025-06
+2025-06-30 checking            <-   cleo          77.00 USD    ^shared-2025-06
+2025-06-30 checking            ->   ben           32.10 USD    ^power-2025-06
+2025-06-30 visa                =    698.47 USD
+2025-06-30 checking            =    5_489.16 USD
+2025-06-30 savings             =    5_900.00 USD
+2025-06-30 collective-checking =    3_610.05 USD
+2025-06-30 wallet              =    299.49 USD
