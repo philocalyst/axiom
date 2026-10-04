@@ -16,7 +16,7 @@ use super::statements::{
     lower_measure, lower_rate_change, lower_split, lower_value, names_a_contract,
 };
 use crate::balance::{self, Settled, Total};
-use crate::book::{Amount, Contract, Input, Place, ScheduleKind, Terms};
+use crate::book::{Amount, Book, Contract, Entity, Input, Loan, Place, ScheduleKind, Terms};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -702,9 +702,8 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         );
         return;
     };
-    if at.world.book.contracts[contract_id].loan.is_some_and(|loan| loan.on == statement.date) {
-        lower_loan_origin(at, doc, amount, contract_id);
-        return;
+    if let Some(loan) = at.world.book.contracts[contract_id].loan.filter(|loan| loan.on == statement.date) {
+        return lower_loan_origin(at, doc, amount, (contract_id, loan));
     }
     let contract = &at.world.book.contracts[contract_id];
     let Some((schedule, due, terms)) = kept_by(contract, statement.date, loc, &mut at.world.diags) else { return };
@@ -990,17 +989,15 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
     rec.keep(txn);
 }
 
-/// Record the source loan's funding as one balanced debt-to-cash flow. It is
-/// deliberately separate from the first scheduled payment, which may begin
-/// months after the origination date.
+/// Record the source loan's funding as one balanced debt-to-cash flow. It is deliberately separate from the first
+/// scheduled payment, which may begin months after the origination date.
 fn lower_loan_origin<'s>(
     at: &mut Stated<'_, '_, 's>,
     doc: Option<ast::Doc<'s>>,
     amount: Option<ast::Amount<'s>>,
-    contract_id: Id<crate::book::Contract>,
+    (contract_id, loan): (Id<Contract>, Loan),
 ) {
-    let (site, loc, statement, code_index) = (at.site, at.loc, at.statement, at.code_index);
-    let file = &site.source.file;
+    let (file, statement, loc) = (at.file(), at.statement, at.loc);
     if amount.is_some() || !file[statement.body.legs].is_empty() || !file[statement.body.items].is_empty() {
         at.world.diags.push(
             Diagnostic::error(
@@ -1011,72 +1008,16 @@ fn lower_loan_origin<'s>(
         );
         return;
     }
-    let (loan, party, owner, funding) = {
-        let contract = &at.world.book.contracts[contract_id];
-        let Some(loan) = contract.loan else {
-            at.world.diags.push(
-                Diagnostic::error("loan-origination-contract", "this contract has no loan principal to originate")
-                    .label(loc, "only a declared loan can have an origination record"),
-            );
-            return;
-        };
-        let template = [&contract.terms, &contract.standing]
-            .into_iter()
-            .flatten()
-            .find(|terms| !terms.template.is_empty())
-            .and_then(|terms| terms.template.first());
-        let Some(template) = template else {
-            at.world.diags.push(
-                Diagnostic::error(
-                    "loan-origination-holding",
-                    "the loan schedule does not identify a cash holding for its principal",
-                )
-                .label(loc, "add a payment schedule from the account that receives the loan"),
-            );
-            return;
-        };
-        let mut candidates = [template.header.flow.from, template.header.flow.to].into_iter().filter(|&place| {
-            let place = &at.world.book.places[place];
-            place.owner == contract.owner
-                && place.class == crate::book::Class::Asset
-                && matches!(place.role, crate::book::Role::Account { .. } | crate::book::Role::Holding(_))
-        });
-        let Some(funding) = candidates.next() else {
-            at.world.diags.push(
-                Diagnostic::error(
-                    "loan-origination-holding",
-                    "the loan schedule does not identify an owner cash account",
-                )
-                .label(loc, "the origination needs the owner-side payment holding"),
-            );
-            return;
-        };
-        if candidates.next().is_some() {
-            at.world.diags.push(
-                Diagnostic::error("loan-origination-holding", "the loan schedule names more than one owner holding")
-                    .label(loc, "the principal destination is ambiguous"),
-            );
-            return;
-        }
-        (loan, contract.party, contract.owner, funding)
-    };
-    if at.world.book.entities[party].place.is_none() {
-        at.world.diags.push(
-            Diagnostic::error("loan-origination-party", "the lender has no flow endpoint")
-                .label(loc, "cannot identify the source of this principal"),
-        );
-        return;
-    }
-
-    let mut rec = Recording::open(at.world, site, statement.date, loc, code_index);
+    let funded = loan_funding(&at.world.book, &at.world.book.contracts[contract_id], loc);
+    let Some((party, owner, funding)) = funded.or_report(at.world) else { return };
+    let mut rec = Recording::open(at.world, at.site, statement.date, loc, at.code_index);
     let mut expressions = Vec::new();
     push_tail_roots(file, statement.tail, &mut expressions);
     if !rec.compile(Ty::Flow, &expressions, &[]) {
         return;
     }
     let (codes, mut tail) = rec.tail(statement.tail);
-    let basis_root = tail.basis_root;
-    let waive = tail.waive;
+    let (basis_root, waive) = (tail.basis_root, tail.waive);
     if tail.price.is_some() {
         rec.staged.diags.push(
             Diagnostic::error("loan-origination-price", "loan principal is transferred in the loan's declared unit")
@@ -1087,33 +1028,63 @@ fn lower_loan_origin<'s>(
     if !tail.valid || rec.failed() {
         return;
     }
-
-    // The debt tab's outflow records the owner's new liability; the same
-    // principal arrives in the account named by the payment schedule.
+    // The debt tab's outflow records the owner's new liability; the same principal arrives in the account named by the
+    // payment schedule.
     tail.payee = Some(party);
     let empty = Run::new(Id::new(0), 0);
     let from = ResolvedEnd { place: loan.debt, entity: None, select: empty };
     let to = ResolvedEnd { place: funding, entity: None, select: empty };
-    let shape = Shape {
-        ends: Ends { from, to },
-        out: loan.principal,
-        arrive: loan.principal,
-        infer: Infer::Known,
-        mode: Mode::Actual,
-    };
+    let (principal, mode) = (loan.principal, Mode::Actual);
+    let shape = Shape { ends: Ends { from, to }, out: principal, arrive: principal, infer: Infer::Known, mode };
     let flow_codes = Codes { header: codes, local: empty_codes(&rec.staged) };
     let Some(mut flow) = rec.flow(shape, flow_codes, tail, loc) else {
         return;
     };
-    flow.owner = owner;
-    flow.payee = Some(party);
-    flow.origin = Origin::Occurrence(contract_id);
+    (flow.owner, flow.payee, flow.origin) = (owner, Some(party), Origin::Occurrence(contract_id));
     rec.push(flow, None, None, basis_root);
     let program = rec.keep_program(None);
     let doc = rec.doc(doc);
     let txn =
         Txn { program, codes, waive, contract: Some(contract_id), kind: TxnKind::LoanOrigin, doc, ..rec.transaction() };
     rec.keep(txn);
+}
+
+/// Who lends a loan, whose debt it is, and the owner's account the principal arrives in: the one owner cash account its
+/// payment schedule names.
+fn loan_funding(
+    book: &Book<'_>,
+    contract: &Contract,
+    loc: Loc,
+) -> Result<(Id<Entity>, Id<Entity>, Id<Place>), Diagnostic> {
+    let holding = |message: &str, label: &str| Diagnostic::error("loan-origination-holding", message).label(loc, label);
+    let template = [&contract.terms, &contract.standing]
+        .into_iter()
+        .flatten()
+        .find(|terms| !terms.template.is_empty())
+        .and_then(|terms| terms.template.first());
+    let Some(template) = template else {
+        let message = "the loan schedule does not identify a cash holding for its principal";
+        return Err(holding(message, "add a payment schedule from the account that receives the loan"));
+    };
+    let mut candidates = [template.header.flow.from, template.header.flow.to].into_iter().filter(|&place| {
+        let place = &book.places[place];
+        place.owner == contract.owner
+            && place.class == crate::book::Class::Asset
+            && matches!(place.role, crate::book::Role::Account { .. } | crate::book::Role::Holding(_))
+    });
+    let Some(funding) = candidates.next() else {
+        let message = "the loan schedule does not identify an owner cash account";
+        return Err(holding(message, "the origination needs the owner-side payment holding"));
+    };
+    if candidates.next().is_some() {
+        let message = "the loan schedule names more than one owner holding";
+        return Err(holding(message, "the principal destination is ambiguous"));
+    }
+    if book.entities[contract.party].place.is_none() {
+        return Err(Diagnostic::error("loan-origination-party", "the lender has no flow endpoint")
+            .label(loc, "cannot identify the source of this principal"));
+    }
+    Ok((contract.party, contract.owner, funding))
 }
 
 /// The ends of a claim and whose it is: the party it is with on one end, and on the other the tab the owners keep it in.
