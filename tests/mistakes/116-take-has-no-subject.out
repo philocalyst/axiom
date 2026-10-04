@@ -1,0 +1,11 @@
+error[expected-subject]: a `<-` line starts with the end that takes
+   ╭─[116-take-has-no-subject.ax:18:12]
+   │
+18 │ 2026-01-16 <- acme 3_200 USD
+   │            ─┬
+   │             ╰── nothing is written before this arrow
+   │
+   = help: name the account that takes it: `checking <- acme 3_200 USD`
+
+✗ 1 error
+[exit status 1]

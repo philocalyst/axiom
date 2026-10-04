@@ -36,5 +36,15 @@ error[flow-amount-mismatch]: a transfer has the same amount at both ends
    │ ───────────────────────┬──────────────────────
    │                        ╰── the two written amounts differ
 
-✗ 4 errors
+warning[v4-syntax]: a line is written the v4 way
+   ╭─[37-transfer-unequal.ax:14:21]
+   │
+14 │ 2026-01-20 checking 500 USD -> savings 450 USD
+   │                     ─────────────┬────────────
+   │                                  ╰── an amount on both sides of the arrow
+   │
+   = help: an exchange states one amount and its price: `checking -> broker 5.58 VTI @ 268.57 USD`
+   = help: `axiom fmt --upgrade` writes them the v5 way, and checks that the book says the same
+
+✗ 4 errors · 1 warning
 [exit status 1]

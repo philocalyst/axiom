@@ -23,11 +23,11 @@ entity newco : employer
   via income/salary-newco
 
 // January to May at Acme: 15_000 USD deferred.
-2026-05-29 acme -> 20_000 USD
-  retirement  15_000 USD
-  checking    ...
+2026-05-29 me <- acme 20_000 USD
+  -> retirement 15_000 USD
+  -> checking   ...
 
 // From June at NewCo: 12_000 USD deferred.
-2026-06-26 newco -> 16_000 USD
-  retirement-newco  12_000 USD
-  checking          ...
+2026-06-26 me <- newco 16_000 USD
+  -> retirement-newco 12_000 USD
+  -> checking         ...

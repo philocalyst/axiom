@@ -5,10 +5,10 @@ error[unset-property]: `born` is not set on `me`, so `deferral-limit` cannot be 
    │        ─┬
    │         ╰── `me` has no `born`
    ⋮
-19 │ 2025-11-15 acme -> 8_000 USD
-20 │   retirement  800 USD
-   │   ─────────┬─────────
-   │            ╰── this flow: 800.00 USD into assets/retirement
+19 │ 2025-11-15 me <- acme 8_000 USD
+20 │   -> retirement 800 USD
+   │   ──────────┬──────────
+   │             ╰── this flow: 800.00 USD into assets/retirement
    │
    ├─[us/401k.ax:43:20] (built in)
    │

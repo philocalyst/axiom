@@ -16,6 +16,6 @@ account income/salary : wages
 entity acme : employer
   via income/salary
 
-2023-01-13 acme -> 6_000 USD
-  retirement  800 USD
-  checking    ...
+2023-01-13 me <- acme 6_000 USD
+  -> retirement 800 USD
+  -> checking   ...

@@ -2726,3 +2726,35 @@ the terminal width, without per-line bullets.
 | 97 | no-root | B | `97-no-root` |
 | 98 | duplicate-across-files | B | `98-duplicate-across-files` |
 | 99 | month-file-mismatch | B | `99-month-file-mismatch` |
+
+## 16. The junction mistakes, and what the v5 flow line changed (lane L1)
+
+Cases 100 to 115 were added by other lanes with their own notes. Cases 116 to 122 are the malformed junctions of the v5 flow
+line (`->` gives, `<-` takes, `<- AMOUNT @ PRICE` buys, `-> AMOUNT @ PRICE` sells, a leg leads with its arrow). Each one
+says what it saw, says the words that would fix it, in the line's own names and amounts where it has them, and points at
+the arrow.
+
+| case | the mistake | the error | what it says to write |
+|---|---|---|---|
+| 116 | `2026-01-16 <- acme 3_200 USD` | `expected-subject` | `checking <- acme 3_200 USD` |
+| 117 | `checking 3_200 USD <- acme` | `amount-before-take` | `checking <- acme 3_200 USD` |
+| 118 | `checking <-` | `takes-nothing` | `checking <- acme 5_750 USD`, or `checking <- 7 VTI @ 285.70 USD` |
+| 119 | `brokerage -> 2 VTI` | `exchange-no-price` | `brokerage -> 2 VTI @ 297.00 USD`, or legs under it |
+| 120 | `brokerage <- 7 VTI` | `exchange-no-price` | `brokerage <- 7 VTI @ 297.00 USD`, or legs under it |
+| 121 | `me <- acme 5_000 USD` and a leg with no arrow | `leg-needs-arrow` | an edit that inserts `-> ` |
+| 122 | `me <- acme 5_000 USD` and a leg that points back with `<-` | `leg-direction` | an edit that writes `->` |
+
+All seven are A: one error each, no cascade, the primary label on the arrow (or the leg), and a fix that is right.
+
+**What changed in the older cases.** The corpus was regenerated with the v5 parser, and the books were written the v5 way with
+`axiom fmt --upgrade`, except the ones about a v4 spelling. These outputs changed, and nothing else did:
+
+- 03 `expected-arrow` now says "expected `->` or `<-`", because both are arrows now; 33 `many-to-many` gains a help line,
+  "or let the subject pass it on: `me <- acme 5_200 USD` with a leg `-> irs 692 USD`".
+- 34, 35, 53, 54, 67, 69, 79, 88 and r24 quote a line that the upgrade wrote the v5 way (a paystub is `me <- acme 5_000 USD`
+  with `->` legs; a purchase states its price once), and the quoted lines and their underlines are what differ.
+- 01, 36 and 37 are about a v4 spelling (a tab-indented leg, an amount that disagrees with its price, two amounts that
+  differ), so they keep it, and gain one `warning[v4-syntax]`: "N lines are written the v4 way", with a label at the first of
+  each form and the command that rewrites them.
+- 31, 46, 68, 75, 78, 86 and 89 were upgraded too (a two-amount line gained the shortest price that gives the same
+  2,000.00 USD, `@ 285.714 USD`), and their output is byte for byte what it was.

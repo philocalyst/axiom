@@ -42,5 +42,16 @@ error[tab-indent]: 2 lines are indented with a tab
 14 - ⇥   savings   500 USD
 14 +   savings   500 USD
 
-✗ 4 errors
+warning[v4-syntax]: 2 lines are written the v4 way
+   ╭─[01-tab-indent.ax:14:2]
+   │
+13 │ 2026-01-15 acme -> 5_000 USD
+14 │ ⇥   savings   500 USD
+   │     ────────┬────────
+   │             ╰── the first of 2 legs with no arrow
+   │
+   = help: a leg leads with its arrow: `-> irs 692 USD`
+   = help: `axiom fmt --upgrade` writes them the v5 way, and checks that the book says the same
+
+✗ 4 errors · 1 warning
 [exit status 1]
