@@ -1087,6 +1087,12 @@ opening 2025-01-01
 
         let sale = run.gains.iter().find(|gain| gain.day == day(2025, 3, 1)).expect("sale records realized gain");
         assert_eq!((sale.proceeds.0, sale.basis.0, sale.gain().0), (144_000, 110_000, 34_000));
+        let condo = &book.assets[asset];
+        assert_eq!(
+            (sale.from, sale.unit, sale.qty.0),
+            (condo.place, condo.unit, 1),
+            "the asset's unit leaves its place"
+        );
         assert!(
             !run.holdings.iter().any(|holding| holding.place == book.assets[asset].place),
             "the sold asset unit is relieved"

@@ -1538,18 +1538,46 @@ mod tests {
         holdings.entry(Id::new(1), Id::new(0)).land(second, Held::Lots, &Arena::new());
         holdings.entry(Id::new(1), Id::new(0)).land(independent, Held::Lots, &Arena::new());
 
-        assert_eq!(basis_of(&holdings, part), 100);
+        // The same part bought in another commodity is not this one's (a part's parcels are all of its commodity).
+        let mut foreign = lot(1, 50, 10);
+        foreign.part = Some(part);
+        holdings.entry(Id::new(1), Id::new(1)).land(foreign, Held::Lots, &Arena::new());
+
+        assert_eq!(basis_of(&holdings, part), 150);
         holdings.adjust(Id::new(0), part, Qty(-25)).unwrap();
-        assert_eq!((basis_of(&holdings, part), basis_of(&holdings, other)), (75, 80));
+        assert_eq!((basis_of(&holdings, part), basis_of(&holdings, other)), (125, 80));
+        assert_eq!(holdings.get(Id::new(1), Id::new(1)).unwrap().holding.lots[0].basis, Qty(50), "another commodity's");
         holdings.adjust(Id::new(0), part, Qty(20)).unwrap();
-        assert_eq!((basis_of(&holdings, part), basis_of(&holdings, other)), (95, 80));
+        assert_eq!((basis_of(&holdings, part), basis_of(&holdings, other)), (145, 80));
         assert_eq!(
             holdings.adjust(Id::new(0), part, Qty(-96)),
             Err(AssetError::ParcelBasisMismatch),
             "no more than held"
         );
-        assert_eq!(holdings.adjust(Id::new(1), part, Qty(5)), Err(AssetError::UnknownPart), "another commodity's");
-        assert_eq!(basis_of(&holdings, part), 95);
+        assert_eq!(
+            holdings.adjust(Id::new(2), part, Qty(5)),
+            Err(AssetError::UnknownPart),
+            "a commodity it has none of"
+        );
+        assert_eq!(basis_of(&holdings, part), 145);
+    }
+
+    #[test]
+    fn a_fall_in_basis_is_shared_by_basis_and_a_rise_by_quantity() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(1), day: Day(10) };
+        let part = PartId { origin, ordinal: 0 };
+        let mut holdings = Holdings::new(2);
+        for (place, qty, basis) in [(0, 1, 300), (1, 3, 100)] {
+            let parcel = Parcel { part: Some(part), ..lot(qty, basis, 10) };
+            holdings.entry(Id::new(place), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
+        }
+        let bases = |holdings: &Holdings| {
+            holdings.iter().flat_map(|slot| &slot.holding.lots).map(|lot| lot.basis.0).collect::<Vec<_>>()
+        };
+        holdings.adjust(Id::new(0), part, Qty(-100)).unwrap();
+        assert_eq!(bases(&holdings), [225, 75], "three quarters of the basis gives three quarters of the fall");
+        holdings.adjust(Id::new(0), part, Qty(100)).unwrap();
+        assert_eq!(bases(&holdings), [250, 150], "one share in four gets a quarter of the rise");
     }
 
     #[test]
@@ -1619,6 +1647,23 @@ mod tests {
             Err(AssetError::ParcelBasisMismatch),
             "nothing unmatched is left"
         );
+    }
+
+    #[test]
+    fn carries_into_lots_of_two_days_split_each_in_its_place() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(0), day: Day(20) };
+        let part = PartId { origin, ordinal: 0 };
+        let mut holdings = Holdings::new(1);
+        for day in [20, 30] {
+            let parcel = Parcel { part: Some(part), ..lot(10, 1_000, day) };
+            holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
+        }
+        let on = |acquired, quantity| CarryLotAddition { acquired: Day(acquired), ..addition(part, quantity, 10) };
+        holdings.carry(Id::new(0), &[on(20, 4), on(30, 5)]).unwrap();
+        let slot = holdings.get(Id::new(0), Id::new(0)).unwrap();
+        let lots: Vec<_> =
+            slot.holding.lots.iter().map(|lot| (lot.acquired.0, lot.qty.0, lot.basis.0, lot.wash_matched)).collect();
+        assert_eq!(lots, [(20, 6, 600, false), (20, 4, 410, true), (30, 5, 500, false), (30, 5, 510, true)]);
     }
 
     #[test]

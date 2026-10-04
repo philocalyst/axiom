@@ -119,17 +119,8 @@ impl Ledger<'_, '_, '_> {
     pub(crate) fn deadline(&mut self, rule: usize, day: Day, period: Days) {
         let rule = self.plan.book.rules.timed()[rule];
         if let Subject::Asset(asset) = rule.subject {
-            let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
             let on = Occasion::time(day, period);
-            for index in 0..count {
-                let Some(part) = self.world.assets.asset(asset).and_then(|state| state.parts().get(index)).copied()
-                else {
-                    continue;
-                };
-                if self.asset_part_held(asset, part.id, day) {
-                    self.fire_asset_part(rule, &on, part.id);
-                }
-            }
+            self.held_parts(asset, day).into_iter().for_each(|part| self.fire_asset_part(rule, &on, part));
         } else {
             self.fire(std::slice::from_ref(&rule), &Occasion::time(day, period));
         }
@@ -140,10 +131,6 @@ impl Ledger<'_, '_, '_> {
     /// so this closes only the partial sale period and ordinary deadlines
     /// later that day see the disposal boundary and skip the asset.
     pub(crate) fn pre_disposal(&mut self, asset: axiom_core::Id<axiom_model::Asset>, day: Day) {
-        let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
-        if count == 0 {
-            return;
-        }
         let mut rules = Vec::new();
         for rule in self.plan.book.rules.timed().iter().copied() {
             if rule.subject != Subject::Asset(asset) || !law_consumes(self.plan.book, rule.law) {
@@ -167,30 +154,18 @@ impl Ledger<'_, '_, '_> {
         if rules.is_empty() {
             return;
         }
-        for index in 0..count {
-            let Some(part) = self.world.assets.asset(asset).and_then(|state| state.parts().get(index)).copied() else {
-                continue;
-            };
-            if !self.asset_part_held(asset, part.id, day) {
-                continue;
-            }
-            for (rule, partial) in rules.iter().copied() {
-                let on = Occasion::partial_terminal(day, partial);
-                if applies(self.plan, &rule, &on) {
-                    self.fire_asset_part(rule, &on, part.id);
-                }
+        for part in self.held_parts(asset, day) {
+            for &(rule, partial) in &rules {
+                self.fire_asset_part(rule, &Occasion::partial_terminal(day, partial), part);
             }
         }
     }
 
-    fn asset_part_held(&self, asset: axiom_core::Id<axiom_model::Asset>, part: PartId, day: Day) -> bool {
-        let Some(state) = self.world.assets.asset(asset) else {
-            return false;
-        };
-        let Some((owner, record)) = self.world.assets.part(part) else {
-            return false;
-        };
-        owner == asset && record.recorded.day <= day && state.held_at(EventKey { day, sequence: u64::MAX })
+    /// The parts of `asset` recorded by `day`, if it is still held at the end of it: what a law about it runs for.
+    fn held_parts(&self, asset: axiom_core::Id<axiom_model::Asset>, day: Day) -> Vec<PartId> {
+        let held = self.world.assets.asset(asset).filter(|state| state.held_at(EventKey { day, sequence: u64::MAX }));
+        let parts = held.into_iter().flat_map(|state| state.parts()).filter(|part| part.recorded.day <= day);
+        parts.map(|part| part.id).collect()
     }
 
     fn fire_asset_part(&mut self, rule: Rule, on: &Occasion<'_>, part: PartId) {
