@@ -57,7 +57,7 @@ opening 2026-01-01
 }
 
 /// What a tally counted, by day and quantity in quanta.
-fn counted(book: &Book, run: &Run, name: &str) -> Vec<(String, i64)> {
+pub(crate) fn counted(book: &Book, run: &Run, name: &str) -> Vec<(String, i64)> {
     let mut found: Vec<_> = run
         .effects
         .iter()
@@ -68,7 +68,7 @@ fn counted(book: &Book, run: &Run, name: &str) -> Vec<(String, i64)> {
     found
 }
 
-fn on(day: &str, qty: i64) -> (String, i64) {
+pub(crate) fn on(day: &str, qty: i64) -> (String, i64) {
     (day.to_string(), qty)
 }
 
