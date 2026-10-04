@@ -11,13 +11,12 @@
 //! holds the plan it is given and either owns the `Folded` or borrows the client's.
 
 use std::borrow::Borrow;
-use std::sync::OnceLock;
 
 use axiom_core::{Day, Diagnostic};
 use axiom_engine::{Checkpoint, Ledger, Options, Plan, Run};
 use axiom_model::Book;
 
-use crate::balance::Unpriced;
+use crate::balance::Worth;
 use crate::closings;
 use crate::forecast::Past;
 use crate::lens::{Lens, Whose};
@@ -32,8 +31,6 @@ pub struct Folded {
     run: Run,
     checkpoint: Checkpoint,
     effects_prefix_len: usize,
-    /// The flow ends `balance --value` cannot price, found by the first view that asks and read by every one after.
-    unpriced: OnceLock<Unpriced>,
 }
 
 impl Folded {
@@ -42,12 +39,7 @@ impl Folded {
         let (run, ledger, effects_prefix_len) = plan.run_with_view_and_effects_prefix(options);
         let checkpoint = ledger.checkpoint();
         drop(ledger);
-        Folded { options, run, checkpoint, effects_prefix_len, unpriced: OnceLock::new() }
-    }
-
-    /// The flow ends of the run no price is known for, whoever's money `lens` is about.
-    pub(crate) fn unpriced(&self, lens: Lens) -> &Unpriced {
-        self.unpriced.get_or_init(|| Unpriced::of(lens, &self.run))
+        Folded { options, run, checkpoint, effects_prefix_len }
     }
 
     /// The journal as folded.
@@ -91,9 +83,8 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
         let run = self.run();
         match query {
             Query::Balance { globs, at, value, monthly } => {
-                let lens = self.lens(at.unwrap_or(run.today));
-                let unpriced = value.then(|| self.folded().unpriced(lens));
-                super::balance::view_with_lens(lens, run, globs, unpriced, *monthly)
+                let worth = if *value { Worth::Market } else { Worth::Native };
+                super::balance::view_with_lens(self.lens(at.unwrap_or(run.today)), run, globs, worth, *monthly)
             }
             Query::Register { place, from, to } => {
                 super::register::view_with_lens(self.lens(to.unwrap_or(run.today)), run, place, *from, *to)

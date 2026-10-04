@@ -106,18 +106,6 @@ impl<'a> Posting<'a> {
         self.flow.day <= day && self.posted.state.is_pending_on(day)
     }
 
-    /// The days on which the flow stands, as the first and the first day past
-    /// it: from its own day, or its settlement, until it is returned.
-    pub(crate) fn standing(&self) -> Option<(Day, Day)> {
-        let forever = Day::MAX;
-        match self.posted.state {
-            State::Actual => Some((self.flow.day, forever)),
-            State::Settled(on) => Some((self.flow.day.max(on), forever)),
-            State::Returned(on) => Some((self.flow.day, on)),
-            State::Pending | State::Void | State::Planned => None,
-        }
-    }
-
     /// The other end of the flow, seen from `place`.
     pub fn counterparty(&self, place: Id<Place>) -> Id<Place> {
         if self.flow.from == place { self.flow.to } else { self.flow.from }
