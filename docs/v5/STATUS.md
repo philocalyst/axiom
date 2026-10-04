@@ -33,7 +33,9 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5d** loans | a loan is one schedule walked once when the promises compile (`Annuity::step` over Pay, Prepay, Reset, Rate: pure, 40-byte state); a payment is a split of `#principal` to the debt tab and `#interest` (of the asset a `for` names) to the lender; `resets`, `prepay shortens\|recasts`, a rate written `DATE LOAN now at PERCENT`; a statement of the loan's balance is held to the schedule with the likely cause named. `deposit` not built (needs K3f) | **merged** (`34adb26`) |
 | **K5e** a loan that began before the book | a loan made before the book's first fact, with no `opening` of its debt and no origination line, opens its debt tab on the first fact's day with what its schedule says is owed (`Book::first_fact` is now one definition; a payment due before the book began is no payment that was missed) | **merged** (`25566a5`) |
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | running (map first) |
-| L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written) |
+| L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written); lane U's plan may take them in (they delete model lines) |
+| D the user's decisions | the small behaviour changes decided above: prorata R1, the exchange fee, the monitor's one warning, the claim's purpose, mortgage interest, `match` out, the examples | brief written, starts when K6b has merged |
+| **U unification** | **the pass that brings the tree to the ceiling: one formulation per concept, from about 53,400 to 27,000 or fewer code lines, every behaviour kept.** An Opus lane in phases: a plan first (`docs/v5/UNIFY.md`), then checkpoints that each merge. It may absorb K12b, K4c, K3e, K3f, K7c and L2/L3, or sequence around them | running (phase 0: the plan) |
 
 Test baseline before any lane: 734 passed, 4 failed, 8 ignored. Lane C on top: 777 passed, the same 4 failed, 13
 ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAINING.md` names.
@@ -49,7 +51,39 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
 | `postings` merge | 2.1–2.7× faster than the classic merge, galloping wins from a skew of 8 |
 | `Trailed<_, ()>` | writes exactly like a `Vec` |
 
-## Waiting on you
+## Decisions
+
+The user's instruction: *"pick the most intuitive/capable option on all"*, and *"the unification pass is the most crucial
+thing: I am okay with the new added lines, but it is crucial that we stay at or below target"*. Every question below was
+decided on those two grounds (what a person writing the book would expect first, then what lets the book say more); the
+numbers refer to the questions as the lanes asked them, kept further down. **Who builds each** is the right-hand column.
+
+| # | question | decision | built by |
+|---|---|---|---|
+| 1 | `fearless_simd` source access | still the user's permission to give; nothing waits on it | no one |
+| 2 | budget ceiling | **27,000 non-test code lines is a ceiling, counted by `docs/v5/measure/quality.py` (53,419 on 2026-10-04)**, aimed at 26,000; levers pulled as needed; behaviour and features stay | lane U |
+| 3 | prorata basis (K3c R1/R2) | **R1**: a transfer from a taxed place into a `basis zero` place is a contribution with no basis (an HSA funded from checking is pre-tax, as people write it); a nondeductible IRA contribution says `basis AMOUNT`. The failing test's fixture gains a stated basis on its flow 2 | lane D |
+| 4 | a fee leg of an exchange split; a promise's `= AMOUNT` leg | **the fee is a cost of the exchange** (it adds to the basis of what is bought, comes off the proceeds of what is sold), as `08-expat`'s README says; the `=` leg **as built** (it moves the gap, the header's remainder is what is left) | lane D (fee); none |
+| 5 | the examples' numbers and errors | accepted; `03-violations`' stale "expect" comment is corrected, `11-sam` declares the purposes it uses; **`08`, `09`, `10` are ported to v5 by hand over `fmt --upgrade`** until `check` has no error that is the port's | lane D after L1 merges |
+| 6 | grace moves `07-landlord` | the book writes `grace 30d` on the manager-fee contract; the default stays half the cadence (LANGUAGE §7) | lane D |
+| 7 | the monitor's start and its eagerness | the monitor starts where it starts; **a run of consecutive missed due days of one contract is one `missed-occurrence`** (how many, since when, and the edit `until DATE` that ends it) | lane D |
+| 8 | recognition and the reserved words | **a claim counts when it is made** (§7's "invoiced"; `AccrualAt::Due` stays one line); the doc of `Books::Accrual` and LANGUAGE §6 are corrected to say so; **`claim`, `debt-claim` and `principal` stay reserved** and LANGUAGE lists them | lane D |
+| 9 | the forecast pays what the book promises | accepted: it is the fold | none |
+| 10 | the year-end test | the original book's `closing 12-31` becomes `each year` (the spelling LANGUAGE §8 defines); its sibling stays only if it asserts something else | lane D |
+| 11 | a missed occurrence's claim; the habit forecast | **the day after** (as built); **the claim carries the contract's purpose**, so accrual counts it when it is found and cash when it is paid. **The habit forecast stays** (what recurs, p10/p50/p90): it becomes a source of flows applied through the same fold (K5c's interface), and lane U shrinks it | lane D (purpose); lane U (the forecast) |
+| 12 | recognition on `04-freelancer` | accepted (cash: gross receipts 74,800.00) | none |
+| 13 | debts as parcels | **built** (K3f); `deposit` is Part B of it | lane U's plan decides: absorb or sequence |
+| 14 | `--at` baseline wrongness; K7b's output unifications | the fold is right; **U1 to U6 are all built** (about -320 lines; U6's three goldens move) | lane U |
+| 15 | the mortgage-interest deduction | **(c)**: the itemized deduction reads `#interest of ASSET` for a home-kind asset, and the asset's shares decide the personal part, so one interest posting never counts twice and any loan `for` a home works; `05-family`'s house interest is written `#interest` | lane D |
+| 16 | a loan's last payment, `principal` | accepted as built (ACTUS) | none |
+| 17 | what the grammar accepts and nothing reads | `match` **leaves the grammar** (its diagnostic names the `also` line that does it); `deposit` is built with K3f; `?` beside `...` stays `cannot-infer` and LANGUAGE says so | lane D (`match`); K3f |
+
+Lane D is one Sonnet lane of small, separate commits (`docs/v5/lanes/lane-D-decisions.md`). Lane U is one Opus lane in
+phases, each ending in a merge (`docs/v5/lanes/lane-U-unify.md`).
+
+## The questions the lanes asked
+
+Kept as written: the reasons behind each decision above. None of these is waiting any more except 1.
 
 1. **`fearless_simd` source access.** The registry source stayed unreadable to the lanes (a permission refusal) and docs.rs is
    blocked by the network policy; nothing was worked around. The API was recovered from our own scratch prototypes, and
