@@ -128,12 +128,14 @@ fn a_price_nobody_wrote_is_refused_with_the_one_that_would_do() {
 }
 
 #[test]
-fn a_source_alone_with_both_amounts_is_a_sale_or_a_purchase() {
+fn a_line_the_book_rejects_is_left_as_it_was() {
+    // An exchange that names one end is an error in v4 and a sale in v5: reading it would change the book.
+    let text = "2026-02-05 broker[2026-01-20] 1.620 VTI -> 481.14 USD\n";
+    assert_eq!(written(text), text);
     assert_eq!(
-        written("2026-02-05 broker[2026-01-20] 1.620 VTI -> 481.14 USD\n"),
-        "2026-02-05 broker[2026-01-20] -> 1.620 VTI @ 297.00 USD\n"
+        written("2026-02-05 broker 2_000.00 USD -> 2_000 EUR\n"),
+        "2026-02-05 broker 2_000.00 USD -> 2_000 EUR\n"
     );
-    assert_eq!(written("2026-02-05 broker 2_000.00 USD -> 2_000 EUR\n").lines().count(), 1);
 }
 
 #[test]

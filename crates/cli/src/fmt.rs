@@ -14,8 +14,8 @@ use std::fs;
 use std::path::Path;
 
 use axiom_core::{Diagnostic, Loc};
-use axiom_model::{Book, Class};
-use axiom_report::Query;
+use axiom_model::{Book, Class, Period};
+use axiom_report::{FlowBy, Query};
 use axiom_session::{Edit, Options, Session, Sources};
 use axiom_syntax::{Folder, Registry, Standing};
 
@@ -108,28 +108,59 @@ fn upgraded(session: &Session<'_>, file: &axiom_syntax::File<'_>) -> Result<Stri
     let registry = BookRegistry(session.book());
     let found = axiom_syntax::upgrade(&source.text, file, Folder::of(&source.path), &registry);
     let whole = Edit::Replace { at: Loc::new(file.id, 0, source.text.len() as u32), text: found.text.clone() };
-    match session.what_if(&whole, |after| say_the_same(session, after)) {
-        Ok(Ok(())) if found.refused.is_empty() => Ok(found.text),
-        Ok(Ok(())) => Err(found.refused),
-        Ok(Err(changed)) => Err(vec![changed]),
+    let before = Said::of(session);
+    match session.what_if(&whole, |after| before.changed_by(&Said::of(after))) {
+        Ok(None) if found.refused.is_empty() => Ok(found.text),
+        Ok(None) => Err(found.refused),
+        Ok(Some(what)) => {
+            let changed = Diagnostic::error("upgrade-changes-the-book", format!("the upgrade would change {what}"))
+                .note(format!("`{}` is left as it was", source.path));
+            Err(found.refused.into_iter().chain([changed]).collect())
+        }
         Err(refused) => Err(vec![Diagnostic::error("upgrade-unparsable", refused.to_string())]),
     }
 }
 
-/// Whether `after` says what `before` did: no diagnostic but the v4 warning gone, and the same book by what it counts and
-/// every balance.
-fn say_the_same(before: &Session<'_>, after: &Session<'_>) -> Result<(), Diagnostic> {
-    let (a, b) = (before.summary(), after.summary());
-    let balance = Query::Balance { globs: vec![], at: None, value: false, monthly: false };
-    let shown = |session: &Session<'_>| session.query(&balance, None).map(|report| report.sections.len());
-    let changed =
-        |what: &str| Diagnostic::error("upgrade-changes-the-book", format!("the upgrade would change {what}"));
-    let (flows, places, worth) = ((a.flows, b.flows), (a.places, b.places), (a.net_worth, b.net_worth));
-    match (flows.0 == flows.1, places.0 == places.1, worth.0 == worth.1, shown(before).ok() == shown(after).ok()) {
-        (true, true, true, true) => Ok(()),
-        (false, ..) => Err(changed("the flows the book holds")),
-        (_, false, ..) => Err(changed("the places the book holds")),
-        _ => Err(changed("what the book is worth")),
+/// What a book says that no upgrade may change: what it counts, what it finds wrong, and what three of its views write.
+struct Said {
+    counted: [(&'static str, String); 5],
+    found: Vec<String>,
+    views: Vec<Option<String>>,
+}
+
+impl Said {
+    fn of(session: &Session<'_>) -> Said {
+        let summary = session.summary();
+        let counted = [
+            ("flows", summary.flows.to_string()),
+            ("places", summary.places.to_string()),
+            ("laws", summary.laws.to_string()),
+            ("net worth", format!("{:?}", summary.net_worth)),
+            ("unpriced holdings", summary.unpriced.to_string()),
+        ];
+        let found = session.diagnostics().map(|d| format!("{:?} {} {}", d.severity, d.code, d.message)).collect();
+        let by_month = FlowBy::Period(Period::Month);
+        let queries = [
+            Query::Balance { globs: vec![], at: None, value: false, monthly: false },
+            Query::Balance { globs: vec![], at: None, value: true, monthly: true },
+            Query::Flow { by: by_month, from: None, to: None },
+        ];
+        let write = |query: &Query<'_>| {
+            let report = session.query(query, None).ok()?;
+            Some(axiom_report::json::render(&report, session.sources()))
+        };
+        Said { counted, found, views: queries.iter().map(write).collect() }
+    }
+
+    /// What `after` says differently, if anything: the first thing it says another way.
+    fn changed_by(&self, after: &Said) -> Option<String> {
+        let counts = self.counted.iter().zip(&after.counted);
+        let count = counts.filter(|(before, after)| before.1 != after.1).next();
+        if let Some(((what, before), (_, after))) = count {
+            return Some(format!("the {what} the book holds: {before} before, {after} after"));
+        }
+        let views = (self.views != after.views).then(|| "what the book's views say".to_string());
+        (self.found != after.found).then(|| "what the book finds wrong".to_string()).or(views)
     }
 }
 

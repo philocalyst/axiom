@@ -7,8 +7,11 @@
 //! Which end of a line is the book's own, who owns a position and how many decimals a commodity has are things no text
 //! says, so they are asked of a [`Registry`], which a book answers; this crate knows no model. Every change is an edit to
 //! the text the file was written in, and the edited text is laid out by the formatter, because a line that is rewritten
-//! changes width and so do its neighbours' columns. A line the upgrade cannot rewrite without guessing is refused, with
-//! the words that would settle it, and stays as it was.
+//! changes width and so do its neighbours' columns.
+//!
+//! Two kinds of line stay as written. One the book rejects today, such as an exchange that names one end, has a meaning
+//! in v5, and reading it would change the book. One the upgrade cannot rewrite without guessing is refused, with the
+//! words that would settle it.
 
 use std::mem::take;
 use std::ops::Range;
@@ -117,14 +120,26 @@ impl<'a, 's> Upgrade<'a, 's> {
         }
     }
 
-    /// The header a flow is written with now, and the way the arrows of its legs point.
+    /// The header a flow is written with now, and the way the arrows of its legs point. A line whose amounts no price
+    /// relates is refused with the line it would be if the nearest price had been written.
     fn rewritten(&self, flow: &Flow<'s>, header: &Header) -> Result<(Header, Junction), Refusal> {
+        self.rewrite(flow, header, None).map_err(|refusal| match refusal {
+            Refusal::Price { exchange, quote, rate: Some(rate), .. } => {
+                let fix = self.rewrite(flow, header, Some(rate)).ok().map(|(fixed, _)| fixed.line());
+                Refusal::Price { exchange, quote, rate: Some(rate), fix }
+            }
+            other => other,
+        })
+    }
+
+    /// [`Self::rewritten`], taking `assumed` as the price of an exchange that states none.
+    fn rewrite(&self, flow: &Flow<'s>, header: &Header, assumed: Option<Dec>) -> Result<(Header, Junction), Refusal> {
         let mut h = header.clone();
         let name = |side: &Side<'s>| side.end.map(|end| end.name.0);
         let legs = !flow.body.legs.is_empty();
         let toward = match (name(&flow.from), name(&flow.to), legs) {
             (Some(source), Some(target), false) => {
-                self.priced(flow, &mut h)?;
+                self.priced(flow, &mut h, assumed)?;
                 self.written_from(flow, &mut h, source, target)?;
                 Junction::Out
             }
@@ -135,10 +150,6 @@ impl<'a, 's> Upgrade<'a, 's> {
             (None, Some(target), true) => {
                 self.split_into(flow, &mut h, target)?;
                 Junction::In
-            }
-            (Some(_), None, false) => {
-                self.exchanged_alone(flow, &mut h)?;
-                Junction::Out
             }
             _ => Junction::Out,
         };
@@ -216,46 +227,35 @@ impl<'a, 's> Upgrade<'a, 's> {
         }
     }
 
-    /// The exchange of an own end with itself that v4 wrote with both amounts and no other end, which the model refuses:
-    /// a sale of what leaves, or a purchase of what arrives.
-    fn exchanged_alone(&self, flow: &Flow<'s>, h: &mut Header) -> Result<(), Refusal> {
-        match self.priced(flow, h)? {
-            Some(Place::Before) => self.amount_after(h),
-            Some(Place::After) => h.verb = Junction::In.spelling().into(),
-            None => {}
-        }
-        Ok(())
-    }
-
     /// An amount written twice says it twice: the one in the price's unit is the other times the price, and the line says
-    /// it once. Gives where the amount that is kept is written, if the line had two to choose from.
-    fn priced(&self, flow: &Flow<'s>, h: &mut Header) -> Result<Option<Place>, Refusal> {
-        let (Some(left), Some(right)) = (money(flow.from.amount), money(flow.to.amount)) else { return Ok(None) };
+    /// it once.
+    fn priced(&self, flow: &Flow<'s>, h: &mut Header, assumed: Option<Dec>) -> Result<(), Refusal> {
+        let (Some(left), Some(right)) = (money(flow.from.amount), money(flow.to.amount)) else { return Ok(()) };
         if left.unit == right.unit {
-            let same = same_number(left.number, right.number);
-            if same {
+            if same_number(left.number, right.number) {
                 h.held.clear();
             }
-            return Ok(same.then_some(Place::After));
+            return Ok(());
         }
         let written = self.price_written(flow);
         let quote = written.as_ref().map_or_else(|| self.quoted_in(&left, &right), |price| price.unit);
         let (kept, dropped, gone) = match (quote == left.unit, quote == right.unit) {
             (true, _) => (&right, &left, Place::Before),
             (_, true) => (&left, &right, Place::After),
-            _ => return Ok(None),
+            _ => return Ok(()),
         };
         let scale = self.registry.scale(quote).unwrap_or(2);
         let rate = match written {
             Some(price) if agrees(kept.number, price.number, dropped.number, scale) => None,
-            Some(_) => return Ok(None),
+            Some(_) => return Ok(()),
             None => Some(
-                exact(dropped.number, kept.number)
-                    .ok_or_else(|| self.inexact(h, (kept, dropped, gone), quote, scale))?,
+                assumed
+                    .or_else(|| exact(dropped.number, kept.number))
+                    .ok_or_else(|| inexact(kept, dropped, quote, scale))?,
             ),
         };
         state_once(h, gone, rate.map(|rate| format!("{} {quote}", shown(rate))).as_deref());
-        Ok(Some(if gone == Place::Before { Place::After } else { Place::Before }))
+        Ok(())
     }
 
     /// The units a price is quoted in when a line names none: the book's own when it is one of the two, else the unit that
@@ -265,24 +265,6 @@ impl<'a, 's> Upgrade<'a, 's> {
             base if base == left.unit => left.unit,
             _ => right.unit,
         }
-    }
-
-    /// The refusal of two amounts that no price anyone wrote relates: what they are, and the nearest price that does.
-    fn inexact(
-        &self,
-        h: &Header,
-        (kept, dropped, gone): (&Money<'s>, &Money<'s>, Place),
-        quote: &str,
-        scale: u8,
-    ) -> Refusal {
-        let exchange = format!("{} for {}", kept.text, dropped.text);
-        let suggestion = nearest(dropped.number, kept.number, scale).map(|rate| {
-            let price = format!("{} {quote}", shown(rate));
-            let mut fixed = h.clone();
-            state_once(&mut fixed, gone, Some(&price));
-            (price, fixed.line())
-        });
-        Refusal::Price { exchange, suggestion }
     }
 
     /// The price a flow's tail states, `@ 285.70 USD`.
@@ -378,14 +360,22 @@ fn shown(dec: Dec) -> String {
     format!("{whole}.{part:0width$}", width = usize::from(places))
 }
 
+/// The refusal of two amounts that no price anyone wrote relates: what they are, and the nearest price that does.
+fn inexact(kept: &Money<'_>, dropped: &Money<'_>, quote: &str, scale: u8) -> Refusal {
+    let exchange = format!("{} for {}", kept.text, dropped.text);
+    let rate = nearest(dropped.number, kept.number, scale);
+    Refusal::Price { exchange, quote: quote.to_string(), rate, fix: None }
+}
+
 /// Why a line was not rewritten.
 enum Refusal {
     /// Neither end is the book's own.
     NeitherOwn,
     /// The own accounts a split ends in have two owners.
     Owners(String, String),
-    /// Two amounts and no price that a person would write: what they are, and the nearest price with the line it makes.
-    Price { exchange: String, suggestion: Option<(String, String)> },
+    /// Two amounts and no price that a person would write: what they are, the nearest price that makes them agree (in
+    /// the units `quote` names), and the line it makes.
+    Price { exchange: String, quote: String, rate: Option<Dec>, fix: Option<String> },
 }
 
 impl Refusal {
@@ -399,15 +389,17 @@ impl Refusal {
                     .label(line, format!("`{first}` and `{second}` both hold part of it"))
                     .help("write the owner the money passes through first: `me <- acme 5_200 USD`, with the legs below")
             }
-            Refusal::Price { exchange, suggestion } => {
+            Refusal::Price { exchange, quote, rate, fix } => {
                 let diag = Diagnostic::error("upgrade-price", "no price anyone would write relates these two amounts")
                     .label(line, format!("{exchange} is not a whole price"))
                     .note("v5 states one amount and its price; the model checks the other against it");
-                match suggestion {
-                    Some((price, fixed)) => diag
-                        .help(format!("if the trade was made at `@ {price}`, write it: that gives the other amount"))
-                        .fix(format!("write `@ {price}`"), line, fixed),
-                    None => diag.help("write the price the trade was made at"),
+                let Some(rate) = rate else { return diag.help("write the price the trade was made at") };
+                let price = format!("{} {quote}", shown(rate));
+                let diag =
+                    diag.help(format!("if the trade was made at `@ {price}`, write it: that gives the other amount"));
+                match fix {
+                    Some(fixed) => diag.fix(format!("write `@ {price}`"), line, fixed),
+                    None => diag,
                 }
             }
         }
