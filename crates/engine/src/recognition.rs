@@ -154,10 +154,7 @@ impl Piece {
     /// Whether it takes back what a claim counted: a claim forgiven in accrual books, or a payment that settled one and
     /// was returned, which count against the way the claim's tab counts.
     pub fn takes_back(&self, book: &Book) -> bool {
-        match self.counts {
-            Counts::Claim { tab, dir } => dir == claim_dir(book.places[tab].class).reversed(),
-            Counts::Flow => false,
-        }
+        matches!(self.counts, Counts::Claim { tab, dir } if dir == claim_dir(book.places[tab].class).reversed())
     }
 }
 
