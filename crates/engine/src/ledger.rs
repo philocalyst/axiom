@@ -17,8 +17,8 @@
 
 use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{
-    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Made, Place,
-    RuntimeDetail, RuntimeFlow, RuntimeTxn,
+    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Infer, Item, Made, Place, RuntimeDetail,
+    RuntimeFlow, RuntimeTxn,
 };
 
 use crate::Promise;
@@ -29,7 +29,7 @@ use crate::plan::Plan;
 use crate::promising::Promising;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
-use crate::statement::is_exchange_cost;
+use crate::statement::{exchange_costs_of, exchange_of};
 use crate::timeline::{Fact, Moment, SourceFact, Timeline};
 use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
 
@@ -507,15 +507,16 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             return;
         }
         let roots = journal.zip(offset).and_then(|(journal, offset)| journal.roots_of(offset));
+        let flows = &book.flows[transaction.flows];
         let in_group = journal.and_then(|journal| journal.group.as_deref());
-        let group = in_group.filter(|group| offset.is_some_and(|offset| group.header == Heading::Flow(offset)));
-        let item = in_group.zip(offset).and_then(|(group, offset)| {
-            group.items.iter().find(|item| item.flow == Some(offset)).map(|item| (group, item))
+        let cost_header = in_group
+            .filter(|group| offset.is_some_and(|offset| exchange_of(flows, group) == Some(offset)))
+            .filter(|group| exchange_costs_of(book, flows, group).next().is_some());
+        let computed_cost_item = in_group.zip(offset).is_some_and(|(group, offset)| {
+            let computed = |item: &Item<Option<u32>>| matches!(item.amount, Cut::Of(Expr::Computed(_)));
+            group.items.iter().any(|item| item.flow == Some(offset) && computed(item))
+                && exchange_costs_of(book, flows, group).any(|cost| cost == offset)
         });
-        let cost_item = item.filter(|(group, item)| is_exchange_cost(book, transaction.flows, group, item));
-        let cost_header =
-            group.filter(|group| group.items.iter().any(|item| is_exchange_cost(book, transaction.flows, group, item)));
-        let computed_cost_item = cost_item.is_some_and(|(_, item)| matches!(item.amount, Cut::Of(Expr::Computed(_))));
         if roots.is_none() && cost_header.is_none() && !computed_cost_item {
             let motion = self.journal_motion(id, day);
             self.post(&motion.running(course));

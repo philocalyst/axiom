@@ -1143,6 +1143,60 @@ fn a_purchase_that_states_its_basis_keeps_it() {
     });
 }
 
+/// Conversions with a fee paid beside them, written as a split, as `examples/08-expat` writes its Wise transfers.
+const WISE: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+purpose fees : spending
+entity wise
+account assets/us-checking
+account assets/girokonto
+opening 2025-06-01
+  us-checking 20_000 USD
+2025-06-27 EUR = 1.1660 USD
+2025-07-08 EUR = 1.1673 USD
+";
+
+/// 9,500.00 USD sent through Wise: a 55.10 USD fee leg, and the euros the rest bought.
+const SENT: &str = "2025-06-27 us-checking 9_500.00 USD ->\n  wise 55.10 USD #fees\n  girokonto 8_100.26 EUR\n";
+
+#[test]
+fn a_fee_leg_beside_the_exchange_leg_of_a_split_is_part_of_what_the_euros_cost() {
+    // The README of example 08: the fee is part of what the euros cost, so their basis is 9,500.00 USD and not 9,444.90.
+    with_run(&format!("{WISE}{SENT}"), day(2025, 12, 31), |book, run| {
+        let euros = &holding(book, run, "girokonto", "EUR").unwrap().lots;
+        assert_eq!(euros.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect::<Vec<_>>(), [(8_100_26, 9_500_00)]);
+        assert_eq!(
+            holding(book, run, "us-checking", "USD").unwrap().qty().0,
+            20_000_00 - 9_500_00,
+            "the fee is paid once"
+        );
+    });
+}
+
+#[test]
+fn a_fee_leg_beside_the_exchange_leg_of_a_sale_comes_off_what_it_fetched() {
+    // 900.00 EUR leave: 4.77 of them the fee (5.57 USD on the day) and 895.23 the exchange, which fetched 1,027.63 USD.
+    let sold = "2025-07-08 girokonto 900.00 EUR ->\n  wise 4.77 EUR #fees\n  us-checking 1_027.63 USD\n";
+    with_run(&format!("{WISE}{SENT}{sold}"), day(2025, 12, 31), |_, run| {
+        let sale = run.gains.iter().find(|gain| gain.qty.0 == 895_23).expect("the exchange is a disposal");
+        assert_eq!((sale.proceeds.0, sale.basis.0), (1_027_63 - 5_57, 1_049_93), "the sale's gain is less by the fee");
+    });
+}
+
+#[test]
+fn a_leg_that_arrives_beside_an_exchange_is_no_cost_of_it() {
+    // Where the split's source is paid, a leg is money coming in, not a fee the source pays.
+    let sold = "2025-07-08 -> us-checking 900.00 USD\n  wise 5.00 USD #fees\n  girokonto 800.00 EUR\n";
+    with_run(&format!("{WISE}{SENT}{sold}"), day(2025, 12, 31), |_, run| {
+        let sale = run.gains.iter().find(|gain| gain.qty.0 == 800_00).expect("the exchange is a disposal");
+        assert_eq!(sale.proceeds.0, 895_00);
+    });
+}
+
 #[test]
 fn wash_sale_carries_a_loss_into_a_later_replacement_lot() {
     let text = "\
