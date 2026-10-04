@@ -234,6 +234,28 @@ fn a_declared_payable_place_holds_its_bills_and_a_payment_into_it_settles_the_on
     });
 }
 
+/// A payment into a declared place that bounces runs backwards, from the place: the bill it settled is open again, and the
+/// credit it left (what was more than the bill) is taken back, so nothing is owed that was not and nothing is lost.
+#[test]
+fn a_payment_into_a_declared_place_that_is_returned_opens_the_bill_again() {
+    let lines = "\
+2026-01-02 owed-to-ben -> pge 300 USD due 2026-02-01 ^p1
+2026-01-20 checking -> owed-to-ben 400 USD ^pay-1
+";
+    let place = |book: &Book| book.place("owed-to-ben").unwrap();
+    cash(lines, |book, run| {
+        assert_eq!(parcels(book, run, place(book)), []);
+        assert_eq!(held(book, run, place(book)), 100_00, "the bill is settled and 100.00 is credit");
+    });
+    cash(&format!("{lines}2026-01-25 ^pay-1 returned\n"), |book, run| {
+        let left: Vec<_> = parcels(book, run, place(book)).into_iter().map(|(code, qty)| (code, -qty)).collect();
+        assert_eq!(left, claims(&[("p1", 300_00)]));
+        assert_eq!(held(book, run, place(book)), -300_00, "the credit went back with the payment");
+        assert_eq!(at(book, run, "checking"), 1_000_00);
+        assert_eq!(everything(book, run), 0);
+    });
+}
+
 /// More than is owed through a declared place is a credit with the party, a positive balance: an overpayment, which is no parcel.
 #[test]
 fn an_overpayment_into_a_declared_place_is_a_credit() {
@@ -297,6 +319,22 @@ fn a_payment_that_is_returned_takes_back_what_it_counted_in_cash_books() {
     );
     cash(&lines, |book, run| {
         assert_eq!(counted(book, run, "bill-running"), [on("2026-01-20", 300_00), on("2026-02-01", 50_00)]);
+    });
+}
+
+/// A credit note from outside, paid into the place that holds the bill, settles it and is what the bill's purpose took back:
+/// the claim counted as spending and the note as spending refunded come to nothing, where a note counted as the payment of
+/// a bill (which replaces what it counts of itself) would leave the bill's spending standing.
+#[test]
+fn a_credit_note_into_a_declared_place_settles_the_bill_and_is_its_spending_refunded() {
+    let lines = "\
+2026-01-02 owed-to-ben -> pge 300 USD due 2026-02-01 #utilities ^p1
+2026-01-20 ben -> owed-to-ben 300 USD #utilities ^p1
+";
+    cash(lines, |book, run| {
+        assert_eq!(parcels(book, run, book.place("owed-to-ben").unwrap()), []);
+        assert_eq!(counted(book, run, "bill-running"), [], "300.00 of spending, and 300.00 refunded");
+        assert_eq!(everything(book, run), 0);
     });
 }
 
