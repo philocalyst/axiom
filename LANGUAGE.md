@@ -425,8 +425,11 @@ opening 01
 Each line creates holdings with an optional total `basis` and acquisition day
 (`since`, default the opening's day). Openings are states, not flows: no law sees
 them, and they may be older than any param. A loan's balance comes from its terms
-and needs no opening line. An asset may also arrive unbought later: `05-01 car
-basis 12_000 USD since 2019-03-01` (a gift, an inheritance).
+and needs no opening line: a loan made before the book begins is opened on the book's
+first day with what its schedule says is owed then (§7). A line that names the loan
+(`mortgage 312_441.12 USD`, a debt being positive) says another number instead. An
+asset may also arrive unbought later: `05-01 car basis 12_000 USD since 2019-03-01`
+(a gift, an inheritance).
 
 ## 6. Declarations
 
@@ -661,7 +664,14 @@ interest to the lender (`#interest`, `of` the asset when `for` names one) and th
 principal to the loan's debt (`#principal`, a built-in purpose a book may not
 declare again). They add up to the level payment, to the cent; the last payment is
 what is left, so a loan is owed nothing after it. The schedule also gives the
-balance on any day. A rate `now` changed (`2029-03-01 mortgage now at 6.25%`), or
+balance on any day. A loan made before the book's first fact (a book begun in 2026
+with a mortgage of 2024) opens its debt on that day with what the schedule says is
+owed after the payments before it, against the opening balances, and `check` notes it
+with the line that says the lender's number instead; a payment before the book is
+nobody's to have missed. A loan the journal originates (`DATE NAME` on the day it was
+made) is owed from that day. A loan declared in a book that says nothing else opens
+on the day it was made, and is watched from it: every payment due since is reported
+until a line keeps it. A rate `now` changed (`2029-03-01 mortgage now at 6.25%`), or
 `resets` from an index param, refigures the payment over the payments left from
 that day's balance (a reset is held to the previous rate by `cap` and to the first
 rate by `life`). Money paid into the loan beyond the payment (a flow to the

@@ -36,6 +36,16 @@ prepayment nobody wrote or an extra counted as principal explains. For every one
 (`expect.txt`): each payment's interest, principal and balance, each prepayment, the balance of the schedule on probe days,
 what the kept lines post and what the forecast promises, the debt tab on the day of the run, the occurrences nothing kept,
 and the diagnostics of the statements (and the cause each names, when exactly one candidate explains the difference).
+
+Lane K5e adds the books the examples have and the first corpus did not: **a book that began after its loan was made** (`gen ... pre`).
+Its first fact is a day after some of the loan's payments (none of them, sometimes, and all of them, 6% of the time), no line
+originates the loan, and the book's own opening is dated that day or a little after. What the reference says of them is what the
+language says: the debt is opened on the book's first day with what the schedule owed the day before (or with the number of an
+`opening` line that names the loan, which agrees with the schedule, or does not), with a note that says so when the terms did it; the
+tab on every statement's day is that opening less what the book's lines and flows paid into it; and a payment due before the book
+began is nobody's to have missed, so no statement's cause counts it. The first fact is the earliest of the book's opening, the lines
+that keep a due day, the flows into the loan and the statements of what is held; a rate a statement says is not one. A line that is
+late for a payment due before the book's first fact is the one thing the opening cannot see (the K5e map, section 7), and is not drawn.
 """
 import calendar
 import datetime
@@ -309,9 +319,11 @@ class Case:
         self.opening_day, self.explicit = BORN, None
         self.forms = Counter()
         self.name = self.rng.choice(self.NAMES)
-        while not self.draw():
-            pass
-        self.settle()
+        while True:
+            while not self.draw():
+                pass
+            if self.settle():
+                break
 
     # -- what is drawn
     def draw(self):
@@ -415,12 +427,17 @@ class Case:
         forms["line-with-amount"] += bool(self.stated and set(self.stated) & set(self.kept))
         self.statement_days = self.draw_statement_days() if self.pre else []
         self.first = self.first_fact()
+        if any(due < self.first for due in self.kept):
+            # A late line that is the book's first fact keeps a payment due before it, which the opening has already counted as
+            # made: the one thing a loan that began before its book cannot see (the K5e map, section 7), and not drawn.
+            return False
         self.opens()
         self.excess = {}
         for due, amount in self.stated.items():
             if due in self.paid and amount > self.paid[due][2] + self.paid[due][3]:
                 self.excess[due] = amount - self.paid[due][2] - self.paid[due][3]
         self.statements()
+        return True
 
     def draw_statement_days(self):
         last = min(TODAY, self.dues[-1] + datetime.timedelta(days=30))
@@ -459,9 +476,12 @@ class Case:
         return paid, header - paid
 
     def tab_on(self, day):
-        """The debt tab as the books have it after what is written on or before `day`: the principal the origination made,
-        less the principal each kept line posted and each flow written to the loan."""
-        tab = self.base - sum(self.posted(due)[1] for due, at in self.kept.items() if at <= day)
+        """The debt tab as the books have it after what is written on or before `day`: what opened it (the principal the
+        origination made, the schedule's balance when the book began, or the book's own opening), less the principal each kept
+        line posted and each flow written to the loan."""
+        # what opens the tab does so on its day: a book's own opening on its own, and the schedule's on the book's first
+        tab = (self.base if day >= (self.opening_day if self.said_open is not None else self.first) else 0)
+        tab -= sum(self.posted(due)[1] for due, at in self.kept.items() if at <= day)
         return tab - sum(amount for when, amount in self.prepays if when <= day)
 
     def statements(self):
@@ -798,6 +818,9 @@ OCC = "crates/engine/src/occurrence.rs"
 LOW = "crates/model/src/lower/contracts.rs"
 REC = "crates/engine/src/reconcile.rs"
 BAL = "crates/engine/src/loan_balance.rs"
+LOP = "crates/model/src/lower/loan_opening.rs"
+BOK = "crates/model/src/book.rs"
+RCD = "crates/model/src/lower/record.rs"
 
 RANKS = "    Reset,\n    Rate,\n    Pay,\n    Prepay,\n}"
 INTEREST = "let held = mul_div(i128::from(open.0), i128::from(rate.num()), i128::from(rate.den())).unwrap_or(0);"
@@ -900,7 +923,7 @@ MUTANTS = [
     (RES, ".max(first)", "", "the monitor waits for payments from before the loan was made"),
     # the causes
     (CAU, "gap if gap < Qty::ZERO => Cause::Prepaid,", "gap if gap < Qty::ZERO => Cause::Unknown,", "a statement that owes less than the schedule names no cause"),
-    (CAU, "filter(|payment| payment.day <= day)", "filter(|payment| payment.day < day)", "a payment due on the day of the statement is not counted in its causes"),
+    (CAU, "(said.begins..=day).contains(&payment.day)", "(said.begins..day).contains(&payment.day)", "a payment due on the day of the statement is not counted in its causes"),
     (CAU, "None => missed.push((due, paid.principal)),", "None => {}", "a payment no line keeps is not a cause"),
     (CAU, "short.push((due, paid.principal - principal));", "short.push((due, principal));", "what a short payment left unpaid is what it paid"),
     (CAU, "(stated - paid.interest).clamp(Qty::ZERO, paid.principal)", "(stated - paid.interest).min(paid.principal)", "a line that states less than the interest paid negative principal"),
@@ -920,6 +943,49 @@ MUTANTS = [
     (REC, "found.gap() == gap) => now,", "found.gap() != gap) => now,", "the book's assertion is said where the loan's is"),
     (BAL, "if !matches!(assert.gap, Gap::Refused) ||", "if false ||", "a statement that accepts its gap is held to the schedule"),
     (BAL, "found.filter(|_| assert.amount.unit == loan.principal.unit)", "found.filter(|_| true)", "a statement in another commodity is held to the schedule"),
+    # a loan that began before the book (lane K5e): which loans, on what day, how much, and the cause of a statement. Each is asked of
+    # the `pre` corpus (`mutate TREE WORK DIR 78,79,..`), whose books are the ones that open a debt.
+    (LOP, "Begins::With { day, .. } => (made < day).then_some(day),", "Begins::With { day, .. } => (made <= day).then_some(day),",
+     "a loan made on the book's first day is opened as if it were before it"),
+    (LOP, "Begins::WithTheLoan => Some(made),", "Begins::WithTheLoan => None,", "a book with no fact opens no loan"),
+    (LOP, ".filter(|&owed| owed > Qty::ZERO)", ".filter(|&owed| owed >= Qty::ZERO)", "a loan paid off before the book opens a debt of nothing"),
+    (LOP, "!named.contains(name) && ", "", "an opening that names the loan does not replace the one its terms say"),
+    (LOP, " && !made.is_some_and(|made| originated.contains(&(name, made)))", "", "a loan whose origination is written is opened as well"),
+    (LOP, "            loans.sort_by_key(|(_, contract)| contract.loan.map(|loan| loan.on));\n", "",
+     "the loans of a book with no fact open in the order they were declared, and not the order they were made"),
+    (LOP, "for id in std::mem::take(&mut self.0) {", "for id in self.0.clone() {", "a loan is opened again after every record"),
+    (LOP, "from: debt,\n        to: opening,", "from: opening,\n        to: debt,", "the debt opens as an asset: into the tab and not out of it"),
+    (LOP, "mode: Mode::Opening,", "mode: Mode::Actual,", "the opening is a flow the laws see"),
+    (LOP, "origin: Origin::Derived(Derivation::Opening(id)),", "origin: Origin::Written,", "an opening the terms made says that the book wrote it"),
+    (LOP, "Insertion::Line { before, indent } => (*before, format!(\"{indent}{said}\\n\")),", "Insertion::Line { before, .. } => (*before, format!(\"{said}\\n\")),",
+     "the line the note offers is not indented as the opening's own"),
+    (LOP, "format!(\"opening {day}\\n  {said}\\n\\n\")", "format!(\"opening {day}\\n{said}\\n\\n\")", "the opening the note offers has its line unindented"),
+    (LOP, ".replace(',', \"_\")", ".replace(',', \"\")", "the amount the note offers is not written as the language writes it"),
+    (PRO, "halt.day >= day", "halt.day > day", "a schedule that stopped on the book's first day is not followed to it"),
+    (PRO, "let followed = loan.terms().halted().is_none_or(|halt| halt.day >= day);", "let followed = true;",
+     "a schedule that stopped before the book began is followed to it"),
+    (PRO, "&Said::rated(contract))?", "&Said::default())?", "the rates said before the book began are not in what is owed then"),
+    (AMO, "self.open_on(day.add_days(-1)).unwrap_or(self.annuity.principal().qty)", "self.open_on(day).unwrap_or(self.annuity.principal().qty)",
+     "what is owed when a day begins includes the payments due on it"),
+    (AMO, "self.open_on(day.add_days(-1)).unwrap_or(self.annuity.principal().qty)", "self.open_on(day.add_days(-1)).unwrap_or(Qty::ZERO)",
+     "a loan made on or after a day owes nothing when it begins"),
+    (AMO, "let begins = book.first_fact().unwrap_or(Day::MIN);", "let begins = Day::MIN;", "a payment before the book began is counted among those that were missed"),
+    (AMO, "let rates = contract.rates.iter().map(|change| (change.day, change.rate)).collect();", "let rates = Vec::new();",
+     "the rates a statement says are not in the schedule of a loan"),
+    (CAU, "(said.begins..=day).contains(&payment.day)", "(said.begins.add_days(1)..=day).contains(&payment.day)",
+     "a payment due on the day the book begins is not one it can have missed"),
+    (BOK, "first_split, first_claim_change].into_iter().flatten().min()", "first_split, first_claim_change].into_iter().flatten().max()",
+     "the book begins with its latest fact"),
+    (BOK, "let first_assert = self.asserts.first().map(|assert| assert.day);", "let first_assert = None::<Day>;", "an assertion is not a fact the book begins with"),
+    (BOK, "let first_split = self.splits.first().map(|split| split.day);", "let first_split = None::<Day>;", "a split is not a fact the book begins with"),
+    (BOK, "let first_flow = self.flows.as_slice().first().map(|flow| flow.day);", "let first_flow = None::<Day>;", "a flow is not a fact the book begins with"),
+    (BOK, "let first_occurrence = self.txns.values().filter(|txn| txn.occurrence.is_some()).map(|txn| txn.day).min();",
+     "let first_occurrence = None::<Day>;", "a kept occurrence is not a fact the book begins with"),
+    (BOK, "let first_claim_change = self.claim_changes.first().map(|change| change.day);", "let first_claim_change = None::<Day>;",
+     "a claim change is not a fact the book begins with (equivalent: a claim is made by a flow, which is earlier)"),
+    (RCD, "    unopened.finish(world, diags);\n", "", "a book with no fact is not begun by its loans"),
+    (RCD, "        unopened.after(world, || record.insertion(), diags);\n", "", "no loan is opened when the book begins"),
+    (RCD, ".rfind('\\n').map_or(0, |newline| newline + 1)", ".rfind('\\n').map_or(0, |newline| newline)", "the edit is put before the newline that ends the line above"),
 ]
 
 

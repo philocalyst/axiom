@@ -6,6 +6,7 @@
 //! | module       | job                                                                          |
 //! |--------------|------------------------------------------------------------------------------|
 //! | `record`     | the journal in order: transactions, openings, occurrences and claims         |
+//! | `loan_opening` | the debt of a loan made before the book, opened with what its terms say     |
 //! | `statements` | the dated statements that are not flows: values, measures, endings, basis    |
 //! | `flow`       | one flow: its quantities, its ends, its items                                |
 //! | `tail`       | the clauses after an amount, read once for flows, terms and derived lines    |
@@ -16,6 +17,7 @@
 mod contracts;
 mod flow;
 mod infer;
+mod loan_opening;
 mod record;
 mod staged;
 mod statements;

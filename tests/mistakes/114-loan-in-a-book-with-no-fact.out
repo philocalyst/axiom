@@ -1,0 +1,25 @@
+warning[missed-occurrence]: `mortgage` was due 17 times and no occurrence was written (the last on 2026-06-01)
+  ╭─[114-loan-in-a-book-with-no-fact.ax:9:1]
+  │
+9 │ contract mortgage with bank
+  │ ─────────────┬─────────────
+  │              ╰── last due 29 days ago, on 2026-06-01
+  │
+  = note: not kept: 2025-02-01, … 2026-05-01, 2026-06-01 (all 17)
+  = help: write what happened: `2026-06-01 mortgage`, with its own amount if it was another
+  = help: or say it was not owed: `2026-06-01 mortgage waived`
+
+note[loan-opening]: `mortgage` opens owing 120,000.00 USD, what its terms say on 2025-01-15
+  ╭─[114-loan-in-a-book-with-no-fact.ax:9:1]
+  │
+9 │ contract mortgage with bank
+  │ ─────────────┬─────────────
+  │              ╰── the book has no fact yet, so it begins with this loan
+  │
+  = note: the payments due since are waited for, and reported as missed until a line keeps each
+  = help: write the lines that kept them, or begin the book later with an opening that says what is
+          owed
+
+1 warning
+✓ 1 flow · 10 places · 0 laws enforced · net worth -120,000.00 USD
+[exit status 0]

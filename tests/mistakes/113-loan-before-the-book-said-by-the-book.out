@@ -1,0 +1,14 @@
+warning[missed-occurrence]: `mortgage` was due 5 times and no occurrence was written (the last on 2026-06-01)
+   ╭─[113-loan-before-the-book-said-by-the-book.ax:13:1]
+   │
+13 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── last due 29 days ago, on 2026-06-01
+   │
+   = note: not kept: 2026-02-01, 2026-03-01, 2026-04-01, 2026-05-01, 2026-06-01
+   = help: write what happened: `2026-06-01 mortgage`, with its own amount if it was another
+   = help: or say it was not owed: `2026-06-01 mortgage waived`
+
+1 warning
+✓ 2 flows · 10 places · 1 law enforced · net worth 814,572.04 USD
+[exit status 0]

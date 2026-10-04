@@ -1,0 +1,37 @@
+error[loan-balance]: `mortgage` owes 82,368.77 USD on 2026-01-31 by its schedule, and the statement says 85,048.55 USD
+   ╭─[115-loan-before-the-book-lender-says-another-number.ax:18:1]
+   │
+18 │ 2026-01-31 mortgage = 85_048.55 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 2,679.78 USD more than the schedule
+   │
+   = note: the schedule's payment of 2026-01-01 paid 427.96 USD of interest and 3,222.67 USD of
+           principal and left 82,368.77 USD owed
+   = note: no cause explains it: 2,679.78 USD is not the principal of the payments no line keeps, of
+           the payments that were short, or of an extra, and the statement does not say less is owed
+   = help: if the lender changed the rate, write `2026-01-31 mortgage now at RATE`
+
+warning[missed-occurrence]: `mortgage` was due 5 times and no occurrence was written (the last on 2026-06-01)
+   ╭─[115-loan-before-the-book-lender-says-another-number.ax:12:1]
+   │
+12 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── last due 29 days ago, on 2026-06-01
+   │
+   = note: not kept: 2026-02-01, 2026-03-01, 2026-04-01, 2026-05-01, 2026-06-01
+   = help: write what happened: `2026-06-01 mortgage`, with its own amount if it was another
+   = help: or say it was not owed: `2026-06-01 mortgage waived`
+
+note[loan-opening]: `mortgage` opens owing 85,591.44 USD, what its terms say on 2026-01-01
+   ╭─[115-loan-before-the-book-lender-says-another-number.ax:12:1]
+   │
+12 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── made on 2025-01-15, before the book begins
+   │
+   = note: the payments due since are not in the book, so the debt opens after them
+   = help: if the lender says another number, write it in an opening: that replaces this
+10 +   mortgage 85_591.44 USD
+
+✗ 1 error · 1 warning
+[exit status 1]

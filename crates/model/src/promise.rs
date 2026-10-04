@@ -41,7 +41,7 @@ pub use reckon::{Proration, Reckoning, Recognition};
 pub use residual::Residual;
 pub use schedule::{Keep, Nearest, Sched, Schedule, Skip};
 
-use axiom_core::{Arena, Cadence, Day, DaySet, Days, Dues, Id, On, Run, Span};
+use axiom_core::{Arena, Cadence, Day, DaySet, Days, Dues, Id, On, Qty, Run, Span};
 
 use crate::book::{Book, Contract, Entity, ForecastError, ScheduleKind, Terms};
 use crate::split::FlowSide;
@@ -262,19 +262,38 @@ impl Promises {
 
     /// The id of the loan a contract's regular schedule pays down.
     fn loan_of(&self, contract: Id<Contract>) -> Option<Id<Annuity>> {
-        let stream = self.get(contract)?.regular?;
-        let Term::Every { body, .. } = self.term(stream.every) else { return None };
+        self.loan_in(self.get(contract)?)
+    }
+
+    fn loan_in(&self, promise: &Promise) -> Option<Id<Annuity>> {
+        let Term::Every { body, .. } = self.term(promise.regular?.every) else { return None };
         self.annuity_of(body)
+    }
+
+    /// What the loan of `contract` owes when `day` begins, after every payment due before it, as the contract stands while the
+    /// journal is still being lowered: its terms and the rates said so far, and nothing the journal does to it. A book's first
+    /// day is on or before every fact, so a loan that was made before it has had nothing done to it that the journal could say.
+    /// None for a contract that is no loan, and for one whose schedule cannot be followed so far (an index it resets by has no
+    /// value yet).
+    pub fn owed_before(book: &Book<'_>, contract: &Contract, day: Day) -> Option<Qty> {
+        let (mut promises, promise) = Promises::alone(contract);
+        let annuity = promises.amortize_with(book, promise, &Said::rated(contract))?;
+        let loan = Amortization::new(promises.annuity(annuity), &promises.entries);
+        let followed = loan.terms().halted().is_none_or(|halt| halt.day >= day);
+        followed.then(|| loan.owed_before(day))
     }
 
     /// Works out the schedule of the contract's loan, if it has one: its owed days after it was made, and every event the
     /// book states of it, walked once.
     fn amortize(&mut self, book: &Book<'_>, id: Id<Contract>) {
-        let (Some(annuity_id), Some(stream)) = (self.loan_of(id), self.get(id).and_then(|promise| promise.regular))
-        else {
-            return;
-        };
-        let (annuity, contract) = (*self.annuity(annuity_id), &book.contracts[id]);
+        let Some(&promise) = self.get(id) else { return };
+        self.amortize_with(book, promise, &Said::of(book, id, &book.contracts[id]));
+    }
+
+    /// Walks the loan `promise` pays down over what is `said` of it, and keeps the schedule it makes.
+    fn amortize_with(&mut self, book: &Book<'_>, promise: Promise, said: &Said) -> Option<Id<Annuity>> {
+        let (annuity_id, stream) = (self.loan_in(&promise)?, promise.regular?);
+        let annuity = *self.annuity(annuity_id);
         let schedule = self.schedule_of(stream.schedule);
         let after = Day(annuity.begins().0.saturating_add(1));
         let first = schedule.before(after);
@@ -284,11 +303,12 @@ impl Promises {
             Some(resets) => reckon::index_on(book, resets.index, day),
             None => Err(ForecastError::InvalidRate),
         };
-        let walked = amortization::walk(&annuity, &dues, &Said::of(book, id, contract), index);
+        let walked = amortization::walk(&annuity, &dues, said, index);
         let payments = walked.entries.iter().filter(|entry| entry.kind == Kind::Pay).count() as u32;
         let run = Run::of(self.entries.len()..self.entries.len() + walked.entries.len());
         self.entries.extend(walked.entries);
         self.annuities[annuity_id].walked(first, payments, run, walked.halted);
+        Some(annuity_id)
     }
 
     fn promise(&mut self, contract: &Contract) -> Promise {

@@ -18,11 +18,12 @@ fn source<'s>(id: u16, path: &'s str, text: &'s str, embedded: bool) -> Source<'
     Source { path, file, embedded }
 }
 
-/// What building a project of one file, with `STD`, makes, which must be without a diagnostic.
+/// What building a project of one file, with `STD`, makes, which must be without a diagnostic but for the note that says a loan
+/// was opened from its terms (these books write a loan and no line that originates it).
 fn with_book<R>(text: &str, then: impl FnOnce(&Book<'_>) -> R) -> R {
     let sources = [source(0, "std.ax", STD, true), source(1, "journal/2026/01.ax", text, false)];
     let (book, diagnostics) = build(&sources);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(diagnostics.iter().all(|diagnostic| &*diagnostic.code == "loan-opening"), "{diagnostics:?}");
     then(&book)
 }
 

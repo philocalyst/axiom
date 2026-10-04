@@ -454,6 +454,8 @@ pub enum Derivation {
     /// A loan payment's interest, or its principal.
     Interest(Id<Contract>),
     Principal(Id<Contract>),
+    /// A loan made before the book began: its debt, opened with what its terms say is owed when the book begins.
+    Opening(Id<Contract>),
     /// What an exchange rate cost: what was given less what was got.
     ExchangeCost,
     /// A leg between two parties, split into its two halves through the owner.

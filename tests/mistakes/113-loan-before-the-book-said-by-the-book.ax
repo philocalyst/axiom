@@ -1,0 +1,18 @@
+// NO NOTE: the opening names the loan, so the book has said what is owed (the lender's number: the schedule's is 85,591.44) and nothing is implied from the terms.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+opening 2026-01-01
+  checking 900_000 USD
+  mortgage 85_000 USD
+
+contract mortgage with bank
+  loan 120_000 USD on 2025-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2025-02-01
+
+2026-01-01 mortgage

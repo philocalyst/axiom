@@ -1,0 +1,17 @@
+// NOTE: the loan was made in 2025 and the book begins in 2026, so the 11 payments before it are not in the book. Nothing opens the debt, and the terms say what is owed: `check` says what it opened and how to say another number.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+opening 2026-01-01
+  checking 900_000 USD
+
+contract mortgage with bank
+  loan 120_000 USD on 2025-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2025-02-01
+
+2026-01-01 mortgage

@@ -395,6 +395,7 @@ pub(crate) fn contract_flow_word(origin: Origin) -> &'static str {
         Origin::Occurrence(_) => "occurrence",
         Origin::Derived(Derivation::Interest(_)) => "interest",
         Origin::Derived(Derivation::Principal(_)) => "principal",
+        Origin::Derived(Derivation::Opening(_)) => "opening",
         Origin::Derived(Derivation::Claim(_)) => "claim",
         Origin::Derived(Derivation::Otherwise(_)) => "late fee",
         Origin::Derived(Derivation::Refund(_)) => "refund",
@@ -410,6 +411,7 @@ pub(crate) fn contract_flow(origin: Origin, contract: Id<Contract>) -> bool {
         Origin::Derived(
             Derivation::Interest(found)
             | Derivation::Principal(found)
+            | Derivation::Opening(found)
             | Derivation::Claim(found)
             | Derivation::Otherwise(found)
             | Derivation::Refund(found),
