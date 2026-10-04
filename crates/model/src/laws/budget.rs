@@ -40,12 +40,6 @@ struct BudgetEntry<'a, 's> {
     loc: Loc,
 }
 
-#[derive(Clone, Copy)]
-enum BudgetLimit {
-    Ready(Limit),
-    Computed(NodeId),
-}
-
 /// The budget rows of every file, by purpose, in the order written.
 #[derive(Default)]
 struct Found<'a, 's> {
@@ -295,45 +289,28 @@ fn lower_terms_on<'s>(
         None => None,
     };
     Some(BudgetTerms {
-        limit: match limit {
-            BudgetLimit::Ready(limit) => limit,
-            BudgetLimit::Computed(root) => Limit::Computed(root),
-        },
+        limit,
         period: entry.allowance.per,
         carries: entry.allowance.carries.unwrap_or(dated && prior.carries),
         funded,
     })
 }
 
-fn lower_budget_limit<'s>(
-    world: &mut World<'s>,
-    entry: BudgetEntry<'_, 's>,
-    nodes: &mut Arena<Node>,
-) -> Option<BudgetLimit> {
+fn lower_budget_limit<'s>(world: &mut World<'s>, entry: BudgetEntry<'_, 's>, nodes: &mut Arena<Node>) -> Option<Limit> {
     match entry.allowance.limit {
         ast::Limit::Amount(ast::Amount::Literal(literal)) => {
             let amount = world.literal_amount(entry.file, literal, Some(world.book.base)).or_report(world)?;
-            Some(BudgetLimit::Ready(Limit::Amount(amount)))
+            Some(Limit::Amount(amount))
         }
         ast::Limit::Amount(ast::Amount::Computed(root)) => {
-            let (program, local_root) =
-                compile::compile_budget_limit(world, entry.file, entry.home, entry.purpose, root)?;
-            let law_offset = nodes.len() as u32;
-            for (_, node) in program.nodes.iter() {
-                nodes.push(Node {
-                    op: offset_op(&node.op, law_offset),
-                    ty: node.ty,
-                    loc: node.loc,
-                    first: offset_node(node.first, law_offset),
-                });
-            }
-            Some(BudgetLimit::Computed(NodeId(local_root.0 + law_offset)))
+            let root = compile::compile_budget_limit(world, entry.file, entry.home, entry.purpose, root, nodes)?;
+            Some(Limit::Computed(root))
         }
         ast::Limit::Share { percent, of } => {
             let word = Word::of(entry.file, of.0);
             let of = world.purpose(entry.home, word).or_report(world)?;
             let rate = Ratio::percent(percent.mantissa as i128, percent.scale)?;
-            Some(BudgetLimit::Ready(Limit::Share { rate, of }))
+            Some(Limit::Share { rate, of })
         }
     }
 }
@@ -363,31 +340,4 @@ fn push_node(nodes: &mut Arena<Node>, op: Op, ty: Ty, loc: axiom_core::Loc, firs
     let id = NodeId(nodes.len() as u32);
     nodes.push(Node { op, ty: Some(ty), loc, first: first.unwrap_or(id) });
     id
-}
-
-fn offset_node(node: NodeId, by: u32) -> NodeId {
-    NodeId(node.0 + by)
-}
-
-/// Moves every child reference when appending one independently compiled
-/// budget formula into its budget law's shared arena.
-fn offset_op(op: &Op, by: u32) -> Op {
-    let one = |node| offset_node(node, by);
-    match op {
-        Op::Const(value) => Op::Const(*value),
-        Op::Var(var) => Op::Var(*var),
-        Op::Local(node) => Op::Local(one(*node)),
-        Op::Field(node, field) => Op::Field(one(*node), *field),
-        Op::Param(param, keys) => Op::Param(*param, keys.iter().copied().map(one).collect()),
-        Op::Call(func, args) => Op::Call(*func, args.iter().copied().map(one).collect()),
-        Op::Of(left, right) => Op::Of(one(*left), one(*right)),
-        Op::At(left, right) => Op::At(one(*left), one(*right)),
-        Op::Select(keys) => Op::Select(keys.clone()),
-        Op::Neg(node) => Op::Neg(one(*node)),
-        Op::Not(node) => Op::Not(one(*node)),
-        Op::Bin(op, left, right) => Op::Bin(*op, one(*left), one(*right)),
-        Op::Is(node, alternatives) => Op::Is(one(*node), alternatives.iter().copied().map(one).collect()),
-        Op::Resides(entity, systems) => Op::Resides(one(*entity), systems.clone()),
-        Op::If(condition, yes, no) => Op::If(one(*condition), one(*yes), one(*no)),
-    }
 }

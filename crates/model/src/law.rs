@@ -539,6 +539,16 @@ pub enum Window {
 }
 
 impl Window {
+    /// The window a word names: `month`, `year` or `ever`.
+    pub fn named(word: &str) -> Option<Window> {
+        match word {
+            "month" => Some(Window::Month),
+            "year" => Some(Window::Year),
+            "ever" => Some(Window::Ever),
+            _ => None,
+        }
+    }
+
     /// The days this window is on the day `day` falls in: its calendar month or
     /// year, or all of time.
     pub fn around(self, day: Day) -> Days {

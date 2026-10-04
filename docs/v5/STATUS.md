@@ -35,7 +35,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **L1** the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | **merged** (`aeb624b`; the model check `error[junction-subject]` is its own last commit `9d375c8`, one `git revert`) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written); lane U's plan may take them in (they delete model lines) |
 | D the user's decisions | the small behaviour changes decided above: prorata R1, the exchange fee, the monitor's one warning, the claim's purpose, mortgage interest, `match` out, the examples | **merged** (`96f3e09`): items 1 to 7, 9 and 10; item 8 (the books: `07-landlord` `grace 30d`, `03-violations`, `11-sam`, porting `08`/`09`/`10`) **merged** (`Merge lane D, the books`): `03-violations`, `07-landlord` (`grace 30d`), `11-sam` corrected; `08-expat`, `09-shared`, `10-budgeter` ported to v5 |
-| **U unification** | **the pass that brings the tree to the ceiling: one formulation per concept, every behaviour kept.** Plan `UNIFY.md` (49 unifications, C1 to C6, a second round C7). **C1 merged** (`48519a6`): 57,109 to 56,143 lines (-966; the entries -1,019 of -2,450 planned: 42%, the ratio the K lanes delivered), so the honest landing is about **51,000, not 46,050**, 24,000 above the ceiling (see Decisions, "the gap"). **Running in parallel: lane U (Opus) on C2/C3 in `model`, and lane U-E (Opus, `lane-unify-c4`) on C4 in `engine`** (relief as a ranking, an asset part's basis is its parcels', realize once) | running |
+| **U unification** | **the pass that brings the tree to the ceiling: one formulation per concept, every behaviour kept.** Plan `UNIFY.md` (49 unifications, C1 to C6, a second round C7). **C1 merged** (`48519a6`: -1,019 of -2,450 planned, 42%) and **C2 merged** (`f1baf39`: -214 of -1,450, 14%; `Diagnostic` behind one pointer takes clippy from 277 to 58 warnings): 57,109 to 55,938 lines. Lane U's own verdict (`UNIFY.md` section 13): **unification ends near 52,000; under 40,000 is a choice of features** (about 12,000 lines of sync, why/explain, the forecast, the v3/v4 readers, relators/addresses, diagnostics quality); under 27,000 removes user-written laws, contracts and loans, lots and basis too. **Running in parallel: lane U (Opus) C3 in `model`; lane U-E (Opus, `lane-unify-c4`) C4 in `engine`; lane U-C6 (Sonnet, `lane-unify-c6`) the report/cli/sync/core entries of C6 (K7c = U35, the view site, rows of flows, the cell writer, sync's memos)** | running |
 
 Test baseline before any lane: 734 passed, 4 failed, 8 ignored. Lane C on top: 777 passed, the same 4 failed, 13
 ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAINING.md` names.
@@ -77,6 +77,7 @@ numbers refer to the questions as the lanes asked them, kept further down. **Who
 | 15 | the mortgage-interest deduction | **(c)**: the itemized deduction reads `#interest of ASSET` for a home-kind asset, and the asset's shares decide the personal part, so one interest posting never counts twice and any loan `for` a home works; `05-family`'s house interest is written `#interest` | lane D |
 | 16 | a loan's last payment, `principal` | accepted as built (ACTUS) | none |
 | 17 | what the grammar accepts and nothing reads | `match` **leaves the grammar** (its diagnostic names the `also` line that does it); `deposit` is built with K3f; `?` beside `...` stays `cannot-infer` and LANGUAGE says so | lane D (`match`); K3f |
+| 18 | a system's `rates` setting (`spot` or `param NAME`: the IRS yearly average rate for foreign income) is parsed, checked and stored and nothing that runs reads it; `Book::convert_for` and its 177 lines are called only by tests | **wire it in** (LANGUAGE §3 and §14 document it: an expat's foreign wages convert at the IRS yearly rate, `us` brings that rate into the param): the law evaluation's currency conversions and `on gain` basis conversion ask the owner's system policy. Output changes only for a book that sets `rates param`, none today | after C4/C5 (it touches `eval.rs` and `calc.rs`): a small lane |
 
 **The gap, and what I am doing about it (2026-10-04, after lane U's plan, `UNIFY.md`).** Lane U read all 55,367 true code lines and
 found that **27,000 is not reachable by unification with the features and the output kept**: its ledger (49 unifications in six
@@ -222,6 +223,20 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
 
 ## Lane U, in numbers
+
+C3, names, laws, values and diagnostics: **55,770**, −168 from the v5 head `f1baf39` (55,938); model 18,710 (−198), core
+3,532 (+30: the cycle finder moved there), report one line changed. Built where an entry deletes about 40 lines or a concept:
+U13 −225/**−113** (one `Compiler` constructor; the owner's currency read once; `Window::named`; a budget's computed limit
+compiled onto its law's arena, so the offset copy and `BudgetLimit` go), U14 −105/**−30** (one spot lookup of the quotes:
+`Book::rate`, which `convert` and `Lens::exact` ask), U15 −85/**−25** (one cycle finder, `core::tree::cycles`). Not built,
+with their map counts (UNIFY §14): U11 −310/0, U12 −60/0, U16 −250/0, U17 −150/0, U18 −5/0: **−168 of −1,190** (14%).
+Diagnostics as rows prototyped on `problem.rs`: the family grows by 35 lines, so not built, and section 13's −500 is withdrawn.
+The evaluator read closely: `eval.rs`'s `Machine` is already the one walk (`fire.rs` is policy, `totals.rs` the window store
+of U29, `calc.rs` arithmetic), so section 13's −400 is withdrawn too. Found: `Book::convert_for` and its five types (a
+system's `rates` policy, 177 code lines) are called only by `model`'s tests; a decision. Byte-identical to `f1baf39` in
+`diff/` (868 outputs), all 577 Books, goldens, mistakes and the declared-lines corpus, and in two books written for the
+budget formula and the asset cycles; the release suite green; clippy 58 warnings (as at C2's end; `core` clean). With C1 and C2, 28% of plan: the tree
+lands near **53,500**; distance to 27,000: **28,770**.
 
 C2, one lowering of a line that moves value: **55,938**, −205 from the v5 head `9590f36` (56,143); model 18,908 (−212), core
 3,502 (+8), session 501 (−1). Planned against delivered: the `Diagnostic` behind one `Box` (first, the coordinator's) +9,

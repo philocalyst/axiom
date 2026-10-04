@@ -244,23 +244,7 @@ pub(crate) fn compile_template<'s>(
     inputs: &[Input],
     roots: &[(ExprId, Ty)],
 ) -> Option<(Program, Box<[NodeId]>)> {
-    let mut compiler = Compiler {
-        world,
-        file,
-        home,
-        owner: None,
-        subject,
-        law_name: name,
-        first: None,
-        base: 0,
-        nodes: Arena::new(),
-        roles: Vec::new(),
-        locals: Vec::new(),
-        inputs,
-        positions: Positions::NONE,
-        when: When::Template,
-        failed: false,
-    };
+    let mut compiler = Compiler { inputs, ..Compiler::new(world, file, home, subject, name, When::Template) };
     let compiled: Vec<NodeId> = roots.iter().filter_map(|&(root, want)| compiler.expression(root, want)).collect();
     if compiler.failed || compiled.len() != roots.len() {
         return None;
@@ -268,39 +252,24 @@ pub(crate) fn compile_template<'s>(
     Some((Program::of(std::mem::take(&mut compiler.nodes)), compiled.into()))
 }
 
-/// Compiles a dated budget limit in its purpose-owner context. Unlike a
-/// contract template, a budget is not triggered by a transaction, so amount,
-/// from and to are unavailable while its formula is read.
+/// Compiles a dated budget limit in its purpose-owner context, onto the end of its law's `nodes`. Unlike a contract
+/// template, a budget is not triggered by a transaction, so amount, from and to are unavailable while its formula is
+/// read.
 pub(crate) fn compile_budget_limit<'s>(
     world: &mut World<'s>,
     file: &File<'s>,
     home: Home,
     purpose: axiom_core::Id<crate::book::Purpose>,
     root: ExprId,
-) -> Option<(Program, NodeId)> {
+    nodes: &mut Arena<Node>,
+) -> Option<NodeId> {
     let name = world.book.purposes[purpose].name;
-    let mut compiler = Compiler {
-        world,
-        file,
-        home,
-        owner: Some(Owner::Purpose(purpose)),
-        subject: Ty::Entity,
-        law_name: name,
-        first: None,
-        base: 0,
-        nodes: Arena::new(),
-        roles: Vec::new(),
-        locals: Vec::new(),
-        inputs: &[],
-        positions: Positions::NONE,
-        when: When::Each,
-        failed: false,
-    };
-    let root = compiler.expression(root, Ty::AMOUNT)?;
-    if compiler.failed {
-        return None;
-    }
-    Some((Program::of(std::mem::take(&mut compiler.nodes)), root))
+    let owner = Some(Owner::Purpose(purpose));
+    let mut compiler = Compiler { owner, ..Compiler::new(world, file, home, Ty::Entity, name, When::Each) };
+    compiler.nodes = std::mem::take(nodes);
+    let root = compiler.expression(root, Ty::AMOUNT);
+    *nodes = compiler.nodes;
+    root.filter(|_| !compiler.failed)
 }
 
 struct Compiler<'w, 'a, 's> {
@@ -329,12 +298,18 @@ struct Compiler<'w, 'a, 's> {
 impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
     /// A compiler for the expressions of a law written at `site`.
     fn placed(world: &'w mut World<'s>, site: &Placement<'a, 's>, law_name: Sym, when: When) -> Self {
+        let owner = Some(site.owner);
+        Compiler { owner, ..Compiler::new(world, site.file, site.home, site.subject, law_name, when) }
+    }
+
+    /// A compiler for expressions written in `file` under `home`, about a `subject`, that nothing owns yet.
+    fn new(world: &'w mut World<'s>, file: &'a File<'s>, home: Home, subject: Ty, law_name: Sym, when: When) -> Self {
         Compiler {
             world,
-            file: site.file,
-            home: site.home,
-            owner: Some(site.owner),
-            subject: site.subject,
+            file,
+            home,
+            owner: None,
+            subject,
             law_name,
             first: None,
             base: 0,
@@ -848,58 +823,30 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
     /// project, or unconfigured system can govern many owners with different
     /// currencies, so those contexts remain genuinely dynamic.
     fn owner_amount_ty(&self) -> Ty {
-        let currency = match self.owner {
-            Some(Owner::Place(place)) => Some(self.world.book.currency(self.world.book.places[place].owner)),
-            Some(Owner::Entity(entity)) => Some(self.world.book.currency(entity)),
-            Some(Owner::Asset(asset)) => {
-                let owner = self.world.book.assets[asset].owner;
-                Some(self.world.book.currency(owner))
-            }
-            Some(Owner::Contract(contract)) => {
-                let owner = self.world.book.contracts[contract].owner;
-                Some(self.world.book.currency(owner))
-            }
-            // A system's currency is only the default for its residents;
-            // individual entities may set another one.
-            Some(Owner::System(_)) => None,
-            Some(Owner::Kind(_) | Owner::Purpose(_) | Owner::Book) | None => None,
+        let book = &self.world.book;
+        let owner = match self.owner {
+            Some(Owner::Place(place)) => book.places[place].owner,
+            Some(Owner::Entity(entity)) => entity,
+            Some(Owner::Asset(asset)) => book.assets[asset].owner,
+            Some(Owner::Contract(contract)) => book.contracts[contract].owner,
+            // A system's currency is only the default for its residents; individual entities may set another one.
+            Some(Owner::System(_) | Owner::Kind(_) | Owner::Purpose(_) | Owner::Book) | None => return Ty::AMOUNT,
         };
-        currency.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))
+        Ty::Amount(Dim::Of(book.currency(owner)))
     }
 
     /// Currency of an explicitly named subject, or the law owner's currency
     /// for `self`; a generic expression stays dynamic.
     fn value_amount_ty(&self, node: NodeId) -> Ty {
-        let currency = match self.nodes[node].op {
-            Op::Const(Value::Place(place)) => {
-                let owner = self.world.book.places[place].owner;
-                Some(self.world.book.currency(owner))
-            }
-            Op::Const(Value::Entity(entity)) => Some(self.world.book.currency(entity)),
-            Op::Const(Value::Asset(asset)) => {
-                let owner = self.world.book.assets[asset].owner;
-                Some(self.world.book.currency(owner))
-            }
-            Op::Var(Var::Subject) => match self.owner {
-                Some(Owner::Place(place)) => {
-                    let owner = self.world.book.places[place].owner;
-                    Some(self.world.book.currency(owner))
-                }
-                Some(Owner::Entity(entity)) => Some(self.world.book.currency(entity)),
-                Some(Owner::Asset(asset)) => {
-                    let owner = self.world.book.assets[asset].owner;
-                    Some(self.world.book.currency(owner))
-                }
-                Some(Owner::Contract(contract)) => {
-                    let owner = self.world.book.contracts[contract].owner;
-                    Some(self.world.book.currency(owner))
-                }
-                Some(Owner::System(_)) => None,
-                _ => None,
-            },
-            _ => None,
+        let book = &self.world.book;
+        let owner = match self.nodes[node].op {
+            Op::Const(Value::Place(place)) => book.places[place].owner,
+            Op::Const(Value::Entity(entity)) => entity,
+            Op::Const(Value::Asset(asset)) => book.assets[asset].owner,
+            Op::Var(Var::Subject) => return self.owner_amount_ty(),
+            _ => return Ty::AMOUNT,
         };
-        currency.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))
+        Ty::Amount(Dim::Of(book.currency(owner)))
     }
 
     /// A flow amount has a static unit only when its governing place declares
@@ -1119,10 +1066,11 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
 
     /// The second argument is `month`, `year` or `ever`.
     fn want_window(&self, call: &Call<'_, 's>) -> Check<()> {
-        if self.keyword(call.args[1]).is_none() {
-            return Err(self.keyword_error(call.typed[1].0, call.function.text, "`month`, `year` or `ever`").into());
-        }
-        Ok(())
+        let text = match self.file.exprs[call.args[1]].kind {
+            ExprKind::Name(name) => name.0,
+            _ => "",
+        };
+        self.window_word(text, call.typed[1].0, call.function.text).map(|_| ())
     }
 
     /// `total(in|out, month|year|ever[, KIND])`
@@ -1157,14 +1105,7 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
                 return Err(self.keyword_error(args[0].0, "total", "`in` or `out`").into());
             }
         };
-        let window = match word(1) {
-            "month" => Window::Month,
-            "year" => Window::Year,
-            "ever" => Window::Ever,
-            _ => {
-                return Err(self.keyword_error(args[1].0, "total", "`month`, `year` or `ever`").into());
-            }
-        };
+        let window = self.window_word(word(1), args[1].0, "total")?;
         if let Some(&(node, ty)) = args.get(2)
             && ty != Ty::Kind
         {
@@ -1174,24 +1115,7 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
     }
 
     fn window_word(&self, text: &str, node: NodeId, function: &str) -> Check<Window> {
-        match text {
-            "month" => Ok(Window::Month),
-            "year" => Ok(Window::Year),
-            "ever" => Ok(Window::Ever),
-            _ => Err(self.keyword_error(node, function, "`month`, `year` or `ever`").into()),
-        }
-    }
-
-    fn keyword(&self, expr: ExprId) -> Option<Window> {
-        let ExprKind::Name(name) = self.file.exprs[expr].kind else {
-            return None;
-        };
-        match name.0 {
-            "month" => Some(Window::Month),
-            "year" => Some(Window::Year),
-            "ever" => Some(Window::Ever),
-            _ => None,
-        }
+        Window::named(text).ok_or_else(|| self.keyword_error(node, function, "`month`, `year` or `ever`").into())
     }
 
     fn keyword_error(&self, node: NodeId, function: &str, wanted: &str) -> Diagnostic {

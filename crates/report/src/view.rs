@@ -210,7 +210,7 @@ impl<'b, 's, 'v> View<'b, 's, 'v> {
         if amount.unit == book.base || amount.qty.is_zero() {
             return Some(i128::from(amount.qty.0) * POW10[EXTRA_DIGITS]);
         }
-        let rate = book.prices.rate(amount.unit, book.base, self.day, book.base)?;
+        let rate = book.rate(amount.unit, book.base, self.day)?;
         let (from, to) = (book.commodities[amount.unit].scale, book.commodities[book.base].scale);
         let numerator = i128::from(rate.num()) * POW10[usize::from(to) + EXTRA_DIGITS];
         mul_div(amount.qty.0.into(), numerator, i128::from(rate.den()) * POW10[usize::from(from)])
