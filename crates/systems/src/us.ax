@@ -112,9 +112,8 @@ kind home : personal-use
 
   /// Interest on a loan secured by your home is itemized (IRC §163(h)): the
   /// interest of the home, whoever the lender is, and not what a loan was
-  /// called. A building shared with rentals divides its interest among its
-  /// parts, so what the rental share counts as a rental cost is not counted
-  /// here as well.
+  /// called. The interest of a rental home is a rental cost instead
+  /// (`us/rental`), so one posting counts once.
   ///
   /// To fix: write the interest `#interest of HOME`, or give the loan `for
   /// HOME` and it does.
