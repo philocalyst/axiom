@@ -7,6 +7,8 @@ error[exchange-no-price]: this line has one end and an amount, but no price and 
    │
    = help: an exchange says its price: `brokerage -> 2 VTI @ 297.00 USD`
    = help: or indent legs below the line to split the amount among ends
+   = help: or send it to `?`, the party for money whose destination is unknown
+18 + 2026-01-22 brokerage -> ? 2 VTI
 
 ✗ 1 error
 [exit status 1]

@@ -701,10 +701,18 @@ fn exchange_no_price(arrow: Loc, flow: &Flow<'_>) -> Diagnostic {
     let (end, amount) = (flow.from.end.or(flow.to.end), flow.to.amount.and_then(Quantity::literal));
     let (end, amount) = (end.map_or("fidelity", |end| end.name.0), amount.map_or("7 VTI", |amount| amount.0));
     let example = format!("{end} {} {amount} @ 297.00 USD", flow.junction.spelling());
-    Diagnostic::error("exchange-no-price", "this line has one end and an amount, but no price and no legs")
+    let diag = Diagnostic::error("exchange-no-price", "this line has one end and an amount, but no price and no legs")
         .label(arrow, "nothing says what the amount was exchanged for, or where it goes")
         .help(format!("an exchange says its price: `{example}`"))
-        .help("or indent legs below the line to split the amount among ends")
+        .help("or indent legs below the line to split the amount among ends");
+    match flow.junction {
+        Junction::Out => diag.fix(
+            "or send it to `?`, the party for money whose destination is unknown",
+            Loc::new(arrow.file, arrow.end, arrow.end),
+            " ?",
+        ),
+        Junction::In => diag,
+    }
 }
 
 fn leg_needs_arrow(leg: Loc, toward: Junction) -> Diagnostic {
