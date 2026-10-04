@@ -18,13 +18,9 @@ use crate::{Cell, Column, Report, Row, Section};
 
 pub fn report<'s>(view: View<'s, '_, '_>, place: Id<Place>) -> Report<'s> {
     let book = view.book();
-    let owner = book.places[place].owner;
     let name = path(book, place);
     if !view.owns(place) {
-        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
-            "{name} belongs to {}, whose money this is not.",
-            book.name(book.entities[owner].path)
-        )));
+        return view.refuse(format!("Why {name}"), name, Some(book.places[place].owner));
     }
     let held: Vec<&Holding> = view
         .run

@@ -1331,3 +1331,17 @@ fn a_flow_is_owned_where_its_money_moves_through() {
     }
     assert!(arriving > 0 && leaving > 0, "the fixture has flows of both kinds");
 }
+
+#[test]
+fn a_page_refused_says_whose_money_it_is_or_that_it_is_out_of_scope() {
+    let house = household();
+    let plan = axiom_engine::Plan::new(&house.book);
+    let whose = Whose::default();
+    let view = crate::view::View::new(&plan, &whose, &house.run, house.run.today);
+    let owned = view.refuse("Why x".to_string(), "x", Some(house.entity("jordan")));
+    assert_eq!(cell(&owned.title), "Why x");
+    assert_eq!(cell(&owned.sections[0].notes[0]), "x belongs to jordan, whose money this is not.");
+    let outside = view.refuse("Why x".to_string(), "x", None);
+    assert_eq!(cell(&outside.sections[0].notes[0]), "x is outside this owner's scope.");
+    assert!(owned.sections[0].rows.is_empty() && outside.sections[0].rows.is_empty(), "a refusal lists nothing");
+}

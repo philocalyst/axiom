@@ -17,6 +17,7 @@ use axiom_engine::{Holding, Known, OwnerShare, Plan, Run};
 use axiom_model::{Amount, Book, Class, Commodity, Entity, Flow, Place, Subject};
 
 use crate::resolve;
+use crate::{Report, Section};
 
 /// Whose money a view is about: everyone's, or one entity's, which for a
 /// household includes its members'.
@@ -130,6 +131,19 @@ impl<'b, 's, 'v> View<'b, 's, 'v> {
     /// Whether the flow moves money through a place these owners own.
     pub fn owns_flow(self, flow: &Flow) -> bool {
         self.owns(self.movement_place(flow))
+    }
+
+    /// The page that says only that `name` is not the money these owners are asked about: whose it is, if `owner` says,
+    /// else that it is outside their scope.
+    pub fn refuse(self, title: String, name: &str, owner: Option<Id<Entity>>) -> Report<'b> {
+        let book = self.book();
+        let said = match owner {
+            Some(owner) => {
+                format!("{name} belongs to {}, whose money this is not.", book.name(book.entities[owner].path))
+            }
+            None => format!("{name} is outside this owner's scope."),
+        };
+        Report::new(title).with(Section::note_only(said))
     }
 
     /// `qty` of what a flow moves, as the owners of the place it moves through own it.

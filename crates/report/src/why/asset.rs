@@ -14,10 +14,7 @@ pub fn report<'s>(view: View<'s, '_, '_>, asset_id: Id<Asset>) -> Report<'s> {
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
     if !view.owns_entity(asset.owner) {
-        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
-            "{name} belongs to {}, whose money this is not.",
-            book.name(book.entities[asset.owner].path)
-        )));
+        return view.refuse(format!("Why {name}"), name, Some(asset.owner));
     }
     let state = view.run.assets.iter().find(|state| state.asset == asset_id);
     // The flows whose purpose is about the asset.

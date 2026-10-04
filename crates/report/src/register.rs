@@ -75,16 +75,11 @@ pub(crate) fn report<'s>(
 
 /// A place is somebody's: another owner's register is not part of whose money this is.
 pub(crate) fn place_register<'s>(view: View<'s, '_, '_>, place: Id<Place>, window: Window) -> Report<'s> {
-    let book = view.book();
-    let register = match view.owns(place) {
-        true => section_with_sign(view, place, window),
-        false => Section::note_only(format!(
-            "{} belongs to {}, whose money this is not.",
-            path(book, place),
-            book.name(book.entities[book.places[place].owner].path)
-        )),
-    };
-    Report::new(format!("Register: {}", path(book, place))).with(register)
+    let (book, title) = (view.book(), format!("Register: {}", path(view.book(), place)));
+    if !view.owns(place) {
+        return view.refuse(title, path(book, place), Some(book.places[place].owner));
+    }
+    Report::new(title).with(section_with_sign(view, place, window))
 }
 
 /// The days a register covers: from a day if there is one, up to a cutoff.
@@ -105,14 +100,6 @@ impl Window {
     }
 }
 
-/// What a register says of what is not the owner's: whose it is.
-fn foreign<'s>(book: &Book<'s>, name: &str, owner: Id<Entity>) -> Report<'s> {
-    Report::new(format!("Register: {name}")).with(Section::note_only(format!(
-        "{name} belongs to {}, whose money this is not.",
-        book.name(book.entities[owner].path)
-    )))
-}
-
 /// A party or owner register is a history of everything it touched, including flows it owns that have no account end
 /// under its name, and the gaps accepted against its place: that keeps market revaluations and unexplained `?`
 /// balances visible from the other end.
@@ -121,10 +108,7 @@ fn entity_register<'s>(view: View<'s, '_, '_>, entity: Id<Entity>, shown: &str, 
     let place = book.entities[entity].place;
     let is_owner = place.is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)));
     if is_owner && !view.owns_entity(entity) {
-        return Report::new(format!("Register: {shown}")).with(Section::note_only(format!(
-            "{} is outside this owner's scope.",
-            book.name(book.entities[entity].path)
-        )));
+        return view.refuse(format!("Register: {shown}"), book.name(book.entities[entity].path), None);
     }
     // At the party's end of a flow: the place it owns, or the outside it stands for.
     let at_party = |end: Id<Place>| {
@@ -147,7 +131,7 @@ fn asset_register<'s>(view: View<'s, '_, '_>, id: Id<Asset>, window: Window) -> 
     let asset = &book.assets[id];
     let name = book.name(asset.name);
     if !view.owns_entity(asset.owner) {
-        return foreign(book, name, asset.owner);
+        return view.refuse(format!("Register: {name}"), name, Some(asset.owner));
     }
     let touching = |flow: &Flow| {
         flow.from == asset.place
@@ -163,7 +147,7 @@ fn contract_register<'s>(view: View<'s, '_, '_>, id: Id<Contract>, window: Windo
     let contract = &book.contracts[id];
     let name = book.name(contract.name);
     if !view.owns_entity(contract.owner) {
-        return foreign(book, name, contract.owner);
+        return view.refuse(format!("Register: {name}"), name, Some(contract.owner));
     }
     let touching = |flow: &Flow| contract_flow(flow.origin, id);
     listing(view, name, window, format!("Nothing happened under {name} in this window."), touching, |_| false)

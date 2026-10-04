@@ -15,10 +15,7 @@ pub fn report<'s>(view: View<'s, '_, '_>, contract_id: Id<Contract>) -> Report<'
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
     if !view.owns_entity(contract.owner) {
-        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
-            "{name} belongs to {}, whose money this is not.",
-            book.name(book.entities[contract.owner].path)
-        )));
+        return view.refuse(format!("Why {name}"), name, Some(contract.owner));
     }
     // The flows the contract derived, or that its occurrences wrote.
     let derived = all_postings(book, view.run).filter(|posting| {

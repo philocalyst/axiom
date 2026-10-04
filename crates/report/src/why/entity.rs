@@ -19,8 +19,7 @@ pub fn report<'s>(view: View<'s, '_, '_>, entity: Id<Entity>) -> Report<'s> {
     let book = view.book();
     let name = book.name(book.entities[entity].path);
     if !view.owns_entity(entity) {
-        return Report::new(format!("Why {name}"))
-            .with(Section::note_only(format!("{name} is outside this owner's scope.")));
+        return view.refuse(format!("Why {name}"), name, None);
     }
     let open = claims::open(view, view.run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
