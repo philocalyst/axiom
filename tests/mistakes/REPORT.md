@@ -2729,7 +2729,7 @@ the terminal width, without per-line bullets.
 
 ## 16. The junction mistakes, and what the v5 flow line changed (lane L1)
 
-Cases 100 to 115 were added by other lanes with their own notes. Cases 116 to 122 are the malformed junctions of the v5 flow
+Cases 100 to 115 were added by other lanes with their own notes. Cases 116 to 126 are the malformed junctions of the v5 flow
 line (`->` gives, `<-` takes, `<- AMOUNT @ PRICE` buys, `-> AMOUNT @ PRICE` sells, a leg leads with its arrow). Each one
 says what it saw, says the words that would fix it, in the line's own names and amounts where it has them, and points at
 the arrow.
@@ -2743,8 +2743,16 @@ the arrow.
 | 120 | `brokerage <- 7 VTI` | `exchange-no-price` | `brokerage <- 7 VTI @ 297.00 USD`, or legs under it |
 | 121 | `me <- acme 5_000 USD` and a leg with no arrow | `leg-needs-arrow` | an edit that inserts `-> ` |
 | 122 | `me <- acme 5_000 USD` and a leg that points back with `<-` | `leg-direction` | an edit that writes `->` |
+| 123 | `acme <- checking 1_200 USD` | `junction-subject` | `checking -> acme ...` |
+| 124 | `acme <- shop 1_200 USD` | `junction-subject` | one of your books first |
+| 125 | `acme <- 7 VTI @ 285.70 USD` | `junction-subject` | the book it happens in first: `brokerage <- 7 VTI @ 285.70 USD` |
+| 126 | `acme <- shop 5_000 USD` with `->` legs | `junction-subject` | one of your books first |
 
-All seven are A: one error each, no cascade, the primary label on the arrow (or the leg), and a fix that is right.
+Cases 123 to 126 are the one check the model makes of a junction: the subject of a `<-`, a purchase, a sale or a split
+through an owner is a book an owner holds, and a party is not. They are the only cases the syntax crate cannot tell,
+because only the book knows who is a party. A `->` that starts at a party is what it was.
+
+All eleven are A: one error each, no cascade, the primary label on the arrow (or the leg), and a fix that is right.
 
 **What changed in the older cases.** The corpus was regenerated with the v5 parser, and the books were written the v5 way with
 `axiom fmt --upgrade`, except the ones about a v4 spelling. These outputs changed, and nothing else did:

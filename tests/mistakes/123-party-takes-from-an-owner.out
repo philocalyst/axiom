@@ -1,0 +1,11 @@
+error[junction-subject]: `acme` is a party, and a `<-` line is written from one of your books
+   ╭─[123-party-takes-from-an-owner.ax:19:17]
+   │
+19 │ 2026-01-15 acme <- checking 1_200 USD
+   │                 ─┬
+   │                  ╰── `acme` is a party
+   │
+   = help: swap the ends: `checking -> acme ...`
+
+✗ 1 error
+[exit status 1]

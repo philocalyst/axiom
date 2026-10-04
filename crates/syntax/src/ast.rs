@@ -61,6 +61,8 @@ use std::ops::{Deref, Index};
 
 use axiom_core::{Day, Dec, FileId, Loc, Span};
 
+use crate::lex::Punct;
+
 pub use crate::refs::{Many, Ref};
 
 // The calendar words a plan and a law's `each` trigger are written in are core's.
@@ -250,6 +252,17 @@ impl<'s> File<'s> {
     /// Where a slice of the source was written.
     pub fn loc(&self, text: &str) -> Loc {
         locate(self.id, self.src, text)
+    }
+
+    /// The first arrow after `end`, which a header is read from: where a flow's junction is. A selector's dates have
+    /// hyphens, and none of them is an arrow.
+    pub fn arrow_after(&self, end: End<'s>) -> Loc {
+        let (bytes, after) = (self.src.as_bytes(), self.loc(end.name.0).end as usize);
+        let found = (after..bytes.len()).find_map(|at| match Punct::lex(&bytes[at..])? {
+            (Punct::Arrow | Punct::Back, len) => Some(Loc::new(self.id, at as u32, (at + len) as u32)),
+            _ => None,
+        });
+        found.unwrap_or_else(|| self.loc(end.name.0))
     }
 
     /// This file laid out in the house style, using the source it borrows.
@@ -532,6 +545,20 @@ pub struct Flow<'s> {
     pub body: Body<'s>,
     /// Which way the arrow was written, and whose book the flow passes through.
     pub course: Course<'s>,
+}
+
+impl<'s> Flow<'s> {
+    /// The end the line says is an owner's, if how it is written says so: what a `<-` takes at, what a purchase or a sale
+    /// stays in, and the owner a split passes through. A `->` between two ends says only that value moved, and v4 books
+    /// are full of `acme -> checking`, so it names none.
+    pub fn owner(&self, file: &File<'s>) -> Option<End<'s>> {
+        let within = self.from.end.zip(self.to.end).is_some_and(|(from, to)| from.name == to.name);
+        match self.course {
+            Course::Through(_, owner) => Some(file[owner]),
+            Course::Direct(Junction::In) => self.to.end,
+            Course::Direct(Junction::Out) => self.from.end.filter(|_| within),
+        }
+    }
 }
 
 /// Which way a flow's arrow points, and whether the flow passes through an owner: the one the header names when it is

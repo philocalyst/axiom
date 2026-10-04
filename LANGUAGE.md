@@ -163,6 +163,11 @@ amount may stand before an arrow that gives (`fidelity[2026-01-20] 1.62 VTI -> c
 | `checking <- 100 USD` with `<-` legs | took, from each of the legs |
 | `me -> shop 45_046.25 USD` with `<-` legs | the owner paid it, out of the accounts the legs name |
 
+The subject of a `<-`, of a purchase or sale, and of a split through an owner is one of the owners' books, because the line
+says what that book did. A party reaches it by the other end of an arrow: `acme <- checking 1_200 USD` is an error
+(`junction-subject`) that says to write `checking -> acme`, and so is a `<-` between two parties. A `->` that starts at a
+party (`acme -> checking 3_200 USD`) is read as it always was.
+
 A line with one end and an amount, but no price and no legs, says nothing of what the amount was exchanged for, and is an
 error with the words that fix it. The price states one amount: the other is what the amount times the price comes to
 (`1_999.90 USD` out for `7 VTI @ 285.70 USD`), so a line never writes both.

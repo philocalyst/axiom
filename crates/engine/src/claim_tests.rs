@@ -312,7 +312,7 @@ fn a_payment_settles_only_what_was_owed_by_its_party_and_already() {
 /// A payment in another commodity than the claim is not the claim's settlement.
 #[test]
 fn a_payment_in_another_commodity_is_no_settlement() {
-    let lines = "2026-01-02 ann       owes me  300 USD ^i1 due 2026-02-01\n2026-01-04 stockroom <-   ann 5 BOX\n";
+    let lines = "2026-01-02 ann       owes me  300 USD ^i1 due 2026-02-01\n2026-01-04 ann -> stockroom 5 BOX\n";
     with_run(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00)]));
     });

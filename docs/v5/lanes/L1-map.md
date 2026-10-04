@@ -408,6 +408,14 @@ seeded generator with its mutants (6888cc5); `LANGUAGE.md` (a2acb5c); the measur
   deleted. The helpers that parse a fixture accept the one `v4-syntax` warning.
 - **A flow's course is one word.** The first AST kept `junction` and `through` as two fields, and a `Txn` grew from 128 to 160
   bytes (1,000,094 flows: 31 MB). They are a `Course`, with the owner in a table of its own, and a `Txn` is 136 bytes.
+- **The model reads one thing of a junction.** The map's STOP was answered yes, and `junction-subject` (the last commit, which
+  reverts alone) is that one read: for a line written `<-`, as a purchase or a sale, or as a split through an owner, the
+  subject must be an end an owner holds, and a party is not. It is 39 lines of code in the model (`party_subject` and its
+  call; the brief said about 30, and the rest is the message) and 27 in the syntax crate (`Flow::owner`, which says which end
+  a spelling makes the subject, and `File::arrow_after`, which finds the arrow to point at), with four mistake books (123 to
+  126). A `->` that starts at a party is read as it always was, so no book written in v4 changes meaning. It found one
+  fixture the upgrade's heuristics had got wrong: `ann -> stockroom 5 BOX` in the engine's claim tests, between two parties,
+  had been written `stockroom <- ann 5 BOX`; it is as it was.
 
 **What was measured.** See the lane's report for the numbers (they are not repeated here): the proof test
 (`crates/cli/tests/upgrade.rs`), the 120 seeded books and their mutants (`docs/v5/measure/junction.py`), `fuzz.py ... diff`,
