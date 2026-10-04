@@ -30,7 +30,7 @@ use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::plan::Plan;
-use crate::scope::is_money;
+use crate::scope::holds;
 use crate::state::World;
 use crate::temporal::Key as TemporalKey;
 use crate::{Cause, Owed};
@@ -1517,8 +1517,7 @@ impl<'a, 's> Machine<'a, 's> {
     /// currency: the total basis of its parcels.
     fn basis(&self, subject: Subject) -> Value {
         let sign = sign(self.env.plan, subject);
-        let basis: Qty =
-            self.held(subject).map(|slot| slot.basis(is_money(self.env.plan, slot.place, slot.unit))).sum();
+        let basis: Qty = self.held(subject).map(|slot| slot.basis(holds(self.env.plan, slot.place, slot.unit))).sum();
         self.base(Qty(basis.0 * sign))
     }
 

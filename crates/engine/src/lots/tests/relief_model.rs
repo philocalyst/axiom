@@ -14,7 +14,7 @@ use axiom_core::{Arena, Day, Days, Id, Qty, Run, Sym};
 use axiom_model::{FlowCodes, Policy, RuntimeTxn, Select};
 
 use crate::Parcel;
-use crate::lots::{NONE, Origin, Relief, Request, Slot};
+use crate::lots::{Held, NONE, Origin, Relief, Request, Slot};
 
 /// The moment of every relief: when, and by what, plain money that leaves is said to have been acquired.
 const NOW: i32 = 1_000;
@@ -352,7 +352,7 @@ impl Real {
             codes: FlowCodes { header, local: empty },
             tied: lot.tied.map(Id::new),
         };
-        self.slot.land_with_codes(parcel, money, &self.pool);
+        self.slot.land(parcel, if money { Held::Money } else { Held::Lots }, &self.pool);
     }
 
     fn relieve(&mut self, ask: &Ask) -> (Vec<Left>, i64) {
@@ -368,7 +368,7 @@ impl Real {
             .collect();
         let permits: Vec<_> = ask.permits.iter().map(|&(entity, permit)| (Id::new(entity), permit)).collect();
         let request = Request {
-            money: ask.money,
+            held: if ask.money { Held::Money } else { Held::Lots },
             selectors: &selectors,
             permits: &permits,
             spender: ask.spender.map(Id::new),

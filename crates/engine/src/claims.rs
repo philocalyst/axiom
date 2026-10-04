@@ -67,8 +67,7 @@ impl Ledger<'_, '_, '_> {
         let (change, flow) = (book.claim_changes[at as usize], &book.flows[claim]);
         let unit = if place == flow.to { flow.arrive.unit } else { flow.out.unit };
         let made = [Select::Txn(change.target)];
-        let open =
-            self.world.holdings.get(place, unit).map_or(Qty::ZERO, |slot| slot.admitted(false, &made, &book.codes));
+        let open = self.world.holdings.get(place, unit).map_or(Qty::ZERO, |slot| slot.admitted(&made, &book.codes));
         if open.is_zero() {
             return 0;
         }

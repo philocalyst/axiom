@@ -29,11 +29,11 @@ use axiom_model::{
 use crate::eval::{Occasion, Realized};
 use crate::explain;
 use crate::ledger::Ledger;
-use crate::lots::{Origin, Request, Selection, Shares, Slice};
+use crate::lots::{Held, Origin, Request, Selection, Shares, Slice};
 use crate::motion::{Course, Motion, Moves};
 use crate::plan::Plan;
 use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
-use crate::scope::{is_money, stays_with_owner};
+use crate::scope::{holds, stays_with_owner};
 use crate::settle::{Claiming, Relief};
 use crate::state::Missing;
 use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, show};
@@ -313,7 +313,7 @@ impl Ledger<'_, '_, '_> {
         // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
         let policy = self.plan.traits.place(m.from).select.or(self.plan.traits.unit_select(unit));
         let request = Request {
-            money: is_money(self.plan, m.from, unit),
+            held: holds(self.plan, m.from, unit),
             selectors: if named { &self.scratch.selectors } else { m.select() },
             permits: &self.scratch.permits,
             spender: m.detail().spender,
@@ -564,13 +564,13 @@ impl Ledger<'_, '_, '_> {
             .detail()
             .hold
             .map(|entity| Some(entity).filter(|&e| e != owner && self.plan.traits.entity(owner).member != Some(e)));
-        let (money, since) = (is_money(self.plan, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
+        let (held, since) = (holds(self.plan, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
         let acquisition = self.new_acquisition_part(m);
         let declared_asset = book
             .commodities
             .get(m.arrive.unit)
             .is_some_and(|commodity| book.asset(book.name(commodity.symbol)).is_some());
-        let fresh_part = if keeps || money || m.moves != Moves::Value {
+        let fresh_part = if keeps || held == Held::Money || m.moves != Moves::Value {
             None
         } else {
             acquisition
@@ -587,7 +587,7 @@ impl Ledger<'_, '_, '_> {
                 // Parcels that keep their identity keep their day and purchase; the rest start over.
                 let (acquired, txn) = if keeps { (slice.acquired, slice.txn) } else { (since, m.txn) };
                 let codes = if keeps { slice.codes } else { m.code_runs };
-                slot.land_with_codes(
+                slot.land(
                     Parcel {
                         qty,
                         basis: slice.carried,
@@ -601,7 +601,7 @@ impl Ledger<'_, '_, '_> {
                         codes,
                         tied: hold.unwrap_or(kept),
                     },
-                    money,
+                    held,
                     &book.codes,
                 );
             }
@@ -731,7 +731,7 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         let declaration = &self.plan.book.assets[asset];
-        self.world.holdings.entry(declaration.place, declaration.unit).land_with_codes(
+        self.world.holdings.entry(declaration.place, declaration.unit).land(
             Parcel {
                 qty: Qty(1),
                 basis: cost,
@@ -743,7 +743,7 @@ impl Ledger<'_, '_, '_> {
                 codes: m.code_runs,
                 tied: None,
             },
-            false,
+            Held::Lots,
             &self.plan.book.codes,
         );
         self.world.holdings.index_part_slot(declaration.place, declaration.unit, part.id);
@@ -850,7 +850,7 @@ impl Ledger<'_, '_, '_> {
         let declaration = &self.plan.book.assets[asset];
         m.target.owner == declaration.owner
             && self.world.assets.asset(asset).is_some_and(|state| state.part_count() > 0 && state.disposed.is_none())
-            && is_money(self.plan, m.to, m.arrive.unit)
+            && holds(self.plan, m.to, m.arrive.unit) == Held::Money
     }
 
     fn dispose_sold_asset(&mut self, m: &Motion) {
@@ -1049,7 +1049,7 @@ impl Ledger<'_, '_, '_> {
         let left: Qty = self.scratch.relief.slices.iter().filter(|s| s.origin != Origin::Fresh).map(|s| s.basis).sum();
         let selection = Selection { selectors: &[], codes: &book.codes };
         let slot = self.world.holdings.entry(m.from, m.out.unit);
-        slot.rebase(left, &selection, is_money(self.plan, m.from, m.out.unit), (m.day, m.txn));
+        slot.rebase(left, &selection, holds(self.plan, m.from, m.out.unit), (m.day, m.txn));
     }
 
     /// Fires the `on spend` laws of every entity whose tied money just left

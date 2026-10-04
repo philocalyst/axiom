@@ -1600,7 +1600,8 @@ fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
                 codes: FlowCodes { header: empty, local: empty },
                 tied: None,
             },
-            false,
+            crate::lots::Held::Lots,
+            &axiom_core::Arena::new(),
         );
         assert_eq!(ledger.balance(place, unit), Qty(1), "matched metadata does not change the aggregate quantity");
         ledger.checkpoint().digest()
@@ -1646,9 +1647,9 @@ fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
         tied: None,
     };
     let second = Parcel { qty: Qty(1), basis: Qty::ZERO, ..first };
-    ledger.world.holdings.entry(place, unit).land(first, false);
+    ledger.world.holdings.entry(place, unit).land(first, crate::lots::Held::Lots, &axiom_core::Arena::new());
     ledger.world.holdings.index_part_slot(place, unit, part);
-    ledger.world.holdings.entry(other_place, unit).land(second, false);
+    ledger.world.holdings.entry(other_place, unit).land(second, crate::lots::Held::Lots, &axiom_core::Arena::new());
     ledger.world.holdings.index_part_slot(other_place, unit, part);
     ledger
         .world
@@ -1818,8 +1819,8 @@ fn value_is_conserved_over_random_journals() {
                 holding.lots.windows(2).all(|pair| pair[0].acquired <= pair[1].acquired),
                 "seed {seed}: lots out of order"
             );
-            let is_base = holding.unit == usd;
-            let alike = |a: &Parcel, b: &Parcel| crate::lots::identity(a, is_base) == crate::lots::identity(b, is_base);
+            let held = if holding.unit == usd { crate::lots::Held::Money } else { crate::lots::Held::Lots };
+            let alike = |a: &Parcel, b: &Parcel| a.is_like(b, held, &book.codes);
             for (at, lot) in holding.lots.iter().enumerate() {
                 assert!(
                     holding.lots[at + 1..].iter().all(|other| !alike(lot, other)),

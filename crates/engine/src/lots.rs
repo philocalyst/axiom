@@ -53,64 +53,36 @@ fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
         && pool[right.header].iter().chain(&pool[right.local]).all(in_left)
 }
 
-/// What makes two parcels interchangeable: parcels merge exactly when their identities are equal.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Identity {
-    /// Money: what matters is who it is tied to and how much of each unit is
-    /// already accounted for. Where and when it arrived does not matter, so a
-    /// 401k's hundreds of zero-basis deferrals are one lot.
-    Money { tied: Option<Id<Entity>>, basis: Qty, qty: Qty, part: Option<PartId>, wash_matched: bool },
-    /// Anything else: each purchase is its own lot, for selectors and for how
-    /// long it has been held.
-    Lot {
-        acquired: Day,
-        held_since: Day,
-        wash_matched: bool,
-        txn: RuntimeTxn,
-        tied: Option<Id<Entity>>,
-        part: Option<PartId>,
-    },
+/// What a holding holds, which says what its plain value is worth and when two of its parcels are one: money (base
+/// currency outside a claim place) is at its face and told apart by its basis per unit, wherever and whenever it came
+/// from; anything else is told apart by the purchase that made it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Held {
+    Money,
+    Lots,
 }
 
-impl PartialEq for Identity {
-    fn eq(&self, other: &Identity) -> bool {
-        match (*self, *other) {
-            (
-                Identity::Money { tied: a, basis: ab, qty: aq, part: ap, wash_matched: aw },
-                Identity::Money { tied: b, basis: bb, qty: bq, part: bp, wash_matched: bw },
-            ) => {
-                // Basis per unit, compared exactly: ab/aq == bb/bq.
-                a == b && ap == bp && aw == bw && ab.0 as i128 * bq.0 as i128 == bb.0 as i128 * aq.0 as i128
-            }
-            (
-                Identity::Lot { acquired: a, held_since: ah, wash_matched: aw, txn: at, tied: ap, part: apart },
-                Identity::Lot { acquired: b, held_since: bh, wash_matched: bw, txn: bt, tied: bp, part: bpart },
-            ) => (a, ah, aw, at, ap, apart) == (b, bh, bw, bt, bp, bpart),
-            _ => false,
+impl Held {
+    /// The basis of `qty` of plain value: its face, if it is money; nothing else has basis outside its lots.
+    fn plain_basis(self, qty: Qty) -> Qty {
+        match self {
+            Held::Money => qty,
+            Held::Lots => Qty::ZERO,
         }
     }
 }
 
-/// `money`: base-currency parcels outside claim places, which are told apart by
-/// their basis per unit; every other parcel by the purchase that made it.
-pub(crate) fn identity(parcel: &Parcel, money: bool) -> Identity {
-    if money {
-        Identity::Money {
-            tied: parcel.tied,
-            basis: parcel.basis,
-            qty: parcel.qty,
-            part: parcel.part,
-            wash_matched: parcel.wash_matched,
-        }
-    } else {
-        Identity::Lot {
-            acquired: parcel.acquired,
-            held_since: parcel.held_since,
-            wash_matched: parcel.wash_matched,
-            txn: parcel.txn,
-            tied: parcel.tied,
-            part: parcel.part,
-        }
+impl Parcel {
+    /// Whether `other` cannot be told from this parcel, so that landing it merges the two: the same tie, part and wash-sale
+    /// mark and the same codes, and then, for money, the same basis per unit (a 401k's hundreds of zero-basis deferrals
+    /// are one lot), for anything else the same purchase. The fields that differ most often are compared first.
+    pub(crate) fn is_like(&self, other: &Parcel, held: Held, pool: &Arena<Sym>) -> bool {
+        let made = match held {
+            Held::Money => self.basis.0 as i128 * other.qty.0 as i128 == other.basis.0 as i128 * self.qty.0 as i128,
+            Held::Lots => (self.txn, self.acquired, self.held_since) == (other.txn, other.acquired, other.held_since),
+        };
+        made && (self.tied, self.part, self.wash_matched) == (other.tied, other.part, other.wash_matched)
+            && same_codes(self.codes, other.codes, pool)
     }
 }
 
@@ -219,7 +191,9 @@ impl Candidate {
             Source::Lot(at) => (false, at as i64),
         };
         let (first, ranked) = match policy {
-            Some(Policy::Hifo) => (plain && !req.money, Ranked { basis: self.basis.0, qty: self.qty.0, at }),
+            Some(Policy::Hifo) => {
+                (plain && req.held == Held::Lots, Ranked { basis: self.basis.0, qty: self.qty.0, at })
+            }
             Some(Policy::Lifo) => (false, Ranked { at: -at, ..Ranked::SAME }),
             Some(Policy::Exact) => (!plain && self.claim == req.exact, Ranked { at, ..Ranked::SAME }),
             _ => (false, Ranked { at, ..Ranked::SAME }),
@@ -233,9 +207,8 @@ pub(crate) struct Request<'a> {
     pub need: Qty,
     /// The size of the claim `exact` looks for: `need`, unless the flow is one of several that make one payment.
     pub exact: Qty,
-    /// Base currency outside claim places: plain money has basis at its face,
-    /// and acquisition dates do not tell parcels apart.
-    pub money: bool,
+    /// What the place holds of the commodity: money, or lots.
+    pub held: Held,
     pub selectors: &'a [Select],
     /// The place's policy; a policy selector on the flow overrides it.
     pub policy: Option<Policy>,
@@ -259,7 +232,7 @@ impl<'a> Request<'a> {
         Request {
             need,
             exact: need,
-            money: false,
+            held: Held::Lots,
             selectors: &[],
             policy,
             codes,
@@ -409,36 +382,23 @@ impl Slot {
         self.qty += qty;
     }
 
-    /// Receives a parcel. Money at its face, tied to nothing, is plain; anything
-    /// else joins the lots, merging into the interchangeable lot if there is one
-    /// (its basis adds; it keeps its own acquisition day) and otherwise taking
-    /// its place among the lots, oldest first.
-    pub fn land(&mut self, parcel: Parcel, money: bool) {
-        self.land_with_codes(parcel, money, &Arena::new());
-    }
-
-    /// Lands a parcel and merges only when its pooled code sets are equivalent.
-    /// Range positions are handles, so two distinct ranges can name the same
-    /// marks; compare their symbols before coalescing their selector identity.
-    pub fn land_with_codes(&mut self, parcel: Parcel, money: bool, codes: &Arena<Sym>) {
-        if money && parcel.tied.is_none() && parcel.basis == parcel.qty {
+    /// Receives a parcel. Money at its face, tied to nothing, is plain; anything else joins the lots, merging into the
+    /// one it is like if there is one (its basis adds; the lot keeps its own acquisition day) and otherwise taking its
+    /// place among the lots, oldest first. Outside money only a lot acquired the same day can be like it.
+    pub fn land(&mut self, parcel: Parcel, held: Held, codes: &Arena<Sym>) {
+        if held == Held::Money && parcel.tied.is_none() && parcel.basis == parcel.qty {
             return self.credit(parcel.qty);
         }
         self.qty += parcel.qty;
-
-        let (kind, lots) = (identity(&parcel, money), &mut self.holding.lots);
-        // Outside money only a lot acquired on the same day can match.
-        let (start, end) = if money {
-            (self.first, lots.len())
-        } else {
-            (
+        let lots = &mut self.holding.lots;
+        let (start, end) = match held {
+            Held::Money => (self.first, lots.len()),
+            Held::Lots => (
                 lots.partition_point(|lot| lot.acquired < parcel.acquired),
                 lots.partition_point(|lot| lot.acquired <= parcel.acquired),
-            )
+            ),
         };
-        let same = lots[start..end].iter().position(|lot| {
-            !lot.qty.is_zero() && identity(lot, money) == kind && same_codes(lot.codes, parcel.codes, codes)
-        });
+        let same = lots[start..end].iter().position(|lot| !lot.qty.is_zero() && lot.is_like(&parcel, held, codes));
         if let Some(found) = same {
             let at = start + found;
             lots[at].qty += parcel.qty;
@@ -478,8 +438,7 @@ impl Slot {
         let slice = match source {
             Source::Plain => {
                 self.holding.plain -= qty;
-                // Outside the base currency plain value has no basis of its own.
-                Slice::new(qty, if req.money { qty } else { Qty::ZERO }, Origin::Plain, req.now)
+                Slice::new(qty, req.held.plain_basis(qty), Origin::Plain, req.now)
             }
             Source::Lot(at) => {
                 let lot = &mut self.holding.lots[at];
@@ -513,14 +472,14 @@ impl Slot {
     /// What is owed, held as the liability it is: a negative parcel, as a place holds what flowed into it less what flowed out.
     pub fn owe(&mut self, owed: Parcel, codes: &Arena<Sym>) {
         self.owes = true;
-        self.land_with_codes(Parcel { qty: -owed.qty, basis: -owed.basis, ..owed }, false, codes);
+        self.land(Parcel { qty: -owed.qty, basis: -owed.basis, ..owed }, Held::Lots, codes);
     }
 
     /// Puts back a parcel that relief took: a debt's, as it was owed.
     pub fn restore(&mut self, parcel: Parcel, codes: &Arena<Sym>) {
         match self.owes {
             true => self.owe(parcel, codes),
-            false => self.land_with_codes(parcel, false, codes),
+            false => self.land(parcel, Held::Lots, codes),
         }
     }
 
@@ -567,7 +526,7 @@ impl Slot {
         let in_order = !selection.constrains()
             && !self.is_tied()
             && match policy {
-                Some(Policy::Hifo) => !req.money,
+                Some(Policy::Hifo) => req.held == Held::Lots,
                 Some(Policy::Exact | Policy::Prorata) => false,
                 None | Some(Policy::Fifo | Policy::Lifo) => true,
             };
@@ -589,7 +548,7 @@ impl Slot {
         let candidates = usize::from(self.holding.plain > Qty::ZERO) + self.live();
         out.ambiguous = policy.is_none() && candidates > 1 && req.need < takeable;
         if out.ambiguous && (req.explain)() {
-            self.gather(req.money, &Selection { selectors: &[], codes: req.codes }, &mut out.candidates);
+            self.gather(req.held, &Selection { selectors: &[], codes: req.codes }, &mut out.candidates);
         }
         let lifo = policy == Some(Policy::Lifo);
         let mut left = if lifo { req.need } else { self.take_plain(req.need, req, out) };
@@ -644,7 +603,7 @@ impl Slot {
     fn take_ranked(&mut self, req: &Request, selection: &Selection, policy: Option<Policy>, out: &mut Relief) -> Qty {
         let mut ranked = std::mem::take(&mut out.gathered);
         ranked.clear();
-        self.gather(req.money, selection, &mut ranked);
+        self.gather(req.held, selection, &mut ranked);
         ranked.retain(|c| req.allows(req.colour(c.tied)));
         if policy == Some(Policy::Exact) {
             whole_claims(&mut ranked, |c| req.colour(c.tied));
@@ -676,12 +635,11 @@ impl Slot {
     }
 
     /// The parcels the selection admits, plain money first.
-    fn gather(&self, money: bool, selection: &Selection, out: &mut Vec<Candidate>) {
+    fn gather(&self, held: Held, selection: &Selection, out: &mut Vec<Candidate>) {
         let plain = self.holding.plain;
         if plain > Qty::ZERO && !selection.constrains() {
             // Plain money has no transaction or acquisition day of its own.
-            let basis = if money { plain } else { Qty::ZERO };
-            let (acquired, txn, tied) = (Day::MIN, None, None);
+            let (basis, acquired, txn, tied) = (held.plain_basis(plain), Day::MIN, None, None);
             out.push(Candidate { source: Source::Plain, qty: plain, basis, acquired, txn, tied, claim: plain });
         }
         let lots = self.holding.lots.iter().enumerate();
@@ -695,7 +653,7 @@ impl Slot {
     }
 
     /// How much of the holding the selectors admit: what `all` means. Of a debt, how much of what is owed they reach.
-    pub fn admitted(&self, money: bool, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
+    pub fn admitted(&self, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
         let selection = Selection { selectors, codes };
         if !selection.constrains() {
             return match self.owes {
@@ -703,9 +661,8 @@ impl Slot {
                 false => self.qty - self.holding.plain.min(Qty::ZERO),
             };
         }
-        let mut found = Vec::new();
-        self.gather(money, &selection, &mut found);
-        let admitted: Qty = found.iter().map(|c| c.qty).sum();
+        // A selector excludes plain value, which has no day or code to be selected by.
+        let admitted: Qty = self.holding.lots.iter().filter(|lot| selection.admits(lot)).map(|lot| lot.qty).sum();
         if self.owes { -admitted } else { admitted }
     }
 
@@ -713,10 +670,10 @@ impl Slot {
     /// their quantity. Quantities do not change. Plain money takes a share too,
     /// and stops being plain when it does. `false` if there is nothing to carry
     /// it: no admitted parcel.
-    pub fn rebase(&mut self, delta: Qty, selection: &Selection, money: bool, now: (Day, RuntimeTxn)) -> bool {
+    pub fn rebase(&mut self, delta: Qty, selection: &Selection, held: Held, now: (Day, RuntimeTxn)) -> bool {
         let plain = self.holding.plain;
         if plain > Qty::ZERO && !selection.constrains() {
-            let basis = if money { plain } else { Qty::ZERO };
+            let basis = held.plain_basis(plain);
             self.holding.plain = Qty::ZERO;
             self.insert(Parcel {
                 qty: plain,
@@ -758,9 +715,8 @@ impl Slot {
 
     /// The basis of everything held, in base-currency quanta: plain money is at
     /// face, and nothing else has basis outside its lots.
-    pub fn basis(&self, money: bool) -> Qty {
-        let plain = if money { self.holding.plain } else { Qty::ZERO };
-        plain + self.holding.lots.iter().map(|lot| lot.basis).sum()
+    pub fn basis(&self, held: Held) -> Qty {
+        held.plain_basis(self.holding.plain) + self.holding.lots.iter().map(|lot| lot.basis).sum()
     }
 
     /// Moves the cursors past exhausted lots at either end.
@@ -1303,27 +1259,6 @@ impl Holdings {
         self.untidy |= slot.dead > 0;
     }
 
-    /// Spreads `delta` of basis over the parcels one holding of `place` can
-    /// carry (the first that has any the selection admits). `false` if none can.
-    pub fn rebase(
-        &mut self,
-        place: Id<Place>,
-        delta: Qty,
-        selection: &Selection,
-        money: impl Fn(Id<Commodity>) -> bool,
-        now: (Day, RuntimeTxn),
-    ) -> bool {
-        let mut at = self.heads[place.index()];
-        while at != NONE {
-            let slot = &mut self.slots[at as usize];
-            if slot.rebase(delta, selection, money(slot.unit), now) {
-                return true;
-            }
-            at = slot.next;
-        }
-        false
-    }
-
     /// A split: every holding of `unit`, in every place, is multiplied by `ratio`.
     pub fn scale(&mut self, unit: Id<Commodity>, ratio: Ratio) {
         for (at, slot) in self.slots.iter_mut().enumerate().filter(|(_, slot)| slot.unit == unit) {
@@ -1380,30 +1315,30 @@ mod tests {
         }
     }
 
-    fn slot_of(unit: u32, plain: i64, lots: &[Parcel], money: bool) -> Slot {
+    fn slot_of(unit: u32, plain: i64, lots: &[Parcel], held: Held) -> Slot {
         let mut slot = Slot::new(Id::new(0), Id::new(unit), NONE);
         slot.credit(Qty(plain));
-        lots.iter().for_each(|&lot| slot.land(lot, money));
+        lots.iter().for_each(|&lot| slot.land(lot, held, &Arena::new()));
         slot
     }
 
     struct Ask<'a> {
-        money: bool,
+        held: Held,
         policy: Option<Policy>,
         selectors: &'a [Select],
         permits: &'a [(Id<Entity>, bool)],
         spender: Option<Id<Entity>>,
     }
 
-    const PLAIN: Ask = Ask { money: false, policy: None, selectors: &[], permits: &[], spender: None };
+    const PLAIN: Ask = Ask { held: Held::Lots, policy: None, selectors: &[], permits: &[], spender: None };
 
     fn relieve(slot: &mut Slot, need: i64, ask: &Ask) -> Relief {
         let mut relief = Relief::default();
         let codes = Arena::new();
-        let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
+        let (held, policy, selectors, permits) = (ask.held, ask.policy, ask.selectors, ask.permits);
         let (spender, now) = (ask.spender, (Day(1_000), journal(0)));
         let request = Request {
-            money,
+            held,
             selectors,
             permits,
             spender,
@@ -1424,7 +1359,7 @@ mod tests {
 
     #[test]
     fn a_lot_that_arrives_empty_is_swept_like_any_exhausted_one() {
-        let mut slot = slot_of(3, 0, &[lot(10, 10, 5), lot(0, 0, 7)], false);
+        let mut slot = slot_of(3, 0, &[lot(10, 10, 5), lot(0, 0, 7)], Held::Lots);
         let relief = relieve(&mut slot, 10, &Ask { policy: Some(Policy::Lifo), ..PLAIN });
         assert_eq!(taken(&relief), [(10, 10)]);
         assert!(slot.holding.lots.is_empty() && slot.dead == 0, "both ends swept, and the count agrees");
@@ -1435,10 +1370,10 @@ mod tests {
         let mut held = Holdings::new(2);
         let (place, unit) = (Id::new(1), Id::new(3));
         let slot = held.entry(place, unit);
-        slot.land(lot(5, 50, 20), false);
-        slot.land(lot(2, 10, 10), false);
-        slot.land(lot(3, 30, 20), false);
-        slot.land(Parcel { txn: journal(9), ..lot(1, 10, 20) }, false);
+        slot.land(lot(5, 50, 20), Held::Lots, &Arena::new());
+        slot.land(lot(2, 10, 10), Held::Lots, &Arena::new());
+        slot.land(lot(3, 30, 20), Held::Lots, &Arena::new());
+        slot.land(Parcel { txn: journal(9), ..lot(1, 10, 20) }, Held::Lots, &Arena::new());
         let lots: Vec<_> = slot.holding.lots.iter().map(|l| (l.acquired.0, l.qty.0, l.basis.0)).collect();
         assert_eq!(lots, [(10, 2, 10), (20, 8, 80), (20, 1, 10)]);
         assert_eq!(held.qty(place, unit), Qty(11));
@@ -1457,7 +1392,7 @@ mod tests {
             (30, 30, 8, Some(entity)),
             (5, 5, 9, Some(entity)),
         ] {
-            slot.land(Parcel { tied, ..lot(qty, basis, acquired) }, true);
+            slot.land(Parcel { tied, ..lot(qty, basis, acquired) }, Held::Money, &Arena::new());
         }
         let lots: Vec<_> =
             slot.holding.lots.iter().map(|l| (l.qty.0, l.basis.0, l.acquired.0, l.tied.is_some())).collect();
@@ -1471,7 +1406,7 @@ mod tests {
         held.entry(Id::new(2), Id::new(1)).credit(Qty(7));
         held.entry(Id::new(0), Id::new(5)).credit(Qty(1));
         held.entry(Id::new(0), Id::new(2)).credit(Qty(1));
-        held.entry(Id::new(0), Id::new(2)).land(lot(4, 4, 0), true);
+        held.entry(Id::new(0), Id::new(2)).land(lot(4, 4, 0), Held::Money, &Arena::new());
         let order: Vec<_> =
             held.iter().map(|s| (s.place.index(), s.unit.index(), s.plain.0, s.lots.capacity())).collect();
         assert_eq!(order, [(0, 2, 5, 0), (0, 5, 1, 0), (2, 1, 7, 0)]);
@@ -1479,7 +1414,7 @@ mod tests {
 
     #[test]
     fn prorata_parts_sum_exactly() {
-        let mut held = slot_of(1, 0, &[lot(7, 100, 1), lot(11, 250, 2), lot(13, 333, 3)], false);
+        let mut held = slot_of(1, 0, &[lot(7, 100, 1), lot(11, 250, 2), lot(13, 333, 3)], Held::Lots);
         let policy = Some(Policy::Prorata);
         let ten = relieve(&mut held.clone(), 10, &Ask { policy, ..PLAIN });
         assert_eq!(ten.slices.iter().map(|p| p.qty.0).sum::<i64>(), 10);
@@ -1499,7 +1434,7 @@ mod tests {
 
     #[test]
     fn every_policy_takes_from_its_own_end() {
-        let base = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 3_000, 2), lot(10, 2_000, 3)], false);
+        let base = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 3_000, 2), lot(10, 2_000, 3)], Held::Lots);
         for (policy, want) in [
             (Policy::Hifo, vec![(10, 3_000), (5, 1_000)]),
             (Policy::Fifo, vec![(10, 1_000), (5, 1_500)]),
@@ -1514,7 +1449,7 @@ mod tests {
 
     #[test]
     fn exact_takes_the_lot_of_exactly_the_size_asked_and_otherwise_the_oldest() {
-        let base = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2), lot(300, 300, 3)], false);
+        let base = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2), lot(300, 300, 3)], Held::Lots);
         let exact = Ask { policy: Some(Policy::Exact), ..PLAIN };
         let mut held = base.clone();
         let relief = relieve(&mut held, 200, &exact);
@@ -1536,7 +1471,7 @@ mod tests {
     fn exact_takes_a_claim_whose_lines_add_up_to_the_size_asked() {
         // An invoice of two lines, 150 and 250, made by one transaction beside two claims of 300.
         let line = |qty, ordinal| Parcel { part: Some(PartId { origin: journal(2), ordinal }), ..lot(qty, qty, 2) };
-        let base = slot_of(1, 0, &[lot(300, 300, 1), line(150, 0), line(250, 1), lot(300, 300, 3)], false);
+        let base = slot_of(1, 0, &[lot(300, 300, 1), line(150, 0), line(250, 1), lot(300, 300, 3)], Held::Lots);
         assert_eq!(base.holding.lots.len(), 4, "the lines stay lots of their own");
         let exact = Ask { policy: Some(Policy::Exact), ..PLAIN };
         let mut held = base.clone();
@@ -1562,11 +1497,11 @@ mod tests {
     fn exact_among_the_lots_a_selector_admits_and_among_the_colours_of_a_tie() {
         let entity = Id::new(3);
         let tied = |qty, acquired| Parcel { tied: Some(entity), ..lot(qty, qty, acquired) };
-        let mut held = slot_of(1, 0, &[lot(200, 200, 1), tied(200, 2), lot(300, 300, 3)], false);
+        let mut held = slot_of(1, 0, &[lot(200, 200, 1), tied(200, 2), lot(300, 300, 3)], Held::Lots);
         let exact = Ask { policy: Some(Policy::Exact), spender: Some(entity), ..PLAIN };
         assert_eq!(taken(&relieve(&mut held, 200, &exact)), [(200, 200)]);
         assert_eq!(lots(&held), [(200, 200), (300, 300)], "the spender's own lot of 200 goes before the untied one");
-        let mut held = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2)], false);
+        let mut held = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2)], Held::Lots);
         let admit_all = [Select::Range(Days::ALWAYS)];
         let scanning = Ask { policy: Some(Policy::Exact), selectors: &admit_all, ..PLAIN };
         assert_eq!(taken(&relieve(&mut held, 200, &scanning)), [(200, 200)]);
@@ -1574,15 +1509,15 @@ mod tests {
 
     #[test]
     fn hifo_follows_a_lot_whose_basis_changed_and_lots_that_arrive() {
-        let mut held = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 2_000, 2)], false);
+        let mut held = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 2_000, 2)], Held::Lots);
         let hifo = Ask { policy: Some(Policy::Hifo), ..PLAIN };
         assert_eq!(taken(&relieve(&mut held, 4, &hifo)), [(4, 800)]);
-        held.land(lot(5, 5_000, 3), false);
+        held.land(lot(5, 5_000, 3), Held::Lots, &Arena::new());
         assert_eq!(taken(&relieve(&mut held, 6, &hifo)), [(5, 5_000), (1, 200)]);
         assert!(held.rebase(
             Qty(9_000),
             &Selection { selectors: &[], codes: &Arena::new() },
-            false,
+            Held::Lots,
             (Day(9), journal(0))
         ));
         assert_eq!(
@@ -1594,13 +1529,13 @@ mod tests {
 
     #[test]
     fn exhausted_lots_leave_the_front_and_the_back_without_a_sweep() {
-        let mut held = slot_of(1, 0, &[lot(1, 10, 1), lot(1, 10, 2), lot(1, 10, 3), lot(1, 10, 4)], false);
+        let mut held = slot_of(1, 0, &[lot(1, 10, 1), lot(1, 10, 2), lot(1, 10, 3), lot(1, 10, 4)], Held::Lots);
         let (fifo, lifo) = (Ask { policy: Some(Policy::Fifo), ..PLAIN }, Ask { policy: Some(Policy::Lifo), ..PLAIN });
         relieve(&mut held, 2, &fifo);
         relieve(&mut held, 1, &lifo);
         assert_eq!(lots(&held), [(1, 10)]);
         assert_eq!(held.holding.lots.len(), 3, "the back was trimmed; the front is a cursor, not a removal");
-        held.land(lot(2, 20, 0), false);
+        held.land(lot(2, 20, 0), Held::Lots, &Arena::new());
         assert_eq!(
             taken(&relieve(&mut held, 3, &fifo)),
             [(2, 20), (1, 10)],
@@ -1610,52 +1545,56 @@ mod tests {
 
     #[test]
     fn only_lots_that_differ_are_ambiguous_without_a_policy() {
-        let mut same = slot_of(1, 0, &[lot(10, 1_000, 5)], false);
+        let mut same = slot_of(1, 0, &[lot(10, 1_000, 5)], Held::Lots);
         assert!(!relieve(&mut same, 6, &PLAIN).ambiguous);
         let purchase = |txn| Parcel { txn: journal(txn), ..lot(10, 1_500, 5) };
-        let differ = slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99)], false);
+        let differ = slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99)], Held::Lots);
         let relief = relieve(&mut differ.clone(), 6, &PLAIN);
         assert!(relief.ambiguous);
         assert_eq!(relief.candidates.len(), 2);
         assert_eq!(taken(&relief), [(6, 600)], "FIFO carries on");
         assert!(!relieve(&mut differ.clone(), 6, &Ask { policy: Some(Policy::Fifo), ..PLAIN }).ambiguous);
         assert!(!relieve(&mut differ.clone(), 20, &PLAIN).ambiguous, "taking everything leaves no choice");
-        let days = slot_of(1, 0, &[lot(10, 1_000, 5), lot(10, 1_000, 6)], false);
+        let days = slot_of(1, 0, &[lot(10, 1_000, 5), lot(10, 1_000, 6)], Held::Lots);
         assert!(relieve(&mut days.clone(), 6, &PLAIN).ambiguous, "each purchase is its own lot outside the base");
         // The same when every candidate is looked at: a selector, or a tie.
         let (all, only_first) = ([Select::Range(Days::ALWAYS)], [Select::Range(span(5, 5))]);
         assert!(relieve(&mut days.clone(), 6, &Ask { selectors: &all, ..PLAIN }).ambiguous);
         assert!(!relieve(&mut days.clone(), 6, &Ask { selectors: &only_first, ..PLAIN }).ambiguous, "one admitted");
         assert!(!relieve(&mut days.clone(), 20, &Ask { selectors: &all, ..PLAIN }).ambiguous, "all of them");
-        let tied = slot_of(1, 0, &[lot(10, 1_000, 5), Parcel { tied: Some(Id::new(2)), ..purchase(99) }], false);
+        let tied = slot_of(1, 0, &[lot(10, 1_000, 5), Parcel { tied: Some(Id::new(2)), ..purchase(99) }], Held::Lots);
         let permits = [(Id::new(2), true)];
         let relief = relieve(&mut tied.clone(), 6, &Ask { permits: &permits, ..PLAIN });
         assert!(!relief.ambiguous, "each colour holds one lot, and the permitted one goes first");
         assert_eq!(taken(&relief), [(6, 900)]);
-        let untied_too =
-            slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99), Parcel { tied: Some(Id::new(2)), ..lot(1, 1, 7) }], false);
+        let untied_too = slot_of(
+            1,
+            0,
+            &[lot(10, 1_000, 5), purchase(99), Parcel { tied: Some(Id::new(2)), ..lot(1, 1, 7) }],
+            Held::Lots,
+        );
         assert!(relieve(&mut untied_too.clone(), 6, &PLAIN).ambiguous, "two untied lots differ, beside a tied one");
     }
 
     #[test]
     fn plain_money_and_a_zero_basis_lot_differ_but_deferrals_do_not() {
-        let money = Ask { money: true, ..PLAIN };
-        let mixed = slot_of(1, 700, &[lot(300, 0, 1)], true);
+        let money = Ask { held: Held::Money, ..PLAIN };
+        let mixed = slot_of(1, 700, &[lot(300, 0, 1)], Held::Money);
         assert!(relieve(&mut mixed.clone(), 100, &money).ambiguous, "after-tax and pre-tax money differ");
-        let deferrals = slot_of(1, 0, &[lot(100, 0, 1), lot(50, 0, 30)], true);
+        let deferrals = slot_of(1, 0, &[lot(100, 0, 1), lot(50, 0, 30)], Held::Money);
         assert!(!relieve(&mut deferrals.clone(), 20, &money).ambiguous, "zero-basis deferrals from any day are alike");
     }
 
     #[test]
     fn prorata_over_plain_and_a_zero_basis_lot_splits_the_withdrawal() {
-        let mut held = slot_of(1, 6_300_00, &[lot(2_200_00, 0, 3)], true);
-        let relief = relieve(&mut held, 1_500_00, &Ask { money: true, policy: Some(Policy::Prorata), ..PLAIN });
+        let mut held = slot_of(1, 6_300_00, &[lot(2_200_00, 0, 3)], Held::Money);
+        let relief = relieve(&mut held, 1_500_00, &Ask { held: Held::Money, policy: Some(Policy::Prorata), ..PLAIN });
         assert_eq!(taken(&relief), [(1_111_76, 1_111_76), (388_24, 0)]);
     }
 
     #[test]
     fn a_sale_beyond_what_is_held_reports_the_shortfall_and_goes_negative() {
-        let mut held = slot_of(1, 0, &[lot(7, 700, 1)], false);
+        let mut held = slot_of(1, 0, &[lot(7, 700, 1)], Held::Lots);
         let relief = relieve(&mut held, 10, &PLAIN);
         assert_eq!((relief.shortfall, taken(&relief)), (Qty(3), vec![(7, 700)]));
         assert_eq!((held.qty, held.holding.plain), (Qty(-3), Qty(-3)));
@@ -1665,10 +1604,10 @@ mod tests {
     fn tied_parcels_go_first_only_when_their_laws_permit() {
         let grant = Id::new(4);
         let tied = Parcel { tied: Some(grant), ..lot(5, 5, 9) };
-        let held = slot_of(1, 0, &[lot(10, 10, 1), tied], true);
+        let held = slot_of(1, 0, &[lot(10, 10, 1), tied], Held::Money);
         let first = |permit: bool| {
             let permits = [(grant, permit)];
-            relieve(&mut held.clone(), 4, &Ask { money: true, permits: &permits, ..PLAIN }).slices[0].tied
+            relieve(&mut held.clone(), 4, &Ask { held: Held::Money, permits: &permits, ..PLAIN }).slices[0].tied
         };
         assert_eq!(first(true), Some(grant));
         assert_eq!(first(false), None);
@@ -1678,9 +1617,9 @@ mod tests {
     fn a_spender_takes_its_own_parcels_then_untied_ones_and_nobody_elses() {
         let (car, trip) = (Id::new(4), Id::new(5));
         let tied = |entity, acquired| Parcel { tied: Some(entity), ..lot(5, 5, acquired) };
-        let held = slot_of(1, 0, &[tied(trip, 1), tied(car, 2), lot(10, 10, 3)], true);
+        let held = slot_of(1, 0, &[tied(trip, 1), tied(car, 2), lot(10, 10, 3)], Held::Money);
         let order = |spender, permits: &[(Id<Entity>, bool)], need| {
-            let ask = Ask { money: true, policy: Some(Policy::Fifo), spender, permits, ..PLAIN };
+            let ask = Ask { held: Held::Money, policy: Some(Policy::Fifo), spender, permits, ..PLAIN };
             let relief = relieve(&mut held.clone(), need, &ask);
             (relief.slices.iter().map(|s| s.tied).collect::<Vec<_>>(), relief.shortfall.0)
         };
@@ -1701,9 +1640,9 @@ mod tests {
 
     #[test]
     fn selectors_intersect_by_kind_and_union_within_one() {
-        let held = slot_of(1, 0, &[lot(1, 1, 10), lot(2, 2, 20), lot(4, 4, 30)], false);
+        let held = slot_of(1, 0, &[lot(1, 1, 10), lot(2, 2, 20), lot(4, 4, 30)], Held::Lots);
         let codes = Arena::new();
-        let pick = |selectors: &[Select]| held.admitted(false, selectors, &codes).0;
+        let pick = |selectors: &[Select]| held.admitted(selectors, &codes).0;
         assert_eq!(pick(&[]), 7);
         assert_eq!(pick(&[Select::Range(span(10, 20))]), 3);
         assert_eq!(pick(&[Select::Range(span(10, 10)), Select::Range(span(30, 30))]), 5);
@@ -1712,11 +1651,11 @@ mod tests {
 
     #[test]
     fn plain_value_is_one_candidate_without_a_fabricated_transaction_key() {
-        let mut slot = slot_of(1, 0, &[], false);
+        let mut slot = slot_of(1, 0, &[], Held::Lots);
         slot.credit(Qty(5));
         let candidates = {
             let mut out = Vec::new();
-            slot.gather(false, &Selection { selectors: &[], codes: &Arena::new() }, &mut out);
+            slot.gather(Held::Lots, &Selection { selectors: &[], codes: &Arena::new() }, &mut out);
             out
         };
         assert_eq!(candidates.len(), 1);
@@ -1744,11 +1683,11 @@ mod tests {
         };
         parcel.codes = marks;
         let mut held = Slot::new(Id::new(0), Id::new(0), NONE);
-        held.land_with_codes(parcel, false, &pool);
+        held.land(parcel, Held::Lots, &pool);
 
-        assert_eq!(held.admitted(false, &[Select::Code(header)], &pool), Qty(5));
-        assert_eq!(held.admitted(false, &[Select::Code(local)], &pool), Qty(5));
-        assert_eq!(held.admitted(false, &[Select::Code(other)], &pool), Qty::ZERO);
+        assert_eq!(held.admitted(&[Select::Code(header)], &pool), Qty(5));
+        assert_eq!(held.admitted(&[Select::Code(local)], &pool), Qty(5));
+        assert_eq!(held.admitted(&[Select::Code(other)], &pool), Qty::ZERO);
     }
 
     #[test]
@@ -1761,7 +1700,7 @@ mod tests {
         let mut parcel = lot(7, 700, 10);
         parcel.codes = codes;
         let mut source = Slot::new(Id::new(0), Id::new(0), NONE);
-        source.land_with_codes(parcel, false, &pool);
+        source.land(parcel, Held::Lots, &pool);
 
         let mut relief = Relief::default();
         let request = Request::of(Qty(3), Some(Policy::Fifo), &pool, (Day(20), journal(20)));
@@ -1779,9 +1718,9 @@ mod tests {
             tied: slice.tied,
         };
         let mut target = Slot::new(Id::new(1), Id::new(0), NONE);
-        target.land_with_codes(moved, false, &pool);
+        target.land(moved, Held::Lots, &pool);
 
-        assert_eq!(target.admitted(false, &[Select::Code(original)], &pool), Qty(3));
+        assert_eq!(target.admitted(&[Select::Code(original)], &pool), Qty(3));
     }
 
     #[test]
@@ -1803,9 +1742,9 @@ mod tests {
         equivalent_parcel.codes = equal;
         let mut distinct_parcel = lot(1, 1, 10);
         distinct_parcel.codes = distinct;
-        slot.land_with_codes(first_parcel, false, &pool);
-        slot.land_with_codes(equivalent_parcel, false, &pool);
-        slot.land_with_codes(distinct_parcel, false, &pool);
+        slot.land(first_parcel, Held::Lots, &pool);
+        slot.land(equivalent_parcel, Held::Lots, &pool);
+        slot.land(distinct_parcel, Held::Lots, &pool);
 
         assert_eq!(slot.holding.lots.len(), 2);
         assert_eq!(slot.holding.lots[0].qty, Qty(5));
@@ -1820,7 +1759,7 @@ mod tests {
         a.part = Some(first);
         let mut b = a;
         b.part = Some(second);
-        let mut slot = slot_of(1, 0, &[a, b], false);
+        let mut slot = slot_of(1, 0, &[a, b], Held::Lots);
 
         assert_eq!(slot.holding.lots.len(), 2, "distinct cost-basis parts remain addressable");
         let mut relief = Relief::default();
@@ -1855,11 +1794,11 @@ mod tests {
         second.part = Some(part);
         let mut independent = lot(1, 80, 10);
         independent.part = Some(other);
-        holdings.entry(Id::new(0), Id::new(0)).land(first, false);
+        holdings.entry(Id::new(0), Id::new(0)).land(first, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(0), Id::new(0), part);
-        holdings.entry(Id::new(1), Id::new(0)).land(second, false);
+        holdings.entry(Id::new(1), Id::new(0)).land(second, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(1), Id::new(0), part);
-        holdings.entry(Id::new(1), Id::new(0)).land(independent, false);
+        holdings.entry(Id::new(1), Id::new(0)).land(independent, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(1), Id::new(0), other);
 
         assert_eq!(holdings.part_basis(part), Ok(Qty(100)));
@@ -1880,9 +1819,9 @@ mod tests {
         first.part = Some(part);
         let mut second = lot(1, 0, 10);
         second.part = Some(part);
-        holdings.entry(Id::new(0), Id::new(0)).land(first, false);
+        holdings.entry(Id::new(0), Id::new(0)).land(first, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(0), Id::new(0), part);
-        holdings.entry(Id::new(1), Id::new(0)).land(second, false);
+        holdings.entry(Id::new(1), Id::new(0)).land(second, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(1), Id::new(0), part);
 
         assert_eq!(holdings.part_basis(part), Ok(Qty(10)));
@@ -1904,7 +1843,7 @@ mod tests {
         let mut parcel = lot(5_000, 25_000, 20);
         parcel.part = Some(part);
         let mut holdings = Holdings::new(1);
-        holdings.entry(Id::new(0), Id::new(0)).land(parcel, false);
+        holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(0), Id::new(0), part);
 
         holdings
@@ -1938,7 +1877,7 @@ mod tests {
         let mut parcel = lot(5_000, 25_000, 20);
         parcel.part = Some(part);
         let mut holdings = Holdings::new(1);
-        holdings.entry(Id::new(0), Id::new(0)).land(parcel, false);
+        holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
         holdings.index_part_slot(Id::new(0), Id::new(0), part);
 
         assert_eq!(
@@ -1960,7 +1899,7 @@ mod tests {
 
     #[test]
     fn a_split_scales_quantity_and_keeps_basis() {
-        let mut held = slot_of(1, 0, &[lot(3, 30, 1), lot(5, 50, 2)], false);
+        let mut held = slot_of(1, 0, &[lot(3, 30, 1), lot(5, 50, 2)], Held::Lots);
         held.scale(Ratio::new(1, 2).unwrap());
         assert_eq!(lots(&held), [(2, 30), (2, 50)], "1.5 rounds to 2 and 2.5 to 2: half to even");
         assert_eq!(held.qty, Qty(4));
@@ -1987,8 +1926,8 @@ mod tests {
                     // Lots of one day are the lines of one transaction, unless a part id tells them apart.
                     let part = Some(PartId { origin: journal(day as u32), ordinal: roll(3) as u32 });
                     let parcel = Parcel { tied, part, ..lot(qty, qty * (50 + roll(100) as i64), day) };
-                    fast.land(parcel, false);
-                    slow.land(parcel, false);
+                    fast.land(parcel, Held::Lots, &Arena::new());
+                    slow.land(parcel, Held::Lots, &Arena::new());
                 } else {
                     let need = 1 + roll(14) as i64;
                     let (yes, no) = ([(Id::new(3), true)], [(Id::new(3), false)]);

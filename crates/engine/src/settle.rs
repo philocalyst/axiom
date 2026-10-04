@@ -203,8 +203,7 @@ impl Ledger<'_, '_, '_> {
         let (book, unit) = (self.plan.book, m.out.unit);
         let named = self.name_claims(m, tab);
         let selectors = if named { &self.scratch.selectors[..] } else { m.select() };
-        let open =
-            self.world.holdings.get(tab, unit).map_or(Qty::ZERO, |slot| slot.admitted(false, selectors, &book.codes));
+        let open = self.world.holdings.get(tab, unit).map_or(Qty::ZERO, |slot| slot.admitted(selectors, &book.codes));
         let need = open.min(m.out.qty);
         if need <= Qty::ZERO {
             return None;
