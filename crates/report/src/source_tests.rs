@@ -37,7 +37,10 @@ fn with_sources<R>(texts: &[(&str, &str)], today: Day, then: impl FnOnce(&Book, 
         syntax_diagnostics.extend(parsed);
         parsed_files.push(file);
     }
-    assert!(syntax_diagnostics.is_empty(), "the source does not parse: {syntax_diagnostics:?}");
+    assert!(
+        syntax_diagnostics.iter().all(|found| found.code == "v4-syntax"),
+        "the source does not parse: {syntax_diagnostics:?}"
+    );
     let sources: Vec<_> =
         texts.iter().zip(parsed_files).map(|((path, _), file)| Source { path, file, embedded: false }).collect();
     let (book, built) = axiom_model::build(&sources);
@@ -140,7 +143,7 @@ opening 2026-01-01
   checking 500.00 USD
 
 2026-01-02 checking -> grocer 50.00 USD #groceries
-2026-01-03 diner -> checking 50.00 USD #dining
+2026-01-03 checking <- diner  50.00 USD #dining
 ";
 
     with_run(source, day(2026, 1, 4), |book, run| {
@@ -288,8 +291,8 @@ purpose salary : income
 purpose groceries : spending
 opening 2026-01-01
   checking 0 USD
-2026-01-02 payroll -> checking 0.01 USD #salary
-2026-01-03 checking -> grocer 0.02 USD #groceries
+2026-01-02 checking <- payroll 0.01 USD #salary
+2026-01-03 checking -> grocer  0.02 USD #groceries
 ";
 
     with_run(source, day(2026, 1, 4), |book, run| {
@@ -405,7 +408,7 @@ opening 2026-01-01
   checking 500.00 USD
 
 2026-01-02 checking -> grocer 50.00 USD #groceries
-2026-01-03 diner -> checking 50.00 USD #dining
+2026-01-03 checking <- diner  50.00 USD #dining
 ";
 
     with_run(source, day(2026, 1, 4), |book, run| {
@@ -607,7 +610,8 @@ fn a_register_shows_an_exchange_as_two_typed_movements() {
 
 #[test]
 fn a_register_lists_an_exchange_inside_one_place_at_both_of_its_ends() {
-    let source = "\
+    for source in [
+        "\
 base USD
 commodity USD
   precision 2
@@ -620,18 +624,34 @@ opening 2025-01-01
   wise 1_000 USD
 
 2025-02-01 wise 500 USD -> wise 400 GBP
-";
-    with_run(source, day(2025, 6, 1), |book, run| {
-        let register = Query::Register { place: "wise", from: None, to: None };
-        assert_eq!(
-            rows(book, run, register),
-            [
-                "2025-01-01 | opening |  |  | 1,000.00 USD | 1,000.00 USD",
-                "2025-02-01 | assets/wise |  |  | -500.00 USD | 500.00 USD",
-                "2025-02-01 | assets/wise |  |  | 400.00 GBP | 400.00 GBP",
-            ]
-        );
-    });
+",
+        "\
+base USD
+commodity USD
+  precision 2
+commodity GBP
+  precision 2
+
+account assets/wise
+
+opening 2025-01-01
+  wise 1_000 USD
+
+2025-02-01 wise -> wise 400 GBP @ 1.25 USD
+",
+    ] {
+        with_run(source, day(2025, 6, 1), |book, run| {
+            let register = Query::Register { place: "wise", from: None, to: None };
+            assert_eq!(
+                rows(book, run, register),
+                [
+                    "2025-01-01 | opening |  |  | 1,000.00 USD | 1,000.00 USD",
+                    "2025-02-01 | assets/wise |  |  | -500.00 USD | 500.00 USD",
+                    "2025-02-01 | assets/wise |  |  | 400.00 GBP | 400.00 GBP",
+                ]
+            );
+        });
+    }
 }
 
 // ─── Laws ───────────────────────────────────────────────────────────────────
@@ -698,10 +718,10 @@ purpose rent : spending
 purpose repair : spending
 opening 2026-01-01
   checking 12_000 USD
-2026-01-15 employer-co -> checking 5_000 USD #salary
-2026-02-15 employer-co -> checking 5_000 USD #salary
-2026-03-15 employer-co -> checking 5_000 USD #salary
-2026-04-15 employer-co -> checking 5_000 USD #salary
+2026-01-15 checking <- employer-co 5_000 USD #salary
+2026-02-15 checking <- employer-co 5_000 USD #salary
+2026-03-15 checking <- employer-co 5_000 USD #salary
+2026-04-15 checking <- employer-co 5_000 USD #salary
 contract monthly-rent with landlord-co
   1_800 USD monthly on 1 from checking #rent
   from 2026-05-01
@@ -736,7 +756,8 @@ fn native_annual_premium_is_spread_across_months() {
 
 #[test]
 fn native_sales_report_realized_short_and_long_gains() {
-    let source = "\
+    for source in [
+        "\
 base USD
 use std
 commodity VTI : stock
@@ -751,37 +772,55 @@ opening 2025-12-01
 
 2026-02-12 short-term 2 VTI -> checking 1_000 USD @ 500 USD
 2026-03-03 long-term 5 VTI -> checking 1_800 USD @ 360 USD
-";
-    with_std(source, day(2026, 3, 3), |book, run| {
-        let report = crate::tests::report(book, run, &Query::Gains { year: Some(2026) }, None).unwrap();
-        let section = &report.sections[0];
-        let realized: Vec<_> = section
-            .rows
-            .iter()
-            .filter_map(|row| match (&row.cells[0], &row.cells[6], &row.cells[7]) {
-                (crate::Cell::Day(sold), crate::Cell::Amount { qty, unit, .. }, crate::Cell::Text(term))
-                    if *unit == "USD" =>
-                {
-                    Some((*sold, *qty, term.as_ref()))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(realized, [(day(2026, 2, 12), Qty(40_000), "short"), (day(2026, 3, 3), Qty(80_000), "long")]);
-        let total = section
-            .rows
-            .iter()
-            .find(|row| matches!(&row.cells[0], crate::Cell::Text(label) if label == "Total"))
-            .expect("the short and long term gains have an aggregate");
-        assert!(matches!(
-            &total.cells[6],
-            crate::Cell::Amount {
-                qty: Qty(120_000),
-                unit,
-                ..
-            } if *unit == "USD"
-        ));
-    });
+",
+        "\
+base USD
+use std
+commodity VTI : stock
+account checking : asset
+account short-term : asset
+account long-term : asset
+
+opening 2024-01-05
+  long-term 5 VTI basis 1_000 USD
+opening 2025-12-01
+  short-term 2 VTI basis 600 USD
+
+2026-02-12 short-term 2 VTI -> checking @ 500 USD
+2026-03-03 long-term 5 VTI  -> checking @ 360 USD
+",
+    ] {
+        with_std(source, day(2026, 3, 3), |book, run| {
+            let report = crate::tests::report(book, run, &Query::Gains { year: Some(2026) }, None).unwrap();
+            let section = &report.sections[0];
+            let realized: Vec<_> = section
+                .rows
+                .iter()
+                .filter_map(|row| match (&row.cells[0], &row.cells[6], &row.cells[7]) {
+                    (crate::Cell::Day(sold), crate::Cell::Amount { qty, unit, .. }, crate::Cell::Text(term))
+                        if *unit == "USD" =>
+                    {
+                        Some((*sold, *qty, term.as_ref()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(realized, [(day(2026, 2, 12), Qty(40_000), "short"), (day(2026, 3, 3), Qty(80_000), "long")]);
+            let total = section
+                .rows
+                .iter()
+                .find(|row| matches!(&row.cells[0], crate::Cell::Text(label) if label == "Total"))
+                .expect("the short and long term gains have an aggregate");
+            assert!(matches!(
+                &total.cells[6],
+                crate::Cell::Amount {
+                    qty: Qty(120_000),
+                    unit,
+                    ..
+                } if *unit == "USD"
+            ));
+        });
+    }
 }
 
 pub(crate) const NATIVE_LOAN: &str = "\
@@ -933,12 +972,12 @@ asset house : property
     count d as depreciation
 account checking : asset
 opening 2026-01-01
-  house basis 120_000 USD
+  house              basis 120_000 USD
   checking 5_000 USD
 law recapture
   each year
   owe tally(depreciation) * 25% to treasury as recapture
-2026-01-05 payor -> checking 100 USD #wages
+2026-01-05 checking <- payor 100 USD #wages
 ";
 
 /// The native asset law lowers the house's basis and recognizes the expense:
@@ -1042,9 +1081,9 @@ purpose salary : income
 
 account checking : asset
 
-2026-03-01 employer -> checking 1_000 USD #salary
-2026-09-01 employer -> checking 1_000 USD #salary
-2027-01-05 employer -> checking 500 USD #salary
+2026-03-01 checking <- employer 1_000 USD #salary
+2026-09-01 checking <- employer 1_000 USD #salary
+2027-01-05 checking <- employer 500 USD   #salary
 ";
 
 fn with_return<R>(system: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R {
@@ -1113,80 +1152,13 @@ fn a_past_day_asked_of_a_later_run_is_what_a_run_that_stopped_there_says() {
     });
 }
 
+/// A forecast resumed from a context keeps what the run already owed (a fee from a flow before today, and one from the pad of
+/// today's own assertion) and takes the closing of the day it stands on once. The law closes the year it is in with `each year`:
+/// `each year closing 12-31` would close the 2026 year on 2027-12-31 (LANGUAGE §8), so no forecast to 2027-03-01 could include
+/// its tax; `each year` closes it on today's own closing, which the resumed ledger takes once, after the obligations the run
+/// already had before it.
 #[test]
 fn a_context_forecast_keeps_historical_and_same_day_obligations_once() {
-    let system = "\
-system context-return
-use std
-
-entity me : person
-  filing single
-  lives context-return
-entity employer
-entity treasury : government
-
-law year-end-tax
-  each year closing 12-31
-  owe tally(pay) * 10% to treasury by date(year + 1, 1, 15) as year-end-tax
-";
-    let source = "\
-base USD
-use context-return
-entity reserve
-entity grocer
-purpose salary : income
-  law count-pay
-    on flow
-    count amount as pay
-account checking : bank
-
-law historical-fee
-  on out
-  when from is checking
-  require amount < empty else owe 5 USD to treasury by date(2027, 2, 15) as historical-fee
-
-law pad-fee
-  on in
-  when from is reserve
-  owe 2 USD to treasury by date(2027, 3, 1) as pad-fee
-
-2026-01-05 employer -> checking 100 USD #salary
-2026-02-01 checking -> grocer 10 USD #food
-2026-12-31 checking = 100 USD via reserve
-";
-
-    with_sources(
-        &[("systems/std.ax", STD), ("systems/context-return.ax", system), ("axiom.ax", source)],
-        day(2026, 12, 31),
-        |book, run| {
-            let context =
-                crate::tests::context(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
-            let query = Query::Forecast { until: Some(day(2027, 3, 1)), paths: 0 };
-            let shared = context.report(&query).unwrap();
-
-            let owed = shared
-                .sections
-                .iter()
-                .find(|section| crate::tests::heading(section) == Some("Obligations coming due"))
-                .unwrap();
-            assert_eq!(
-                lines(owed),
-                [
-                    "2027-01-15 | year-end-tax | treasury | 10.00 USD",
-                    "2027-02-15 | historical-fee | treasury | 5.00 USD",
-                    "2027-03-01 | pad-fee | treasury | 2.00 USD",
-                ],
-                "the prefix includes the old flow and pre-close pad, while the year-end close is resumed once"
-            );
-        },
-    );
-}
-
-/// What the test above means, in a book whose law closes the year it is in: `closing 12-31` closes the 2026 year on
-/// 2027-12-31 (LANGUAGE §8), so no forecast to 2027-03-01 can include its tax. `each year` closes it on today's own
-/// closing, which the resumed ledger takes once, after the obligations the run already had before it.
-#[test]
-fn a_context_forecast_takes_the_closing_of_the_day_it_stands_on_once() {
     let system = "\
 system context-return
 use std
@@ -1222,10 +1194,11 @@ law pad-fee
   when from is reserve
   owe 2 USD to treasury by date(2027, 3, 1) as pad-fee
 
-2026-01-05 employer -> checking 100 USD #salary
-2026-02-01 checking -> grocer 10 USD #food
-2026-12-31 checking = 100 USD via reserve
+2026-01-05 checking <- employer 100 USD #salary
+2026-02-01 checking -> grocer   10 USD  #food
+2026-12-31 checking =  100 USD          via reserve
 ";
+
     with_sources(
         &[("systems/std.ax", STD), ("systems/context-return.ax", system), ("axiom.ax", source)],
         day(2026, 12, 31),
@@ -1234,6 +1207,7 @@ law pad-fee
                 crate::tests::context(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
             let query = Query::Forecast { until: Some(day(2027, 3, 1)), paths: 0 };
             let shared = context.report(&query).unwrap();
+
             let owed = shared
                 .sections
                 .iter()
@@ -1245,7 +1219,8 @@ law pad-fee
                     "2027-01-15 | year-end-tax | treasury | 10.00 USD",
                     "2027-02-15 | historical-fee | treasury | 5.00 USD",
                     "2027-03-01 | pad-fee | treasury | 2.00 USD",
-                ]
+                ],
+                "the prefix includes the old flow and pre-close pad, while the year-end close is resumed once"
             );
         },
     );
@@ -1585,14 +1560,14 @@ account checking : asset
 account ira : retirement
 
 opening 2026-01-01
-  checking 1_000 USD
+  checking  1_000 USD
   ira      10_000 USD
 
 law return
   each year closing 04-15
   owe tally(income) * 20% to treasury as income-tax
 
-2026-01-05 employer -> checking 100 USD #salary
+2026-01-05 checking <- employer 100 USD #salary
 ";
 
 /// Drawing the account down in June makes income in 2026, and the 2026 return
@@ -1632,14 +1607,14 @@ account checking : asset
 account ira : retirement
 
 opening 2026-01-01
-  checking 1_000 USD
+  checking  1_000 USD
   ira      10_000 USD
 
 law return
   each year
   owe tally(income) * 20% to treasury as income-tax
 
-2026-01-05 employer -> checking 100 USD #salary
+2026-01-05 checking <- employer 100 USD #salary
 ";
 
 /// What is drawn on the day a year ends is a fact of that day, and the law that
@@ -1695,7 +1670,7 @@ contract payroll with employer
   1_000 USD monthly on 5 into checking #salary
   from 2026-02-05
 
-2026-01-05 employer -> checking 1_000 USD #salary
+2026-01-05 checking <- employer 1_000 USD #salary
 ";
 
 /// A year from today ends in January 2027, three months before the return of
@@ -1825,8 +1800,8 @@ purpose pay : income
 opening 2025-01-01
   broker 10 FAST
 
-2025-01-02 payer -> checking 100 USD ^deposit
-2025-01-03 FAST split 2 for 1
+2025-01-02 checking <-       payer   100 USD ^deposit
+2025-01-03 FAST     split    2 for 1
 2025-01-04 ^deposit returned
 ";
     with_run(source, day(2025, 1, 5), |book, run| {
@@ -2032,5 +2007,56 @@ opening 2026-01-01
         };
         assert!(named("pastry"), "what moved is a row");
         assert!(!named("candy"), "a flow of nothing moved nothing, and a purpose that moved nothing is no row");
+    });
+}
+
+// ─── What the owner owes ────────────────────────────────────────────────────
+
+/// A repair bill of 1,200.00, made on the 5th of March and partly paid on the 12th by a payment that carries its code.
+const BILL: &str = "\
+use std
+base USD
+entity me : person
+entity landlord : org
+account checking : bank
+purpose repairs : spending
+2026-01-01 market -> checking 5_000 USD
+2026-03-05 me owes landlord 1_200 USD due 2026-04-04 #repairs ^bill-7
+2026-03-12 checking -> landlord 500 USD ^bill-7
+";
+
+/// What `claims` says the owner owes on `at`: a bill is a parcel, so it is open by what is left of it on that day, with the day it
+/// was made and the day it falls due.
+fn owed_on(book: &Book, run: &Run, at: Day) -> Vec<String> {
+    let report = crate::tests::report(book, run, &Query::Claims { at: Some(at) }, None).expect("claims are asked");
+    let owed = report
+        .sections
+        .iter()
+        .find(|section| section.heading.as_ref().is_some_and(|h| crate::tests::cell(h) == "Owed by you"));
+    owed.map_or_else(Vec::new, |section| lines(section))
+}
+
+#[test]
+fn a_bill_is_open_by_what_its_parcel_holds_on_the_day_asked() {
+    with_std(BILL, day(2026, 3, 31), |book, run| {
+        assert_eq!(
+            owed_on(book, run, day(2026, 3, 31)),
+            [
+                "landlord | ^bill-7 | 700.00 USD | 2026-03-05 | 26d | 2026-04-04 | in 4d",
+                "=Total |  | 700.00 USD |  |  |  |"
+            ]
+        );
+        let before = owed_on(book, run, day(2026, 3, 5));
+        assert!(before[0].contains("^bill-7 | 1,200.00 USD"), "on the day it was made it was owed whole: {before:?}");
+        assert!(owed_on(book, run, day(2026, 3, 4)).is_empty(), "nothing was owed before the bill was made");
+    });
+}
+
+/// A bill is not held: `lots` lists the parcels of what the owner has, and a debt is not among them.
+#[test]
+fn a_bill_is_no_lot() {
+    with_std(BILL, day(2026, 3, 31), |book, run| {
+        let lots = crate::tests::report(book, run, &Query::Lots { place: None, at: None }, None).unwrap();
+        assert!(lots.sections[0].rows.iter().all(|row| !crate::tests::cell(&row.cells[0]).contains("landlord")));
     });
 }

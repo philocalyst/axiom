@@ -12,5 +12,5 @@ account assets/brokerage : broker
     warn gain <= 1_000 USD "large gain"
 account equity/opening
 
-2025-12-31 equity/opening -> checking 3_000 USD
-2026-01-22 checking 2_000 USD -> brokerage 7 VTI
+2025-12-31 checking <- equity/opening 3_000 USD
+2026-01-22 checking -> brokerage      7 VTI     @ 285.714 USD

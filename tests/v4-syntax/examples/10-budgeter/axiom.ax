@@ -1,0 +1,18 @@
+// A budget for a young person: envelopes for the month and for the year, money set
+// aside for the car and the trip, subscriptions, a wallet of cash that does not
+// add up, a check in the mail and a deposit that bounced. September 2025 to
+// mid-February 2026, with a question for June: can I afford a 3,000 USD trip?
+//
+// The folders are constraints: journal/2025/09.ax holds September 2025 only.
+
+base USD
+
+use std
+use us
+
+/// Jamie, 24, a junior designer at a studio, single, in a city with no state
+/// income tax.
+entity me : person
+  born   2001-05-01
+  filing single
+  lives  us

@@ -77,5 +77,33 @@ class NativeOpeningTests(unittest.TestCase):
         self.assertEqual(sum(map(Decimal, amounts)), Decimal("1235.00"))
 
 
+class V5SpellingTests(unittest.TestCase):
+    places = {
+        "p1/bank/checking": "p1-checking",
+        "p1/bank/savings": "p1-savings",
+        "p1/invest/brokerage": "p1-brokerage",
+        "p1/travel/eur-wallet": "p1-eur-wallet",
+        "p1/retire/k401": "p1-401k",
+    }
+    parties = {"income/p1/interest": "p1-interest-source", "acme-p1": "acme-p1"}
+
+    def line(self, text):
+        return _native_line(text, self.places, self.parties, {}, {}, set(self.places.values()))
+
+    def test_a_payment_that_arrives_is_written_from_the_books_own_side(self):
+        written = self.line("2024-01-28 income/p1/interest -> p1/bank/savings 5.10 USD")
+        self.assertTrue(written.startswith("2024-01-28 p1-savings <- p1-interest-source 5.10 USD"), written)
+
+    def test_a_paystub_passes_the_money_through_its_owner_and_each_leg_leads_with_its_arrow(self):
+        self.assertEqual(self.line("2024-01-15 acme-p1 -> 7681.50 USD"), "2024-01-15 p1 <- acme-p1 7681.50 USD")
+        self.assertEqual(self.line("  p1/retire/k401 800.00 USD"), "  -> p1-401k 800.00 USD")
+
+    def test_an_exchange_states_one_amount_and_its_price(self):
+        sale = self.line("2024-02-05 p1/invest/brokerage 3 VTI -> p1/bank/checking 660.00 USD")
+        self.assertTrue(sale.startswith("2024-02-05 p1-brokerage 3 VTI -> p1-checking @ 220.00 USD"), sale)
+        trip = self.line("2024-06-03 p1/bank/checking 1060.00 USD -> p1/travel/eur-wallet 1000.00 EUR")
+        self.assertTrue(trip.startswith("2024-06-03 p1-checking -> p1-eur-wallet 1000.00 EUR @ 1.06 USD"), trip)
+
+
 if __name__ == "__main__":
     unittest.main()

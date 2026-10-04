@@ -19,6 +19,6 @@ law wages-note
   when from is wages
   require tally(wagess) <= 500_000 USD "wages over 500_000 USD"
 
-2026-01-15 acme -> 8_000 USD
-  taxes/federal  880 USD
-  checking       ...
+2026-01-15 me <- acme 8_000 USD
+  -> taxes/federal 880 USD
+  -> checking      ...

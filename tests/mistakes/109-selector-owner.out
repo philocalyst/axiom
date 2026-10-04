@@ -1,0 +1,14 @@
+error[selector-owner]: a selector reads the flows of one occurrence
+  ╭─[109-selector-owner.ax:9:31]
+  │
+8 │ kind rewards : credit-card
+9 │   also issuer -> self 2% of ([visa] up to 10% of amount) #rebate
+  │                               ──┬─
+  │                                 ╰── this law has no occurrence to select from
+  │
+  = note: only a contract's law is read with the flows of an occurrence; a law that fires on a
+          posted flow has that one flow, and its `amount`
+  = help: write the law inside a contract, or narrow what it derives with `when`
+
+✗ 1 error
+[exit status 1]

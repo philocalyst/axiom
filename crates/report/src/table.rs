@@ -3,8 +3,8 @@
 use std::borrow::Cow;
 
 use axiom_core::{Day, Days, Qty, Ratio, Sym, calendar};
-use axiom_engine::{Cause, Owed, Pad};
-use axiom_model::{Amount, Book, Period};
+use axiom_engine::{Cause, Owed, Pad, Run};
+use axiom_model::{Amount, Book, Offspring, Period};
 
 use crate::places::path;
 use crate::{Align, Cell, Column, Fact, Money, Report, Row, Section, Style, When};
@@ -252,11 +252,25 @@ pub fn gap_words(book: &Book, pad: &Pad) -> String {
 
 /// Where a consequence comes from: the line that caused it, so it can be
 /// traced with `why`.
-pub fn cause_cell<'s>(book: &'s Book<'_>, cause: Cause) -> Cell<'s> {
+pub fn cause_cell<'s>(book: &'s Book<'_>, run: &Run, cause: Cause) -> Cell<'s> {
     match cause {
         Cause::Flow(flow) => Cell::Source(book.flows[flow].loc),
         Cause::Transaction(txn) => Cell::Source(book.txns[txn].loc),
         Cause::Applied(_) => Cell::text("hypothetical flow"),
         Cause::Time => Cell::text("period end"),
+        Cause::Derived(offspring) => run
+            .offspring
+            .get(offspring.index())
+            .map_or(Cell::text("derived flow"), |offspring| origin_cell(book, offspring)),
+    }
+}
+
+/// What derived a flow, and from what: the law in the words of the book, and the line of the flow that began the chain.
+pub fn origin_cell<'s>(book: &'s Book<'_>, offspring: &Offspring) -> Cell<'s> {
+    let by = Cell::text(format!("derived by {}", book.law_words(offspring.law)));
+    match offspring.root {
+        Cause::Flow(flow) => Cell::Join(" from ", vec![by, Cell::Source(book.flows[flow].loc)]),
+        Cause::Transaction(txn) => Cell::Join(" from ", vec![by, Cell::Source(book.txns[txn].loc)]),
+        Cause::Applied(_) | Cause::Time | Cause::Derived(_) => by,
     }
 }

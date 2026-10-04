@@ -110,11 +110,12 @@ fn about<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) -> Sect
         Column::left("From"),
     ])
     .headed("Flows about it");
-    for (id, flow) in book.flows.iter().filter(|(_, flow)| {
-        lens.owns(crate::flow::movement_place(lens, flow))
-            && flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
-    }) {
-        let out = crate::history::Posting::at(book, run, id).out();
+    let about_it = crate::history::all_postings(book, run).filter(|posting| {
+        lens.owns(crate::flow::movement_place(lens, posting.flow))
+            && posting.flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
+    });
+    for posting in about_it {
+        let (flow, out) = (posting.flow, posting.out());
         let amount = crate::flow::scoped_movement_qty(lens, flow, out.qty);
         if amount.is_zero() {
             continue;

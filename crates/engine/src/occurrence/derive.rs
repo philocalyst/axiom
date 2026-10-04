@@ -13,8 +13,8 @@
 
 use axiom_core::{Arena, Day, Id};
 use axiom_model::{
-    Amount, Bear, Book, Commodity, Cut, Derivation, Derived, Expr, Failed, Flow, FlowSide, Infer, Law, LiteralEnv,
-    Origin, Remainder, Remaining, RuntimeDetail, RuntimeFlow, Shape, Sign, Watch, solve,
+    Amount, Bear, Book, Commodity, Cut, Derived, Expr, Failed, Flow, FlowSide, Law, LiteralEnv, Remainder, Remaining,
+    RuntimeDetail, RuntimeFlow, Shape, Sign, Watch, solve,
 };
 
 use super::{Cx, Pools, TemplateError};
@@ -98,7 +98,8 @@ impl Ledger<'_, '_, '_> {
             if !derived.makes_flow() {
                 continue;
             }
-            let flow = self.derived_flow(&pools.flows[first].flow, derived, *made);
+            // A contract's law has no subject end: its `self` is the header's own.
+            let flow = derived.flow_from(&pools.flows[first].flow, made.law, made.amount, None);
             pools.flows.push(RuntimeFlow { flow, detail: None, ordinal, txn: cx.making.txn });
             ordinal += 1;
         }
@@ -139,35 +140,6 @@ impl Ledger<'_, '_, '_> {
             (header.out, header.arrive) = (left.out, left.arrive);
         }
         Ok(())
-    }
-
-    /// The flow a `derive` makes: along the header's ends (reversed for a `-` item) or the ends it names, the amount
-    /// the law came to, and what the line says of it. What it does not say is the header's, as for a leg or an item the
-    /// template writes (the contract's party is its payee, whatever end it is paid to). A header carries no waiver, so
-    /// there is none to keep.
-    fn derived_flow(&self, header: &Flow, derived: &Derived, made: Made) -> Flow {
-        let (from, to) = match derived.shape {
-            Shape::Flow { from, to } => (from.unwrap_or(header.from), to.unwrap_or(header.to)),
-            Shape::Item(Sign::Less) => (header.to, header.from),
-            Shape::Item(Sign::Add | Sign::Carve) => (header.from, header.to),
-        };
-        Flow {
-            from,
-            to,
-            out: made.amount,
-            arrive: made.amount,
-            infer: Infer::Known,
-            owner: derived.owner.unwrap_or(header.owner),
-            purpose: derived.purpose.or(header.purpose),
-            description: derived.description.or(header.description),
-            codes: derived.codes,
-            select: derived.select,
-            detail: derived.detail,
-            waive: derived.waive,
-            loc: derived.loc,
-            origin: Origin::Derived(Derivation::Law(made.law)),
-            ..header.clone()
-        }
     }
 }
 
@@ -364,7 +336,7 @@ opening 2026-01-01
     fn an_amount_that_reads_the_occurrence_sees_the_header_as_given_and_the_flows_the_group_made() {
         // The header is 5,000.00 with 500.00 to the 401(k): a match of 40% of the smaller of that and 10% of the gross.
         let text = format!(
-            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  checking ...\n  law match\n    on flow\n    derive acme -> k401 40% of ([k401] up to 10% of amount) #match\n2026-01-01 pay\n"
+            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  -> k401 500.00 USD #match\n  -> checking ...\n  law match\n    on flow\n    derive acme -> k401 40% of ([k401] up to 10% of amount) #match\n2026-01-01 pay\n"
         );
         with_run(&text, day(2026, 1, 31), |book, run| {
             assert_eq!(held(book, run, "k401"), Qty(500_00 + 200_00), "40% of min(500.00, 500.00)");
@@ -379,7 +351,7 @@ opening 2026-01-01
     #[test]
     fn a_law_fires_for_the_header_and_reads_its_ends_whatever_legs_the_group_has() {
         let text = format!(
-            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
+            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  -> k401 500.00 USD #match\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
         );
         with_run(&text, day(2026, 1, 31), |book, run| {
             assert_eq!(

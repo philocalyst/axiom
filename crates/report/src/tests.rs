@@ -114,7 +114,7 @@ fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Rep
         }
         Query::Budget { at: day, by } => budget::view_with_lens(at(day), run, *day, *by),
         Query::Limits { year } => limits::view_with_lens(lens, run, *year),
-        Query::Claims { at: day } => claims::view_from(at(day), run, run.holdings.iter()),
+        Query::Claims { at: day } => claims::view_from(at(day), run.holdings.iter()),
         Query::Contracts => contracts::view_with_lens(lens, run),
         Query::Tax { year } => tax::view_with_lens(lens, run, *year),
         Query::Gains { year } => gains::view_with_lens(lens, run, *year),
@@ -279,6 +279,7 @@ fn kind(name: Sym) -> Kind {
         system: None,
         slots: axiom_core::Run::default(),
         laws: Box::default(),
+        owners: Box::default(),
         doc: None,
         loc: None,
     }
@@ -738,6 +739,7 @@ pub(crate) fn household() -> Household {
         adjustments: Vec::new(),
         checks: vec![0; law_count].into(),
         promised_flows: Box::default(),
+        offspring: Box::default(),
         runtime_details: Arena::new(),
         missing_inputs: Box::default(),
         open_claims: Box::default(),
@@ -1123,26 +1125,6 @@ fn claims_list_what_is_owed_with_its_age_and_what_is_overdue() {
             "!acme | ^inv-12 · The March design invoice. | 3,000.00 USD | 2026-03-02 | 29d | 2026-03-20 | overdue 11d",
             "=Total |  | 3,000.00 USD |  |  |  |"
         ]
-    );
-}
-
-#[test]
-fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
-    let house = household();
-    let lens_owner = Whose::default();
-    let plan = axiom_engine::Plan::new(&house.book);
-    let lens = crate::lens::Lens::new(&plan, &lens_owner, day(2026, 3, 31));
-    let bills = crate::claims::owed_by_you(lens, &house.run, house.place("liabilities/bills"));
-    let [bill] = &bills[..] else { panic!("one bill is open") };
-    assert_eq!(
-        (bill.left.qty, bill.made, bill.due, bill.mine),
-        (Qty(70_000), day(2026, 3, 5), Some(day(2026, 4, 4)), false)
-    );
-    // Paid in full, it is no longer open.
-    let paid = crate::lens::Lens::new(&plan, &lens_owner, day(2026, 3, 5));
-    assert_eq!(
-        crate::claims::owed_by_you(paid, &house.run, house.place("liabilities/bills"))[0].left.qty,
-        Qty(120_000)
     );
 }
 

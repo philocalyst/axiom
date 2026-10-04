@@ -22,7 +22,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, pattern: &str) -> Resul
             lens.owns(crate::flow::movement_place(lens, posting.flow))
                 && book.flow_view(posting.flow).codes().any(marked)
         })
-        .map(|posting| posting.id)
+        .filter_map(|posting| posting.id.journal())
         .collect();
     let visible_codes = super::line::scoped_codes(book, lens);
     let event_visible = |code| lens.whose.is_everyone() || visible_codes.contains(&code);

@@ -72,6 +72,7 @@ purpose nondeductible : spending
 /// IRA does, says `taxed-by-kind true`.
 kind tax-deferred : asset
   deferred
+  owner taxpayer
   has taxed-by-kind bool
   has deductible    bool
   taxed-by-kind     false
@@ -94,26 +95,32 @@ kind tax-deferred : asset
     when not purpose is #nondeductible
     count amount as adjustments
 
-/// Income tax withheld from pay, or paid to the IRS directly. Every arrival
-/// counts as tax already paid for the year it is `for`.
-purpose pretax-benefit : spending
-
 /// Health premiums, commuter benefits and anything else taken from pay before
 /// tax (IRC §125). Pay counts whole, and what goes here comes back out of it.
-purpose mortgage-interest : spending
-
-/// Interest on a loan secured by your home (IRC §163(h)): itemized.
-purpose property-tax : spending
+purpose pretax-benefit : spending
 
 /// Tax on the home, paid to the county or from escrow (IRC §164): itemized,
 /// with state income tax, up to a cap.
-purpose charity : spending
+purpose property-tax : spending
 
 /// Gifts to a charity (IRC §170): itemized.
+purpose charity : spending
 
 /// Your main home, held for your own use. A loss on it is not deductible, and
 /// part of a gain on it is excluded when it is sold (IRC §121).
 kind home : personal-use
+
+  /// Interest on a loan secured by your home is itemized (IRC §163(h)): the
+  /// interest of the home, whoever the lender is, and not what a loan was
+  /// called. The interest of a rental home is a rental cost instead
+  /// (`us/rental`), so one posting counts once.
+  ///
+  /// To fix: write the interest `#interest of HOME`, or give the loan `for
+  /// HOME` and it does.
+  law home-interest
+    on flow
+    when purpose is #interest
+    count amount as itemized
 
 /// The Internal Revenue Service.
 entity irs : tax-authority
@@ -261,13 +268,14 @@ law count-payments
 
 // ─── Itemizing ──────────────────────────────────────────────────────────────
 
-/// Mortgage interest and gifts to charity are itemized deductions.
+/// Gifts to charity are itemized deductions (the interest of a home is, by
+/// the law of its kind).
 ///
-/// To fix: book the payment under a place of kind `mortgage-interest` or
-/// `charity`, or count what a project knows into `itemized`.
-law itemize-interest-and-gifts
+/// To fix: book the payment under a place of kind `charity`, or count what a
+/// project knows into `itemized`.
+law itemize-gifts
   on in
-  when purpose is #mortgage-interest | #charity
+  when purpose is #charity
   count amount as itemized
 
 /// Property tax is a state and local tax. So is state income tax, which the

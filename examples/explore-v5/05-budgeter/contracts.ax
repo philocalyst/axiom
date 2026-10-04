@@ -3,11 +3,11 @@
 /// Net pay, twice a month. Each paycheck is divided at the source: 197.50 USD goes to the envelopes.
 contract job with acme-corp
   2_450 USD twice monthly on 15, last into checking
-  savings   50.00 USD for car                     // ▸ tied: not available to spend
-  savings   30.00 USD for gifts
-  savings   75.00 USD for travel
-  savings   22.50 USD for subs
-  savings   20.00 USD for medical
+  -> savings   50.00 USD for car                     // ▸ tied: not available to spend
+  -> savings   30.00 USD for gifts
+  -> savings   75.00 USD for travel
+  -> savings   22.50 USD for subs
+  -> savings   20.00 USD for medical
 
 // ── The flat: three people, one lease ───────────────────────────────────────
 // Noor is on the lease and pays all of it. The share of each roommate is an item that pays on their behalf:

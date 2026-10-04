@@ -144,10 +144,11 @@ pub(super) struct CodeIndex {
 impl CodeIndex {
     fn add(&mut self, world: &World<'_>, txn_id: Id<Txn>) {
         let (book, source) = (&world.book, &world.book.txns[txn_id]);
-        let makes_claim = source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
-        let header = source.codes.ids().map(|id| book.codes[id]);
         let flows = source.flows.ids().flat_map(|flow| book.flows[flow].codes.ids().map(|id| book.codes[id]));
-        for code in header.chain(flows) {
+        let mut codes = source.codes.ids().map(|id| book.codes[id]).chain(flows).peekable();
+        // Only a transaction with a code asks what its flows make: nearly none has one.
+        let makes_claim = codes.peek().is_some() && source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
+        for code in codes {
             self.all.note(code, txn_id, source.loc);
             if makes_claim {
                 self.claims.note(code, txn_id, source.loc);
@@ -328,6 +329,9 @@ fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut 
     let from = flow.from.end.map(|end| resolve_end(staged, &cx, end, diags));
     let to = flow.to.end.map(|end| resolve_end(staged, &cx, end, diags));
     built.successful &= from.is_none_or(|end| end.is_some()) && to.is_none_or(|end| end.is_some());
+    if let Some(problem) = party_subject(staged, &cx, flow, [from, to].map(Option::flatten), diags) {
+        return built.reject(problem, diags);
+    }
     let has_legs = !cx.file[flow.body.legs].is_empty();
     match (from, to) {
         (Some(Some(from)), Some(Some(to))) => {
@@ -350,6 +354,45 @@ fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut 
             built.reject(problem, diags);
         }
     }
+}
+
+/// A line written `<-`, as a purchase or a sale, or as a split through an owner is about its subject, whose book it is,
+/// so the subject is an owner's. A party reaches an owner's book by the other end: `checking -> acme 3_200 USD`.
+fn party_subject<'s>(
+    staged: &mut Staged<'_, 's>,
+    cx: &FlowCx<'_, 's>,
+    flow: &ast::Flow<'s>,
+    [from, to]: [Option<ResolvedEnd>; 2],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Diagnostic> {
+    let named = flow.owner(cx.file)?;
+    let subject = match flow.course {
+        ast::Course::Through(..) => resolve_end(staged, cx, named, diags),
+        ast::Course::Direct(ast::Junction::In) => to,
+        ast::Course::Direct(ast::Junction::Out) => from,
+    }?;
+    let party = |end: ResolvedEnd| staged.book.places[end.place].class == crate::book::Class::Outside;
+    if !party(subject) {
+        return None;
+    }
+    let (name, ends) = (named.name.0, [(flow.from.end, from), (flow.to.end, to)]);
+    let other =
+        ends.into_iter().find_map(|(written, end)| Some((written?.name.0, party(end?)))).filter(|o| o.0 != name);
+    let (label, help) = match other {
+        Some((other, false)) => (format!("`{name}` is a party"), format!("swap the ends: `{other} -> {name} ...`")),
+        Some((other, true)) => {
+            (format!("`{name}` and `{other}` are both parties"), "write one of your books first".into())
+        }
+        None => (
+            format!("`{name}` is a party"),
+            "name the book it happens in first: `brokerage <- 7 VTI @ 285.70 USD`".into(),
+        ),
+    };
+    let said = format!(
+        "`{name}` is a party, and a `{}` line is written from one of your books",
+        flow.course.junction().spelling()
+    );
+    Some(Diagnostic::error("junction-subject", said).label(cx.file.arrow_after(named), label).help(help))
 }
 
 /// A header that names both its ends is one flow, with the items under it as a group of their own.
@@ -1347,15 +1390,16 @@ fn claim_ends<'a, 's>(
     let creditor_is_owner = world.book.entities[creditor].place.is_some_and(
         |place| matches!(world.book.places[place].role, crate::book::Role::Holding(owner) if owner == creditor),
     );
-    let (party, owner, class, party_end) = if creditor_is_owner {
-        (debtor, creditor, crate::book::Class::Asset, debtor)
+    let kinds = world.book.roots.kinds;
+    let (party, owner, kind, party_end) = if creditor_is_owner {
+        (debtor, creditor, kinds.claim, debtor)
     } else if debtor_is_owner {
-        (creditor, debtor, crate::book::Class::Debt, creditor)
+        (creditor, debtor, kinds.debt_claim, creditor)
     } else {
         // Neither end is an owner: the subject owes the creditor, who holds the claim.
-        (debtor, creditor, crate::book::Class::Asset, debtor)
+        (debtor, creditor, kinds.claim, debtor)
     };
-    let tab = world.tab(party, owner, class, loc);
+    let tab = world.tab(party, owner, kind, loc);
     let Some(party_place) = world.book.entities[party_end].place else {
         diags.push(
             Diagnostic::error("claim-party-place", "the claim party has no flow endpoint")
@@ -1366,7 +1410,7 @@ fn claim_ends<'a, 's>(
     let empty = Run::new(Id::new(0), 0);
     let outside = ResolvedEnd { place: party_place, entity: Some(party_end), select: empty };
     let tab = ResolvedEnd { place: tab, entity: None, select: empty };
-    let (from, to) = if class == crate::book::Class::Asset { (outside, tab) } else { (tab, outside) };
+    let (from, to) = if kind == kinds.claim { (outside, tab) } else { (tab, outside) };
     Some((Ends { from, to }, owner))
 }
 

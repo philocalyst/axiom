@@ -1,0 +1,51 @@
+error[derive-depth]: a flow is derived through more than 8 laws
+   ╭─[106-derive-depth.ax:21:3]
+   │
+ 4 │ purpose p0 : spending
+ 5 │   also - 100% of amount #p1
+   │   ────────────┬────────────
+   │               ╰── 1. the `also` of purpose `#p0` derives from it
+ 6 │ purpose p1 : spending
+ 7 │   also - 100% of amount #p2
+   │   ────────────┬────────────
+   │               ╰── 2. the `also` of purpose `#p1` derives from it
+ 8 │ purpose p2 : spending
+ 9 │   also - 100% of amount #p3
+   │   ────────────┬────────────
+   │               ╰── 3. the `also` of purpose `#p2` derives from it
+10 │ purpose p3 : spending
+11 │   also - 100% of amount #p4
+   │   ────────────┬────────────
+   │               ╰── 4. the `also` of purpose `#p3` derives from it
+12 │ purpose p4 : spending
+13 │   also - 100% of amount #p5
+   │   ────────────┬────────────
+   │               ╰── 5. the `also` of purpose `#p4` derives from it
+14 │ purpose p5 : spending
+15 │   also - 100% of amount #p6
+   │   ────────────┬────────────
+   │               ╰── 6. the `also` of purpose `#p5` derives from it
+16 │ purpose p6 : spending
+17 │   also - 100% of amount #p7
+   │   ────────────┬────────────
+   │               ╰── 7. the `also` of purpose `#p6` derives from it
+18 │ purpose p7 : spending
+19 │   also - 100% of amount #p8
+   │   ────────────┬────────────
+   │               ╰── 8. the `also` of purpose `#p7` derives from it
+20 │ purpose p8 : spending
+21 │   also - 100% of amount #p9
+   │   ────────────┬────────────
+   │               ╰── 9. and the `also` of purpose `#p8` would be one law too many: not made
+   ⋮
+27 │ 2026-01-05 checking -> shop 10.00 USD #p0
+   │ ────────────────────┬────────────────────
+   │                     ╰── the flow that started it
+   │
+   = note: a flow is derived through 8 laws at most, so that a chain nothing ends is found where it
+           grows too long
+   = help: end the chain: narrow a law with `when`, so that it does not watch the flow the one
+           before it derived
+
+✗ 1 error
+[exit status 1]

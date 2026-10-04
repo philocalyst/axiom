@@ -11,6 +11,6 @@ entity acme : employer
   via income/salary
 
 account expenses/taxes/federal
-2026-01-15 acme -> 5_000 USD
-  taxes/federl  900 USD
-  checking      ...
+2026-01-15 me <- acme 5_000 USD
+  -> taxes/federl 900 USD
+  -> checking     ...

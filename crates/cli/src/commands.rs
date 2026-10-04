@@ -33,10 +33,10 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
     let texts = Texts::default();
     let sources = project.load(&texts)?;
-    if let Command::Fmt { files, check } = command {
-        return Ok(crate::fmt::execute(&sources, &project.root, files, *check, terminals.out));
-    }
     let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
+    if let Command::Fmt(format) = command {
+        return Ok(crate::fmt::execute(&sources, &project.root, format, options, terminals.out));
+    }
     let session = Session::open(sources, options);
     let shown = Shown {
         terminals,

@@ -762,13 +762,36 @@ def baseline_outputs(baseline, path, commands_):
     return said
 
 
+def quiet(said, codes=("v4-syntax",)):
+    """What a build said without the warnings of `codes`, which the baseline cannot say, and without them in the count of
+    warnings: the books here are one file, so each such warning is the file's one."""
+    code, out, err = said
+    dropped = 0
+    kept = []
+    for block in err.split("\n\n"):
+        if any(block.lstrip("\n").startswith(f"warning[{name}]") for name in codes):
+            dropped += 1
+        else:
+            kept.append(block)
+    err = "\n\n".join(kept).rstrip("\n") + ("\n" if err.endswith("\n") and kept else "")
+
+    def counted(text):
+        """` · 2 warnings` in a summary, or a line of its own (`2 warnings`) when nothing else is counted."""
+        left = lambda m: int(m.group(1)) - dropped
+        warnings = lambda n: f"{n} warning" + ("" if n == 1 else "s")
+        text = re.sub(r" · (\d+) warnings?", lambda m: "" if left(m) <= 0 else f" · {warnings(left(m))}", text)
+        return re.sub(r"(?m)^(\d+) warnings?\n?$", lambda m: "" if left(m) <= 0 else f"{warnings(left(m))}\n", text)
+
+    return code, counted(out), counted(err)
+
+
 def run_project(baseline, new, path):
     """The commands of one project through both binaries: what differs, and what the baseline said."""
     differences, summary = [], {"clean": True, "silent": True, "moves": False}
     work = commands(path)
     said = baseline_outputs(baseline, path, work)
     for index, (args, before) in enumerate(zip(work, said)):
-        after = sh(new, args, path)
+        after = quiet(sh(new, args, path))
         if before != after:
             differences.append((args, before, after))
         if index == 0:

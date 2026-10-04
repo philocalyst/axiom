@@ -15,8 +15,8 @@
 /// month. Each paystub is restated in the journal, since its amounts move.
 contract job with lumen
   4_600 USD twice monthly on 15, last into checking   // gross; checking takes what is left
-  retirement   6%                          // ▸ pre-tax deferral: into a 401k, from wages
-  blue-shield  184.20 USD #premium         // ▸ pre-tax (§125): out of wages and payroll tax
+  -> retirement   6%                          // ▸ pre-tax deferral: into a 401k, from wages
+  -> blue-shield  184.20 USD #premium         // ▸ pre-tax (§125): out of wages and payroll tax
   also lumen -> retirement 50% of ([retirement] up to 6% of amount) #match
                                            // ▸ Lumen adds 138.00 to each paycheck's 276.00
 

@@ -1,0 +1,11 @@
+use std
+base USD
+purpose fees : spending
+entity me : person
+entity shop
+account checking : bank
+  law big
+    on flow
+    warn value(amount, USD) <= 50 USD
+2025-12-31 market -> checking 1_000.00 USD
+2026-01-05 checking -> shop 100.00 USD #fees

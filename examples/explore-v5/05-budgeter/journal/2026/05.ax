@@ -2,23 +2,23 @@
 
 01 rent
 01 gym
-02 delta-card -> delta 312.40 USD #travel "DEN to LAX, June"    // ▸ 625 MILES earned (2 a dollar on Delta)   // ✗ 05a1
+02 delta-card  -> delta         312.40 USD   #travel "DEN to LAX, June"  // ▸ 625 MILES earned (2 a dollar on Delta)   // ✗ 05a1
 03 phone
-03 card -> king-soopers 90.80 USD
-05 1password                                                    // ▸ 35.88 from card
+03 card        -> king-soopers  90.80 USD
+05 1password                                                             // ▸ 35.88 from card
 09 internet
-10 card -> trader-joes 55.35 USD
-12 electric 84.10 USD
-14 gas 27.90 USD
+10 card        -> trader-joes   55.35 USD
+12 electric    84.10 USD
+14 gas         27.90 USD
 15 job
-15 card -> tacos-el-jefe 38.20 USD #dining
-20 ben -> venmo 1_107.33 USD "rent + power, gas, wifi"
-21 cleo -> venmo 1_107.33 USD "rent + power, gas, wifi"
-21 card -> king-soopers 88.95 USD
+15 card        -> tacos-el-jefe 38.20 USD    #dining
+20 venmo       <- ben           1_107.33 USD "rent + power, gas, wifi"
+21 venmo       <- cleo          1_107.33 USD "rent + power, gas, wifi"
+21 card        -> king-soopers  88.95 USD
 22 netflix
-24 venmo -> checking 2_214.66 USD
-25 card -> target 47.30 USD #household
-30 card -> sprouts 50.60 USD
+24 venmo       -> checking      2_214.66 USD
+25 card        -> target        47.30 USD    #household
+30 card        -> sprouts       50.60 USD
 31 job
-31 chase -> card 9.95 USD #rebate "cash back, 2% of 497.57"
-31 delta-miles = 25_125 MILES                                   // ▸ 24,500 + 625 earned on 312.40 at two a dollar
+31 card        <- chase         9.95 USD     #rebate "cash back, 2% of 497.57"
+31 delta-miles =  25_125 MILES                                           // ▸ 24,500 + 625 earned on 312.40 at two a dollar

@@ -1,0 +1,20 @@
+// MISTAKE: the paycheck is passed on to its legs with `->`, and the second leg points back.
+base USD
+use std
+
+commodity VTI : security
+  precision 0
+
+account assets/brokerage : brokerage
+account assets/checking : bank
+account assets/savings  : bank
+
+entity acme : employer
+
+opening 2025-12-31
+  checking 3_000 USD
+  brokerage 10 VTI basis 2_800 USD since 2024-03-01
+
+2026-01-15 me <- acme 5_000 USD
+  -> savings    800 USD
+  <- checking 4_200 USD

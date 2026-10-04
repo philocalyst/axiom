@@ -1,0 +1,13 @@
+use std
+base USD
+purpose rebate : income
+entity me : person
+entity issuer
+entity shop
+kind rewards : credit-card
+  also issuer -> self 2% of amount #rebate
+account checking : bank
+account visa : rewards
+2025-12-31 market -> checking 1_000.00 USD
+2026-01-05 visa -> shop 100.00 USD #groceries
+2026-01-06 visa -> shop 50.00 USD #groceries

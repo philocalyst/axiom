@@ -1,26 +1,26 @@
 /// Balances at the start of the ledger. An opening is a statement, not a flow: no law sees it,
 /// nothing counts toward 2025's limits, and each line says what it cost and since when.
 opening 2024-12-31
-  checking  12_480.66 USD
-  savings   41_250.00 USD
-  escrow          1_380.00 USD
-  me/401k       148_300.00 USD
-  jordan/401k     96_850.00 USD
-  hsa             7_420.00 USD
-  riley/529       24_600.00 USD  basis 19_850 USD  since 2019-01-01
-  house basis 540_000 USD  since 2023-06-15
-  crv basis 33_900 USD  since 2023-06-15
-  mortgage        412_428.22 USD
-  car-loan        23_207.37 USD
-  card            2_284.17 USD
+  checking     12_480.66 USD
+  savings      41_250.00 USD
+  escrow        1_380.00 USD
+  me/401k     148_300.00 USD
+  jordan/401k  96_850.00 USD
+  hsa           7_420.00 USD
+  riley/529    24_600.00 USD basis 19_850 USD since 2019-01-01
+  house                      basis 540_000 USD since 2023-06-15
+  crv                        basis 33_900 USD since 2023-06-15
+  mortgage    412_428.22 USD
+  car-loan     23_207.37 USD
+  card          2_284.17 USD
 
-2024-12-31 checking = 12_480.66 USD
-2024-12-31 savings = 41_250.00 USD
-2024-12-31 escrow = 1_380.00 USD
-2024-12-31 me/401k = 148_300.00 USD
+2024-12-31 checking    = 12_480.66 USD
+2024-12-31 savings     = 41_250.00 USD
+2024-12-31 escrow      = 1_380.00 USD
+2024-12-31 me/401k     = 148_300.00 USD
 2024-12-31 jordan/401k = 96_850.00 USD
-2024-12-31 hsa = 7_420.00 USD
-2024-12-31 riley/529 = 24_600.00 USD
-2024-12-31 mortgage = 412_428.22 USD
-2024-12-31 car-loan = 23_207.37 USD
-2024-12-31 card = 2_284.17 USD
+2024-12-31 hsa         = 7_420.00 USD
+2024-12-31 riley/529   = 24_600.00 USD
+2024-12-31 mortgage    = 412_428.22 USD
+2024-12-31 car-loan    = 23_207.37 USD
+2024-12-31 card        = 2_284.17 USD

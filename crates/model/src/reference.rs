@@ -187,14 +187,21 @@ impl World<'_> {
         }
     }
 
-    /// No account has this address on the day: the closest name among those its words fill, and when an account has it
-    /// on another day, that.
+    /// No account has this address on the day: the closest name among those its words fill, written so that it can be pasted
+    /// in place of what was written, and when an account has it on another day, that.
     fn unknown_address(&self, word: Word, fillers: &[Id<Entity>], day: Option<Day>) -> Diagnostic {
         let (leading, name) = word.text.rsplit_once('/').unwrap_or(("", word.text));
-        let named: Vec<&str> = self.named_by(fillers).collect();
-        let nearest = closest(name, named.iter().copied()).map(|near| match leading.is_empty() {
-            true => near.to_string(),
-            false => format!("{leading}/{near}"),
+        let called = self.named_by(fillers);
+        let named: Vec<&str> = called.iter().map(|&(_, text)| text).collect();
+        let nearest = closest(name, named.iter().copied()).and_then(|near| {
+            let &(place, _) = called.iter().find(|&&(_, text)| text == near)?;
+            // The words as written mean the account if they say it with its name, else its own address does.
+            let means = self.book.names.get(near).is_some_and(|sym| self.means(place, fillers, sym, day));
+            Some(match (means, leading.is_empty()) {
+                (false, _) => self.spell(self.book.lookup.addresses.address(place)),
+                (true, true) => near.to_string(),
+                (true, false) => format!("{leading}/{near}"),
+            })
         });
         let diagnostic = problem::unknown(Noun::Address, word, nearest.as_deref());
         match (day, self.on_another_day(fillers, name)) {
@@ -208,16 +215,16 @@ impl World<'_> {
         .help("an address is the entities that fill an account's slots, in order, then its name: `jordan/bluefin/401k`")
     }
 
-    /// The names of the accounts the first of `fillers` fills a slot of.
-    fn named_by<'w>(&'w self, fillers: &[Id<Entity>]) -> impl Iterator<Item = &'w str> + 'w {
+    /// The accounts the first of `fillers` fills a slot of, each with the name it is called, once.
+    fn named_by<'w>(&'w self, fillers: &[Id<Entity>]) -> Vec<(Id<Place>, &'w str)> {
         let addresses = &self.book.lookup.addresses;
         let called = fillers.first().map(|&first| addresses.filled_by(first)).unwrap_or_default();
         let names = called.into_iter().filter_map(|place| match addresses.address(place).last() {
-            Some(&Part::Name(name)) => Some(self.book.names.name(name)),
+            Some(&Part::Name(name)) => Some((place, self.book.names.name(name))),
             _ => None,
         });
         let mut seen = axiom_core::Set::default();
-        names.filter(move |&name| seen.insert(name)).collect::<Vec<_>>().into_iter()
+        names.filter(move |&(_, name)| seen.insert(name)).collect()
     }
 
     /// An account with these words and this name that is open on some day, written out.

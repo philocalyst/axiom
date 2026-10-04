@@ -8,7 +8,7 @@ use axiom_model::{Action, Amount, Book, Flow, Promised, Provenance, Purposed, Su
 
 use super::event_words;
 use crate::flow::{object_name, scoped_movement_qty};
-use crate::history::Posting;
+use crate::history::{Derivatives, Posting, journal_root};
 use crate::lens::Lens;
 use crate::places::{path, route};
 use crate::table::{creditor, gap_words};
@@ -256,17 +256,33 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
         .collect()
 }
 
+/// The flows laws derived from the flows of the line, as the first thing each of them caused.
+fn derived_flows<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], told: &mut Vec<(usize, u8, Row<'s>)>) {
+    let book = lens.book();
+    let derivatives = Derivatives::of(run);
+    for (at, &id) in flows.iter().enumerate() {
+        for posting in
+            derivatives.after(id).filter(|posting| lens.owns(crate::flow::movement_place(lens, posting.flow)))
+        {
+            let flow = posting.flow;
+            let moved = Amount::new(scoped_movement_qty(lens, flow, posting.out().qty), posting.out().unit);
+            let purpose = flow.purpose.map_or_else(String::new, |purposed| purpose_words(book, purposed));
+            let text = format!("derived flow: {}, {}{purpose}", route(book, flow), book.show(moved));
+            let law = posting.offspring(run).map_or(Cell::Blank, |offspring| Cell::text(book.law_words(offspring.law)));
+            told.push((at, 0, Row::new([Cell::text(text), law])));
+        }
+    }
+}
+
 /// What the flows did downstream: gains, obligations, tallies, violations. Each of the run's records is read once, whatever
 /// the number of flows, and they are told in the order of the flows, each one's gains first, then its effects, then its
 /// violations, as the records stand in the run.
 fn consequences<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, flows: &[Id<Flow>], section: &mut Section<'s>) {
     let book = lens.book();
     let rank: Map<Id<Flow>, usize> = flows.iter().enumerate().map(|(rank, &id)| (id, rank)).collect();
-    let ranked = |cause: Cause| match cause {
-        Cause::Flow(id) => rank.get(&id).copied(),
-        _ => None,
-    };
+    let ranked = |cause: Cause| journal_root(run, cause).and_then(|id| rank.get(&id).copied());
     let mut told: Vec<(usize, u8, Row<'s>)> = Vec::new();
+    derived_flows(lens, run, flows, &mut told);
     for gain in run.gains.iter().filter(|gain| lens.owns(gain.from)) {
         let Some(at) = ranked(gain.cause) else { continue };
         let realized = lens.place_qty(gain.from, gain.gain());

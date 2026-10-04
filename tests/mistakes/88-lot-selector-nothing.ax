@@ -9,7 +9,7 @@ account assets/brokerage : broker
 account assets/checking : bank
 account equity/opening
 
-2025-12-31 equity/opening -> checking 5_000 USD
-2026-01-22 checking 2_000 USD -> brokerage 7 VTI
-2026-02-18 checking 1_500 USD -> brokerage 5 VTI
-2026-03-02 brokerage[2026-01-23] 3 VTI -> checking 900 USD
+2025-12-31 checking                    <- equity/opening 5_000 USD
+2026-01-22 checking                    -> brokerage      7 VTI     @ 285.714 USD
+2026-02-18 checking                    -> brokerage      5 VTI     @ 300.00 USD
+2026-03-02 brokerage[2026-01-23] 3 VTI -> checking                 @ 300.00 USD

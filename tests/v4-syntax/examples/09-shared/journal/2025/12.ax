@@ -1,0 +1,62 @@
+2025-12-01 checking -> 3_150.00 USD / landlord #rent-2025-12 due 2025-12-08
+  rent                    1_050.00 USD
+  ben                     1_050.00 USD
+  cleo                    1_050.00 USD
+2025-12-02 ben -> checking 1_050.00 USD for #rent-2025-12
+2025-12-03 checking -> car 128 USD / progressive
+2025-12-05 cleo -> checking 1_050.00 USD for #rent-2025-12
+2025-12-06 wallet -> dining 7.35 USD
+2025-12-07 income/tips -> wallet 226.28 USD
+2025-12-07 visa -> 89.72 USD #shared-2025-12 due 2026-01-21
+  groceries               29.90 USD
+  ben                     29.91 USD
+  cleo                    29.91 USD
+2025-12-08 visa -> phone 45 USD / mint-mobile
+2025-12-09 checking -> 69.99 USD / fiberco #shared-2025-12 due 2026-01-23
+  utilities               23.33 USD
+  ben                     23.33 USD
+  cleo                    23.33 USD
+2025-12-12 lantern -> 1_414.29 USD   // 962.00 wages + 452.29 card tips
+  taxes/federal           175.37 USD
+  taxes/payroll           108.19 USD
+  checking                ...
+2025-12-12 owed-to-ben -> utilities 43.90 USD #power-2025-12 due 2026-01-11   // my third of 131.70, from power-co
+2025-12-12 checking -> car 330.50 USD / carmax-finance
+2025-12-13 wallet -> dining 8.54 USD
+2025-12-14 income/tips -> wallet 251.43 USD
+2025-12-14 visa -> dining 57.73 USD
+2025-12-15 riley -> checking 250 USD for #loan-riley
+2025-12-15 checking -> health 189.40 USD / marketplace-plan
+2025-12-16 income/donations -> collective-checking 45 USD
+2025-12-17 visa -> groceries 64.46 USD / farmers-market
+2025-12-18 wallet -> transport 3.21 USD
+2025-12-19 visa -> entertainment 79.39 USD
+2025-12-21 income/tips -> wallet 145.40 USD
+2025-12-21 visa -> 83.61 USD #shared-2025-12 due 2026-02-04
+  groceries               27.87 USD
+  ben                     27.87 USD
+  cleo                    27.87 USD
+2025-12-22 checking -> visa 380.46 USD
+2025-12-24 wallet -> checking 800 USD
+
+/// Forgiving 200.00 USD of it as a Christmas present. Nothing came in, so nothing is income; it is a gift, settling that part of the claim.
+2025-12-24 riley -> gifts 200 USD for #loan-riley
+2025-12-26 lantern -> 1_359.65 USD   // 1_036.00 wages + 323.65 card tips
+  taxes/federal           168.60 USD
+  taxes/payroll           104.01 USD
+  checking                ...
+2025-12-26 visa -> clothing 85.45 USD
+2025-12-27 wallet -> dining 9.13 USD
+2025-12-28 income/tips -> wallet 253.44 USD
+2025-12-28 checking -> savings 700 USD
+2025-12-31 by-ben = 81.11 USD
+2025-12-31 by-cleo = 131.11 USD
+2025-12-31 owed-to-ben = 43.90 USD
+2025-12-31 owed-to-cleo = 0.00 USD
+2025-12-31 visa = 505.36 USD
+2025-12-31 collective-checking = 2_654.61 USD
+2025-12-31 collective-cash = 109.00 USD
+2025-12-31 checking = 9_907.48 USD
+2025-12-31 savings = 10_100.00 USD
+2025-12-31 collective-checking = 2_654.61 USD
+2025-12-31 wallet = 433.48 USD

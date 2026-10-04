@@ -17,19 +17,19 @@
 
 use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{
-    Book, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Heading, Infer, Made, Place,
+    Book, Class, Commodity, Cut, End, Expr, Fault, Flow, FlowExpressions, FlowView, Infer, Item, Made, Place,
     RuntimeDetail, RuntimeFlow, RuntimeTxn,
 };
 
 use crate::Promise;
 use crate::checkpoint::CheckpointPhase;
 use crate::monitor;
-use crate::motion::{Amounts, Motion};
+use crate::motion::{Amounts, Course, Motion};
 use crate::plan::Plan;
 use crate::promising::Promising;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
-use crate::statement::is_exchange_cost;
+use crate::statement::{exchange_costs_of, exchange_of};
 use crate::timeline::{Fact, Moment, SourceFact, Timeline};
 use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
 
@@ -332,6 +332,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             promises: &record.promises,
             planned: &record.planned,
             promised_flows: &record.promised_flows,
+            offspring: &record.offspring,
+            first_offspring: record.first_offspring,
             promised_inputs: &record.promise_missing_inputs,
             promised_details: &record.promise_runtime_details,
         }
@@ -382,6 +384,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             assets,
             promises: record.promises,
             promised_flows: record.promised_flows.into_boxed_slice(),
+            offspring: record.offspring.into_boxed_slice(),
             runtime_details: record.promise_runtime_details,
             missing_inputs: record.promise_missing_inputs.into_boxed_slice(),
             open_claims,
@@ -469,13 +472,13 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 let split = self.plan.book.splits[at as usize];
                 self.world.holdings.scale(split.unit, split.ratio);
             }
-            Fact::Source(_, SourceFact::Flow(id)) => self.post_journal(id, moment.day, false),
+            Fact::Source(_, SourceFact::Flow(id)) => self.post_journal(id, moment.day, Course::Forward),
             Fact::Source(_, SourceFact::Occurrence(txn)) => self.post_written_occurrence(txn, moment.day),
             Fact::ClaimChange(at) => self.write_off(at),
             // A settlement lands a pending flow; a return runs an actual one backwards.
             Fact::Settle(id) => {
                 let returned = matches!(self.plan.events.state(id, &self.plan.book.flows[id]), State::Returned(_));
-                self.post_journal(id, moment.day, returned);
+                self.post_journal(id, moment.day, if returned { Course::Back } else { Course::Forward });
             }
             Fact::Assert(index) => self.reconcile(index as usize),
             Fact::Deadline(rule, period) => self.deadline(rule as usize, moment.day, period),
@@ -493,7 +496,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// Evaluate sparse computed journal roots before posting their source
     /// flow. Literal-only flows retain the borrowed fast path above; computed
     /// quantities never fall back to the zero placeholders stored in Book.
-    fn post_journal(&mut self, id: Id<Flow>, day: Day, reversed: bool) {
+    fn post_journal(&mut self, id: Id<Flow>, day: Day, course: Course) {
         let book = self.plan.book;
         let source = &book.flows[id];
         let txn_id = source.txn;
@@ -504,21 +507,22 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             return;
         }
         let roots = journal.zip(offset).and_then(|(journal, offset)| journal.roots_of(offset));
+        let flows = &book.flows[transaction.flows];
         let in_group = journal.and_then(|journal| journal.group.as_deref());
-        let group = in_group.filter(|group| offset.is_some_and(|offset| group.header == Heading::Flow(offset)));
-        let item = in_group.zip(offset).and_then(|(group, offset)| {
-            group.items.iter().find(|item| item.flow == Some(offset)).map(|item| (group, item))
+        let cost_header = in_group
+            .filter(|group| offset.is_some_and(|offset| exchange_of(flows, group) == Some(offset)))
+            .filter(|group| exchange_costs_of(book, flows, group).next().is_some());
+        let computed_cost_item = in_group.zip(offset).is_some_and(|(group, offset)| {
+            let computed = |item: &Item<Option<u32>>| matches!(item.amount, Cut::Of(Expr::Computed(_)));
+            group.items.iter().any(|item| item.flow == Some(offset) && computed(item))
+                && exchange_costs_of(book, flows, group).any(|cost| cost == offset)
         });
-        let cost_item = item.filter(|(group, item)| is_exchange_cost(book, transaction.flows, group, item));
-        let cost_header =
-            group.filter(|group| group.items.iter().any(|item| is_exchange_cost(book, transaction.flows, group, item)));
-        let computed_cost_item = cost_item.is_some_and(|(_, item)| matches!(item.amount, Cut::Of(Expr::Computed(_))));
         if roots.is_none() && cost_header.is_none() && !computed_cost_item {
             let motion = self.journal_motion(id, day);
-            self.post(&if reversed { motion.reversed() } else { motion });
+            self.post(&motion.running(course));
             return;
         }
-        if let Err(problem) = self.post_computed(id, day, reversed, roots, cost_header) {
+        if let Err(problem) = self.post_computed(id, day, course, roots, cost_header) {
             self.record.report(problem);
         }
     }
@@ -529,7 +533,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         &mut self,
         id: Id<Flow>,
         day: Day,
-        reversed: bool,
+        course: Course,
         roots: Option<FlowExpressions>,
         cost_header: Option<&'b Made>,
     ) -> Result<(), Diagnostic> {
@@ -582,7 +586,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         // A computed basis is a call-local override: borrow it for this motion and allocate no runtime detail.
         let view = book.flow_view_with_detail(&flow, &detail);
         let motion = Motion::from_view_at(book, view, txn, Cause::Flow(id), day, amounts, offset.unwrap_or_default());
-        self.post(&if reversed { motion.reversed() } else { motion });
+        self.post(&motion.running(course));
         Ok(())
     }
 
@@ -609,7 +613,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub(crate) fn everything(&self, flow: &Flow, written: Amounts) -> Amounts {
         let book = self.plan.book;
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
-        let qty = if book.places[flow.from].class.holds_parcels() {
+        let qty = if book.places[flow.from].class == Class::Asset {
             let money = is_money(self.plan, flow.from, flow.out.unit);
             let view = book.flow_view(flow);
             slot.map_or(Qty::ZERO, |slot| slot.admitted(money, view.select(), &book.codes))

@@ -17,11 +17,11 @@ contract utility-bill with utility
 contract paycheck with acme
   8_000 USD monthly on 13 into checking
   from 2026-02-13
-  retirement 800 USD
-  irs 880 USD
-  ftb 370 USD
-  ssa 612 USD
-  checking ...
+  -> retirement 800 USD
+  -> irs 880 USD
+  -> ftb 370 USD
+  -> ssa 612 USD
+  -> checking ...
 
 /// Fall tuition, partly from checking and partly from the 529 plan.
 contract fall-tuition with state-u
@@ -46,8 +46,8 @@ contract next-renter-policy with insurer
 contract bonus with acme
   4_000 USD yearly on 12-15 into checking
   from 2026-12-15
-  retirement 400 USD
-  irs 880 USD
-  ftb 409 USD
-  ssa 306 USD
-  checking ...
+  -> retirement 400 USD
+  -> irs 880 USD
+  -> ftb 409 USD
+  -> ssa 306 USD
+  -> checking ...

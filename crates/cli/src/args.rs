@@ -37,6 +37,7 @@ pub enum Opt {
     Until,
     Paths,
     Check,
+    Upgrade,
     Json,
     Dry,
 }
@@ -80,6 +81,7 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::Version, "version", None, "show the version").short('V').everywhere(),
     option(Opt::Json, "json", None, "write machine-readable output").everywhere(),
     option(Opt::Check, "check", None, "report files that need formatting without writing them"),
+    option(Opt::Upgrade, "upgrade", None, "write v4 lines the v5 way: arrows on legs, the book's own end first"),
     option(Opt::Dry, "dry", None, "show proposed sync changes without writing them"),
     option(Opt::At, "at", Some("DATE"), "as of this day"),
     option(Opt::Value, "value", None, "value holdings at market prices"),
@@ -192,7 +194,13 @@ pub const COMMANDS: &[CommandSpec] = &[
         "a place, entity:NAME, system, ^code, #purpose, asset:NAME, contract:NAME, law, tax line, file:line or description",
     ),
     command(Verb::Sync, "sync", Operands::Any("NAME"), &[Opt::Dry], "read declared sources and apply their changes"),
-    command(Verb::Fmt, "fmt", Operands::Any("FILE"), &[Opt::Check], "format journal lines in the house style"),
+    command(
+        Verb::Fmt,
+        "fmt",
+        Operands::Any("FILE"),
+        &[Opt::Check, Opt::Upgrade],
+        "format journal lines in the house style",
+    ),
 ];
 
 /// What was asked for: the options every command shares, and the command.
@@ -210,6 +218,30 @@ pub struct Invocation<'a> {
     pub command: Command<'a>,
 }
 
+/// What `fmt` writes into a source.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Rewrite {
+    /// The house style: columns, and the clauses of a tail in one order.
+    Layout,
+    /// The house style, and every v4 line written the v5 way (`--upgrade`).
+    Upgrade,
+}
+
+/// Whether what `fmt` makes is written.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Effect {
+    Write,
+    /// Only report the files that would change (`--check`).
+    Check,
+}
+
+/// What was asked of `fmt`: which files (none is all), what to write into them, and whether to write it.
+pub struct Format<'a> {
+    pub files: Vec<&'a str>,
+    pub rewrite: Rewrite,
+    pub effect: Effect,
+}
+
 /// What to do. All but the first two work on a project.
 pub enum Command<'a> {
     Help,
@@ -219,12 +251,8 @@ pub enum Command<'a> {
         names: Vec<&'a str>,
         dry: bool,
     },
-    /// Format all project sources, or just the named files. With `--check`,
-    /// report whether formatting would change any file without writing.
-    Fmt {
-        files: Vec<&'a str>,
-        check: bool,
-    },
+    /// Format all project sources, or just the named files.
+    Fmt(Format<'a>),
     /// A view, about the money of an entity (`--for`) or of everyone.
     Report(Query<'a>, Option<&'a str>),
 }
@@ -284,7 +312,9 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
             return Ok(Command::Sync { names: operands.to_vec(), dry: has(Dry) });
         }
         Verb::Fmt => {
-            return Ok(Command::Fmt { files: operands.to_vec(), check: has(Check) });
+            let rewrite = if has(Upgrade) { Rewrite::Upgrade } else { Rewrite::Layout };
+            let effect = if has(Check) { Effect::Check } else { Effect::Write };
+            return Ok(Command::Fmt(Format { files: operands.to_vec(), rewrite, effect }));
         }
         Verb::Balance => {
             Query::Balance { globs: operands.to_vec(), at: day(At)?, value: has(Value), monthly: has(Monthly) }
@@ -551,9 +581,15 @@ mod tests {
     #[test]
     fn fmt_parses_targets_and_check_mode() {
         let args = ["fmt", "journal/2026.ax", "--check"].map(String::from);
-        assert!(
-            matches!(parse(&args).unwrap().command, Command::Fmt { files, check: true } if files == ["journal/2026.ax"])
-        );
+        assert!(matches!(
+            parse(&args).unwrap().command,
+            Command::Fmt(Format { files, rewrite: Rewrite::Layout, effect: Effect::Check }) if files == ["journal/2026.ax"]
+        ));
+        let args = ["fmt", "--upgrade"].map(String::from);
+        assert!(matches!(
+            parse(&args).unwrap().command,
+            Command::Fmt(Format { rewrite: Rewrite::Upgrade, effect: Effect::Write, .. })
+        ));
         let args = ["check", "--check"].map(String::from);
         assert!(parse(&args).err().unwrap().message.contains("has no option `--check`"));
     }

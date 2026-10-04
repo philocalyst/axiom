@@ -1,0 +1,26 @@
+/// Lease B: 2,500 USD a month from 2025-10-01, deposit 2,500 USD, due back a month after the lease ends (2026-10-31).
+// The lease contract creates this tenant-held deposit automatically.
+2025-10-01 rent-b
+2025-10-01 checking -> oak-street 1_950 USD #rent
+2025-10-01 home-loan
+// Historical loan split, independently checked from the contract terms: home-loan            251.24 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_558.35 USD   // interest
+2025-10-08 checking -> trader-joes 221.65 USD #groceries
+
+/// The roof is paid from personal savings: a contribution into the rental account, then the bill is paid.
+2025-10-08 checking -> rental-bank 16_500 USD #transfer
+2025-10-10 rental-bank -> summit-roofing 14_200 USD ^inv-roof
+2025-10-15 checking -> trader-joes 171.31 USD #groceries
+2025-10-19 checking -> cafe 143.41 USD #dining
+2025-10-22 checking -> home-supplies 387.38 USD #household
+2025-10-28 paycheck
+
+/// Second half of the county tax.
+2025-10-31 rental-bank -> county 2_190 USD #property-tax of house
+// Previous hand-entered depreciation: 956.61 USD on 2025-10-31. v4 derives this from the house parts.
+2025-10-31 home-loan = 276_788.77 USD
+2025-10-31 bills = empty
+2025-10-31 rental-bank = 2_401.79 USD
+2025-10-31 checking = 37_455.88 USD
+2025-10-31 deposit-bank = 2_500.00 USD
+2025-10-31 deposits = 2_500.00 USD

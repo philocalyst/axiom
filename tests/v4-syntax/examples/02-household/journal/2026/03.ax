@@ -1,0 +1,43 @@
+// March 2026.
+
+01 apartment-rent
+
+/// February's card statement, paid in full.
+03 checking -> visa 722.20 USD
+03 visa = empty
+
+05 checking -> college 300 USD #contribution
+06 visa -> trader-joes 109.30 USD
+08 cash -> cafe 22.50 USD #dining
+09 visa -> cafe 52.10 USD #dining
+
+13 paycheck
+
+14 visa -> trader-joes 121.75 USD
+16 utility-bill 116.30 USD
+19 visa -> cafe 68.40 USD #dining
+
+/// The brokerage sells the oldest shares first: all seven from January and
+/// one from February. Each lot realizes its own gain.
+20 brokerage 8 VTI -> checking 2_432.80 USD
+
+20 checking -> savings 500 USD #transfer
+
+/// This distribution does not pay for education; its earnings are taxable
+/// and owe the additional 10% tax for a nonqualified withdrawal.
+25 college -> checking 1_500 USD
+
+26 visa -> trader-joes 100.45 USD
+27 VTI -> brokerage 1.88 USD
+
+/// The statement is 14.50 USD below the book. `!` accepts and names the gap.
+31 cash = 63.00 USD !
+
+31 chase -> savings 51.14 USD #interest
+
+31 checking = 10_332.70 USD
+31 savings = 16_647.05 USD
+31 retirement = 43_700 USD
+31 college = 6_700 USD
+31 brokerage = 2 VTI
+31 brokerage = 1.88 USD

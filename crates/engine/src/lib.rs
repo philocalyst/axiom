@@ -55,6 +55,7 @@ mod lots;
 mod monitor;
 mod motion;
 mod occurrence;
+mod offspring;
 mod owners;
 mod plan;
 mod post;
@@ -75,6 +76,8 @@ mod traits;
 #[cfg(test)]
 mod claim_tests;
 #[cfg(test)]
+mod debt_tests;
+#[cfg(test)]
 mod fixture;
 #[cfg(test)]
 mod histories_tests;
@@ -82,6 +85,8 @@ mod histories_tests;
 mod loan_opening_tests;
 #[cfg(test)]
 mod loan_tests;
+#[cfg(test)]
+mod offspring_tests;
 #[cfg(test)]
 mod payment_tests;
 #[cfg(test)]
@@ -97,14 +102,15 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
-    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, RuntimeDetail,
-    RuntimeFlow, RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
+    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Offspring, Place, PurposeRoot,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
 };
 
 pub use assets::{
     AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId,
     PartKind, PendingCarry,
 };
+pub use axiom_model::Cause;
 pub use checkpoint::Checkpoint;
 pub use histories::{Extremes, Histories, Position, Steps};
 pub use ledger::Ledger;
@@ -184,6 +190,9 @@ pub struct Run {
     /// Item-level instantiated flows for promises, in promise order. The range
     /// on each Promise indexes this shared pool.
     pub promised_flows: Box<[RuntimeFlow]>,
+    /// The flows laws derived from flows that had posted (a card's cash back), in the order they posted, numbered from
+    /// 0: what [`Cause::Derived`] and `RuntimeTxn::Derived` say.
+    pub offspring: Box<[Offspring]>,
     /// Runtime detail overrides used by `promised_flows`.
     pub runtime_details: Arena<RuntimeDetail>,
     /// Unbound required inputs, stored as declaration-order indices. A promise
@@ -444,20 +453,6 @@ impl Hash for Parcel {
     }
 }
 
-/// Which flow caused something: one in the journal, or one handed to
-/// [`Ledger::apply`] (numbered in the order applied).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Cause {
-    Flow(Id<Flow>),
-    /// A source transaction whose grouped contract occurrence was materialized
-    /// by the engine. This keeps occurrence provenance distinct from a
-    /// hypothetical `Applied` flow and from template metadata flow IDs.
-    Transaction(Id<Txn>),
-    Applied(u32),
-    /// A period ending or a deadline passing.
-    Time,
-}
-
 /// Parcels leaving a place and realizing a gain.
 #[derive(Clone, Copy, Debug)]
 pub struct Gain {
@@ -633,6 +628,10 @@ pub struct Recorded<'a> {
     pub planned: &'a [Planned],
     /// What the occurrences kept and promised made: the flows, the inputs they left out, and the details of the flows.
     pub promised_flows: &'a [RuntimeFlow],
+    /// The flows laws derived, in the order they posted, from the number the first of them has: a ledger resumed from a
+    /// checkpoint numbers on from where its parent ended.
+    pub offspring: &'a [Offspring],
+    pub first_offspring: u32,
     pub promised_inputs: &'a [u16],
     pub promised_details: &'a Arena<RuntimeDetail>,
 }

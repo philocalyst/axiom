@@ -88,7 +88,7 @@ Source is UTF-8, read line by line.
 | purpose     | `#` then a name                                         | `#groceries`, `#repair` |
 | code        | `^` then `[a-z0-9][a-z0-9_:./-]*`, may contain `*`      | `^inv-2026-01`, `^check-1041` |
 | string      | `"…"` with `\" \\ \n \t`                                | `"food for the routine"` |
-| punct       | `-> .. ... = == != < <= > >= + - * / @ ( ) [ ] , : ! ? . \|` | |
+| punct       | `-> <- .. ... = == != < <= > >= + - * / @ ( ) [ ] , : ! ? . \|` | |
 
 A token starting with a digit is a date, month, number, percent, fraction or span
 if it matches that shape exactly, and a name otherwise (`401k`). At the start of an
@@ -100,7 +100,11 @@ the start of a line item. Case separates names (lowercase) from units (uppercase
 appears on a journal line.
 
 Keywords are recognized by position and not reserved. `empty` is the zero of every
-unit; a bare `0` where an amount belongs is an error whose fix is `empty`.
+unit; a bare `0` where an amount belongs is an error whose fix is `empty`. Three names
+are the language's own, and a book may not declare them again: the kinds `claim` and
+`debt-claim` (the places that hold what others owe, and what is owed, §7), which a
+second declaration refuses as `duplicate-kind`, and the purpose `principal` (the
+principal leg of a loan's payment, §7), which a second one makes `ambiguous-purpose`.
 
 ## 2. Reading a journal
 
@@ -108,7 +112,8 @@ Every journal line is `DATE SUBJECT …`, and the word after the subject says wh
 kind of line it is. A reader skims that column.
 
 ```text
-06 visa -> trader-joes 84.20 USD                    ->     a flow (§3)
+06 visa -> trader-joes 84.20 USD                    ->     a flow: it gave (§3)
+15 checking <- acme 3_200 USD                       <-     a flow: it took (§3)
 01 flat                                             —      a promise kept (§7)
 08 phone 47.30 USD                                  AMOUNT kept, differently this once
 27 halcyon owes studio 3_800 USD due 30d ^inv-12    owes   a promise of one flow: a claim (§7)
@@ -131,15 +136,45 @@ columns, and each flow's tail in one order.
 
 ```text
 DATE FLOW
-FLOW   := SOURCE -> TARGET [@ PRICE] TAIL (INDENT (LEG | ITEM))*
-SOURCE := [END [SELECT]] [AMOUNT | all [UNIT]]
-TARGET := [END] [AMOUNT]
-END    := ACCOUNT | OWNER | PARTY | UNIT | PROMISE | ?
-LEG    := END [SELECT] LEGAMOUNT [@ PRICE] TAIL
-ITEM   := [+ | -] AMOUNT TAIL
-TAIL   := [#PURPOSE [of THING]] [STRING] CODE* [for WHOM|PERIOD] [due WHEN] [against CODE] [via PARTY] [basis AMOUNT] [! [STRING]]
+FLOW      := SUBJECT -> OBJECT [AMOUNT] [@ PRICE] TAIL      gave
+           | SUBJECT <- OBJECT [AMOUNT] TAIL                took
+           | SUBJECT -> AMOUNT @ PRICE TAIL                 sold
+           | SUBJECT <- AMOUNT @ PRICE TAIL                 bought
+           (INDENT (LEG | ITEM))*
+SUBJECT   := END [SELECT] [AMOUNT | all [UNIT]]
+OBJECT    := END
+END       := ACCOUNT | OWNER | PARTY | UNIT | PROMISE | ?
+LEG       := (-> | <-) END [SELECT] LEGAMOUNT [@ PRICE] TAIL
+ITEM      := [+ | -] AMOUNT TAIL
+TAIL      := [#PURPOSE [of THING]] [STRING] CODE* [for WHOM|PERIOD] [due WHEN] [against CODE] [via PARTY] [basis AMOUNT] [! [STRING]]
 LEGAMOUNT := AMOUNT | ... | = AMOUNT | all [UNIT]
 ```
+
+**The arrow says what happened.** A flow line is about its subject, the end written first, which is meant to be the
+book's own: `->` says the subject gave, `<-` says it took. `checking <- acme 3_200 USD` and `acme -> checking 3_200 USD`
+are one flow, written from either end; the first is the way to write it because a reader of the book is the one who
+took. An amount belongs after the arrow, to the right of the end it is of (`S <- O A`: A came from O); the subject's own
+amount may stand before an arrow that gives (`fidelity[2026-01-20] 1.62 VTI -> checking @ 297.00 USD`).
+
+| line | what happened |
+|---|---|
+| `checking -> shop 84.20 USD` | gave |
+| `checking <- acme 3_200 USD` | took (the flow `acme -> checking 3_200 USD`) |
+| `broker -> 1.62 VTI @ 297.00 USD` | sold: one end, an amount and its price; the proceeds stay at the end |
+| `broker <- 7 VTI @ 285.70 USD` | bought: the price says what it cost |
+| `checking -> 900.00 EUR` with `->` legs | gave, split among the legs |
+| `me <- acme 8_000 USD` with `->` legs | the owner took it, and passes it on to each leg |
+| `checking <- 100 USD` with `<-` legs | took, from each of the legs |
+| `me -> shop 45_046.25 USD` with `<-` legs | the owner paid it, out of the accounts the legs name |
+
+The subject of a `<-`, of a purchase or sale, and of a split through an owner is one of the owners' books, because the line
+says what that book did. A party reaches it by the other end of an arrow: `acme <- checking 1_200 USD` is an error
+(`junction-subject`) that says to write `checking -> acme`, and so is a `<-` between two parties. A `->` that starts at a
+party (`acme -> checking 3_200 USD`) is read as it always was.
+
+A line with one end and an amount, but no price and no legs, says nothing of what the amount was exchanged for, and is an
+error with the words that fix it. The price states one amount: the other is what the amount times the price comes to
+(`1_999.90 USD` out for `7 VTI @ 285.70 USD`), so a line never writes both.
 
 Amounts are the forms of §4. The tail's clauses may come in any order; `axiom fmt`
 writes them in the order above.
@@ -149,14 +184,14 @@ writes them in the order above.
 - an **account**: money leaves or joins a position with an institution;
 - an **owner**: money or a thing held directly (`checking -> me 100 USD` is cash in
   hand; `me -> taqueria 18.50 USD`);
-- a **party**: money leaves the book's owners to it, or comes to them from it;
-- a **commodity in party position**: its issuer, as in `VTI -> fidelity 198.12 USD`
+- a **party**: money leaves the book's owners to it, or comes to them from it (`checking <- acme 3_200 USD`);
+- a **commodity in party position**: its issuer, as in `fidelity <- VTI 198.12 USD`
   (a fund pays);
 - a **promise**: what it is owed or owes (`checking -> mortgage 1_000 USD` pays the
   loan's principal; §7);
 - `?`: an unknown party, for money whose other end nobody knows;
 - nothing: the other side is the legs (a one-sided split), or, for an exchange
-  written with only a source, the same account (`fidelity 20 VTI -> 5_940 USD`).
+  written with one end, the same account (`fidelity -> 20 VTI @ 297.00 USD`).
 
 An asset is never an end: a flow says which asset it concerns through its
 purpose's object (§9): `#purchase of laptop`, `#improvement of condo`, `#sale of
@@ -167,9 +202,9 @@ declaration, except that a contract may share its party's name (§7).
 ```text
 06 visa -> trader-joes 84.20 USD                      a payment, #groceries by its party
 09 visa -> amazon 62.40 USD #household "hooks"        purpose and description written
-20 checking 2_000 USD -> fidelity 7 VTI               an exchange
-20 checking -> fidelity 7 VTI @ 285.70 USD            price given: 1,999.90 USD out
-05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD        a sale; the proceeds stay at fidelity
+15 checking <- acme 3_200 USD #wages                  a payment that arrives
+20 checking -> fidelity 7 VTI @ 285.70 USD            an exchange: 1,999.90 USD out for 7 VTI
+05 fidelity[2026-01-20] -> 1.62 VTI @ 297.00 USD      a sale; the proceeds stay at fidelity
 24 visa -> best-buy 1_739.13 USD #purchase of laptop  the laptop arrives (§9)
 12 checking -> jo 600 USD due 04-01                   lent: jo owes it (§7)
 24 visa -> delta 420 USD for lumen                    paid for lumen: lumen owes it (§7)
@@ -183,13 +218,26 @@ declaration, except that a contract may share its party's name (§7).
 
 **Split flows.** When the header names only one end, the indented legs are the
 other side; their total is the header amount, or the sum of the legs, and at most
-one leg is `...` (the remainder). A leg `= AMOUNT` makes its account's balance
-equal that amount after the flow. Many-to-many is an error.
+one leg is `...` (the remainder). Each leg leads with its arrow: `->` where the
+header's end gives and the legs receive, `<-` where it takes and the legs give; a leg
+that points the other way is an error that says which arrow to write. A leg `=
+AMOUNT` makes its account's balance equal that amount after the flow. A `?` leg beside a
+`...` leg is `cannot-infer`: both would take what the others leave, so write the amount of
+one of them, or assert the balance that solves it. Many-to-many is an error, and so is a
+leg with no arrow where one is needed.
 
-**A leg between two parties passes through the transaction's owner.** When the
-header's end and a leg's end are both parties, the value is the owner's on the
-way: `lumen -> irs 498 USD` in Sam's paystub is Sam's wages, paid on to the IRS.
-The owner of a transaction is the owner of its accounts, or `me`.
+```text
+15 me <- acme 8_000 USD #wages                         the paycheck, passed on
+  -> retirement 800 USD ^pretax                        to each leg, which says where it goes
+  -> irs        880 USD
+  -> checking   ...                                    the remainder
+```
+
+**A party's money passes through the transaction's owner.** When the header's end
+and a leg's end are both parties, the value is the owner's on the way: in Sam's
+paystub `sam <- lumen 498 USD` with a leg `-> irs 498 USD` is Sam's wages, paid on
+to the IRS. The owner of a transaction is the owner of its accounts, or `me`;
+`axiom fmt --upgrade` writes the owner in.
 
 **Line items.** An indented line that names no end is an item of the flow above it,
 between the same two ends, with its own purpose, description and codes:
@@ -210,7 +258,7 @@ unit than the header's is an exchange of its own (gas paid in ETH on a swap).
 14 visa -> target 120.00 USD #household
   32.10 USD #groceries
   12.00 USD #gifts "for jo's birthday"                // 75.90 stays #household
-15 title-co -> checking 627_000 USD #sale of condo
+15 checking <- title-co 627_000 USD #sale of condo
   - 6% #selling-costs "commission"                    // 37,620 withheld
 ```
 
@@ -478,13 +526,14 @@ Built-in properties:
 |----|----------|---------|
 | account, asset, business | `owner ENTITY [SHARE], …` | default `me`; `owner me 60%, theo 40%` gives each its share of what it earns and bears |
 | | `holds UNIT, … \| any` | commodities it may hold; a measure never |
+| kind of account | `owner KIND, …` | the kinds of entity that may own its accounts, as a word before the name or an `owner` line; none says any (`us` says `owner taxpayer` of `tax-deferred`) |
 | | `select fifo\|lifo\|hifo\|prorata\|exact` | relief policy |
 | | `opened DATE` | flows before are errors (`ends` closes it) |
 | | `liquidity SPAN` | time to turn into cash |
 | account, entity | `known-as PATTERN, …` | how it appears on statements (§14); a name is its own by default |
 | entity | `lives SYSTEM, …` | residences; `now lives` moves them |
 | | `citizen SYSTEM` | taxed by it wherever it lives |
-| | `books cash\|accrual` | when claims are income or spending (default cash) |
+| | `books cash\|accrual` | when claims are income or spending: when they are settled (`cash`, the default) or when they are made (`accrual`, §7) |
 | | `member ENTITY` | belongs to that household |
 | | `owner ENTITY` | on a business: owned by that owner |
 | | `of OWNER` | a client of that owner: what it pays is that owner's |
@@ -655,7 +704,8 @@ payment is recognized over that span; ending early makes the unused part a claim
 the party, pro rata), `share` (§10), `also` (§10), `deposit` (paid at the start,
 into the holding named, and owed back at the end: a tenant's deposit to you is held
 for the tenant; yours to a landlord is a claim on it). In accrual books an
-occurrence is income or spending on its due day, and the payment settles it.
+occurrence the party owed and nothing kept is a claim made when it is found missing,
+counted on the day the occurrence fell due; the payment settles it and counts nothing.
 
 **Loans** follow the ACTUS annuity. `loan AMOUNT on DATE at RATE over SPAN` is a
 debt of the owner to the party, and its life is one schedule, worked out once from
@@ -698,12 +748,12 @@ contract job with lumen
 
 ```text
 12 checking -> jo 600 USD due 04-01                lent: jo owes me 600
-12 jo -> checking 200 USD                          settles 200 of it
+12 checking <- jo 200 USD                          settles 200 of it
 24 visa -> delta 420 USD for lumen                 paid for lumen: lumen owes me 420
 27 halcyon owes studio due 30d ^inv-12             an invoice, itemized
   3_000 USD #design "brand refresh"
     800 USD #design "icon set"
-26 halcyon -> checking 3_800 USD ^inv-12           settles exactly that claim
+26 checking <- halcyon 3_800 USD ^inv-12           settles exactly that claim
 05 me owes pge 142.50 USD due 02-20 #utilities     a bill received
 ```
 
@@ -726,6 +776,12 @@ contract job with lumen
   purpose has no recognition to wait for. A claim `waived` is forgiven; in accrual
   books what was recognized is reversed, in the totals a purpose keeps (a law that
   counted it keeps what it counted).
+- What the owner owes is a claim of the party's, and works the same way the other way
+  round: `OWNER owes PARTY` (or a flow out of an account of a `payable` kind) makes a
+  bill, a payment from the owner's money to the party (or into that account) settles
+  bills by the same order, a bill the party forgives is `waived`, and a bill is
+  spending as an invoice is income, counted when made in accrual books and when
+  settled in cash books. A loan is not a bill: it is a balance its schedule holds.
 - `claims` lists what is open, with age, due day and whom it blames; `check` warns
   on what is past due; `available` counts claims as coming in, never as money to
   spend.
@@ -862,7 +918,9 @@ nothing, is plain and always one parcel.
   deferrals). `basis AMOUNT` overrides both. It is tied to the paying party when
   that party's kind is `restricted`, and to the `for` entity when the flow names
   one.
-- **Transfers** between an owner's holdings move parcels unchanged.
+- **Transfers** between an owner's holdings move parcels unchanged, except from a place that is not `deferred` into one
+  that says `basis zero`: that is a contribution, and arrives with no basis (an HSA funded from checking is pre-tax). A
+  contribution that is not deductible, such as a nondeductible IRA contribution, says `basis AMOUNT` on the flow.
 - **Relief** chooses which parcels leave: ties first, then the policy (the
   selector's, the account's, its kind's, then the commodity kind's; currencies are
   FIFO). Parcels that differ with no policy are ambiguous: an error listing each
@@ -947,10 +1005,43 @@ A written line that says the same thing replaces the derived one.
 A contract's `also` and `share` are laws: `also LINE [when E]` is `on flow`, `when E`,
 `derive LINE`, and `share 60% for studio` is `on flow`, `derive 60% of amount` as an item
 carved from the header, borne by the studio and for what the header is. They are made with
-each occurrence of the contract, a forecast's too. An `also` under a kind, an entity or a
-purpose derives nothing yet, and the book is told so (`also-inert`): what it would derive
-is a flow of a flow that has already posted. A `share` for a party, which is a claim, and a
-party kind's `sales-tax`, which is inside a price a journal flow paid, are not made yet.
+each occurrence of the contract, a forecast's too. A `share` for a party, which is a claim,
+and a party kind's `sales-tax`, which is inside a price a journal flow paid, are not made yet.
+
+An `also` under a kind, an account, an entity, a purpose or an asset is the same law, read
+as a flow posts instead of as an occurrence is made. `kind card`'s `also issuer -> self 2%
+of amount #rebate` is `on flow`, `derive issuer -> self 2% of amount #rebate`, for every
+flow at an account of that kind: a purchase on the card, a payment to it, a refund. What it
+derives is a flow of its own, or a `+` or `-` item that is one, along the flow's ends or back,
+and it is made after the flow's value has moved, so it cannot be a part of that flow: an item
+with no purpose (`- 5% of amount`) is an `error[derive-posted]` outside a contract. Beside what
+a derived flow says, it is the flow it came from: its day, its owner, its purpose when it says
+none (`self` is the end of the flow at what the law governs, the owner's end in a purpose's
+law).
+
+- **Which laws, in what order.** A flow fires the laws of the account at each end and of the
+  accounts it lies in, of the account's kind, of the party that stands there and of its
+  kind, then those of its purpose and the purposes above it, then those of the asset it is
+  for, each in the order it was written and once for the flow, however many of the places it
+  touches the law governs. Value that moved around inside what a law governs (between two of
+  an entity's own bank accounts) fires it for nothing. What a flow derives posts right after
+  it, the first it derived first, and what that derives before the next.
+- **A law does not watch what it made.** A card's cash back is no purchase and earns none,
+  and nothing is said. A chain that comes back to a law another law's flow led to is
+  stopped there and `error[derive-cycle]` names each law in order and the flow that began it,
+  once; so is a flow derived through more than eight laws (`derive-depth`). Narrow a law
+  with `when` to end the chain.
+- **A derived flow is a posting.** `register`, `flow`, `balance` and `tax` count it, and say
+  "derived by the `also` of kind `card` from FILE:LINE"; `why FILE:LINE` lists the flows a
+  line derived. It settles nothing: it is not a claim's payment, and a contract's occurrences
+  it comes from stay what they were.
+- **When it is made.** A pending flow derives what it derives when it settles, on that day,
+  and a void one never; a flow written ahead derives when the run reaches it; a forecast's
+  promised occurrences derive what a kept one does, since the forecast is the same run
+  continued. A returned flow returns what it derived, in the order it posted it, and the
+  return derives nothing anew.
+- **A law that can never fire** (an `also` under a kind of which nothing exists) is a
+  `warning[law-never-fires]`, not silence.
 
 ## 11. Dates, files, documents and returns
 
@@ -1034,8 +1125,18 @@ axiom lots      [ACCOUNT] [--at DATE]
 axiom forecast  [--until DATE] [--paths N]
 axiom why       TARGET                         a name, #purpose, ^code, law, tax line, "text" or FILE:LINE
 axiom sync      [NAME…] [--dry]                bring in what is new (§14)
-axiom fmt       [FILE…] [--check]              lay files out in the house style
+axiom fmt       [FILE…] [--check] [--upgrade]  lay files out in the house style; write v4 lines the v5 way
 ```
+
+**Books written the v4 way.** v4 had no `<-` and no arrow on a leg, and wrote an exchange with an amount on each side. A
+file that still does is read all the same, and `check` says so once for the file, with a label at the first of each form: a
+leg with no arrow, an amount on each side of an arrow that names two ends, an amount before an arrow with only legs after it,
+and an arrow with no subject. `axiom fmt --upgrade` rewrites them, and changes nothing the book says: it asks the book which
+end of a line is its own (a payment that arrives is written `<-`), whom a paystub passes through, and how many decimals a
+commodity has, writes each file's new text on a copy of the session, and keeps it only if the balances, the figures and every
+diagnostic are what they were. A line it would have to guess is left as it was and said: two amounts that no price a person
+would write relates (it names the shortest price that does), and a split whose legs end in the accounts of two owners. Plain
+`axiom fmt` lays a v4 line out and does not respell it.
 
 Global options: `--for ENTITY`, `--relaxed`, `--today DATE`, `--color
 auto|always|never`, and `--json`, which writes any view as JSON: tallies and totals

@@ -1,0 +1,14 @@
+use std
+base USD
+purpose fees : spending
+purpose rebate : income
+entity me : person
+entity shop
+account checking : bank
+account card : bank
+2025-12-31 market -> checking 1_000.00 USD
+purpose spending
+  law cash-back
+    on flow
+    derive + 2% of amount #rebate
+2026-01-05 checking -> shop 100.00 USD #fees

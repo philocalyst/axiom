@@ -1,29 +1,29 @@
 // September 2026.
 
-01 mortgage-2                                                 // ▸ 3,465.38: #interest of home 2,245.36 · principal 518.02 · escrow 702.00
-01 auto-ny                                                    // ▸ 1_310.00 #insurance, six months from 09-01
+01 mortgage-2                                              // ▸ 3,465.38: #interest of home 2,245.36 · principal 518.02 · escrow 702.00
+01 auto-ny                                                 // ▸ 1_310.00 #insurance, six months from 09-01
 01 nyc-lease
-07 joint-visa -> whole-foods 132.55 USD
+07 joint-visa     -> whole-foods 132.55 USD
 12 electricity-ca 62.00 USD
-14 car-loan                                                   // ▸ 560.20: #interest of car2 130.35 · principal 429.85
+14 car-loan                                                // ▸ 560.20: #interest of car2 130.35 · principal 429.85
 14 electricity-ny
 15 job-jamie
-15 job-harbor 3_364.00 USD                                 // 09-08 to 09-15 only     // ✗ 02a4
-  retirement-harbor 6%
-  blue-shield       240.00 USD #premium                  // ✗ 02a4: not prorated with the pay: restated
-  irs               470.40 USD
-  dtf               173.85 USD
-  nyc-dof            94.45 USD
-  ssa               257.35 USD
-  ny-pfl             13.05 USD
-19 joint-visa -> target 94.30 USD                             // ▸ #household · 8.875% now: the same Target, another city
-28 joint-visa -> trader-joes 101.12 USD
+15 job-harbor     3_364.00 USD                             // 09-08 to 09-15 only     // ✗ 02a4
+  -> retirement-harbor 6%
+  -> blue-shield       240.00 USD #premium                  // ✗ 02a4: not prorated with the pay: restated
+  -> irs               470.40 USD
+  -> dtf               173.85 USD
+  -> nyc-dof            94.45 USD
+  -> ssa               257.35 USD
+  -> ny-pfl             13.05 USD
+19 joint-visa   -> target      94.30 USD                      // ▸ #household · 8.875% now: the same Target, another city
+28 joint-visa   -> trader-joes 101.12 USD
 30 job-jamie
 30 hsa-employer
-30 harbor-labs 10_000 USD -> #wages "signing bonus"
-  irs             2_200.00 USD
-  dtf             1_170.00 USD
-  nyc-dof           425.00 USD
-  ssa               765.00 USD
-  ny-pfl             38.80 USD
-  joint-checking    ...                                  // ▸ 5,401.20
+30 family       <- harbor-labs 10_000 USD #wages "signing bonus"
+  -> irs            2_200.00 USD
+  -> dtf            1_170.00 USD
+  -> nyc-dof          425.00 USD
+  -> ssa              765.00 USD
+  -> ny-pfl            38.80 USD
+  -> joint-checking ...                                     // ▸ 5,401.20

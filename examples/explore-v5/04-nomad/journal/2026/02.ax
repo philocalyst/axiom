@@ -2,20 +2,20 @@
 
 01 rent-austin
 02 health
-06 staking 0.001441 ETH
+06 staking     0.001441 ETH
 08 github
 08 notion
-09 fieldnotes -> paypal-bal 750.00 USD ^inv-2026-015 via paypal            // ▸ settles the invoice
+09 paypal-bal  <- fieldnotes 750.00 USD ^inv-2026-015 via paypal           // ▸ settles the invoice
   - 3.49% #fees
   - 0.49 USD #fees
 12 nordlicht-retainer
-12 paypal-bal -> chase-checking 723.33 USD                      // withdrawn to the bank
-13 staking 0.001440 ETH
+12 paypal-bal            ->   chase-checking 723.33 USD                                                                                        // withdrawn to the bank
+13 staking               0.001440 ETH
 14 cloudflare
 15 brightside-retainer
-16 nordlicht owes me 2_800 EUR due 14d ^inv-2026-020 for 2026-02-16..2026-03-15 #consulting "data pipeline sprint"  // ✗ 04a6: half of it is earned in Austin and half in Lisbon
-20 staking 0.001440 ETH
-26 visa -> tap-portugal 690.00 USD #travel "AUS to LIS, one way"
-27 staking 0.001441 ETH
-27 wise-bal 2_000.00 USD -> 1_836.88 EUR                        // ▸ EUR for the Lisbon deposit
-28 rent-austin ends
+16 nordlicht             owes me             2_800 EUR    #consulting "data pipeline sprint" ^inv-2026-020 for 2026-02-16..2026-03-15 due 14d  // ✗ 04a6: half of it is earned in Austin and half in Lisbon
+20 staking               0.001440 ETH
+26 visa                  ->   tap-portugal   690.00 USD   #travel "AUS to LIS, one way"
+27 staking               0.001441 ETH
+27 wise-bal 2_000.00 USD ->                  1_836.88 EUR                                                                                      // ▸ EUR for the Lisbon deposit
+28 rent-austin           ends

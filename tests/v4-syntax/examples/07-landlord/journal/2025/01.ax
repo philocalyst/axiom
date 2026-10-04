@@ -1,0 +1,21 @@
+2025-01-01 checking -> oak-street 1_950 USD #rent
+
+/// Landlord policy for the year, paid in full.
+2025-01-06 rental-bank -> landlord-policy 1_560 USD #insurance of house
+2025-01-08 checking -> trader-joes 178.86 USD #groceries
+2025-01-15 checking -> trader-joes 138.10 USD #groceries
+2025-01-19 checking -> cafe 200.66 USD #dining
+2025-01-22 checking -> home-supplies 223.18 USD #household
+
+/// The day job: one occurrence of the `paycheck` plan a month.
+2025-01-28 paycheck
+
+/// Depreciation is a deduction with no cash: a flow out of the house's basis. The first month is a half month
+/// (mid-month convention); the plan says 913.58 USD, the whole month.
+// Previous hand-entered depreciation: 456.79 USD on 2025-01-31. v4 derives this from the house parts.
+2025-01-31 home-loan = 279_000 USD
+2025-01-31 rental-bank = 4_747.70 USD
+2025-01-31 checking = 23_482.20 USD
+2025-01-31 deposit-bank = 0.00 USD
+2025-01-31 deposits = 0.00 USD
+// Listed for rent on January 15. Nothing is earned before a tenant signs.

@@ -1,0 +1,16 @@
+// MISTAKE: an `owner` line that names an employer for a 529 plan, which is a taxpayer's account. The line is held to the same
+// range as a word before the name (120), and the fix is one of the entities that may own it.
+base USD
+use std
+use us/529
+
+entity acme : employer
+entity riley : person
+entity family : household
+
+account college : 529-plan
+  owner acme
+  beneficiary riley
+
+opening 2026-01-01
+  college 5_000 USD

@@ -23,14 +23,14 @@
 use axiom_core::{Day, Diagnostic, Id, Loc, Qty};
 use axiom_model::{
     Amount, Asset, Basis, Class, Contract, Dir, Entity, Fault, Object, Place, Purpose, PurposeRoot, RuntimeTxn, Select,
-    Subject, Watch,
+    Subject, Table, Watch,
 };
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
 use crate::ledger::Ledger;
 use crate::lots::{Origin, Request, Selection, Shares, Slice};
-use crate::motion::{Motion, Moves};
+use crate::motion::{Course, Motion, Moves};
 use crate::plan::Plan;
 use crate::recognition::{Counting, Counts, Dealing, Piece, Share};
 use crate::scope::{is_money, stays_with_owner};
@@ -68,8 +68,9 @@ fn restarts_basis(plan: &Plan, m: &Motion) -> bool {
 }
 
 impl Ledger<'_, '_, '_> {
-    /// Applies a flow: moves its value and fires every law that watches it.
-    pub(crate) fn post(&mut self, m: &Motion) {
+    /// Moves one flow's value and fires every law that watches it. What the laws derive is queued, and posted by
+    /// [`post`](Ledger::post) once this has finished with them all.
+    pub(crate) fn post_flow(&mut self, m: &Motion) {
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
@@ -79,7 +80,7 @@ impl Ledger<'_, '_, '_> {
         if watched {
             self.count_leaving(m, claiming.as_ref(), &on);
         }
-        if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
+        if self.holds_parcels(m) || m.moves != Moves::Value {
             if relief == Relief::Pending {
                 self.relieve(m, paid);
             }
@@ -103,9 +104,20 @@ impl Ledger<'_, '_, '_> {
         self.record_balances(m.day);
     }
 
+    /// Whether either end of a flow holds parcels: an asset, or a debt place that says `claim` (what is owed is a parcel there
+    /// as well). Between places that hold none a flow is two credits.
+    fn holds_parcels(&self, m: &Motion) -> bool {
+        let holds = |end: &Place, at: Id<Place>| match end.class {
+            Class::Asset => true,
+            Class::Debt => self.plan.traits.place(at).claim,
+            Class::Outside => false,
+        };
+        holds(m.source, m.from) || holds(m.target, m.to)
+    }
+
     /// A `!` on an assertion accepts its gap: it is never unused.
     fn accept_waiver(&mut self, m: &Motion) {
-        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), false, Some(waive)) =
+        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_) | Cause::Derived(_), false, Some(waive)) =
             (m.cause, m.opening, m.waive)
         {
             self.record.waivers.entry(waive.loc).or_insert(false);
@@ -117,7 +129,7 @@ impl Ledger<'_, '_, '_> {
     /// flow settled. Says whether the source has been relieved.
     fn deal_with_claims(&mut self, m: &Motion) -> (Option<Claiming>, Relief) {
         let claiming = self.settle_claims(m);
-        if !(self.plan.traits.place(m.from).claim && m.source.class.holds_parcels()) {
+        if !(self.plan.traits.place(m.from).claim && m.source.class == Class::Asset) {
             return (claiming, Relief::Pending);
         }
         self.relieve(m, Qty::ZERO);
@@ -138,12 +150,29 @@ impl Ledger<'_, '_, '_> {
     fn fire_arrival(&mut self, m: &Motion, on: &Occasion) {
         let rules = &self.plan.book.rules;
         self.fire(rules.at(Watch::In(m.to)), &Occasion { amount: Some(m.arrive), skip_internal: true, ..*on });
+        self.fire_touching(m, on);
         self.fire_purpose(m, on);
         self.fire_contract(m, on);
         self.fire_spend(m);
         self.fire(rules.at(Watch::Always(m.from)), on);
         if m.to != m.from {
             self.fire(rules.at(Watch::Always(m.to)), on);
+        }
+    }
+
+    /// The laws that say what happens to a flow at a place, either end: an account's, its kind's, and those of the
+    /// entity that stands there and of its kind. Value that moved around inside what a law governs entered and left
+    /// nothing, so such a flow does not fire it.
+    fn fire_touching(&mut self, m: &Motion, on: &Occasion) {
+        let rules = &self.plan.book.rules;
+        // A book that writes no `on flow` law under a place, a kind or an entity looks nothing up, for any flow.
+        if !rules.watches(Table::Touching) {
+            return;
+        }
+        let on = Occasion { amount: Some(m.out), skip_internal: true, ..*on };
+        self.fire(rules.at(Watch::Touching(m.from)), &on);
+        if m.to != m.from {
+            self.fire(rules.at(Watch::Touching(m.to)), &on);
         }
     }
 
@@ -176,7 +205,7 @@ impl Ledger<'_, '_, '_> {
         match m.txn {
             RuntimeTxn::Journal(txn) => book.txns.get(txn.id()).and_then(|txn| txn.contract),
             RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
-            RuntimeTxn::Adjustment { .. } => None,
+            RuntimeTxn::Adjustment { .. } | RuntimeTxn::Derived(_) => None,
         }
         .filter(|&contract| book.contracts.get(contract).is_some())
     }
@@ -295,11 +324,14 @@ impl Ledger<'_, '_, '_> {
         self.account_for_relief(m);
     }
 
-    /// A source that holds no parcels, a debt or the outside, only a balance: the balance falls by what leaves, less
-    /// what settled a claim, and the value in flight is one fresh slice.
+    /// A source that holds no parcels to give up, a debt or the outside: the balance falls by what leaves, less what settled a
+    /// claim, and the value in flight is one fresh slice. A debt place that says `claim` owes what leaves as a bill, a parcel.
     fn relieve_balance(&mut self, m: &Motion, settled: Qty) {
         self.scratch.relief.slices.clear();
-        self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty);
+        match m.source.class == Class::Debt && self.plan.traits.place(m.from).claim && m.course == Course::Forward {
+            true => self.owe(m),
+            false => self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty),
+        }
         let fresh = fresh_slice(m, m.out.qty, m.out.unit == self.plan.book.base, (m.day, m.txn));
         self.scratch.relief.slices.push(fresh);
     }
@@ -787,7 +819,7 @@ impl Ledger<'_, '_, '_> {
     fn source_flow(&self, m: &Motion) -> Option<Id<axiom_model::Flow>> {
         match m.cause {
             Cause::Flow(flow) => Some(flow),
-            Cause::Transaction(_) | Cause::Applied(_) | Cause::Time => None,
+            Cause::Transaction(_) | Cause::Applied(_) | Cause::Time | Cause::Derived(_) => None,
         }
     }
 
@@ -804,6 +836,8 @@ impl Ledger<'_, '_, '_> {
                 .and_then(|prefix| prefix.checked_add(u64::from(m.flow_ordinal)))
                 .unwrap_or(u64::MAX),
             Cause::Applied(ordinal) => u64::from(ordinal),
+            // After every flow the journal and the fold number, in the order they derived.
+            Cause::Derived(offspring) => (1 << 62) + offspring.index() as u64,
             Cause::Time => 0,
         };
         EventKey { day: m.day, sequence }
@@ -1189,8 +1223,8 @@ opening 2025-01-01
   checking 5_000 USD
 
 2025-01-05 checking -> contractor 1_000 USD #purchase of condo
-2025-02-15 checking -> contractor 100 USD #improvement of condo
-2025-03-01 buyer -> checking 1_500 USD #sale of condo
+2025-02-15 checking -> contractor 100 USD   #improvement of condo
+2025-03-01 checking <- buyer      1_500 USD #sale of condo
   - 60 USD #fees
 ";
         let book = book(text);

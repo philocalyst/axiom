@@ -13,26 +13,26 @@ error[assertion]: deposit-bank holds 0.00 USD, not 2,400.00 USD
 error[assertion]: deposits holds 0.00 USD, not 2,400.00 USD
    ╭─[journal/2025/02.ax:22:1]
    │
-22 │ 2025-02-28 deposits = 2_400.00 USD
-   │ ─────────────────┬────────────────
-   │                  ╰── 2,400.00 USD more than the ledger holds
+22 │ 2025-02-28 deposits     = 2_400.00 USD
+   │ ───────────────────┬──────────────────
+   │                    ╰── 2,400.00 USD more than the ledger holds
    │
    = note: 2,400.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-22 + 2025-02-28 deposits = 2_400.00 USD !
+22 + 2025-02-28 deposits     = 2_400.00 USD !
 
 error[assertion]: bills holds 0.00 USD, not 14,200.00 USD
    ╭─[journal/2025/09.ax:40:1]
    │
-40 │ 2025-09-30 bills = 14_200 USD
-   │ ──────────────┬──────────────
-   │               ╰── 14,200.00 USD more than the ledger holds
+40 │ 2025-09-30 bills        = 14_200 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── 14,200.00 USD more than the ledger holds
    │
    = note: 14,200.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-40 + 2025-09-30 bills = 14_200 USD !
+40 + 2025-09-30 bills        = 14_200 USD !
 
 error[assertion]: deposit-bank holds -2,400.00 USD, not 2,500.00 USD
    ╭─[journal/2025/10.ax:25:1]
@@ -51,14 +51,14 @@ error[assertion]: deposit-bank holds -2,400.00 USD, not 2,500.00 USD
 error[assertion]: deposits holds 0.00 USD, not 2,500.00 USD
    ╭─[journal/2025/10.ax:26:1]
    │
-26 │ 2025-10-31 deposits = 2_500.00 USD
-   │ ─────────────────┬────────────────
-   │                  ╰── 2,500.00 USD more than the ledger holds
+26 │ 2025-10-31 deposits     = 2_500.00 USD
+   │ ───────────────────┬──────────────────
+   │                    ╰── 2,500.00 USD more than the ledger holds
    │
    = note: 2,500.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-26 + 2025-10-31 deposits = 2_500.00 USD !
+26 + 2025-10-31 deposits     = 2_500.00 USD !
 
 error[contract-occurrence-date]: this day is outside every contract schedule's grace window
    ╭─[journal/2025/12.ax:12:1]
@@ -70,7 +70,7 @@ error[contract-occurrence-date]: this day is outside every contract schedule's g
 error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
    ╭─[journal/2025/12.ax:38:1]
    │
-21 │ 2025-12-29 buyer -> rental-bank 431_500 USD #sale of house
+21 │ 2025-12-29 rental-bank <- buyer 431_500 USD #sale of house
    │ ─────────────────────────────┬────────────────────────────
    │                              ╰── +431,500.00 USD from buyer
 22 │   - 26_968.75 USD #selling-cost of house
@@ -79,9 +79,9 @@ error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
 23 │ 2025-12-29 rental-bank -> home-loan 276_282.05 USD ^loan
    │ ────────────────────────────┬───────────────────────────
    │                             ╰── -276,282.05 USD to lender
-24 │ 2025-12-29 rental-bank -> buyer 2_500 USD #deposit of house
-   │ ─────────────────────────────┬─────────────────────────────
-   │                              ╰── -2,500.00 USD to buyer
+24 │ 2025-12-29 rental-bank -> buyer     2_500 USD      #deposit of house
+   │ ──────────────────────────────────┬─────────────────────────────────
+   │                                   ╰── -2,500.00 USD to buyer
    ⋮
 29 │ 2025-12-29 rental-bank -> lender 1_450.48 USD #interest of house
    │ ────────────────────────────────┬───────────────────────────────
@@ -91,37 +91,35 @@ error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
    │ ─────────────────────────────┬────────────────────────────
    │                              ╰── +2,500.00 USD from deposit-bank
    ⋮
-35 │ 2025-12-29 rental-bank -> checking 129_981.33 USD #transfer
-   │ ─────────────────────────────┬─────────────────────────────
-   │                              ╰── -129,981.33 USD to checking
+35 │ 2025-12-29 rental-bank  -> checking       129_981.33 USD #transfer
+   │ ─────────────────────────────────┬────────────────────────────────
+   │                                  ╰── -129,981.33 USD to checking
    ⋮
-38 │ 2025-12-31 rental-bank = 0.00 USD
-   │ ────────────────┬────────────────
-   │                 ╰── 200.00 USD less than the ledger holds
+38 │ 2025-12-31 rental-bank  =  0.00 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 200.00 USD less than the ledger holds
    │
    = note: 200.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-38 + 2025-12-31 rental-bank = 0.00 USD !
+38 + 2025-12-31 rental-bank  =  0.00 USD !
 
 ✗ 7 errors
 ✗ rests on a book with 7 errors (`axiom check` lists them): what they touch may be wrong
 
 Balances at 2026-04-16
 
-  Place                  Balance
-  ──────────────────────────────
-  checking        173,866.60 USD
-  ──────────────────────────────
-  deposit-bank     -4,900.00 USD
-  ──────────────────────────────
-  rental-bank         200.00 USD
-  ──────────────────────────────
-  summit-roofing   14,200.00 USD
+  Place                Balance
+  ────────────────────────────
+  checking      173,866.60 USD
+  ────────────────────────────
+  deposit-bank   -4,900.00 USD
+  ────────────────────────────
+  rental-bank       200.00 USD
 
   Net worth       Value (USD)
   ───────────────────────────
   Assets       169,166.60 USD
-  Liabilities   14,200.00 USD
+  Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    154,966.60 USD
+  Net worth    169,166.60 USD

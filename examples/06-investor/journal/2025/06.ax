@@ -1,50 +1,50 @@
-2025-06-01 checking -> landlord 2_650 USD
-2025-06-01 staking-source 27.02 USD -> wallet 0.01076454 ETH @ 2510.11 USD
-2025-06-05 checking 1_499.98 USD -> fidelity 5.1544 VTI @ 291.01 USD
-2025-06-09 checking -> utility-co 134.35 USD
+2025-06-01 checking -> landlord       2_650 USD
+2025-06-01 wallet   <- staking-source 0.01076454 ETH @ 2510.11 USD
+2025-06-05 checking -> fidelity       5.1544 VTI     @ 291.01 USD
+2025-06-09 checking -> utility-co     134.35 USD
 
 /// Buying UNH back thirteen days after selling it at a loss: a wash sale on 10 shares (IRC section 1091). Axiom does not
 /// see the 30-day window: this second line is the owner's statement of it. The disallowed loss on those 10 shares
 /// goes into the cost of the new lot, a flow into the basis of fidelity from the place that parks disallowed losses;
 /// tax.ax adds it back to short-term gains. The holding period does not tack.
-2025-06-10 checking 3_022.10 USD -> fidelity 10 UNH @ 302.21 USD
+2025-06-10 checking -> fidelity 10 UNH @ 302.21 USD
 2025-06-10 wash-sale -> fidelity[2025-06-10].basis 1_978.60 USD   // disallowed loss, 10 x (basis - price)
-2025-06-12 checking -> grocer 346.05 USD
-2025-06-12 dividend-source -> fidelity 30.15 USD
-2025-06-16 checking -> cafe 183.32 USD
-2025-06-16 checking 2_499.99 USD -> fidelity 35.2907 VXUS @ 70.84 USD
-2025-06-20 checking -> grocer 358.41 USD
-2025-06-24 checking -> misc-vendor 309.09 USD
-2025-06-25 dividend-source -> schwab 27.51 USD
-2025-06-26 dividend-source 72.08 USD -> fidelity 0.2404 VTI @ 299.85 USD // reinvested: 72.11 USD dividend
-2025-06-26 dividend-source -> fidelity 0.03 USD
-2025-06-28 dividend-source -> schwab 75.53 USD
-2025-06-30 northwind -> 14_000.00 USD
-  retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  irs       2_650.00 USD
-  payroll-office       1_071.00 USD   // Social Security and Medicare
-  checking            ...
+2025-06-12 checking -> grocer          346.05 USD
+2025-06-12 fidelity <- dividend-source 30.15 USD
+2025-06-16 checking -> cafe            183.32 USD
+2025-06-16 checking -> fidelity        35.2907 VXUS  @ 70.84 USD
+2025-06-20 checking -> grocer          358.41 USD
+2025-06-24 checking -> misc-vendor     309.09 USD
+2025-06-25 schwab   <- dividend-source 27.51 USD
+2025-06-26 fidelity <- dividend-source 0.2404 VTI    @ 299.85 USD  // reinvested: 72.11 USD dividend
+2025-06-26 fidelity <- dividend-source 0.03 USD
+2025-06-28 schwab   <- dividend-source 75.53 USD
+2025-06-30 me       <- northwind       14_000.00 USD
+  -> retirement     1_958.33 USD           // 401(k) deferral
+  -> espp-cash      1_400.00 USD for espp  // ESPP contribution, after tax
+  -> irs            2_650.00 USD
+  -> payroll-office 1_071.00 USD           // Social Security and Medicare
+  -> checking       ...
 
 /// Employee stock purchase plan, January-June offering.
 /// Offering date price 142.43, purchase date price 169.00: the plan buys at 85% of the lower, 121.07.
 /// The purchase is `for me`: money the plan held becomes mine, shares I own.
 /// The discount of 3_325.45 USD is pay: it arrives from a wages place, so it counts as wages, and as a basis flow it raises the cost of these shares to their value.
-2025-06-30 espp-cash 8_400.01 USD -> etrade 69.3814 NWND for me
+2025-06-30 espp-cash -> etrade 69.3814 NWND @ 121.07 USD for me
 2025-06-30 northwind -> etrade[2025-06-30].basis 3_325.45 USD
-2025-06-30 interest-source -> savings 270.62 USD
-2025-06-30 interest-source -> fidelity 204.03 USD
-2025-06-30 checking = 29_690.83 USD
-2025-06-30 savings = 81_457.99 USD
-2025-06-30 espp-cash = 0.00 USD
-2025-06-30 fidelity = 84.0926 VTI
-2025-06-30 fidelity = 36.3264 MSFT
-2025-06-30 fidelity = 19.7153 UNH
-2025-06-30 fidelity = 101.9694 FAST
-2025-06-30 fidelity = 73.0778 VXUS
-2025-06-30 schwab = 333.4448 BND
-2025-06-30 schwab = 38.2029 VXUS
-2025-06-30 etrade = 302.7888 NWND
-2025-06-30 coinbase = 0.15 BTC
-2025-06-30 coinbase = 0.95668225 ETH
-2025-06-30 wallet = 6.01954043 ETH
+2025-06-30 savings   <- interest-source 270.62 USD
+2025-06-30 fidelity  <- interest-source 204.03 USD
+2025-06-30 checking  =  29_690.83 USD
+2025-06-30 savings   =  81_457.99 USD
+2025-06-30 espp-cash =  0.00 USD
+2025-06-30 fidelity  =  84.0926 VTI
+2025-06-30 fidelity  =  36.3264 MSFT
+2025-06-30 fidelity  =  19.7153 UNH
+2025-06-30 fidelity  =  101.9694 FAST
+2025-06-30 fidelity  =  73.0778 VXUS
+2025-06-30 schwab    =  333.4448 BND
+2025-06-30 schwab    =  38.2029 VXUS
+2025-06-30 etrade    =  302.7888 NWND
+2025-06-30 coinbase  =  0.15 BTC
+2025-06-30 coinbase  =  0.95668225 ETH
+2025-06-30 wallet    =  6.01954043 ETH

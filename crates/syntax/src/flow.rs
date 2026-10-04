@@ -1,36 +1,52 @@
-//! Flows: the `SOURCE -> TARGET` header, its ends and tail, the indented legs
-//! of a one-side split (which an occurrence, a contract and an opening share),
-//! and the selectors that say which parcels an end means.
+//! Flows: the `SUBJECT -> OBJECT` and `SUBJECT <- OBJECT` headers, their ends and tail, the indented legs of a split
+//! (which an occurrence, a contract and an opening share), and the selectors that say which parcels an end means.
 
 use std::mem::discriminant;
 
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
+use crate::legacy::Form;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported, Scope};
 
 impl<'s> Parser<'s> {
-    /// The rest of a header once its source side is read: `-> TARGET TAIL`,
-    /// whose clauses start at `clauses` in the table, so that ones the caller
-    /// read first (a `DATE..DATE` spread) count too. Also gives where the arrow
-    /// was. The legs come after the header line has ended: see
-    /// [`Self::flow_legs`].
-    pub fn flow_head(&mut self, from: Side<'s>, scope: Scope, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
-        let arrow = self.arrow(&from)?;
-        let to = self.side(scope)?;
-        if self.at(Punct::Slash) {
-            return Err(self.slash(Some((&from, &to))));
+    /// The rest of a header once its subject is read: `-> OBJECT TAIL` or `<- OBJECT TAIL`, whose clauses start at
+    /// `clauses` in the table, so that ones the caller read first (a `DATE..DATE` spread) count too. Also gives where
+    /// the arrow was. The legs come after the header line has ended: see [`Self::flow_legs`].
+    pub fn flow_head(&mut self, subject: Side<'s>, scope: Scope, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
+        let (junction, arrow) = self.arrow(&subject)?;
+        let object = self.side(scope)?;
+        if let (Junction::Out, true) = (junction, self.at(Punct::Slash)) {
+            return Err(self.slash(Some((&subject, &object))));
         }
         let tail = self.tail(scope, clauses)?;
-        Ok((Flow { from, to, tail, body: Body::default() }, arrow))
+        let flow = match junction {
+            Junction::Out => {
+                Flow { from: subject, to: object, tail, body: Body::default(), course: Course::Direct(junction) }
+            }
+            Junction::In => self.taken(subject, object, tail, arrow)?,
+        };
+        Ok((flow, arrow))
     }
 
-    /// Reads the legs under `line` into `flow` and checks they fit its sides.
+    /// `S <- O A` is the flow `O -> S A`: the model reads what moved, and the arrow only says whose side it is written from.
+    fn taken(&mut self, subject: Side<'s>, object: Side<'s>, tail: Many<Clause<'s>>, arrow: Loc) -> Parse<Flow<'s>> {
+        if subject.end.is_none() {
+            return self.fail(no_subject(arrow, &object));
+        }
+        if subject.amount.is_some() {
+            return self.fail(amount_before_take(arrow, &subject, &object));
+        }
+        let (from, to) = (Side { end: object.end, amount: None }, Side { end: subject.end, amount: object.amount });
+        Ok(Flow { from, to, tail, body: Body::default(), course: Course::Direct(Junction::In) })
+    }
+
+    /// Reads the legs under `line` into `flow` and settles what the header and they say together.
     pub fn flow_legs(&mut self, line: &Line<'s>, flow: &mut Flow<'s>, scope: Scope, arrow: Loc) -> Parse<()> {
         flow.body = self.body(line, scope)?;
-        self.check_shape(flow, arrow)
+        self.settle(flow, arrow)
     }
 
     /// The lines under a header, each a leg (it names an end) or an item (it
@@ -72,15 +88,7 @@ impl<'s> Parser<'s> {
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn side(&mut self, scope: Scope) -> Parse<Side<'s>> {
-        let starts_end = match self.tok() {
-            Tok::Name(word) => !matches!(word, "all" | "empty"),
-            // An amount starts with its number, so a commodity first is an end.
-            Tok::Unit(_) => true,
-            // `? USD` is an unknown amount; a lone `?` is the unknown party.
-            Tok::Punct(Punct::Question) => !matches!(self.lexer.peek_second().tok, Tok::Unit(_)),
-            _ => false,
-        };
-        let end = if starts_end { Some(self.end()?) } else { None };
+        let end = if starts_end(self.tok(), || self.lexer.peek_second().tok) { Some(self.end()?) } else { None };
         let starts_amount = match self.tok() {
             Tok::Number(_) | Tok::Punct(Punct::LParen | Punct::Question | Punct::Minus) => true,
             // A share is of something: of what the header says, or, in a
@@ -96,28 +104,51 @@ impl<'s> Parser<'s> {
         Ok(Side { end, amount })
     }
 
-    /// The arrow. `=>` and `→` are read as one, with an error that says how to
-    /// write it, so the flow around them is still kept.
-    fn arrow(&mut self, from: &Side<'s>) -> Parse<Loc> {
-        if let Some(loc) = self.eat(Punct::Arrow) {
-            let written = self.text(loc);
-            if written != "->" {
-                let diag = Diagnostic::error("unknown-arrow", format!("`{written}` is not the flow arrow; write `->`"))
-                    .label(loc, "money moves with `->`")
-                    .fix("replace it", loc, "->");
-                self.report(diag);
-            }
-            return Ok(loc);
+    /// The arrow, and which way it points.
+    fn arrow(&mut self, subject: &Side<'s>) -> Parse<(Junction, Loc)> {
+        match (self.junction(), subject.end) {
+            (Some(junction), _) => Ok((junction, self.written_arrow(junction))),
+            (None, Some(_)) => Err(self.missing_arrow()),
+            (None, None) => Err(self.expected_arrow()),
         }
-        Err(self.expected_arrow(from.end.is_some()))
     }
 
-    /// Reports that the arrow is missing. Another name or amount right where it
-    /// belongs is a flow written without it, which `has_end` says had a source.
-    pub fn expected_arrow(&mut self, has_end: bool) -> Reported {
+    /// Consumes the arrow, which is `junction`'s. `=>`, `→` and `←` are read as one, with an error that says how to
+    /// write it, so the flow around them is still kept.
+    pub fn written_arrow(&mut self, junction: Junction) -> Loc {
+        let loc = self.bump().loc;
+        // The lexer's `->` and `<-` are the two that start with these bytes; the others it reads as arrows do not.
+        if !matches!(self.src.as_bytes()[loc.start as usize], b'-' | b'<') {
+            self.unknown_arrow(loc, junction);
+        }
+        loc
+    }
+
+    #[cold]
+    fn unknown_arrow(&mut self, loc: Loc, junction: Junction) {
+        let (written, arrow) = (self.text(loc), junction.spelling());
+        let diag = Diagnostic::error("unknown-arrow", format!("`{written}` is not the flow arrow; write `{arrow}`"))
+            .label(loc, format!("money moves with `{arrow}`"))
+            .fix("replace it", loc, arrow);
+        self.report(diag);
+    }
+
+    fn arrow_expected(&self) -> Diagnostic {
+        self.unexpected(self.peek(), "expected-arrow", "`->` or `<-`")
+    }
+
+    /// Reports that the arrow is missing.
+    pub fn expected_arrow(&mut self) -> Reported {
+        let diag = self.arrow_expected();
+        self.report(diag)
+    }
+
+    /// Reports that the arrow is missing after an end. Another name or amount right where it belongs is a flow
+    /// written without it.
+    pub fn missing_arrow(&mut self) -> Reported {
         let token = self.peek();
-        let mut diag = self.unexpected(token, "expected-arrow", "`->`");
-        if has_end && matches!(token.tok, Tok::Name(_) | Tok::Number(_)) {
+        let mut diag = self.arrow_expected();
+        if matches!(token.tok, Tok::Name(_) | Tok::Number(_)) {
             diag = diag.help("a flow moves value from one end to another: `checking -> food 84.20 USD`").fix(
                 "insert the arrow",
                 self.point(token.loc.start),
@@ -172,9 +203,10 @@ impl<'s> Parser<'s> {
         }
     }
 
-    /// An indented line of a split: `END LEGAMOUNT TAIL`.
+    /// An indented line of a split: `[ARROW] END LEGAMOUNT TAIL`.
     pub fn leg(&mut self, line: &mut Line<'s>, scope: Scope) -> Parse<Ref<Leg<'s>>> {
         let doc = line.take_doc();
+        let arrow = self.leg_arrow(scope)?;
         let end = self.end()?;
         // What a leg may say that a header side may not: the remainder, a
         // target balance, or a share of the header; and in an opening nothing
@@ -189,7 +221,20 @@ impl<'s> Parser<'s> {
         let tail = self.tail(scope, self.mark::<Clause>())?;
         self.expect_eol()?;
         let loc = self.loc_from(line.body);
-        Ok(self.push(Leg { doc, end, amount, tail, loc }))
+        Ok(self.push(Leg { doc, end, amount, tail, loc, arrow }))
+    }
+
+    /// The arrow a leg leads with, if it has one. An opening's lines state balances, which move nothing.
+    fn leg_arrow(&mut self, scope: Scope) -> Parse<Option<Junction>> {
+        let Some(junction) = self.junction() else { return Ok(None) };
+        if scope.is_opening() {
+            return Err(self.expected(
+                "expected-end",
+                "a name such as `checking`: an opening line states a balance and has no arrow",
+            ));
+        }
+        self.written_arrow(junction);
+        Ok(Some(junction))
     }
 
     /// An indented line that names no end: `[+ | -] AMOUNT TAIL`.
@@ -378,24 +423,120 @@ impl<'s> Parser<'s> {
         Ok(Waive { at: bang.to(self.bump().loc), reason: Some(Text(reason)) })
     }
 
-    /// One side split needs exactly one named side and legs for the other.
-    fn check_shape(&mut self, flow: &Flow<'s>, arrow: Loc) -> Parse<()> {
-        let (from_named, to_named) = (flow.from.end.is_some(), flow.to.end.is_some());
-        let legs = self.slice(flow.body.legs);
-        let diag = match (from_named, to_named, legs.first()) {
-            (true, true, Some(leg)) => many_to_many(arrow, leg.loc),
-            (false, false, _) => no_end(arrow),
-            // An exchange with only a source stays at the source: `fidelity 20 VTI -> 5_940 USD`.
-            (true, false, None) if flow.from.amount.is_some() && flow.to.amount.is_some() => return Ok(()),
-            (true, false, None) => missing_legs(arrow, true),
-            (false, true, None) => missing_legs(arrow, false),
-            _ => {
-                let mut remainders = legs.iter().filter(|leg| matches!(leg.amount, Quantity::Rest));
-                let (Some(first), Some(second)) = (remainders.next(), remainders.next()) else { return Ok(()) };
-                two_remainders(first.loc, second.loc)
-            }
+    /// What the header and the lines under it say together: a flow between two ends, a split into legs, a split through an
+    /// owner, or an exchange inside one end.
+    fn settle(&mut self, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
+        let legs = !flow.body.legs.is_empty();
+        match (flow.from.end, flow.to.end, legs) {
+            (None, None, _) => self.fail(no_end(arrow)),
+            (Some(_), Some(_), false) => Ok(()),
+            (Some(_), Some(_), true) => self.settle_through(flow, arrow),
+            (_, _, true) => self.settle_split(flow),
+            _ => self.settle_exchange(flow, arrow),
+        }?;
+        self.note_old(flow, arrow);
+        Ok(())
+    }
+
+    /// Notes a header that is spelled the way v4 spelled it: an amount on each side of two named ends, an amount before an
+    /// arrow that has only legs after it, or no subject. What the upgrade can move or drop is a written amount: a marker,
+    /// a share or an `all` has no other spelling yet, and an exchange that names one end is no spelling of anything v4
+    /// read.
+    fn note_old(&mut self, flow: &Flow<'s>, arrow: Loc) {
+        let legs = !flow.body.legs.is_empty();
+        let written = |side: &Side<'s>| side.amount.and_then(Quantity::literal);
+        let ends = flow.from.end.is_some() && flow.to.end.is_some();
+        // Each is pointed at by what makes it old: the amounts, or the arrow that has nothing before or after it.
+        let at = |amount: Literal<'s>| self.loc_of(amount.0);
+        let form = match (written(&flow.from), written(&flow.to), legs) {
+            (Some(left), Some(right), _) if ends => Some((Form::TwoAmounts, at(left).to(at(right)))),
+            (Some(left), None, true) => Some((Form::DanglingAmount, at(left).to(arrow))),
+            _ => (matches!(flow.course, Course::Direct(Junction::Out)) && flow.from.end.is_none())
+                .then_some((Form::NoSubject, arrow)),
         };
+        if let Some((form, loc)) = form {
+            self.old.note(form, loc, 1);
+        }
+        // The legs of a split or a through-split lead with an arrow; the others may leave it off.
+        if matches!(flow.course, Course::Direct(Junction::Out)) {
+            self.note_bare_legs(flow.body.legs);
+        }
+    }
+
+    /// Legs under a header that names two ends are how an owner passes a party's money on: `me <- acme 12_000 USD` with
+    /// `->` legs, `me -> shop 100 USD` with `<-` legs. Without arrows on them it is many-to-many.
+    fn settle_through(&mut self, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
+        let junction = flow.course.junction();
+        let first = &self.slice(flow.body.legs)[0];
+        let (arrowed, at) = (first.arrow.is_some() || junction == Junction::In, first.loc);
+        if !arrowed || flow.from.amount.is_some() {
+            return self.fail(many_to_many(arrow, at));
+        }
+        let owner = match junction {
+            Junction::Out => flow.from.end.take(),
+            Junction::In => flow.to.end.take(),
+        };
+        flow.course = Course::Through(junction, self.push(owner.expect("settle sends only flows that name both ends")));
+        self.settle_split(flow)
+    }
+
+    /// One named end and legs for the other: the arrows they lead with point the way the split goes.
+    fn settle_split(&mut self, flow: &Flow<'s>) -> Parse<()> {
+        let toward = if flow.from.end.is_some() { Junction::Out } else { Junction::In };
+        let arrows = match flow.course {
+            Course::Direct(Junction::Out) => Arrows::Tolerated(toward),
+            _ => Arrows::Required(toward),
+        };
+        self.legs_point(flow.body.legs, arrows)?;
+        let mut remainders = self.slice(flow.body.legs).iter().filter(|leg| matches!(leg.amount, Quantity::Rest));
+        let (Some(first), Some(second)) = (remainders.next(), remainders.next()) else { return Ok(()) };
+        let diag = two_remainders(first.loc, second.loc);
         self.fail(diag)
+    }
+
+    /// One named end and no legs: an exchange inside it, which says its price. v4's source with both amounts stays as it
+    /// was written, and the model refuses it.
+    fn settle_exchange(&mut self, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
+        let (from, to) = (flow.from.amount.is_some(), flow.to.amount.is_some());
+        let named = flow.course.junction() == Junction::In || flow.from.end.is_some();
+        if from && to && flow.to.end.is_none() {
+            return Ok(());
+        }
+        if !named || !to || from {
+            return self.fail(match flow.course.junction() {
+                Junction::In => takes_nothing(arrow, flow.to.end),
+                Junction::Out => missing_legs(arrow, flow.from.end.is_some()),
+            });
+        }
+        if !self.slice(flow.tail).iter().any(|clause| matches!(clause.kind, ClauseKind::Price(_))) {
+            return self.fail(exchange_no_price(arrow, flow));
+        }
+        flow.within();
+        Ok(())
+    }
+
+    /// How the legs under a header write their arrows, and whether they do. A leg that leads with an arrow when it is
+    /// told it need not still has to point the right way.
+    pub fn legs_point(&mut self, legs: Many<Leg<'s>>, arrows: Arrows) -> Parse<()> {
+        let faulty = self.slice(legs).iter().find_map(|leg| Some((leg, arrows.fault(leg.arrow)?)));
+        let problem = faulty.map(|(leg, fault)| fault.said(leg.loc, self.arrow_at(leg)));
+        problem.map_or(Ok(()), |diag| self.fail(diag))
+    }
+
+    /// Notes the legs of a line that was kept and that name no arrow, which v4 wrote and v5 does not.
+    pub fn note_bare_legs(&mut self, legs: Many<Leg<'s>>) {
+        let mut bare = self.slice(legs).iter().filter(|leg| leg.arrow.is_none()).map(|leg| leg.loc);
+        if let Some(first) = bare.next() {
+            let more = bare.count();
+            self.old.note(Form::BareLeg, first, 1 + more as u32);
+        }
+    }
+
+    /// Where a leg's arrow is: the first token of its line.
+    fn arrow_at(&self, leg: &Leg<'s>) -> Loc {
+        let start = leg.loc.start as usize;
+        let len = Punct::lex(&self.src.as_bytes()[start..]).map_or(2, |(_, len)| len);
+        Loc::new(leg.loc.file, leg.loc.start, (start + len) as u32)
     }
 
     // ─── Selectors ──────────────────────────────────────────────────────────
@@ -449,6 +590,7 @@ fn many_to_many(arrow: Loc, leg: Loc) -> Diagnostic {
         .context(arrow, "both sides are already named here")
         .note("legs spell out the side the header leaves unnamed: `acme -> 5_200 USD` with legs for where it goes")
         .help("write two transactions, one for each flow")
+        .help("or let the subject pass it on: `me <- acme 5_200 USD` with a leg `-> irs 692 USD`")
 }
 
 fn no_end(arrow: Loc) -> Diagnostic {
@@ -488,4 +630,141 @@ fn rest_in_header(loc: Loc) -> Diagnostic {
     Diagnostic::error("remainder-in-header", "`...` means \"whatever remains\", which only a leg can say")
         .label(loc, "not allowed in a flow's header")
         .help("write the amount, or move this to a leg")
+}
+
+impl<'s> Flow<'s> {
+    /// An exchange inside one end: the end is on both sides, and the amount on the side that gives (a sale) or takes (a
+    /// purchase).
+    fn within(&mut self) {
+        let bare = |end: Option<End<'s>>| end.map(|end| End { select: Many::EMPTY, ..end });
+        match self.course.junction() {
+            Junction::Out => {
+                self.from.amount = self.to.amount.take();
+                self.to.end = bare(self.from.end);
+            }
+            Junction::In => self.from.end = bare(self.to.end),
+        }
+    }
+}
+
+/// How the legs under a header write their arrows: a header written the new way needs them, one written the way v4 did
+/// may leave them off, and a return's tallies have none.
+#[derive(Clone, Copy)]
+pub(crate) enum Arrows {
+    Required(Junction),
+    Tolerated(Junction),
+    Forbidden,
+}
+
+/// What is wrong with the arrow of a leg. Small, so that the legs that are right cost no diagnostic to find.
+#[derive(Clone, Copy)]
+enum Fault {
+    Missing(Junction),
+    Wrong(Junction),
+    Tally,
+}
+
+impl Arrows {
+    /// What is wrong with a leg that wrote `written` (or none), if anything.
+    fn fault(self, written: Option<Junction>) -> Option<Fault> {
+        match (written, self) {
+            (None, Arrows::Required(toward)) => Some(Fault::Missing(toward)),
+            (Some(written), Arrows::Required(toward) | Arrows::Tolerated(toward)) if written != toward => {
+                Some(Fault::Wrong(toward))
+            }
+            (Some(_), Arrows::Forbidden) => Some(Fault::Tally),
+            _ => None,
+        }
+    }
+}
+
+impl Fault {
+    /// The error for a leg written at `leg`, whose arrow (if it has one) is at `arrow`.
+    fn said(self, leg: Loc, arrow: Loc) -> Diagnostic {
+        match self {
+            Fault::Missing(toward) => leg_needs_arrow(leg, toward),
+            Fault::Wrong(toward) => leg_direction(arrow, toward),
+            Fault::Tally => tally_arrow(arrow),
+        }
+    }
+}
+
+/// Whether a token starts an end and not an amount: a name, a commodity (an amount starts with its number, so one
+/// first is an end), or a lone `?` (`? USD` is an unknown amount). `after` is the token that follows.
+pub(crate) fn starts_end<'s>(token: Tok<'s>, after: impl FnOnce() -> Tok<'s>) -> bool {
+    match token {
+        Tok::Name(word) => !matches!(word, "all" | "empty"),
+        Tok::Unit(_) => true,
+        Tok::Punct(Punct::Question) => !matches!(after(), Tok::Unit(_)),
+        _ => false,
+    }
+}
+
+/// What a side says in its own words, as far as they are plain: its end and its amount, `acme 3_200 USD`.
+fn said(side: &Side<'_>) -> String {
+    let (end, amount) =
+        (side.end.map(|end| end.name.0), side.amount.and_then(Quantity::literal).map(|amount| amount.0));
+    [end, amount].into_iter().flatten().collect::<Vec<_>>().join(" ")
+}
+
+fn no_subject(arrow: Loc, object: &Side<'_>) -> Diagnostic {
+    Diagnostic::error("expected-subject", "a `<-` line starts with the end that takes")
+        .label(arrow, "nothing is written before this arrow")
+        .help(format!("name the account that takes it: `checking <- {}`", said(object)))
+}
+
+fn amount_before_take(arrow: Loc, subject: &Side<'_>, object: &Side<'_>) -> Diagnostic {
+    let words = Side { end: object.end, amount: subject.amount };
+    let end = subject.end.map_or("checking", |end| end.name.0);
+    Diagnostic::error("amount-before-take", "a `<-` line states its amount after the end it takes from")
+        .label(arrow, "the amount belongs to the right of this arrow")
+        .help(format!("write `{end} <- {}`, with the amount last", said(&words)))
+}
+
+fn takes_nothing(arrow: Loc, subject: Option<End<'_>>) -> Diagnostic {
+    let end = subject.map_or("checking", |end| end.name.0);
+    Diagnostic::error("takes-nothing", "nothing follows this `<-`")
+        .label(arrow, "what does it take, and from whom?")
+        .help(format!("name the end it takes from and an amount: `{end} <- acme 5_750 USD`"))
+        .help(format!("or an amount and a price: `{end} <- 7 VTI @ 285.70 USD`"))
+}
+
+fn exchange_no_price(arrow: Loc, flow: &Flow<'_>) -> Diagnostic {
+    let (end, amount) = (flow.from.end.or(flow.to.end), flow.to.amount.and_then(Quantity::literal));
+    let (end, amount) = (end.map_or("fidelity", |end| end.name.0), amount.map_or("7 VTI", |amount| amount.0));
+    let example = format!("{end} {} {amount} @ 297.00 USD", flow.course.junction().spelling());
+    let diag = Diagnostic::error("exchange-no-price", "this line has one end and an amount, but no price and no legs")
+        .label(arrow, "nothing says what the amount was exchanged for, or where it goes")
+        .help(format!("an exchange says its price: `{example}`"))
+        .help("or indent legs below the line to split the amount among ends");
+    match flow.course.junction() {
+        Junction::Out => diag.fix(
+            "or send it to `?`, the party for money whose destination is unknown",
+            Loc::new(arrow.file, arrow.end, arrow.end),
+            " ?",
+        ),
+        Junction::In => diag,
+    }
+}
+
+fn leg_needs_arrow(leg: Loc, toward: Junction) -> Diagnostic {
+    let arrow = toward.spelling();
+    Diagnostic::error("leg-needs-arrow", "a leg of this flow leads with its arrow")
+        .label(leg, "this leg names no arrow")
+        .note("under a header written with `<-`, or a split through an owner, each leg says which way its value goes")
+        .fix(format!("insert `{arrow} `"), Loc::new(leg.file, leg.start, leg.start), format!("{arrow} "))
+}
+
+fn leg_direction(arrow: Loc, toward: Junction) -> Diagnostic {
+    let (wrong, right) = (toward.turned().spelling(), toward.spelling());
+    Diagnostic::error("leg-direction", format!("`{wrong}` points the wrong way for a leg of this flow"))
+        .label(arrow, format!("the legs here go `{right}`"))
+        .note("value goes from the header's end to each leg with `->`, and from each leg to it with `<-`")
+        .fix(format!("write `{right}`"), arrow, right)
+}
+
+fn tally_arrow(arrow: Loc) -> Diagnostic {
+    Diagnostic::error("tally-arrow", "a tally has no arrow")
+        .label(arrow, "this line lists what a return counted, and moves nothing")
+        .fix("remove it", Loc::new(arrow.file, arrow.start, arrow.end + 1), "")
 }

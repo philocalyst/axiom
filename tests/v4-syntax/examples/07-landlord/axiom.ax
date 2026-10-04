@@ -1,0 +1,12 @@
+// Jamie's rental house, acquired 2024-12-18 and sold 2025-12-29.
+// The journal records the original cash facts; us/rental derives per-part
+// depreciation from the home's basis, land and in-service date.
+base USD
+use std
+use us
+use us/rental
+
+entity me : person
+  born   1980-05-02
+  filing single
+  lives  us

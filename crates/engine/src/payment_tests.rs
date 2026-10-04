@@ -48,10 +48,10 @@ fn everything(book: &Book, run: &Run) -> i64 {
 #[test]
 fn a_split_payment_net_of_a_fee_settles_the_whole_invoice() {
     let lines = "\
-2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
-2026-01-20 ann -> 3_100 USD ^i1
-  checking 3_009.80 USD
-  stripe 90.20 USD #fees
+2026-01-02 ann owes me  3_100 USD #design ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD ^i1
+  -> checking 3_009.80 USD
+  -> stripe      90.20 USD #fees
 ";
     paid(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[]));
@@ -65,10 +65,10 @@ fn a_split_payment_net_of_a_fee_settles_the_whole_invoice() {
 #[test]
 fn the_fee_leg_may_come_first() {
     let lines = "\
-2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
-2026-01-20 ann -> 3_100 USD ^i1
-  stripe 90.20 USD #fees
-  checking 3_009.80 USD
+2026-01-02 ann owes me  3_100 USD #design ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD ^i1
+  -> stripe      90.20 USD #fees
+  -> checking 3_009.80 USD
 ";
     paid(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[]));
@@ -81,11 +81,11 @@ fn the_fee_leg_may_come_first() {
 #[test]
 fn a_split_payment_settles_the_claim_it_is_the_size_of_and_not_the_oldest() {
     let lines = "\
-2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
-2026-01-03 ann owes me 3_100 USD due 2026-02-01 ^i2
-2026-01-20 ann -> 3_100 USD
-  checking 3_009.80 USD
-  stripe 90.20 USD #fees
+2026-01-02 ann owes me  300 USD   ^i1 due 2026-02-01
+2026-01-03 ann owes me  3_100 USD ^i2 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD
+  -> checking 3_009.80 USD
+  -> stripe      90.20 USD #fees
 ";
     paid(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 300_00)]));
@@ -97,10 +97,10 @@ fn a_split_payment_settles_the_claim_it_is_the_size_of_and_not_the_oldest() {
 #[test]
 fn a_split_payment_of_more_than_the_claim_settles_it_and_the_rest_is_ordinary() {
     let lines = "\
-2026-01-02 ann owes me 3_000 USD due 2026-02-01 ^i1
-2026-01-20 ann -> 3_100 USD
-  checking 3_009.80 USD
-  stripe 90.20 USD #fees
+2026-01-02 ann owes me  3_000 USD ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD
+  -> checking 3_009.80 USD
+  -> stripe      90.20 USD #fees
 ";
     paid(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[]));
@@ -114,10 +114,10 @@ fn a_split_payment_of_more_than_the_claim_settles_it_and_the_rest_is_ordinary() 
 #[test]
 fn a_returned_split_payment_opens_what_each_leg_settled() {
     let lines = "\
-2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
-2026-01-20 ann -> 3_100 USD ^pay-1
-  checking 3_009.80 USD
-  stripe 90.20 USD #fees
+2026-01-02 ann owes me  3_100 USD #design ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD ^pay-1
+  -> checking 3_009.80 USD
+  -> stripe      90.20 USD #fees
 ";
     paid(lines, |book, run| assert_eq!(tab(book, run, "ann"), claims(&[])));
     paid(&format!("{lines}2026-01-25 ^pay-1 returned\n"), |book, run| {
@@ -143,10 +143,10 @@ fn a_payment_to_a_third_party_settles_nothing() {
 #[test]
 fn a_split_of_which_no_leg_reaches_the_owner_settles_nothing() {
     let lines = "\
-2026-01-02 ann owes me 200 USD due 2026-02-01 ^i1
-2026-01-20 ann -> 200 USD
-  bob 120 USD
-  stripe 80 USD
+2026-01-02 ann owes me  200 USD ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 200 USD
+  -> bob    120 USD
+  -> stripe  80 USD
 ";
     paid(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i1", 200_00)]));
@@ -158,11 +158,11 @@ fn a_split_of_which_no_leg_reaches_the_owner_settles_nothing() {
 #[test]
 fn a_leg_that_is_still_pending_is_not_yet_what_the_party_pays() {
     let lines = "\
-2026-01-02 ann owes me 300 USD due 2026-02-01 ^i0
-2026-01-03 ann owes me 3_100 USD due 2026-02-01 ^i1
-2026-01-20 ann -> 3_100 USD
-  checking 3_009.80 USD
-  stripe (90.20 USD) ^fee-1
+2026-01-02 ann owes me  300 USD   ^i0 due 2026-02-01
+2026-01-03 ann owes me  3_100 USD ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD
+  -> checking 3_009.80 USD
+  -> stripe   (90.20 USD)  ^fee-1
 2026-01-25 ^fee-1 settled
 ";
     paid(lines, |book, run| {
@@ -180,12 +180,12 @@ fn a_leg_that_is_still_pending_is_not_yet_what_the_party_pays() {
 #[test]
 fn the_legs_of_a_statement_from_two_parties_are_a_payment_each() {
     let lines = "\
-2026-01-02 ann owes me 100 USD due 2026-02-01 ^i0
-2026-01-03 ann owes me 600 USD due 2026-02-01 ^i1
-2026-01-04 bob owes me 400 USD due 2026-02-01 ^j1
-2026-01-20 -> checking 1_000 USD
-  ann 600 USD
-  bob 400 USD
+2026-01-02 ann      owes me 100 USD   ^i0 due 2026-02-01
+2026-01-03 ann      owes me 600 USD   ^i1 due 2026-02-01
+2026-01-04 bob      owes me 400 USD   ^j1 due 2026-02-01
+2026-01-20 checking <-      1_000 USD
+  <- ann 600 USD
+  <- bob 400 USD
 ";
     paid(lines, |book, run| {
         assert_eq!(tab(book, run, "ann"), claims(&[("i0", 100_00)]));

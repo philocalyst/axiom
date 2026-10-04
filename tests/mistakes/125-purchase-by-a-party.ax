@@ -1,0 +1,19 @@
+// MISTAKE: a purchase is made in one of the owner's books, and a party has none.
+base USD
+use std
+
+commodity VTI : security
+  precision 0
+
+account assets/brokerage : brokerage
+account assets/checking : bank
+account assets/savings  : bank
+
+entity acme : employer
+entity shop : merchant
+
+opening 2025-12-31
+  checking 3_000 USD
+  brokerage 10 VTI basis 2_800 USD since 2024-03-01
+
+2026-01-15 acme <- 7 VTI @ 285.70 USD

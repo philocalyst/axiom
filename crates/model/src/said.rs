@@ -9,7 +9,7 @@ use axiom_core::tagless::Field;
 use axiom_core::{Day, DaySet, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
-use crate::book::{Basis, Book, Books, Class, Commodity, Entity, Kind, Place, Purpose, System};
+use crate::book::{Basis, Book, Books, Class, Commodity, Entity, Kind, Place, Purpose, Role, System};
 use crate::builtin::{self, Coded};
 use crate::holders::Holder;
 use crate::journal::Flow;
@@ -111,6 +111,24 @@ impl Book<'_> {
         holds.next().is_none().then_some(only)
     }
 
+    /// The entity a place is where a flow reaches: the party whose outside place it is, and the owner of every other
+    /// place. The laws an entity or its kind writes about the flows that touch it are about the flows at its places.
+    pub fn standing_at(&self, place: Id<Place>) -> Id<Entity> {
+        match self.places[place].role {
+            Role::Outside(Some(party)) => party,
+            _ => self.places[place].owner,
+        }
+    }
+
+    /// The party a place is the outside of, if it is: who a flow into or out of it is paid to or paid by.
+    pub fn party_at(&self, place: Id<Place>) -> Option<Id<Entity>> {
+        match self.places[place].role {
+            Role::Outside(party) => party,
+            Role::Tab(party) => Some(party),
+            Role::Account { .. } | Role::Holding(_) | Role::Issuer(_) | Role::Asset(_) => None,
+        }
+    }
+
     /// The household an entity belongs to.
     pub fn member(&self, entity: Id<Entity>) -> Option<Id<Entity>> {
         self.fact(builtin::MEMBER, entity)
@@ -176,16 +194,20 @@ impl Book<'_> {
         self.fact(builtin::CLAIM, place).unwrap_or(false)
     }
 
-    /// Whether a flow is the making of a claim on a party: value from outside paid into a place that holds what is owed.
-    /// The claim is a parcel that can be forgiven, and forgiving it gives the value back to where it came from.
-    pub fn makes_claim(&self, flow: &Flow) -> bool {
-        self.is_claim(flow.to) && self.places[flow.from].class == Class::Outside
+    /// The place a flow makes a claim in, if it makes one: value from outside paid into a place that holds what a party owes,
+    /// or paid out of a `Debt` place that holds what the owner owes, to outside (a bill). The claim is a parcel that can be
+    /// forgiven, and forgiving it gives the value back to where it came from, or to where it went.
+    pub fn claim_made_in(&self, flow: &Flow) -> Option<Id<Place>> {
+        match self.places[flow.from].class {
+            Class::Outside if self.is_claim(flow.to) => Some(flow.to),
+            Class::Debt if self.places[flow.to].class == Class::Outside && self.is_claim(flow.from) => Some(flow.from),
+            _ => None,
+        }
     }
 
-    /// Whether a flow is the making of a debt of an owner's: a claim place of the `Debt` class paying a party. What is owed
-    /// is a plain balance there, with no parcel of the debt to forgive.
-    pub fn makes_debt(&self, flow: &Flow) -> bool {
-        self.is_claim(flow.from) && self.places[flow.from].class == Class::Debt
+    /// Whether a flow makes a claim: of a party's on the owner, or of the owner's on a party.
+    pub fn makes_claim(&self, flow: &Flow) -> bool {
+        self.claim_made_in(flow).is_some()
     }
 
     fn said_of(&self, holder: u32, name: Sym, day: Day) -> Option<Value> {

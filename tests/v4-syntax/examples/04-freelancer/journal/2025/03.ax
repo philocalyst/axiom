@@ -1,0 +1,49 @@
+2025-03-01 business-card -> google 7.20 USD #business-software
+
+/// Card annual fee.
+2025-03-01 business-card -> card-issuer 375 USD #business-fees
+2025-03-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-03-01 personal-checking -> bluecross 412 USD #health-premium
+2025-03-03 brightwave owes me due 30d ^inv-2025-b03
+  3_200 USD #design
+
+/// Brand guidelines, billed once and paid in two halves by wire: one invoice, two payments `for` it.
+2025-03-03 orbit-labs owes me due 30d ^inv-2025-o1
+  5_500 USD #design
+2025-03-03 business-card -> notion 10 USD #business-software
+2025-03-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2025-03-05 business-card -> apple 2_499 USD #business-equipment ^macbook-2025
+2025-03-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-03-05 personal-checking -> trader-joes 65.35 USD #groceries
+2025-03-08 business-card -> adobe 59.99 USD #business-software
+2025-03-08 personal-checking -> restaurant 66.06 USD #dining
+2025-03-10 personal-checking -> transit-agency 36.02 USD #transport
+2025-03-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-03-12 personal-checking -> safeway 61.64 USD #groceries
+2025-03-13 business-card -> meal-vendor 54.80 USD #business-meal
+2025-03-13 car used 22 MI #business-mile for fernhill
+2025-03-14 brightwave 3_200 USD -> business-checking #design ^inv-2025-b02
+2025-03-14 business-checking -> tax-vault 640 USD for vault
+2025-03-14 business-card -> figma 15 USD #business-software
+2025-03-16 personal-checking -> pge 71.10 USD #home-office-cost
+2025-03-18 personal-checking -> tmobile 64 USD #business-phone
+
+/// The February statement, paid in full.
+2025-03-20 business-checking -> business-card 1_013.07 USD
+2025-03-20 personal-checking -> safeway 60.06 USD #groceries
+2025-03-22 business-card -> freshbooks 21 USD #business-software
+2025-03-22 personal-checking -> restaurant 34.49 USD #dining
+2025-03-27 personal-checking -> trader-joes 95.76 USD #groceries
+2025-03-28 fernhill -> 4_500 USD #design ^inv-2025-f1
+  business-checking 4_369.20 USD
+  stripe 130.80 USD #business-fees // Stripe fee
+2025-03-28 business-checking -> tax-vault 873.84 USD for vault
+2025-03-31 interest-source -> tax-vault 22.35 USD #interest-income for vault
+
+/// Quarterly statement: what the custodian says the account is worth. The gap from the
+/// balance is the market's doing, a revaluation `via market`, never a withdrawal.
+2025-03-31 sep = 17_964.65 USD via market
+2025-03-31 business-card = 3_041.99 USD
+2025-03-31 business-checking = 7_259.54 USD
+2025-03-31 personal-checking = 3_438.03 USD
+2025-03-31 tax-vault = 6_407.88 USD

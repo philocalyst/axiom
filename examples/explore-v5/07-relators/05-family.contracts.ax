@@ -39,15 +39,15 @@ contract alex-pay : employment with acme
   employee me
   employer acme
   5_750 USD twice monthly on 15, last into joint-checking #wages
-  alex-401k 575 USD #household-deferral
-  hsa 250 USD
-  blue-shield 212.50 USD #pretax-benefit
-  dcfsa 208.33 USD
-  irs 692 USD #federal-tax
-  ftb 285 USD #state-tax
-  ssa 388.56 USD #payroll-tax
-  edd 60.95 USD #state-disability
-  joint-checking ...
+  -> alex-401k 575 USD #household-deferral
+  -> hsa 250 USD
+  -> blue-shield 212.50 USD #pretax-benefit
+  -> dcfsa 208.33 USD
+  -> irs 692 USD #federal-tax
+  -> ftb 285 USD #state-tax
+  -> ssa 388.56 USD #payroll-tax
+  -> edd 60.95 USD #state-disability
+  -> joint-checking ...
   from 2026-01-01
   also acme -> alex-401k 40% of ([alex-401k] up to 10% of amount) #contribution
 
@@ -55,12 +55,12 @@ contract jordan-pay : employment with bluefin
   employee jordan
   employer bluefin
   3_803.08 USD every 2w on friday into joint-checking #wages
-  jordan-401k 228.18 USD #household-deferral
-  irs 330 USD #federal-tax
-  ftb 126 USD #state-tax
-  ssa 290.93 USD #payroll-tax
-  edd 45.64 USD #state-disability
-  joint-checking ...
+  -> jordan-401k 228.18 USD #household-deferral
+  -> irs 330 USD #federal-tax
+  -> ftb 126 USD #state-tax
+  -> ssa 290.93 USD #payroll-tax
+  -> edd 45.64 USD #state-disability
+  -> joint-checking ...
   from 2026-01-02
   also bluefin -> jordan-401k 50% of ([jordan-401k] up to 6% of amount) #contribution
 
@@ -70,11 +70,11 @@ contract alex-bonus : employment with acme
   employee me
   employer acme
   12_000 USD yearly on 03-14 into joint-checking #wages
-  alex-401k 1_200 USD #household-deferral
-  irs 2_640 USD #federal-tax
-  ftb 1_227.60 USD #state-tax
-  ssa 918 USD #payroll-tax
-  edd 144 USD #state-disability
-  joint-checking ...
+  -> alex-401k 1_200 USD #household-deferral
+  -> irs 2_640 USD #federal-tax
+  -> ftb 1_227.60 USD #state-tax
+  -> ssa 918 USD #payroll-tax
+  -> edd 144 USD #state-disability
+  -> joint-checking ...
   from 2026-03-14
   also acme -> alex-401k 40% of ([alex-401k] up to 10% of amount) #contribution

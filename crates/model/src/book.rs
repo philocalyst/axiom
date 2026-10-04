@@ -15,10 +15,10 @@ use axiom_core::{
 use crate::addresses::Addresses;
 use crate::holders::HolderIndex;
 use crate::journal::{
-    Assert, ClaimChange, Detail, EndEvent, Event, Filed, Flow, FlowView, Measure, Prices, Program, Purposed, Reading,
-    RuntimeDetail, RuntimeFlow, RuntimeTxn, Select, Split, Txn, Waive, WrittenOccurrence,
+    Assert, ClaimChange, Derivation, Detail, EndEvent, Event, Filed, Flow, FlowView, Infer, Measure, Origin, Prices,
+    Program, Purposed, Reading, RuntimeDetail, RuntimeFlow, RuntimeTxn, Select, Split, Txn, Waive, WrittenOccurrence,
 };
-use crate::law::{Fault, Law, Rules, Value};
+use crate::law::{Fault, Law, Owner, Rules, Value};
 use crate::names::{Found, Names, Scoped};
 use crate::slots::{Schema, Slot};
 use crate::split::{Item, Promised, Says, Sign};
@@ -217,8 +217,8 @@ pub enum Class {
     /// Held by an owner: parcels with basis. Accounts of `asset` kinds,
     /// owners' own holdings, assets, and claims a party owes an owner.
     Asset,
-    /// Owed by an owner: a plain balance. Accounts of `debt` kinds, and
-    /// claims a party holds on an owner.
+    /// Owed by an owner: a plain balance, or, in a place that says `claim`, parcels of what is owed (negative, as a liability's
+    /// balance is). Accounts of `debt` kinds, and claims a party holds on an owner.
     Debt,
     /// Everyone else: parties, `?`, and where openings come from. Value that
     /// reaches one has left the owners; value from one is new to them.
@@ -233,12 +233,6 @@ impl Class {
             Class::Asset | Class::Outside => 1,
             Class::Debt => -1,
         }
-    }
-
-    /// Whether a place of this class holds parcels (with basis and lots) rather
-    /// than a plain signed balance.
-    pub fn holds_parcels(self) -> bool {
-        self == Class::Asset
     }
 }
 
@@ -348,6 +342,8 @@ pub struct Kind {
     pub slots: Run<Slot>,
     /// Only this kind's own laws; ancestors' laws are found through the tree.
     pub laws: Box<[Id<Law>]>,
+    /// The kinds of entity that may own what this kind of account classifies (`owner taxpayer`); none says nothing of it.
+    pub owners: Box<[Id<Kind>]>,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -578,7 +574,7 @@ pub struct Deadline {
 pub struct Claim {
     pub payee: Option<Id<Entity>>,
     pub due: Option<Day>,
-    /// The place the value came from: the party's.
+    /// The party's place: where the value came from, or, for a bill, where it went.
     pub from: Id<Place>,
     pub loc: Loc,
     /// The flow of a line that made it, if a line did, and its place among the flows of its transaction.
@@ -795,6 +791,47 @@ impl Derived {
     pub fn makes_flow(&self) -> bool {
         matches!(self.shape, Shape::Flow { .. }) || self.purpose.is_some() || self.owner.is_some()
     }
+
+    /// Whether it can be made of a flow that has already moved: a flow of its own, or an item that is a flow along
+    /// the header's ends or back. An item that takes from the header, or is a part of it, is an allocation, and the
+    /// header's value is gone.
+    pub fn follows_a_posted_flow(&self) -> bool {
+        match self.shape {
+            Shape::Flow { .. } => true,
+            Shape::Item(Sign::Add | Sign::Less) => self.makes_flow(),
+            Shape::Item(Sign::Carve) => false,
+        }
+    }
+
+    /// The flow this makes of `amount`, for the law `law` that fired for `header`: along the header's ends (reversed for
+    /// a `-` item) or the ends it names, the amount the law came to, and what the line says of it. What it does not
+    /// say is the header's, as for a leg or an item the template writes (the contract's party is its payee, whatever
+    /// end it is paid to). A header carries no waiver, so there is none to keep. `subject` is the place `self` stands
+    /// for, for a law that has one: a contract's has none, and its `self` is the header's own end.
+    pub fn flow_from(&self, header: &Flow, law: Id<Law>, amount: Amount, subject: Option<Id<Place>>) -> Flow {
+        let (from, to) = match self.shape {
+            Shape::Flow { from, to } => (from.at(header.from, subject), to.at(header.to, subject)),
+            Shape::Item(Sign::Less) => (header.to, header.from),
+            Shape::Item(Sign::Add | Sign::Carve) => (header.from, header.to),
+        };
+        Flow {
+            from,
+            to,
+            out: amount,
+            arrive: amount,
+            infer: Infer::Known,
+            owner: self.owner.unwrap_or(header.owner),
+            purpose: self.purpose.or(header.purpose),
+            description: self.description.or(header.description),
+            codes: self.codes,
+            select: self.select,
+            detail: self.detail,
+            waive: self.waive,
+            loc: self.loc,
+            origin: Origin::Derived(Derivation::Law(law)),
+            ..header.clone()
+        }
+    }
 }
 
 /// How a derived flow lies against the flow that fired its law.
@@ -802,9 +839,32 @@ impl Derived {
 pub enum Shape {
     /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
     Item(Sign),
-    /// `-> escrow 410 USD`, `lumen -> retirement 50% of …`: a flow of its own. An end that is `None` is the firing
-    /// flow's own (`self`).
-    Flow { from: Option<Id<Place>>, to: Option<Id<Place>> },
+    /// `-> escrow 410 USD`, `lumen -> retirement 50% of …`: a flow of its own.
+    Flow { from: Stand, to: Stand },
+}
+
+/// Where one end of a derived flow stands.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Stand {
+    /// Nothing is written: where the flow that fired the law has its own end at this position.
+    Flow,
+    /// `self`, in a law whose `self` is a place or an entity: the end of the flow that the law governs, so that a card's
+    /// `issuer -> self` credits the card.
+    Subject,
+    /// A place the line names.
+    At(Id<Place>),
+}
+
+impl Stand {
+    /// The place this end stands at, given the header's own end at its position and the place `self` stands for, if the
+    /// law has one. An end that is `self` where nothing does is the header's own.
+    pub fn at(self, own: Id<Place>, subject: Option<Id<Place>>) -> Id<Place> {
+        match self {
+            Stand::Flow => own,
+            Stand::Subject => subject.unwrap_or(own),
+            Stand::At(place) => place,
+        }
+    }
 }
 
 /// `budget food 900 USD monthly [carries]` (LANGUAGE §4): a warning when the
@@ -1243,6 +1303,21 @@ impl<'s> Book<'s> {
         self.kinds.covers(ancestor, kind)
     }
 
+    /// The kinds of entity that may own things of `kind`, as the nearest kind above it that says (`owner taxpayer`) says;
+    /// none says any entity may.
+    pub fn owners_of(&self, kind: Id<Kind>) -> &[Id<Kind>] {
+        let says = self.kinds.lineage(kind).map(|above| &*self.kinds[above].owners).find(|owners| !owners.is_empty());
+        says.unwrap_or_default()
+    }
+
+    /// Whether `entity` may own things of `kind`: `me` always may, being whom everything belongs to that says nothing.
+    pub fn may_own(&self, kind: Id<Kind>, entity: Id<Entity>) -> bool {
+        let owners = self.owners_of(kind);
+        entity == self.roots.me
+            || owners.is_empty()
+            || owners.iter().any(|&of| self.is_a(self.entities[entity].kind, of))
+    }
+
     /// `amount` in `unit` at the latest prices on or before `day`, rounded to
     /// `unit`'s precision. `None` without a price path.
     pub fn convert(&self, amount: Amount, unit: Id<Commodity>, day: Day) -> Option<Amount> {
@@ -1478,15 +1553,39 @@ impl<'s> Book<'s> {
             });
         }
         let flows = self.txns.get(txn.source_txn()?)?.flows;
-        let (id, flow) = flows.ids().map(|id| (id, &self.flows[id])).find(|(_, flow)| flow.to == place)?;
+        // A bill is made by paying out of the owner's place, a claim on a party by paying into it.
+        let (id, flow, party) = flows.ids().find_map(|id| {
+            let flow = &self.flows[id];
+            let (at, party) =
+                if self.places[place].class == Class::Debt { (flow.from, flow.to) } else { (flow.to, flow.from) };
+            (at == place).then_some((id, flow, party))
+        })?;
         let (due, ordinal) = (self.flow_view(flow).detail().due, (id.index() - flows.start().index()) as u32);
-        Some(Claim { payee: flow.payee, due, from: flow.from, loc: flow.loc, source: Some(id), ordinal })
+        Some(Claim { payee: flow.payee, due, from: party, loc: flow.loc, source: Some(id), ordinal })
     }
 
     /// The flow a written transaction made as its `ordinal`th: for a claim, the line that says what it is for.
     pub fn txn_flow(&self, txn: RuntimeTxn, ordinal: u32) -> Option<Id<Flow>> {
         let flows = self.txns.get(txn.source_txn()?)?.flows;
         (ordinal < flows.len()).then(|| Id::new(flows.start().index() as u32 + ordinal))
+    }
+
+    /// A law in the words of the book: the `also` of a kind, or a law by its name and where it is written.
+    pub fn law_words(&self, law: Id<Law>) -> String {
+        let law = &self.laws[law];
+        let of = match law.owner {
+            Owner::Kind(kind) => format!("kind `{}`", self.name(self.kinds[kind].name)),
+            Owner::Place(place) => format!("account `{}`", self.name(self.places[place].path)),
+            Owner::Entity(entity) => format!("entity `{}`", self.name(self.entities[entity].path)),
+            Owner::Purpose(purpose) => format!("purpose `#{}`", self.name(self.purposes[purpose].name)),
+            Owner::Asset(asset) => format!("asset `{}`", self.name(self.assets[asset].name)),
+            Owner::Contract(contract) => format!("contract `{}`", self.name(self.contracts[contract].name)),
+            Owner::System(_) | Owner::Book => "the project".to_owned(),
+        };
+        match self.name(law.name) {
+            "also" => format!("the `also` of {of}"),
+            name => format!("law `{name}` of {of}"),
+        }
     }
 
     /// `1,234.56 USD`

@@ -1,5 +1,5 @@
-// MISTAKE: two employers before the name of a 401(k). Each could be the owner or the `employer`, and nothing
-// settles which: placement never takes the first slot that fits. A role line says which.
+// MISTAKE: two employers before the name of a 401(k). An employer is no owner of one (a taxpayer is), so each fits the
+// `employer` only, which takes one word: the words do not fit the slots together. 133 is a word that fits two.
 base USD
 use std
 use us/401k

@@ -11,7 +11,7 @@ use axiom_model::{
     Amount, Asset, Book, Commodity, Contract, Derivation, Entity, Flow, Object, Origin, Place, Role, Subject,
 };
 
-use crate::history::{Change, Posting, pad_ends, postings};
+use crate::history::{Change, Posting, all_postings, pad_ends};
 use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
@@ -135,9 +135,9 @@ fn entity_view<'s>(
         Column::left("State"),
         Column::left("From"),
     ]);
-    let touching = postings(book, run).filter(|posting| touches_entity(lens, posting.flow, entity, window));
+    let touching = all_postings(book, run).filter(|posting| touches_entity(lens, posting.flow, entity, window));
     for posting in touching {
-        section.push(entity_flow_row(lens, posting));
+        section.push(entity_flow_row(lens, run, posting));
     }
     // An accepted assertion gap has no journal flow, but its counterparty is
     // still part of the entity's register. In particular, this keeps market
@@ -171,17 +171,18 @@ fn touches_entity(lens: Lens<'_, '_, '_, '_>, flow: &Flow, entity: Id<Entity>, w
         && (flow.owner == entity || at_party || place_owned_by(lens, moved, entity))
 }
 
-fn entity_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, posting: Posting<'_>) -> Row<'s> {
+fn entity_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, posting: Posting<'_>) -> Row<'s> {
     let book = lens.book();
     let flow = posting.flow;
     let mut note = book.flow_view(flow).codes().map(|code| Cell::Code(book.name(code))).collect::<Vec<_>>();
     if let Some(description) = flow.description {
         note.push(Cell::text(book.text(description)));
     }
-    if let Some(doc) = book.txns[flow.txn].doc {
-        if let Some(headline) = crate::table::doc_headline(book, Some(doc)) {
-            note.push(Cell::text(headline));
-        }
+    // A flow a law derived is no statement of its own: it says what derived it, and not what its cause's line says of itself.
+    match posting.offspring(run) {
+        Some(offspring) => note.push(crate::table::origin_cell(book, offspring)),
+        None => note
+            .extend(book.txns.get(flow.txn).and_then(|txn| crate::table::doc_headline(book, txn.doc)).map(Cell::text)),
     }
     let state = match posting.posted.state {
         State::Actual => Cell::Word("actual"),
@@ -245,7 +246,8 @@ fn asset_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>
     if !lens.owns_entity(asset.owner) {
         return foreign(book, name, asset.owner);
     }
-    let flows = book.flows.iter().filter(|(_, flow)| {
+    let flows = all_postings(book, run).filter(|posting| {
+        let flow = posting.flow;
         window.holds(flow.day)
             && lens.owns(crate::flow::movement_place(lens, flow))
             && (flow.from == asset.place
@@ -253,7 +255,7 @@ fn asset_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>
                 || flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
                 || matches!(flow.origin, Origin::Derived(Derivation::Disposal(found)) if found == asset_id))
     });
-    let mut rows: Vec<_> = flows.map(|(id, flow)| (flow.day, asset_flow_row(lens, run, id, flow))).collect();
+    let mut rows: Vec<_> = flows.map(|posting| (posting.flow.day, asset_flow_row(lens, posting))).collect();
     let consumed = run.adjustments.iter().filter(|adjustment| {
         window.holds(adjustment.day)
             && matches!(adjustment.kind, axiom_engine::AdjustmentKind::Consumed { asset, .. } if asset == asset_id)
@@ -270,15 +272,14 @@ fn asset_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>
     dated_register(name, columns, rows, format!("Nothing happened to {name} in this window."))
 }
 
-fn asset_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, flow: &Flow) -> Row<'s> {
-    let book = lens.book();
+fn asset_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, posting: Posting<'_>) -> Row<'s> {
+    let (book, flow) = (lens.book(), posting.flow);
     let (activity, style) = match flow.origin {
         Origin::Derived(Derivation::Disposal(_)) => ("disposed", Style::Alert),
         Origin::Derived(_) => ("derived", Style::Muted),
         Origin::Occurrence(_) => ("contract occurrence", Style::Muted),
         Origin::Written => ("flow", Style::Normal),
     };
-    let posting = Posting::at(book, run, id);
     Row::new([
         Cell::Day(flow.day),
         Cell::Word(activity),
@@ -475,7 +476,7 @@ fn section_with_sign<'s>(
     }
     for step in &steps[split..] {
         let (unit, amount, balance) = running.advance(lens, place, step);
-        section.push(step_row(book, step, shown(amount, unit), shown(balance, unit)));
+        section.push(step_row(book, run, step, shown(amount, unit), shown(balance, unit)));
     }
     if section.rows.is_empty() {
         section.note(format!("Nothing touches {} in this window.", path(book, place)));
@@ -523,13 +524,13 @@ impl Running {
     }
 }
 
-fn step_row<'s>(book: &'s Book<'_>, step: &Step<'_>, amount: Cell<'s>, balance: Cell<'s>) -> Row<'s> {
+fn step_row<'s>(book: &'s Book<'_>, run: &Run, step: &Step<'_>, amount: Cell<'s>, balance: Cell<'s>) -> Row<'s> {
     let payee = step.source.posting().and_then(|posting| posting.flow.payee);
     let cells = [
         Cell::Day(step.day),
         Cell::text(path(book, step.with)),
         payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
-        note(book, step).unwrap_or(Cell::Blank),
+        note(book, run, step).unwrap_or(Cell::Blank),
         amount,
         balance,
     ];
@@ -545,6 +546,8 @@ struct Step<'a> {
     /// The other end.
     with: Id<Place>,
     source: Source<'a>,
+    /// Where it stands among the steps of its day (`Posting::sequence`).
+    order: (u32, u32),
 }
 
 /// What made a step.
@@ -574,12 +577,14 @@ impl Step<'_> {
     }
 }
 
-/// Every step touching `place` up to `cutoff`, in order. A pad, made at the
-/// end of its day, follows that day's flows.
+/// Every step touching `place` up to `cutoff`, in order. A flow a law derived follows the flow it came from, and a pad,
+/// made at the end of its day, follows that day's flows.
 fn steps<'a>(lens: Lens<'a, '_, '_, '_>, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec<Step<'a>> {
     let book = lens.book();
-    let flows = book.touching[place].iter().flat_map(|&id| {
-        let posting = Posting::at(book, run, id);
+    let journal = book.touching[place].iter().map(|&id| Posting::at(book, run, id));
+    let derived = (0..run.offspring.len()).map(|at| Posting::derived(run, Id::new(at as u32)));
+    let derived = derived.filter(|posting| posting.flow.from == place || posting.flow.to == place);
+    let flows = journal.chain(derived).flat_map(|posting| {
         let in_scope = lens.owns(place);
         posting.changes_at(place).filter(move |_| in_scope).map(move |change| Step {
             day: posting.flow.day,
@@ -587,6 +592,7 @@ fn steps<'a>(lens: Lens<'a, '_, '_, '_>, run: &'a Run, place: Id<Place>, cutoff:
             counts: posting.is_real_on(cutoff),
             with: posting.counterparty(place),
             source: Source::Flow(posting),
+            order: posting.sequence(run),
         })
     });
     let pads = run.pads.iter().flat_map(|pad| {
@@ -599,15 +605,16 @@ fn steps<'a>(lens: Lens<'a, '_, '_, '_>, run: &'a Run, place: Id<Place>, cutoff:
             counts: true,
             with,
             source: Source::Gap(pad),
+            order: (u32::MAX, u32::MAX),
         })
     });
     let mut steps: Vec<Step> = flows.chain(pads).filter(|step| step.day <= cutoff).collect();
-    steps.sort_by_key(|step| step.day);
+    steps.sort_by_key(|step| (step.day, step.order));
     steps
 }
 
 /// A change of basis, codes, and settlement, as one line of small print.
-fn note<'s>(book: &'s Book<'_>, step: &Step<'_>) -> Option<Cell<'s>> {
+fn note<'s>(book: &'s Book<'_>, run: &Run, step: &Step<'_>) -> Option<Cell<'s>> {
     let parts: Vec<Cell<'s>> = match step.source {
         Source::Gap(pad) => vec![Cell::Said(gap_words(book, pad).into())],
         Source::Flow(posting) => {
@@ -621,7 +628,8 @@ fn note<'s>(book: &'s Book<'_>, step: &Step<'_>) -> Option<Cell<'s>> {
             };
             let flow = book.flow_view(posting.flow);
             let codes = flow.codes().map(|code| Cell::Code(book.name(code)));
-            codes.chain(status).collect()
+            let origin = posting.offspring(run).map(|offspring| crate::table::origin_cell(book, offspring));
+            codes.chain(status).chain(origin).collect()
         }
     };
     (!parts.is_empty()).then(|| Cell::list(" · ", parts))

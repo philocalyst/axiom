@@ -1,0 +1,28 @@
+// A US citizen who moved from San Francisco to Berlin on 2025-07-01. Calendar year
+// 2025. Reports are in dollars; the German pay, rent and savings are in euros, and
+// a trip to London is in pounds.
+//
+// The folders are constraints: journal/2025/07.ax holds July 2025 only.
+
+base USD
+
+use std
+use us/401k
+use us/ca
+use us/abroad
+use de
+
+/// Dana, 37, single. San Francisco until the end of June, Berlin from July 1.
+///
+/// Residences may overlap. Until June 30, Dana lives in San Francisco (and so under
+/// California and the United States). From July 1, Dana lives in Germany and, as a
+/// citizen abroad, still under the United States: the two residences cover the
+/// same days, and each system governs on the days its residence does. A part-year
+/// resident of California owes California for the part of the year, and the
+/// exclusion of the German pay is a law of `us/abroad`, in force from July.
+entity me : person
+  born   1987-09-14
+  filing single
+  lives  us/ca/san-francisco until 2025-06-30
+  lives  us/abroad from 2025-07-01
+  lives  de from 2025-07-01

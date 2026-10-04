@@ -1,0 +1,14 @@
+// MISTAKE: an employer before the name of a 529 plan. A 529 is a taxpayer's account (a person or a household), so `acme` is no
+// owner of it: the word fits no slot, where it used to be placed as the owner without a word said.
+base USD
+use std
+use us/529
+
+entity acme : employer
+entity riley : person
+
+account acme/529 : 529-plan
+  beneficiary riley
+
+opening 2026-01-01
+  acme/529 5_000 USD

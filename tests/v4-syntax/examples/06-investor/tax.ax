@@ -1,0 +1,25 @@
+// Two things an investor has that `us` does not count: staking rewards, and the
+// loss a wash sale disallows. Each counts into a line `us` reads, so the netting
+// of gains and losses, the deduction and the brackets stay `us`'s.
+
+/// Staking rewards are ordinary income at their value on the day they arrive
+/// (Rev. Rul. 2023-14), and the reward's basis is that same value.
+///
+/// To fix: if a coin arrives that is not a reward, book it from another place.
+law count-staking
+  on in
+  when purpose is #staking
+  count value(amount, USD) as staking
+  count value(amount, USD) as total-income
+
+/// A wash sale (IRC §1091): a loss on a sale is disallowed when substantially
+/// identical shares are bought within 30 days either side, and it is added to the
+/// basis of the shares bought. The owner records the adjustment as a flow into the
+/// basis of the new shares from a place of kind `wash-adjustment`. `us` counted the
+/// whole loss when the shares were sold; this law adds back what the flow moved.
+///
+/// To fix: if a sale is not a wash sale, do not write the flow, and the loss stands.
+law disallow-wash-loss
+  on in
+  when from is wash-adjustment
+  count amount as short-term-gains

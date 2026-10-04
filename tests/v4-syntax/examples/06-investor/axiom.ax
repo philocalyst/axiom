@@ -1,0 +1,23 @@
+// An investor: a software engineer with a taxable brokerage, employer stock, an
+// employee stock purchase plan and a little crypto. September 2024 to December
+// 2025; the 2025 tax year is the one to read.
+//
+// The opening balances are statements, so two lots can be older than the ledger:
+// the openings carry their cost and their day, and no year-end law is run for the
+// years before the first flow.
+//
+// The folders are constraints: journal/2024/09.ax holds September 2024 only,
+// journal/2025/03.ax holds March 2025 only.
+
+base USD
+
+use std
+use us
+use us/401k
+
+/// Sam, 34, single, in Seattle: no state income tax, so `lives us` is the whole
+/// story. Northwind Systems is the employer.
+entity me : person
+  born   1991-03-22
+  filing single
+  lives  us

@@ -1,0 +1,14 @@
+error[leg-direction]: `<-` points the wrong way for a leg of this flow
+   ╭─[122-leg-points-the-wrong-way.ax:20:3]
+   │
+20 │   <- checking 4_200 USD
+   │   ─┬
+   │    ╰── the legs here go `->`
+   │
+   = note: value goes from the header's end to each leg with `->`, and from each leg to it with `<-`
+   = help: write `->`
+20 -   <- checking 4_200 USD
+20 +   -> checking 4_200 USD
+
+✗ 1 error
+[exit status 1]

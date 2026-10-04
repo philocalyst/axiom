@@ -1,43 +1,191 @@
-//! Statements (LANGUAGE §5): `DATE SUBJECT VERB …`.
+//! Dated lines (LANGUAGE §2): `DATE SUBJECT VERB …`, and the `opening` block that says what a book begins with.
 //!
-//! One line says one thing about one thing on a day, and the word after the
-//! subject says what: `=` a value, `owes` a claim, `now` a change, `worked` and
-//! `used` a measure, `waived`, `ends`, `settled`, `void`, `returned`, `split`,
-//! `basis` and `filed` events, and no verb at all an occurrence. The rest of the
-//! line is read by that word and never by what the subject's name means: `01
-//! flat` is an occurrence whether or not `flat` is a contract.
+//! One line says one thing about one thing on a day, and the word after the subject says what. That word is looked up
+//! in one table ([`PUNCTUATION`] and [`WORDS`], keyed by the token that is it): `->` a flow, `=` a value, `owes` a
+//! claim, `now` a change, `worked` and `used` a measure, `waived`, `ends`, `settled`, `void`, `returned`, `split`,
+//! `basis` and `filed` events, and no word at all an occurrence. The rest of the line is read by that word and never
+//! by what the subject's name means: `01 flat` is an occurrence whether or not `flat` is a contract.
+//!
+//! The subject is read before the word is looked for, which is what lets one pass tell a flow from a statement: they
+//! share their first end, and a name followed by an arrow is the source of a flow while the same name followed by
+//! anything else is what a statement says something of.
 
 use axiom_core::diag::closest;
 use axiom_core::{Day, Dec, Diagnostic, Loc};
 
 use crate::ast::*;
+use crate::dates::empty_range;
+use crate::flow::Arrows;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
-use crate::parser::{Parse, Parser, Scope};
+use crate::parser::{Parse, Parser, Reported, Scope};
 
-const EVENT_STATES: [(&str, EventState); 3] =
-    [("settled", EventState::Settled), ("void", EventState::Void), ("returned", EventState::Returned)];
+/// What follows a dated line's subject, and so what the line is.
+#[derive(Clone, Copy)]
+enum Word {
+    /// An arrow: the line is a flow.
+    Flow(Junction),
+    Value,
+    Owes,
+    Now,
+    Worked,
+    Used,
+    Waived,
+    Ends,
+    Event(EventState),
+    Split,
+    Basis,
+    Filed,
+}
 
-/// The words that follow a subject and say what a line is.
-const VERBS: [&str; 12] =
-    ["owes", "now", "worked", "used", "waived", "ends", "settled", "void", "returned", "split", "basis", "filed"];
+/// What a dated line's subject is followed by when that is a punctuation mark.
+const PUNCTUATION: [(Punct, Word); 3] =
+    [(Punct::Arrow, Word::Flow(Junction::Out)), (Punct::Back, Word::Flow(Junction::In)), (Punct::Eq, Word::Value)];
+
+/// What a dated line's subject is followed by when that is a word. A line with none is an occurrence.
+const WORDS: [(&str, Word); 12] = [
+    ("owes", Word::Owes),
+    ("now", Word::Now),
+    ("worked", Word::Worked),
+    ("used", Word::Used),
+    ("waived", Word::Waived),
+    ("ends", Word::Ends),
+    ("settled", Word::Event(EventState::Settled)),
+    ("void", Word::Event(EventState::Void)),
+    ("returned", Word::Event(EventState::Returned)),
+    ("split", Word::Split),
+    ("basis", Word::Basis),
+    ("filed", Word::Filed),
+];
 
 pub(crate) const BUDGET_PERIODS: [(&str, Period); 2] = [("monthly", Period::Month), ("yearly", Period::Year)];
 
+/// What a dated line starts with, read before anything says what the line is.
+enum Head<'s> {
+    /// A `^code`, a `#purpose` or a commodity that no arrow follows: only a statement is about these.
+    Said(Subject<'s>),
+    /// A name, a commodity or `?`, and the amount written after it: a flow's source, or what a statement is about.
+    Side(Side<'s>),
+}
+
 impl<'s> Parser<'s> {
+    /// A line that began with a date, which is read as one whole: `[..DATE] SUBJECT [AMOUNT] VERB …`.
+    pub fn journal_entry(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
+        let clauses = self.mark::<Clause>();
+        let spread = self.spread(line, date)?;
+        let head = self.head(Scope::Dated(date))?;
+        let word = self.word();
+        let from = match (head, word) {
+            (Head::Side(from), Some(Word::Flow(_))) => return self.flow(line, date, from, clauses),
+            (Head::Side(from), _) => from,
+            (Head::Said(subject), _) => return self.statement(line, date, subject, None, word),
+        };
+        match about(&from, spread) {
+            Some((subject, amount)) => self.statement(line, date, subject, amount, word),
+            // A lot selector, or any amount but a plain one, belongs to a flow: the arrow is what is missing.
+            None => self.flow(line, date, from, clauses),
+        }
+    }
+
+    /// The subject of a dated line, and whatever amount is written after it.
+    fn head(&mut self, scope: Scope) -> Parse<Head<'s>> {
+        let token = self.peek();
+        Ok(match token.tok {
+            Tok::Code(code) => Head::Said(self.bump_as(Subject::Code(code))),
+            // v3 wrote `DATE #code settled`; a purpose is the subject of a change.
+            Tok::Purpose(_) if matches!(self.lexer.peek_second().tok, Tok::Name("settled" | "void" | "returned")) => {
+                return Err(self.hash_code(token.loc));
+            }
+            Tok::Purpose(purpose) => Head::Said(self.bump_as(Subject::Purpose(purpose))),
+            // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
+            Tok::Unit(unit) if !matches!(self.lexer.peek_second().tok, Tok::Punct(Punct::Arrow | Punct::Back)) => {
+                self.bump();
+                if let Tok::Number(_) = self.tok() {
+                    return Err(self.price_needs_equals());
+                }
+                Head::Said(Subject::Unit(Name(unit)))
+            }
+            _ => {
+                let mut from = self.side(scope)?;
+                // A quantity at a price is one amount, however the line goes on.
+                if let (true, Some(Quantity::Amount(Amount::Literal(quantity)))) = (self.at(Punct::At), from.amount) {
+                    from.amount = Some(Quantity::Amount(self.at_price(quantity)?));
+                }
+                Head::Side(from)
+            }
+        })
+    }
+
+    /// The way the next token points, if it is an arrow. Only punctuation can be one, so no word is looked up.
+    pub fn junction(&self) -> Option<Junction> {
+        let Tok::Punct(punct) = self.tok() else { return None };
+        match Self::punctuation(punct) {
+            Some(Word::Flow(junction)) => Some(junction),
+            _ => None,
+        }
+    }
+
+    /// The word after the subject, if the table has it.
+    fn word(&self) -> Option<Word> {
+        match self.tok() {
+            Tok::Punct(punct) => Self::punctuation(punct),
+            Tok::Name(name) => WORDS.iter().find(|(known, _)| *known == name).map(|&(_, word)| word),
+            _ => None,
+        }
+    }
+
+    fn punctuation(punct: Punct) -> Option<Word> {
+        PUNCTUATION.iter().find(|(known, _)| *known == punct).map(|&(_, word)| word)
+    }
+
+    /// The rest of a flow whose source was read: the arrow, its target, the tail and the lines under it.
+    fn flow(&mut self, line: &mut Line<'s>, date: Day, from: Side<'s>, clauses: usize) -> Parse<()> {
+        let scope = Scope::Dated(date);
+        let (mut flow, arrow) = self.flow_head(from, scope, clauses)?;
+        let header = self.end_header(line)?;
+        self.flow_legs(line, &mut flow, scope, arrow)?;
+        self.emit(&header, Txn { date, flow }, ItemKind::Txn);
+        Ok(())
+    }
+
+    /// v4's first form of a price, `DATE VTI 280.14 USD`: a price is a value now.
+    fn price_needs_equals(&mut self) -> Reported {
+        let number = self.peek().loc;
+        let diag = Diagnostic::error("price-needs-equals", "a price is a value: `VTI = 280.14 USD`")
+            .label(number, "a commodity's price is written after `=`")
+            .fix("insert `=`", self.point(number.start), "= ");
+        self.report(diag)
+    }
+
+    /// `..DATE` after a transaction's date: it is paid that day and recognized
+    /// over the range, which is what the clause `for DATE..DATE` says. Adds
+    /// that clause.
+    fn spread(&mut self, line: &Line<'s>, date: Day) -> Parse<bool> {
+        let Some(dots) = self.eat(Punct::DotDot) else { return Ok(false) };
+        let last = self.date("the last day of the range, like `2026-12-31`")?;
+        let range = self.loc_from(line.body);
+        if last < date {
+            return self.fail(empty_range(range, self.text(range), date, last));
+        }
+        self.push(Clause { at: dots.to(range), kind: ClauseKind::For(For::Period(date, last)) });
+        Ok(true)
+    }
+
     /// A dated line about `subject`, whose header and lines are read here. An
-    /// `amount` already read after the subject is the occurrence's own.
-    pub fn statement(
+    /// `amount` already read after the subject is the occurrence's own, and
+    /// `word` is what the table says follows it.
+    fn statement(
         &mut self,
         line: &mut Line<'s>,
         date: Day,
         subject: Subject<'s>,
         amount: Option<Amount<'s>>,
+        word: Option<Word>,
     ) -> Parse<()> {
-        let mut statement = self.said(date, subject, amount)?;
+        let mut statement = self.said(date, subject, amount, word)?;
         if let (Verb::Occurrence(_), Tok::Name(_)) = (&statement.verb, self.tok()) {
             // A name where the tail starts: a flow written without its arrow.
-            return Err(self.expected_arrow(true));
+            return Err(self.missing_arrow());
         }
         let header = self.end_header(line)?;
         if takes_lines(&statement.verb) {
@@ -51,9 +199,15 @@ impl<'s> Parser<'s> {
     /// The statement a header line says, without the lines under it.
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
-    pub fn said(&mut self, date: Day, subject: Subject<'s>, amount: Option<Amount<'s>>) -> Parse<Statement<'s>> {
+    fn said(
+        &mut self,
+        date: Day,
+        subject: Subject<'s>,
+        amount: Option<Amount<'s>>,
+        word: Option<Word>,
+    ) -> Parse<Statement<'s>> {
         let scope = Scope::Statement(date);
-        let verb = self.verb(scope, subject, amount)?;
+        let verb = self.verb(scope, subject, amount, word)?;
         let tail = self.tail(scope, self.mark::<Clause>())?;
         if !tail.is_empty() {
             for clause in self.slice(tail) {
@@ -66,51 +220,50 @@ impl<'s> Parser<'s> {
         Ok(Statement { date, subject, verb, tail, body: Body::default() })
     }
 
-    /// The word after the subject, and what it takes.
-    fn verb(&mut self, scope: Scope, subject: Subject<'s>, amount: Option<Amount<'s>>) -> Parse<Verb<'s>> {
+    /// What the line says of its subject: what its word says, or, with no word, that the promise was kept.
+    fn verb(
+        &mut self,
+        scope: Scope,
+        subject: Subject<'s>,
+        amount: Option<Amount<'s>>,
+        word: Option<Word>,
+    ) -> Parse<Verb<'s>> {
         // An amount read before anything else can only be an occurrence's own.
         if amount.is_some() {
             return Ok(Verb::Occurrence(amount));
         }
-        match self.tok() {
-            Tok::Punct(Punct::Eq) => {
-                self.bump();
-                if self.at(Punct::Minus) && matches!(self.lexer.peek_second().tok, Tok::Number(_)) {
-                    self.signed_literal().map(|literal| Verb::Value(Amount::Literal(literal)))
-                } else if self.at(Punct::Minus) {
-                    let start = self.peek().loc.start as usize;
-                    self.bump();
-                    let value = self.expression()?;
-                    let first = self.expr(value).first;
-                    let root = self.node(ExprKind::Unary(UnOp::Neg, value), self.loc_from(start), first);
-                    Ok(Verb::Value(Amount::Computed(root)))
-                } else {
-                    self.amount(scope).map(Verb::Value)
-                }
-            }
-            Tok::Name(word) => self.word_verb(scope, subject, word),
-            _ => self.occurrence(subject),
+        match word {
+            // An arrow after a subject that no flow starts with is no verb.
+            None | Some(Word::Flow(_)) => self.occurrence(subject),
+            Some(Word::Value) => self.value(scope),
+            Some(Word::Owes) => self.owes(scope),
+            Some(Word::Now) => self.now(scope).map(Verb::Now),
+            Some(Word::Worked) => self.then(Self::measured).map(Verb::Worked),
+            Some(Word::Used) => self.then(Self::measured).map(Verb::Used),
+            Some(Word::Waived) => Ok(self.bump_as(Verb::Waived)),
+            Some(Word::Ends) => Ok(self.bump_as(Verb::Ends)),
+            Some(Word::Event(state)) => Ok(self.bump_as(Verb::Event(state))),
+            Some(Word::Split) => self.split(),
+            Some(Word::Basis) => self.basis(scope),
+            Some(Word::Filed) => self.filed(),
         }
     }
 
-    /// A verb that is a word, or, when the word is none, an occurrence whose
-    /// tail starts here.
-    fn word_verb(&mut self, scope: Scope, subject: Subject<'s>, word: &str) -> Parse<Verb<'s>> {
-        match word {
-            "owes" => self.owes(scope),
-            "now" => self.now(scope).map(Verb::Now),
-            "worked" => self.then(Self::measured).map(Verb::Worked),
-            "used" => self.then(Self::measured).map(Verb::Used),
-            "waived" => Ok(self.bump_as(Verb::Waived)),
-            "ends" => Ok(self.bump_as(Verb::Ends)),
-            "settled" | "void" | "returned" => self
-                .choose(&EVENT_STATES, "unknown-event-state", "settlement state")
-                .map(|(state, _)| Verb::Event(state)),
-            "split" => self.split(),
-            "basis" => self.basis(scope),
-            "filed" => self.filed(),
-            _ => self.occurrence(subject),
+    /// `= AMOUNT`: after `=` an overdrawn account is `-50 USD`, and a negated expression is one too.
+    fn value(&mut self, scope: Scope) -> Parse<Verb<'s>> {
+        self.bump();
+        if !self.at(Punct::Minus) {
+            return self.amount(scope).map(Verb::Value);
         }
+        if let Tok::Number(_) = self.lexer.peek_second().tok {
+            return self.signed_literal().map(|literal| Verb::Value(Amount::Literal(literal)));
+        }
+        let start = self.peek().loc.start as usize;
+        self.bump();
+        let value = self.expression()?;
+        let first = self.expr(value).first;
+        let root = self.node(ExprKind::Unary(UnOp::Neg, value), self.loc_from(start), first);
+        Ok(Verb::Value(Amount::Computed(root)))
     }
 
     /// No verb: a promise kept, which only a name can be.
@@ -125,7 +278,7 @@ impl<'s> Parser<'s> {
             "what the line says of it: `=`, `now`, `owes`, `ends` or another verb",
         );
         if let Tok::Name(word) = token.tok {
-            if let Some(near) = closest(word, VERBS) {
+            if let Some(near) = closest(word, WORDS.iter().map(|(known, _)| *known)) {
                 diag = diag.fix(format!("did you mean `{near}`?"), token.loc, near);
             }
         }
@@ -252,8 +405,10 @@ impl<'s> Parser<'s> {
         if !needs_lines && statement.body.legs.is_empty() && statement.body.items.is_empty() {
             return Ok(());
         }
-        let (legs, items) = (self.slice(statement.body.legs), statement.body.items);
         let legs_only = matches!(statement.verb, Verb::Filed(_));
+        let arrows = if legs_only { Arrows::Forbidden } else { Arrows::Tolerated(Junction::Out) };
+        self.legs_point(statement.body.legs, arrows)?;
+        let (legs, items) = (self.slice(statement.body.legs), statement.body.items);
         let items_only = matches!(statement.verb, Verb::Owes { .. } | Verb::Waived | Verb::Now(Change::Amendment));
         if let (true, Some(leg)) = (items_only, legs.first()) {
             return self.fail(takes_items_only(leg.loc, what_it_says(&statement.verb)));
@@ -267,19 +422,60 @@ impl<'s> Parser<'s> {
             Verb::Now(Change::Amendment) => items.is_empty(),
             _ => false,
         };
-        match says_nothing {
-            true => self.fail(no_amount_or_items(header, what_it_says(&statement.verb))),
-            false => Ok(()),
+        if says_nothing {
+            return self.fail(no_amount_or_items(header, what_it_says(&statement.verb)));
         }
+        if !legs_only {
+            self.note_bare_legs(statement.body.legs);
+        }
+        Ok(())
     }
 
     /// The claim an opening's line states: there are no lines under it.
-    pub fn check_claim(&mut self, statement: &Statement<'s>, header: Loc) -> Parse<()> {
+    fn check_claim(&mut self, statement: &Statement<'s>, header: Loc) -> Parse<()> {
         match statement.verb {
             Verb::Owes { amount: None, .. } => self.fail(no_amount_or_items(header, "a claim")),
             _ => Ok(()),
         }
     }
+
+    /// `opening DATE` and its lines `END [SELECTOR] AMOUNT [basis AMOUNT] [since DATE]`,
+    /// `ASSET basis AMOUNT [since DATE]` and `DEBTOR owes CREDITOR AMOUNT TAIL`.
+    pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
+        let date = self.item_date("the day the balances are stated, like `2024-12-31`")?;
+        let header = self.end_header(line)?;
+        let claims = self.mark::<Statement>();
+        let lines = self.legs(line, |parser, opening_line| {
+            if let (Tok::Name(debtor), Tok::Name("owes")) = (parser.tok(), parser.lexer.peek_second().tok) {
+                parser.bump();
+                let claim = parser.said(date, Subject::Name(Name(debtor)), None, Some(Word::Owes))?;
+                parser.check_claim(&claim, parser.line_loc(opening_line))?;
+                parser.expect_eol()?;
+                parser.push(claim);
+                return Ok(());
+            }
+            let leg = parser.leg(opening_line, Scope::Opening(date))?;
+            match parser.get(leg).amount {
+                Quantity::Amount(_) | Quantity::Whole => Ok(()),
+                _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
+            }
+        });
+        let claims = self.since(claims);
+        self.emit(&header, Opening { date, lines: lines?, claims }, ItemKind::Opening);
+        Ok(())
+    }
+}
+
+/// What a statement is about when the flow's source that was read is all it says: a name that no selector narrows, and
+/// perhaps the occurrence's own amount. A line that spreads a payment over days is a flow whatever follows.
+fn about<'s>(from: &Side<'s>, spread: bool) -> Option<(Subject<'s>, Option<Amount<'s>>)> {
+    let end = from.end.filter(|end| !spread && end.select.is_empty())?;
+    let amount = match from.amount {
+        None => None,
+        Some(Quantity::Amount(amount)) => Some(amount),
+        Some(_) => return None,
+    };
+    Some((Subject::Name(end.name), amount))
 }
 
 /// Whether the lines under a statement of this kind mean anything.
@@ -349,4 +545,10 @@ fn no_amount_or_items(header: Loc, says: &str) -> Diagnostic {
     Diagnostic::error("expected-amount", format!("{says} needs an amount, or items that make one"))
         .label(header, "no amount here, and no items under it")
         .help("write the amount on the line, or indent items below it")
+}
+
+fn opening_needs_amount(leg: Loc) -> Diagnostic {
+    Diagnostic::error("opening-amount", "an opening line says how much a place holds")
+        .label(leg, "no amount here")
+        .help("write the balance the statement shows: `checking 10_000 USD`")
 }

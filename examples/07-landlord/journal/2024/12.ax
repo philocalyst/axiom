@@ -1,19 +1,19 @@
 /// Balances at the start of the ledger: Jamie's checking account, the day before the closing.
 opening 2024-12-18
-  checking    128_000 USD
+  checking 128_000 USD
 
 /// Closing day. The loan contract originates 279,000.00 USD into rental-bank;
 /// its loan-contract assertions reconcile the principal and payoff. Cash to close
 /// is the 25% down payment, 4,850.00 USD of basis costs, 3,120.00 USD of loan
 /// costs and 722.30 USD of prepaid interest.
-2024-12-18 checking -> rental-bank 108_000 USD #transfer
+2024-12-18 checking    -> rental-bank 108_000 USD #transfer
 2024-12-18 home-loan
-2024-12-18 rental-bank -> title-co 376_850 USD #purchase of house
+2024-12-18 rental-bank -> title-co    376_850 USD #purchase of house
 
 /// The loan costs are a cost of the loan for as long as the loan lasts. Written here after the sale, the range
 /// ends the day the loan was paid off: paid now, deducted evenly per day over those 377 days.
-2024-12-18..2025-12-29 rental-bank -> lender 3_120 USD #loan-cost of house
-2024-12-18 rental-bank -> lender 722.30 USD #interest of house
-2024-12-31 rental-bank = 6_307.70 USD
-2024-12-31 checking = 20_000.00 USD
-2024-12-31 home-loan = 279_000 USD
+2024-12-18..2025-12-29 rental-bank -> lender        3_120 USD  #loan-cost of house
+2024-12-18             rental-bank -> lender        722.30 USD #interest of house
+2024-12-31             rental-bank =  6_307.70 USD
+2024-12-31             checking    =  20_000.00 USD
+2024-12-31             home-loan   =  279_000 USD

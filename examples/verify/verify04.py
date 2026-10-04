@@ -11,7 +11,7 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.join(HERE, "..", "04-freelancer")
+ROOT = os.path.join(HERE, "..", "..", "tests", "v4-syntax", "examples", "04-freelancer")
 YEAR = 2025
 CLIENTS = {"brightwave", "fernhill", "orbit-labs", "delta-rugs", "northpeak"}
 BUSINESS_PURPOSES = {

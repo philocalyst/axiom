@@ -4,11 +4,11 @@
 2026-02-03 checking -> utilities 61.84 USD / power-co
 2026-02-04 visa -> dining 18.42 USD
 2026-02-05 visa -> groceries 67.86 USD / trader-joes
-2026-02-06 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
+2026-02-06 me <- studio 2_307.69 USD
+  -> taxes/federal 226.00 USD
+  -> taxes/payroll 176.54 USD
+  -> health         60.00 USD
+  -> checking      ...
 2026-02-06 checking -> savings 100 USD for car-fund
 2026-02-06 checking -> savings 100 USD for insurance-fund
 2026-02-06 checking -> savings 250 USD for trip-fund
@@ -22,6 +22,6 @@
 2026-02-12 visa -> groceries 82.49 USD / trader-joes
 2026-02-13 wallet -> dining 6.21 USD
 2026-02-14 visa -> subscriptions 11.99 USD / spotify
-2026-02-14 visa = 839.28 USD
+2026-02-14 visa     = 839.28 USD
 2026-02-14 checking = 6_597.01 USD
-2026-02-14 savings = 4_813.75 USD
+2026-02-14 savings  = 4_813.75 USD

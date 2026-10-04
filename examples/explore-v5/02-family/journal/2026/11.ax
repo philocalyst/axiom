@@ -3,19 +3,19 @@
 01 mortgage-2                                                 // ▸ 3,465.38: #interest of home 2,240.50 · principal 522.88 · escrow 702.00
 01 nyc-lease
 05 529-noa-monthly
-06 joint-visa -> target 166.20 USD
+06 joint-visa      -> target 166.20 USD
 // 11-09: a parked car hit in the Fairway lot. Claim 114 with State Farm: 1,000 deductible.
-10 joint-visa -> little-oaks 1_610.00 USD #childcare for benefit-admin ^dc-1110 "11-10 to 11-30, 21 of 30 days"  // ▸ the FSA owes it: a claim on the plan
+10 joint-visa     -> little-oaks       1_610.00 USD #childcare "11-10 to 11-30, 21 of 30 days" ^dc-1110 for benefit-admin  // ▸ the FSA owes it: a claim on the plan
 12 electricity-ca
-14 car-loan                                                   // ▸ 560.20: #interest of car2 126.11 · principal 434.09
+14 car-loan                                                                                                                // ▸ 560.20: #interest of car2 126.11 · principal 434.09
 14 electricity-ny
 15 job-jamie
 15 job-harbor
-17 joint-visa -> whole-foods 124.05 USD
-20 joint-visa -> nyu-langone 1_450.00 USD ^bill-nyu-1003      // ▸ settles the rest
-24 joint-visa -> redline-collision 8_940.00 USD #repair of car2 ^claim-114
-28 benefit-admin -> joint-checking 1_000.00 USD ^dc-1110      // ▸ all the FSA holds today: 1,000.00 of its 1,610.00      // ✗ 02a14
-29 joint-visa -> trader-joes 92.48 USD
+17 joint-visa     -> whole-foods       124.05 USD
+20 joint-visa     -> nyu-langone       1_450.00 USD ^bill-nyu-1003                                                         // ▸ settles the rest
+24 joint-visa     -> redline-collision 8_940.00 USD #repair of car2 ^claim-114
+28 joint-checking <- benefit-admin     1_000.00 USD ^dc-1110                                                               // ▸ all the FSA holds today: 1,000.00 of its 1,610.00      // ✗ 02a14
+29 joint-visa     -> trader-joes       92.48 USD
 30 job-jamie
 30 hsa-employer
 30 job-harbor

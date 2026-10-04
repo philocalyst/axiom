@@ -1,26 +1,26 @@
 // March 2026.
 
-01 mortgage                                                   // ▸ 3,364.95: #interest of home 1,873.84 · principal 789.11 · escrow 702.00
-01 auto-ca                                                    // ▸ 940.00 #insurance, six months from 03-01
-01 home-insurance                                             // ▸ 1,340.00 from escrow · #insurance of home, recognized over 12 months
-05 me-visa -> blooming-events 3_200 USD #wedding "photographer deposit"
-06 me-visa -> trader-joes 91.14 USD
+01 mortgage                                                           // ▸ 3,364.95: #interest of home 1,873.84 · principal 789.11 · escrow 702.00
+01 auto-ca                                                            // ▸ 940.00 #insurance, six months from 03-01
+01 home-insurance                                                     // ▸ 1,340.00 from escrow · #insurance of home, recognized over 12 months
+05 me-visa        -> blooming-events 3_200 USD #wedding "photographer deposit"
+06 me-visa        -> trader-joes     91.14 USD
 12 electricity-ca
-13 jamie-amex -> target 58.62 USD
-14 car-loan                                                   // ▸ 560.20: #interest of car2 142.81 · principal 417.39
+13 jamie-amex     -> target          58.62 USD
+14 car-loan                                                           // ▸ 560.20: #interest of car2 142.81 · principal 417.39
 15 job-lumen
 15 job-jamie
-20 lumen 9_200 USD -> #wages "annual bonus"                 // ✎ 02b5: a raw split needs a header with a dangling arrow
-  irs            2_024.00 USD                            // ▸ 22% supplemental, tax paid for 2026
-  ftb              941.16 USD
-  ssa              703.80 USD
-  edd              119.60 USD
-  me-checking      ...                                   // ▸ 5,411.44
-22 me-visa -> whole-foods 120.30 USD
-22 me-visa -> aurora-catering 2_480 USD #wedding "dress, alterations and shoes"
-29 me-visa -> trader-joes 84.86 USD
-31 mortgage = 460_463.37 USD
-31 car-loan = 28_628.86 USD
+20 me             <- lumen           9_200 USD #wages "annual bonus"  // ✎ 02b5: a raw split needs a header with a dangling arrow
+  -> irs         2_024.00 USD                               // ▸ 22% supplemental, tax paid for 2026
+  -> ftb           941.16 USD
+  -> ssa           703.80 USD
+  -> edd           119.60 USD
+  -> me-checking ...                                        // ▸ 5,411.44
+22 me-visa      -> whole-foods     120.30 USD
+22 me-visa      -> aurora-catering 2_480 USD  #wedding "dress, alterations and shoes"
+29 me-visa      -> trader-joes     84.86 USD
+31 mortgage     =  460_463.37 USD
+31 car-loan     =  28_628.86 USD
 31 job-lumen
 31 job-jamie
 31 hsa-employer

@@ -1,0 +1,18 @@
+2025-11-01 checking -> oak-street 1_950 USD #rent
+2025-11-01 home-loan
+// Historical loan split, independently checked from the contract terms: home-loan            252.65 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_556.94 USD   // interest
+2025-11-03 rent-b
+2025-11-05 manager-fee 200.00 USD
+2025-11-08 checking -> trader-joes 194.38 USD #groceries
+2025-11-15 checking -> trader-joes 155.97 USD #groceries
+2025-11-19 checking -> cafe 225.04 USD #dining
+2025-11-22 checking -> home-supplies 423.68 USD #household
+2025-11-28 paycheck
+// Previous hand-entered depreciation: 956.61 USD on 2025-11-30. v4 derives this from the house parts.
+2025-11-30 home-loan = 276_536.12 USD
+2025-11-30 bills = empty
+2025-11-30 rental-bank = 2_892.20 USD
+2025-11-30 checking = 40_679.81 USD
+2025-11-30 deposit-bank = 2_500.00 USD
+2025-11-30 deposits = 2_500.00 USD

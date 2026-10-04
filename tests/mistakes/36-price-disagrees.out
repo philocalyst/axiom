@@ -27,5 +27,15 @@ error[price-disagrees]: the stated price does not match the flow amounts
    │                               │                        ╰── this price implies a different amount
    │                               ╰── the written quantities disagree with the price
 
-✗ 3 errors
+warning[v4-syntax]: a line is written the v4 way
+   ╭─[36-price-disagrees.ax:13:21]
+   │
+13 │ 2026-01-22 checking 2_000 USD -> brokerage 7 VTI @ 285.70 USD
+   │                     ──────────────┬─────────────
+   │                                   ╰── an amount on both sides of the arrow
+   │
+   = help: an exchange states one amount and its price: `checking -> broker 5.58 VTI @ 268.57 USD`
+   = help: `axiom fmt --upgrade` writes them the v5 way, and checks that the book says the same
+
+✗ 3 errors · 1 warning
 [exit status 1]

@@ -1,0 +1,13 @@
+error[wrong-kind]: `acme` is an employer, and `owner` takes a taxpayer
+   ╭─[132-owner-line-is-no-person.ax:12:9]
+   │
+11 │ account college : 529-plan
+12 │   owner acme
+   │         ──┬─
+   │           ╰── an employer, not a taxpayer
+   │
+   = note: it could be `family` or `riley`
+   = help: write one of them, as in `owner family`
+
+✗ 1 error
+[exit status 1]

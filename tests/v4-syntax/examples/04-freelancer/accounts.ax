@@ -1,0 +1,101 @@
+// Native v4 vocabulary for the freelance design business. Accounts describe
+// custody; purposes classify recognized income and expenses.
+
+kind sep-ira : tax-deferred
+  basis zero
+  deductible true
+  liquidity 3d
+  law count-contributions
+    on in
+    when from is asset
+    count amount as sep-contributions
+  law contribution-limit
+    each year closing 04-15
+    let cap = min((value(tally(net-profit), USD) - value(tally(se-deduction), USD)) * 20%, sep-limit[year])
+    require value(tally(sep-contributions), USD) <= cap "SEP-IRA contributions over the limit for the year"
+
+purpose design : income
+  law cash-receipts
+    on flow
+    count amount as gross-receipts
+
+purpose business-expense : spending
+  law deductible-expense
+    on flow
+    count amount as business-expenses
+purpose business-software : business-expense
+  budget 130 USD monthly
+purpose business-insurance : business-expense
+purpose business-equipment : business-expense
+purpose business-education : business-expense
+purpose business-travel : business-expense
+purpose business-printing : business-expense
+purpose business-fonts : business-expense
+purpose business-hosting : business-expense
+purpose business-fees : business-expense
+purpose business-mile : spending
+  law standard-mileage
+    on flow
+    count value(amount, USD) as business-expenses
+purpose business-meal : spending
+  law half-deductible
+    on flow
+    count amount * 50% as business-expenses
+purpose home-office-cost : spending
+  law home-office
+    on flow
+    count amount * office-share[year] as business-expenses
+purpose business-phone : spending
+  law phone-share
+    on flow
+    count amount * 60% as business-expenses
+purpose health-premium : spending
+  law self-employed-health
+    on flow
+    count amount as health-premiums
+    count amount as adjustments
+purpose owner-draw : transfer
+purpose tax-estimate : tax-paid
+purpose reward : income
+
+entity vault : envelope
+
+account business-checking : deposit at chase
+account personal-checking : deposit at chase
+  owner me
+account tax-vault : deposit at chase
+account sep : sep-ira at fidelity
+account business-card : credit-card at chase
+account receivable : receivable
+
+asset car : vehicle
+  owner me
+
+entity chase : org
+entity fidelity : org
+entity brightwave, fernhill, orbit-labs, delta-rugs, northpeak : client
+entity adobe, figma, notion, google, freshbooks, dropbox : software
+entity hiscox, bluecross, statefarm : insurer
+entity apple, trader-joes, safeway : store
+entity ixdf, config, monotype, squarespace, sf-hotel : org
+entity alaska-air, lyft, stripe, card-issuer : merchant
+entity landlord : landlord
+entity pge, comcast : utility
+entity tmobile : phone-company
+kind interest-source : org
+  pays interest-income
+kind reward-source : org
+  pays reward
+entity interest-source : interest-source
+entity rewards : reward-source
+entity restaurant : merchant
+entity transit-agency : merchant
+entity printing : merchant
+entity education-vendor : merchant
+entity travel-vendor : merchant
+entity fees : merchant
+entity bad-debt : org
+
+code inv-* on receivable
+code macbook-* on business-card
+code q*-* on tax-vault

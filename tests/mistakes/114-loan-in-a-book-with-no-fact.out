@@ -1,4 +1,4 @@
-warning[missed-occurrence]: `mortgage` was due 17 times and no occurrence was written (the last on 2026-06-01)
+warning[missed-occurrence]: `mortgage` was due 17 times since 2025-02-01 and no occurrence was written (the last on 2026-06-01)
   ╭─[114-loan-in-a-book-with-no-fact.ax:9:1]
   │
 9 │ contract mortgage with bank

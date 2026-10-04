@@ -1,4 +1,4 @@
-warning[missed-occurrence]: `mortgage` was due 5 times and no occurrence was written (the last on 2026-06-01)
+warning[missed-occurrence]: `mortgage` was due 5 times since 2026-02-01 and no occurrence was written (the last on 2026-06-01)
    ╭─[112-loan-before-the-book.ax:12:1]
    │
 12 │ contract mortgage with bank

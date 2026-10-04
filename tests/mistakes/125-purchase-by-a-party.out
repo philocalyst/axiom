@@ -1,0 +1,11 @@
+error[junction-subject]: `acme` is a party, and a `<-` line is written from one of your books
+   ╭─[125-purchase-by-a-party.ax:19:17]
+   │
+19 │ 2026-01-15 acme <- 7 VTI @ 285.70 USD
+   │                 ─┬
+   │                  ╰── `acme` is a party
+   │
+   = help: name the book it happens in first: `brokerage <- 7 VTI @ 285.70 USD`
+
+✗ 1 error
+[exit status 1]

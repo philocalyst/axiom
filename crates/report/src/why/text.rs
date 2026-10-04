@@ -16,7 +16,7 @@ pub fn flows(lens: Lens<'_, '_, '_, '_>, run: &Run, description: &str) -> Vec<Id
         lens.owns(crate::flow::movement_place(lens, posting.flow))
             && posting.flow.description.is_some_and(|text| book.text(text) == description)
     };
-    postings(book, run).filter(described).map(|posting| posting.id).collect()
+    postings(book, run).filter(described).filter_map(|posting| posting.id.journal()).collect()
 }
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, description: &str, ids: &[Id<Flow>]) -> Report<'s> {

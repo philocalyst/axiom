@@ -12,7 +12,7 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.join(HERE, "..", "05-family")
+ROOT = os.path.join(HERE, "..", "..", "tests", "v4-syntax", "examples", "05-family")
 JOURNAL = os.path.join(ROOT, "journal", "2025")
 NUMBER = r"([\d_]+(?:\.\d+)?)"
 FLOW = re.compile(
@@ -86,7 +86,7 @@ federal = total(lambda f: tagged(f, "federal-tax"))
 state = total(lambda f: tagged(f, "state-tax") or tagged(f, "prior-year-state-tax"))
 sdi = total(lambda f: tagged(f, "state-disability"))
 interest = total(lambda f: tagged(f, "interest-income"))
-mortgage_interest = total(lambda f: tagged(f, "mortgage-interest"))
+mortgage_interest = total(lambda f: tagged(f, "interest") and "house" in f["tail"].split())
 property_tax = total(lambda f: tagged(f, "property-tax"))
 charity = total(lambda f: tagged(f, "charity"))
 

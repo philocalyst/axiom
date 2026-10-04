@@ -128,7 +128,7 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
     /// The claims open at `at`, from the parcels a fold to that day holds.
     fn claims(&self, at: Day) -> Report<'b> {
         let ledger = self.ledger_at(at, self.run().today);
-        super::claims::view_from(self.lens(at), self.run(), ledger.holdings())
+        super::claims::view_from(self.lens(at), ledger.holdings())
     }
 
     /// What is held at `at`, with its cost and its gain: everywhere, or in the place `scope` names.

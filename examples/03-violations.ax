@@ -42,7 +42,7 @@ opening 2025-12-31
   checking 100_000 USD
 
 // The 2026 deferral limit is 24,500 USD; the owner is under 50.
-2026-01-30 acme -> retirement 26_000 USD
+2026-01-30 retirement <- acme 26_000 USD
 // expect: `deferral-limit`, 1,500 USD over the annual cap.
 
 // All pre-tax value in the account has no basis; this $10,000 withdrawal is
@@ -51,9 +51,9 @@ opening 2025-12-31
 // expect: 1,000 USD of early-withdrawal tax, owed with the return.
 
 // With no lot policy, a quarter of a coin could come from either purchase.
-2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
-2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
-2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
+2026-02-10 checking        -> wallet   0.5 BTC @ 60_000 USD
+2026-02-20 checking        -> wallet   0.5 BTC @ 90_000 USD
+2026-03-01 wallet 0.25 BTC -> checking         @ 96000.00 USD
 // expect: ambiguous relief. The two candidate gains are 9,000 USD and 1,500 USD.
 
 // Trader Joe's says groceries; the explicit purpose disagrees.
@@ -66,12 +66,12 @@ opening 2025-12-31
 
 // The scholarship's money stays in its own account, so the theater payment
 // cannot use unrestricted checking parcels instead.
-2026-04-01 scholarship -> education-fund 1_200 USD
-2026-04-02 education-fund -> theater 300 USD #fun
+2026-04-01 education-fund <- scholarship 1_200 USD
+2026-04-02 education-fund -> theater     300 USD   #fun
 // expect: `purpose`, since scholarship money is restricted to education.
 
 // The scholarship account keeps the remaining grant money identifiable through
 // the deadline. The bank balance assertions show both positions at year end.
-2026-12-31 checking = 57_915.80 USD
+2026-12-31 checking       = 57_915.80 USD
 2026-12-31 education-fund = 900 USD
 // expect: `deadline`, with 900 USD of education money still unspent.

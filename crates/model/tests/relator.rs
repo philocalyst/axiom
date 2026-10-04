@@ -1,7 +1,7 @@
 //! What a contract of a kind is: who fills its slots, which of its kind's legs a book has, and what is refused.
 
 use axiom_core::{Diagnostic, FileId, Id};
-use axiom_model::{Book, Contract, Effect, Law, Owner, Shape, Source, StepKind, build};
+use axiom_model::{Book, Contract, Effect, Law, Owner, Shape, Source, Stand, StepKind, build};
 use axiom_syntax::{Folder, parse};
 
 /// An employment between a person and an employer, whose employer half of the payroll tax is written once.
@@ -88,7 +88,7 @@ fn the_employer_that_pays_it_has_the_leg_from_its_own_account() {
     let (payroll, irs) = (book.place("payroll").unwrap(), book.entities[book.entity("irs").unwrap()].place.unwrap());
     assert_eq!(
         shape(&book, leg),
-        Shape::Flow { from: Some(payroll), to: Some(irs) },
+        Shape::Flow { from: Stand::At(payroll), to: Stand::At(irs) },
         "the employer stands at the account"
     );
 }
@@ -110,7 +110,7 @@ fn a_member_of_the_owner_stands_where_the_owner_does() {
     let (joint, irs) = (book.place("joint").unwrap(), book.entities[book.entity("irs").unwrap()].place.unwrap());
     assert_eq!(
         shape(&book, leg),
-        Shape::Flow { from: Some(joint), to: Some(irs) },
+        Shape::Flow { from: Stand::At(joint), to: Stand::At(irs) },
         "jo is a member of the owner of joint"
     );
 }

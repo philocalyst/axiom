@@ -1,0 +1,17 @@
+// Shared kinds and purpose trees come from `std` and the imported `us` systems.
+// The actual system laws stay in those imported source files; this keeps the
+// project-specific income and business-cost meanings visible at their source.
+
+purpose business-income : income
+purpose design : business-income
+
+kind sole-proprietorship : entity
+  /// The business identity used to recognize owner allocations on spending.
+
+purpose spending
+  /// A cost allocated to a sole proprietorship, or paid by it, is deductible
+  /// on Schedule C. A bill remains one flow; only the business share is counted.
+  law business-costs
+    on flow
+    when owner.kind is sole-proprietorship
+    count amount as schedule-c-expenses

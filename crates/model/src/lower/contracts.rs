@@ -12,8 +12,8 @@ use super::infer::classify;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
-    Amount, Asset, At, Book, Cadence, Class, Commodity, Contract, Coverage, Deadline, Entity, Escalation, Input, Loan,
-    Param, Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
+    Amount, Asset, At, Book, Cadence, Commodity, Contract, Coverage, Deadline, Entity, Escalation, Input, Loan, Param,
+    Place, Prepay, Relative, Reset, Role, Share, Terms, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
@@ -163,7 +163,8 @@ fn loan_endpoint<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>
     let said = &mut Vec::new();
     let party = contract_party(world, written, said)?;
     let owner = contract_owner(world, written, said).filter(|&owner| owner != party)?;
-    Some(End { place: world.tab(party, owner, Class::Debt, loan.loc), entity: Some(party) })
+    let loans = world.book.roots.kinds.debt;
+    Some(End { place: world.tab(party, owner, loans, loan.loc), entity: Some(party) })
 }
 
 fn contract_facts<'a, 's>(
@@ -248,7 +249,8 @@ fn lower_contract<'a, 's>(
 fn owed_by_party(world: &mut World<'_>, contract: &Contract) {
     let deadline = |terms: &Terms| terms.due.is_some() && terms.blame() == Blame::Party;
     if contract.terms.iter().chain(&contract.standing).any(deadline) {
-        world.tab(contract.party, contract.owner, Class::Asset, contract.loc);
+        let claims = world.book.roots.kinds.claim;
+        world.tab(contract.party, contract.owner, claims, contract.loc);
     }
 }
 
@@ -297,7 +299,7 @@ fn contract_loan<'s>(
         );
         return None;
     }
-    let debt = world.tab(party, owner, Class::Debt, prop.loc);
+    let debt = world.tab(party, owner, world.book.roots.kinds.debt, prop.loc);
     Some(Some((Loan { principal, on, term, asset, debt, resets, prepay }, rate)))
 }
 

@@ -1,0 +1,11 @@
+error[junction-subject]: `acme` is a party, and a `<-` line is written from one of your books
+   ╭─[124-take-between-two-parties.ax:19:17]
+   │
+19 │ 2026-01-15 acme <- shop 1_200 USD
+   │                 ─┬
+   │                  ╰── `acme` and `shop` are both parties
+   │
+   = help: write one of your books first
+
+✗ 1 error
+[exit status 1]

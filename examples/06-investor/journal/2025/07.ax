@@ -1,31 +1,31 @@
-2025-07-01 checking -> landlord 2_650 USD
-2025-07-01 staking-source 23.68 USD -> wallet 0.00950374 ETH @ 2491.17 USD
-2025-07-05 checking 1_500.00 USD -> fidelity 4.9804 VTI @ 301.18 USD
-2025-07-09 checking -> utility-co 163.02 USD
-2025-07-12 checking -> grocer 296.21 USD
-2025-07-16 checking -> cafe 211.02 USD
-2025-07-20 checking -> grocer 287.07 USD
-2025-07-24 checking -> misc-vendor 169.72 USD
-2025-07-28 dividend-source -> schwab 75.53 USD
-2025-07-31 northwind -> 14_000.00 USD
-  retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  irs       2_650.00 USD
-  payroll-office       1_071.00 USD   // Social Security and Medicare
-  checking            ...
-2025-07-31 interest-source -> savings 271.53 USD
-2025-07-31 interest-source -> fidelity 209.42 USD
-2025-07-31 checking = 31_334.46 USD
-2025-07-31 savings = 81_729.52 USD
-2025-07-31 espp-cash = 1_400.00 USD
-2025-07-31 fidelity = 89.073 VTI
-2025-07-31 fidelity = 36.3264 MSFT
-2025-07-31 fidelity = 19.7153 UNH
-2025-07-31 fidelity = 101.9694 FAST
-2025-07-31 fidelity = 73.0778 VXUS
-2025-07-31 schwab = 333.4448 BND
-2025-07-31 schwab = 38.2029 VXUS
-2025-07-31 etrade = 302.7888 NWND
-2025-07-31 coinbase = 0.15 BTC
-2025-07-31 coinbase = 0.95668225 ETH
-2025-07-31 wallet = 6.02904417 ETH
+2025-07-01 checking -> landlord        2_650 USD
+2025-07-01 wallet   <- staking-source  0.00950374 ETH @ 2491.17 USD
+2025-07-05 checking -> fidelity        4.9804 VTI     @ 301.18 USD
+2025-07-09 checking -> utility-co      163.02 USD
+2025-07-12 checking -> grocer          296.21 USD
+2025-07-16 checking -> cafe            211.02 USD
+2025-07-20 checking -> grocer          287.07 USD
+2025-07-24 checking -> misc-vendor     169.72 USD
+2025-07-28 schwab   <- dividend-source 75.53 USD
+2025-07-31 me       <- northwind       14_000.00 USD
+  -> retirement     1_958.33 USD           // 401(k) deferral
+  -> espp-cash      1_400.00 USD for espp  // ESPP contribution, after tax
+  -> irs            2_650.00 USD
+  -> payroll-office 1_071.00 USD           // Social Security and Medicare
+  -> checking       ...
+2025-07-31 savings   <- interest-source 271.53 USD
+2025-07-31 fidelity  <- interest-source 209.42 USD
+2025-07-31 checking  =  31_334.46 USD
+2025-07-31 savings   =  81_729.52 USD
+2025-07-31 espp-cash =  1_400.00 USD
+2025-07-31 fidelity  =  89.073 VTI
+2025-07-31 fidelity  =  36.3264 MSFT
+2025-07-31 fidelity  =  19.7153 UNH
+2025-07-31 fidelity  =  101.9694 FAST
+2025-07-31 fidelity  =  73.0778 VXUS
+2025-07-31 schwab    =  333.4448 BND
+2025-07-31 schwab    =  38.2029 VXUS
+2025-07-31 etrade    =  302.7888 NWND
+2025-07-31 coinbase  =  0.15 BTC
+2025-07-31 coinbase  =  0.95668225 ETH
+2025-07-31 wallet    =  6.02904417 ETH

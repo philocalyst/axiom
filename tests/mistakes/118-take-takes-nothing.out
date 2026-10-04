@@ -1,0 +1,12 @@
+error[takes-nothing]: nothing follows this `<-`
+   ╭─[118-take-takes-nothing.ax:18:21]
+   │
+18 │ 2026-01-16 checking <-
+   │                     ─┬
+   │                      ╰── what does it take, and from whom?
+   │
+   = help: name the end it takes from and an amount: `checking <- acme 5_750 USD`
+   = help: or an amount and a price: `checking <- 7 VTI @ 285.70 USD`
+
+✗ 1 error
+[exit status 1]
