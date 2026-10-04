@@ -1,0 +1,21 @@
+// MISTAKE: a typo in the name of an address, whose closest name is an account the words before it do not reach. `jordan` fills
+// the 401(k) with `bluefin` and the IRA alone, so `jordan/bluefin/roth-ira` is no address either: what can be pasted in place
+// of the typo is the address of the IRA.
+base USD
+use std
+use us/401k
+use us/ira
+
+entity fidelity : org
+entity bluefin : employer
+entity jordan : person
+
+account jordan/bluefin/401k at fidelity
+account jordan/roth-ira : roth-ira at fidelity
+  established 2015-01-01
+
+opening 2026-01-01
+  jordan/bluefin/401k 5_000 USD
+  jordan/roth-ira 3_000 USD
+
+2026-01-31 jordan/bluefin/roth-irc = 3_000 USD
