@@ -176,7 +176,7 @@ impl<'s> FlowCx<'_, 's> {
             ClauseKind::Due(due) => {
                 tail.detail.due = Some(match due {
                     ast::Due::On(day) => day,
-                    ast::Due::After(span) => self.day.add(span),
+                    ast::Due::After(span) => self.day + span,
                 });
             }
             ClauseKind::Via(name) => match world.entity(home, Word::of(file, name.0)).or_report(diags) {

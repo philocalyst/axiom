@@ -111,9 +111,9 @@ const CLOSING_REACH: Span = Span::months(4);
 
 /// A year from today, or the day a return closes if that is soon after.
 fn default_horizon(book: &Book, today: Day) -> Day {
-    let year_ahead = today.add(Span::months(12));
+    let year_ahead = today + Span::months(12);
     match closings::next_after(book, year_ahead) {
-        Some(closes) if closes <= year_ahead.add(CLOSING_REACH) => closes,
+        Some(closes) if closes <= year_ahead + CLOSING_REACH => closes,
         _ => year_ahead,
     }
 }

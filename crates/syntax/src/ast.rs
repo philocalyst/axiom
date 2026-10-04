@@ -133,7 +133,7 @@ impl<'s> Literal<'s> {
         };
         let number = text.bytes().position(is_blank).map_or(text, |end| &text[..end]);
         let dec = Dec::parse(number.as_bytes()).unwrap_or_default();
-        if negative { dec.neg() } else { dec }
+        if negative { -dec } else { dec }
     }
 
     /// The commodity, or `None` for `empty`, the zero of every commodity.

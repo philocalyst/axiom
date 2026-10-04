@@ -498,7 +498,7 @@ fn unit_dim<'s>(world: &World<'s>, file: &File<'s>, written: Name<'s>) -> Result
     let loc = file.loc(written.0);
     let unit = |text: &str| world.commodity_of(Word { text, loc }).map(Dim::Of);
     let Some((top, bottom)) = written.0.split_once('/') else { return unit(written.0) };
-    match unit(top)?.div(unit(bottom)?) {
+    match unit(top)?.over(unit(bottom)?) {
         Some(dim) if dim != Dim::Number && dim != Dim::Any => Ok(dim),
         _ => Err(Diagnostic::error("has-unit", "this is not a supported amount unit")
             .label(loc, "write one commodity or a rate such as `USD/MI`")),

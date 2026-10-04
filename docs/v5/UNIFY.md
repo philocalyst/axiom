@@ -1168,7 +1168,7 @@ the type; the facts frozen once if the order allows (or the module doc says why 
 K12b's one addition, +30). *Lines:* model −35 / +30 / **−5**. *Behaviour:* none. K12b also names two items that would change
 what a book says (`owner` written without a range, as in `acme/529`; `unknown-address` suggesting the closest name rather
 than the closest address): U does not change them, and lists them for lane D or a decision (question 11). `core`'s eight
-`clippy` errors go in the first commit of phase 1, so that every commit after it is held to `clippy`. *Proof:* tests;
+`clippy` errors go in the first commit of phase 1, so that `core` is held to `clippy -D warnings` from then on. *Proof:* tests;
 mistakes. *Risk:* low. *Needs:* U11.
 
 ### Checkpoint C4: where value rests and how it leaves (`engine`, K3e): −1,295
@@ -1501,7 +1501,9 @@ with the three cheap levers. Question 2 asks you to choose.
 ## 6. The checks
 
 **On every commit**, against the baseline binary built from the checkpoint's starting commit: `cargo fmt --check`,
-`cargo clippy --workspace -- -D warnings` (green from the first commit, which fixes `core`'s eight errors),
+`cargo clippy` (`core` clean with `-D warnings` from phase 1a; the rest of the workspace has 238 warnings today, 168 of
+them `result_large_err` for a `Diagnostic` in an `Err`: counted per crate in each checkpoint report, never up, and none in
+code U writes),
 `cargo test --workspace --release` (no known failures once lane D has merged), the goldens (`sh tests/golden.sh`: 60
 outputs), the mistakes corpus (`sh tests/mistakes/run.sh`: 115 books, 108 files and seven projects), the differential harness
 (`docs/v5/measure/diff/run.sh` on both binaries, then `compare.sh`: 156 cases of mistakes and odd shapes, 33 valid projects

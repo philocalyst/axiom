@@ -199,7 +199,7 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         // Whichever is slower, the place or the commodity, sets the pace.
         let span = |span: Option<Span>| span.unwrap_or_default();
         let (by_place, by_unit) = (span(place_span), span(unit_span));
-        Some(Liquidity::Slow(if self.day.add(by_place) >= self.day.add(by_unit) { by_place } else { by_unit }))
+        Some(Liquidity::Slow(if self.day + by_place >= self.day + by_unit { by_place } else { by_unit }))
     }
 
     /// What is in hand in a holding: its plain money and the parcels tied to no one.

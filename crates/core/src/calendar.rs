@@ -280,6 +280,7 @@ impl Days {
 
     /// How many days: 1 for [`Days::on`]. [`Days::ALWAYS`] has more than a
     /// `u32` counts, and says `u32::MAX`.
+    #[expect(clippy::len_without_is_empty, reason = "never empty: `Days::new` refuses a last day before the first")]
     pub fn len(self) -> u32 {
         u32::try_from(self.count()).unwrap_or(u32::MAX)
     }
@@ -349,7 +350,7 @@ impl Window {
 
     /// The window `n` periods on, or before when `n` is negative.
     pub fn after(self, n: i32) -> Window {
-        Window::containing(self.period, self.days.first().add(Span::months(self.period.months() * n)))
+        Window::containing(self.period, self.days.first() + Span::months(self.period.months() * n))
     }
 
     /// How many windows on from this one the window containing `day` is: 0 for
