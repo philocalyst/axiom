@@ -1,0 +1,25 @@
+error[derive-cycle]: the laws of this book derive each other's flows without end
+   ╭─[105-derive-cycle.ax:11:3]
+   │
+ 4 │ purpose rebate : income
+ 5 │   also - 50% of amount #tip
+   │   ────────────┬────────────
+   │               ╰── 2. the `also` of purpose `#rebate` derives from it
+   ⋮
+10 │ kind rewards : credit-card
+11 │   also issuer -> self 2% of amount #rebate
+   │   ──────────────────┬─┬───────────────────
+   │                     │ ╰── 1. the `also` of kind `rewards` derives from it
+   │                     ╰── 3. and the `also` of kind `rewards` would derive again from what that made: not made
+   ⋮
+15 │ 2026-01-05 visa -> shop 100.00 USD #groceries
+   │ ──────────────────────┬──────────────────────
+   │                       ╰── the flow that started it
+   │
+   = note: a law derives once from a flow, and once from each flow another law derives from it, so a
+           chain that comes back to a law stops where it began
+   = help: narrow one of the laws with `when`, so that it does not watch the flow that closes the
+           chain
+
+✗ 1 error
+[exit status 1]

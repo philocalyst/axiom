@@ -1,0 +1,16 @@
+error[derive-posted]: a flow that has posted cannot be changed or given away in part
+   ╭─[107-derive-posted.ax:10:3]
+   │
+ 9 │ kind rewards : credit-card
+10 │   also - 5% of amount
+   │   ─────────┬─────────
+   │            ╰── this item is a part of the flow it comes with, or takes from it
+   │
+   = note: a law that is not a contract's is read as a flow posts, after its value has moved; only
+           an occurrence is made before it posts, so only a contract's law can carve an item out of
+           it
+   = help: give it a purpose, so that it is a flow of its own along the same ends (`+ 5% of amount
+           #fee`) or back (`- 5% of amount #refund`)
+
+✗ 1 error
+[exit status 1]

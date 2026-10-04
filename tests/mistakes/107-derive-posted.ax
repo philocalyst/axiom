@@ -1,0 +1,14 @@
+// MISTAKE: a `- 5%` with no purpose is a part of the flow it comes with, and a flow that has posted cannot be given away in part.
+use std
+base USD
+purpose fee : spending
+purpose refund : income
+entity me : person
+entity issuer
+entity shop
+kind rewards : credit-card
+  also - 5% of amount
+account checking : bank
+account visa : rewards
+2025-12-31 market -> checking 1_000.00 USD
+2026-01-05 visa -> shop 100.00 USD #groceries

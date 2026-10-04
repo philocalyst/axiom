@@ -1,0 +1,13 @@
+warning[law-never-fires]: no flow can reach this law: no account is of kind `rewards`
+  ╭─[108-law-never-fires.ax:9:3]
+  │
+8 │ kind rewards : credit-card
+9 │   also issuer -> self 2% of amount #rebate
+  │   ────────────────────┬───────────────────
+  │                       ╰── this watches the flows of every account of kind `rewards`, and there is none
+  │
+  = help: declare an account of kind `rewards`, or remove the law
+
+1 warning
+✓ 2 flows · 11 places · 1 law enforced · net worth 900.00 USD
+[exit status 0]

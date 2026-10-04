@@ -1,0 +1,13 @@
+// MISTAKE: a selector reads the flows of an occurrence, and a law of a card has no occurrence to read them from.
+use std
+base USD
+purpose rebate : income
+entity me : person
+entity issuer
+entity shop
+kind rewards : credit-card
+  also issuer -> self 2% of ([visa] up to 10% of amount) #rebate
+account checking : bank
+account visa : rewards
+2025-12-31 market -> checking 1_000.00 USD
+2026-01-05 visa -> shop 100.00 USD #groceries
