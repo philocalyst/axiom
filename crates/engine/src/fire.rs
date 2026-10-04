@@ -73,7 +73,7 @@ fn law_consumes(book: &axiom_model::Book<'_>, law: Id<Law>) -> bool {
     })
 }
 
-impl Ledger<'_, '_, '_> {
+impl<'b, 's> Ledger<'_, 'b, 's> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
         self.fire_as(rules, on, None);
@@ -612,16 +612,7 @@ impl Ledger<'_, '_, '_> {
         if !fresh {
             return;
         }
-        let frame = Frame {
-            plan: self.plan,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-            settled: &self.record.settled,
-        };
-        let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
+        let diagnostic = explain::broken(&self.frame(rule, ctx), step as usize, warn, waiver);
         let verdict = match (waiver, warn) {
             (Some(waiver), _) => Verdict::Waived(waiver),
             (None, true) => Verdict::Warns,
@@ -640,22 +631,11 @@ impl Ledger<'_, '_, '_> {
     /// A `require … else owe …` that does not hold costs what the law says,
     /// unless a `!` waives it.
     fn charge(&mut self, rule: &Rule, ctx: &Context, step: u32, (name, amount, owed): (Sym, Amount, Owed)) {
-        let law = &self.plan.book.laws[rule.law];
         let waive = ctx.motion.and_then(|m| m.waive);
         if let Some(waive) = waive {
             self.record.waivers.insert(waive.loc, true);
         }
-        let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame {
-            plan: self.plan,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-            settled: &self.record.settled,
-        };
-        let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
+        let diagnostic = explain::priced(&self.frame(rule, ctx), step as usize, (name, amount, owed), waive);
         self.violation(rule, ctx, diagnostic, Verdict::Priced { waived: waive.is_some() });
         if waive.is_none() {
             let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Penalty(owed));
@@ -667,17 +647,7 @@ impl Ledger<'_, '_, '_> {
     /// price, a property of one thing, a param's rows), however many laws,
     /// steps and flows run into it.
     pub(crate) fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
-        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
-        let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame {
-            plan: self.plan,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-            settled: &self.record.settled,
-        };
+        let (book, frame) = (self.plan.book, self.frame(rule, ctx));
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
         let missing = match fault {
@@ -690,10 +660,17 @@ impl Ledger<'_, '_, '_> {
             Fault::MissingInput(_) => Missing::Arithmetic(rule.law, step as u32),
             Fault::DivideByZero | Fault::Overflow => Missing::Arithmetic(rule.law, step as u32),
         };
-        if self.record.missing.insert(missing) {
-            let diagnostic = explain::faulted(&frame, fault, origin, holder);
+        let unsaid = !self.record.missing.contains(&missing);
+        if let Some(diagnostic) = unsaid.then(|| explain::faulted(&frame, fault, origin, holder)) {
+            self.record.missing.insert(missing);
             self.record.report(diagnostic);
         }
+    }
+
+    /// A law's evaluation as it stands, for saying what went wrong in it.
+    fn frame<'a>(&'a self, rule: &Rule, ctx: &'a Context) -> Frame<'a, 'b, 's> {
+        let (law, facts) = (&self.plan.book.laws[rule.law], &self.plan.laws[rule.law.index()]);
+        Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, record: &self.record }
     }
 }
 
