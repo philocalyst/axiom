@@ -1502,8 +1502,8 @@ with the three cheap levers. Question 2 asks you to choose.
 
 **On every commit**, against the baseline binary built from the checkpoint's starting commit: `cargo fmt --check`,
 `cargo clippy` (`core` clean with `-D warnings` from phase 1a; the rest of the workspace has 238 warnings today, 168 of
-them `result_large_err` for a `Diagnostic` in an `Err`: counted per crate in each checkpoint report, never up, and none in
-code U writes),
+them `result_large_err` for a `Diagnostic` in an `Err`: counted per crate in each checkpoint report; C1 broke "never up, and
+none in code U writes", see section 11),
 `cargo test --workspace --release` (no known failures once lane D has merged), the goldens (`sh tests/golden.sh`: 60
 outputs), the mistakes corpus (`sh tests/mistakes/run.sh`: 115 books, 108 files and seven projects), the differential harness
 (`docs/v5/measure/diff/run.sh` on both binaries, then `compare.sh`: 156 cases of mistakes and odd shapes, 33 valid projects
@@ -1876,3 +1876,11 @@ education` on the scholarship, so 03's expected `purpose` violation fires becaus
 `check` warns October's `#fun` at 297.01 USD (the total at its second firing) where `budget` says 323.02, the window total
 counted twice, which U29 (one recognized series) is to make one; the engine's dead code since the K merges
 (`Assets::into_states`, the guards' `before`, `part_straight_line`) is U21's and U33's.
+
+`clippy`: `core` clean with `-D warnings`; the workspace has 277 warnings against 245 on `bce9735`. C1 removed 15 (five
+`too_many_arguments`, the unused imports, `core`'s eight from phase 1a) and added 47 `result_large_err`: the one reader of
+property lines returns `Result<_, Diagnostic>` as all of `model` does (`args.rs` 22, `lower/contracts/lines.rs` 25, the
+rest in `written_amount`, `written_part` and `implied_end`). That breaks section 6's promise of none in code U writes. The cure
+is one change in `core`, not 264 boxes: a `Diagnostic` that holds its parts behind one `Box` (with `Deref` to them, so every
+reader of `.code` and `.labels` stays as it is) makes every `Err` one pointer wide and the lint silent everywhere. It is an
+entry for C6 (U43's neighbourhood), or for now if the coordinator wants the count down before C2.

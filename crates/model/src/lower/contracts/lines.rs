@@ -399,11 +399,9 @@ fn add_share(total: Ratio, rate: Ratio, loc: Loc) -> Result<Ratio, Diagnostic> {
 }
 
 /// What a share is of the whole, and for a measure the two amounts it is the ratio of.
-fn share_rate<'s>(
-    world: &World<'s>,
-    cx: &TermsCx<'_, 's>,
-    a: &mut Args<'_, 's>,
-) -> Result<(Option<Ratio>, Option<(Amount, Amount)>), Diagnostic> {
+type Rate = (Option<Ratio>, Option<(Amount, Amount)>);
+
+fn share_rate<'s>(world: &World<'s>, cx: &TermsCx<'_, 's>, a: &mut Args<'_, 's>) -> Result<Rate, Diagnostic> {
     let written = |expr: &ast::Expr<'s>| match expr.kind {
         ExprKind::Pct(percent) => Some(Err(percent.to_ratio().and_then(|rate| rate.checked_div(Ratio::new(100, 1)?)))),
         ExprKind::Fraction(top, bottom) => Some(Err(Ratio::new(i128::from(top), i128::from(bottom)))),
