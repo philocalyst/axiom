@@ -1,0 +1,27 @@
+// raises contract-loan-resets
+use std
+base USD
+entity me : person
+entity acme : org
+entity shop : org
+account checking : bank
+account savings : bank
+account escrow : bank
+  owner acme
+account wallet : bank
+  holds USD
+asset car : vehicle
+asset house : vehicle
+commodity VTI : stock
+kind sq : measure
+commodity SQF : sq
+param cpi
+  2026 3%
+param fee USD
+  2026 5 USD
+2025-12-31 market -> checking 9_000 USD
+contract mortgage with shop
+  loan 100_000 USD on 2026-01-01 at 5% over 10y
+    resets 1y from
+  monthly on 1 from checking
+  from 2026-07-01
