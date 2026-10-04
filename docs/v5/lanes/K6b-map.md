@@ -315,3 +315,142 @@ names no law or day: K7b's missing edge 1, which two words more fix). The drain,
   `g-also-*` cases (`scratchpad/k6b/also-inert.txt`).
 - **The baseline:** `cargo build --release` at `990ddb5` (the binary is `scratchpad/k6b/baseline-axiom`); `loc.py` 54,314 and `hist.py`
   (2,085 / 732 / 515 / 127 / 6 / 0 / 1 functions in the bins 1-10 / 11-20 / 21-40 / 41-80 / 81-160 / 161-320 / 321+) before any change.
+
+## 13. What was built
+
+Ten commits on `990ddb5` (this file's commit is the last), each building and passing (`axiom-engine`'s `a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot`
+and `axiom-report`'s `a_context_forecast_keeps_historical_and_same_day_obligations_once` fail before and after; the oracles and the sibling lanes
+say nothing of them):
+
+| commit | what |
+|---|---|
+| `25f8e94` | this map |
+| `714f430` | model: `Cause` and `Offspring` (with `RuntimeTxn::Derived`), `Stand`, `Derived::flow_from`, `Table::Touching`, an `also` or `derive` under any owner is a law |
+| `c342eaa` | engine: the host (`offspring.rs`: `post` = `post_flow` + `post_brood`), `Lineage`, the record, the return, `Run.offspring` |
+| `c84ba1b` | engine: `Offspring.root`, the payee, an asset's `amount` is money |
+| `aa72ff8` | report: a derived flow is a posting after the flow it came from (`register`, `flow`, `balance`, `tax`, `why`, the histories) |
+| `deecf5b`, `c28ffb7`, `77c1fea` | the cost of a book with no such law, the depth stop's own note, `fits` and `why LAW` back under the length limit |
+| `8f5561c` | `derived.py`, its 40 mutants, the probes, `tests/mistakes/105-109`, LANGUAGE section 10 |
+| `ac39991` | a test that a claim the monitor makes derives nothing (the one mutant the oracle's books cannot reach) |
+
+**Where the build differs from the sections above** (each was decided by the code, and none changes what the sections promise):
+
+- **The number is the record's, not the world's** (section 0.3, 4): `Record.first_offspring` says where a record begins and `Record::forked` sets it
+  to its parent's end, so a number is never reused across a checkpoint, and `World` is untouched. `Run.offspring` begins at 0.
+- **`derive-posted`, not `derive-carve`** (0.7): the error covers every item that is part of the flow it comes with, not only a carve (a `+` or `-`
+  with no purpose too), and says the fix (`give it a purpose`). A contract keeps carving.
+- **A law does not watch what it made** (`Stopped::Own`, said nothing): the card of section 3 and of LANGUAGE credits itself through `issuer -> self`,
+  which touches the card, so without it the example was a cycle of one. A cycle is every other chain that comes back (`Stopped::Unbounded`), keyed
+  by `(lineage, law)` in `Record.stopped`, not a `Set<Lineage>`.
+- **`Offspring.root`** (the first cause back that is no offspring) is stored: `why`, the register and the cycle's "flow that started it" would
+  otherwise walk the record for every row.
+- **A law's firing order is the order they are written in** (`rank`), not the order of the rows they are found in: `watching_place` fills a row
+  in owner order and `Rules::of` then sorts it by rank, so the kind-before-entity order of section 2 is declaration order.
+- **A flow of a returned flow's chain is remembered only if the plan says it is returned** (`remember_for_return`), as designed.
+- **The flow does not wait for a `begin`**: the chain a flow begins (`Brood::begin`) is set when its first law derives, and `post_brood` returns at
+  once for a flow nothing derived from.
+- **`law-never-fires`** is a warning for a kind of which nothing exists (and not for a system's laws, which are written for every book that lives
+  under it). **No entity stands at no place**: every declared entity has an outside place, so an entity's law is always reached by some row, and
+  the orchestrator's example for this warning does not arise in this model. A law that no flow of *this* journal reaches is not said: a forecast's
+  contracts may bring one.
+- **An asset's `amount`** is not typed in the asset's own unit (a repair of a house is money): found by the oracle's first asset book.
+- **A derived flow's `recognized` is its cause's** (a pending flow settled on May 4 derives a flow of April's tallies, as the flow it comes from
+  is), which the written book says with `for 2026-04`.
+
+## 14. What was measured
+
+**The oracle** (`docs/v5/measure/derived.py`, 700 lines of Python that work out which law fires for which flow, in what order, a second time from
+LANGUAGE and not from the engine): a project is four books (`also`, `law ... on flow ... derive`, no law with the derived lines written after each
+line, and `also` with every occurrence kept), a flow of the journal is a line, pending (settled, void or still pending), returned, written ahead of
+today, or an occurrence of a contract; every owner kind is an owner (`kind` of an account, of an entity, of an asset; an account; an entity; a
+purpose, among them one that inherits its law; an asset), laws derive an item along or back or a flow of their own with `self` or named ends, with
+`when` guards on the amount, in chains, in cycles (`derive-cycle`, held to the reference's count) and in ladders of nine and ten laws
+(`derive-depth`). It checks the CLI (`check`, `balance`, `flow`, `flow --by party`, `claims`, `tax 2026`, seven registers, `forecast`, `available`),
+and the engine's own dump (`forecasts/main.rs`: every flow posted, the derived after today, holdings at each month end, the diagnostics). The fund
+`available` draws is slow money, so its hypothetical flow derives and what the laws owe for it is held to the reference's. On the corpora I
+kept: 600 projects (seed 7: 22 rejected for a flow of a place to itself or a chain too long to read) through the CLI of the final build, 0 differ, and
+through the dump, 0 differ (25,961 flows posted, 4,462 derived after today, 12,656 derived flows written out for the `written` books); the
+owners are all used (every kind, account, entity, purpose, asset in the world 22 to 161 times; 107 projects are cycles, 77 ladders, of which
+208 projects say `derive-cycle` and 51 `derive-depth`, each held to the reference's count); 442 pending flows stay pending, 897 settle, 446
+are void; 1,183 are returned (a third of those after today, so the return is after the forecast's checkpoint); and the forecast's promised
+occurrences derive 1,588 flows that `ahead`'s fold derives again, equal on every month end.
+
+**Mutants**: 40 changes of one piece of the code under test (`derived.py mutate`), the oracle's two layers first and the crates' own tests after.
+Of the 40: **26 are killed by the engine's dump, 6 by the CLI's views** (the ones that change an order or what a view lists), **5 by a named unit
+test** (`self_in_the_law_of_an_asset_is_the_asset_itself`, `the_numbers_of_derived_flows_go_on_after_a_checkpoint_and_the_effects_they_cause_say_which`,
+`a_derive_that_cannot_be_made_is_said_where_it_is_written` twice, `a_flow_handed_to_a_ledger_derives_as_a_flow_of_the_journal_does`) and **3 survived**:
+(19) *a flow caused by time derives*, which no book of the oracle makes (it writes no claim), and which `the_claim_the_monitor_makes_for_a_missed_occurrence_derives_nothing`
+kills, checked by hand against the mutant (two derived flows where one is the kept occurrence's); (32) *a derived flow's `sequence` is its root's*, which
+is equivalent while the register's sort is stable, since the postings arrive in order; (39) *`Rules::watches` is always true*, which only
+costs, since the lookups it skips find empty rows. One more mutant of the first pass, *an opening derives*, survived because the clause was
+dead (no law watches an opening) and was removed from `Motion::derives`; the first pass and the second (the survivors and five more, after the fast
+path) are in `scratchpad`, not kept
+
+**Unchanged**: K6's `derives.py` (150 triples: run, dump, compare), `relators.py` (80 cases), K4b's `splits.py` (120 projects, 3,374 commands, and
+100 `promises`: 0 differ), `fuzz.py` (2,000 mutants of the examples, `diff`: one output differs, `regress_1607`, a hand-written `on flow` law under
+an entity that used to be `law-trigger` and now is a law whose `amount` has no one unit, so `count amount as business-expenses` says
+`type-mismatch`), K7b's twelve-date harness over the examples (3,292 files, `diff -r` empty), `diff/compare.sh` (the only outputs that move are
+K6's three `g-also-{account,entity,kind}` probes: the `also-inert` warning is gone and the `also` they write is read, so its `#fees`, which no
+book declares, is an `unknown-purpose` error), `tests/golden.sh` and `tests/mistakes/run.sh` (byte-identical; 105-109 are new).
+
+**Cost of a book with no such law** (`axiom check`, `bench/100k`, 1,868,129,556 instructions on `990ddb5`, callgrind):
+
+| build | instructions | over the baseline |
+|---|---|---|
+| first host (two `Touching` lookups, a `begin` and a `post` wrapper per flow) | 1,881,140,905 | +13.0 M, +0.70% |
+| `Rules::watches` fast path, `begin` when a law first derives (`c28ffb7`) | 1,873,570,980 | +5.4 M, +0.29% |
+
+That is about 50 instructions for each of the ~100,000 flows (`post_flow` +2.5 M, the `post` wrapper +2.3 M, `enforce` +2.1 M without my touching
+its path), not one empty-slice check. Wall time on the same books, three runs and the fastest, load average 2.9 to 3.4 (`time3.sh`): 100k 0.444 s before, 0.412 s after; 1m
+4.220 s before, 4.195 s after. Interleaved (`ab.py`, nine and five runs, fastest, then user time): 100k 0.410 against 0.411 s wall and 0.378
+against 0.393 s user; 1m 4.335 against 4.346 s wall and 4.069 against 4.158 s user. The difference is inside the noise of a shared machine
+except that the user time is 2% to 4% higher in both, which is more than the instruction count says, and which I read as the layout of
+`post_flow` and not as work
+
+**Size** (`loc.py`, non-blank non-comment lines, tests and `#[cfg(test)]` excluded; `hist.py` on `crates`): engine 12,242 to 12,492 (+250:
+`offspring.rs` is 306 of the +798 lines written, and `offspring_tests.rs` another 380, which `loc.py` leaves out), model 19,081 to 19,269 (+188),
+report 6,748 to 6,878 (+130), the rest unchanged: **54,314 to 54,882, +568** (+1.0%). By function length (bins 1-10, 11-20, 21-40, 41-80, 81-160, 161-320,
+321+): 2,085 / 732 / 515 / 127 / 6 / 0 / 1 became **2,115 / 740 / 522 / 126 / 6 / 0 / 1**: 43 more functions, 7 of them in 21 to 40 and one fewer in 41 to 80.
+Functions over 40 lines: 132 before, 131 after; the one this lane left longer is `Ledger::finish` (50 to 51 lines: `Run.offspring`, one field of
+a struct literal; I did not split it, to leave K5d's neighbourhood alone). `fits` went from 60 lines to three functions.
+
+## 15. What is not finished
+
+- **A derived flow settles nothing**, so the one place a hand-written line and a derived flow differ is claims: a payment a law implied does not
+  pay a party's claim. The oracle generates no claims.
+- **`explain.rs` is K5d's**: the contributors the explanation of a limit that broke names are journal flows (`book.flows`), so a derived flow counts
+  toward a limit and is not named among them.
+- **The hypothetical flow `available` derives is held to the reference for one place** (the fund into `checking`); other hypothetical flows
+  (`Reach` of a 401(k), of a security) go through the same `post` and are checked by `a_flow_handed_to_a_ledger_derives_as_a_flow_of_the_journal_does`.
+- **No entity stands at no place** (section 13), so `law-never-fires` does not say a law of an entity that no flow touches.
+- **The oracle masks what only a written line can say** (the note a register gives a derived row, where it was written, the count of flows, the
+  code of the flow a derived row came from, a sentence about flows recognized over a range); what it masks is listed in `derivation` and `written`.
+- **A share for a party, a party kind's `sales-tax`, and a written line replacing the derived one** (LANGUAGE section 10) are not built; the last
+  was never this lane's.
+
+## 16. The three places I am least proud of
+
+1. **`derived.py`'s masks.** The strongest claim, that a law and the lines it stands for are the same book, passes through a layer of regular
+   expressions that strip the note, the code, the source line and a sentence, and a derived row shows its root's code (a code that names a line
+   that has not derived it, and is not unique). The masks are few and named, and nothing they strip is a number, but they are where a difference
+   between a derived flow and a written line goes to hide.
+2. **`Brood`'s invariants.** The chain a flow begins is set when its first law derives (`derive_later` calls `begin` for a flow no law derived),
+   and a derived flow enters its chain from the `Waiting` it was made as (`enter`); a flow that derives nothing never touches either. It is
+   cheaper by 8 M instructions and it is subtler than a reset at the start of every post: a second place that posts a root flow and forgets to
+   reset the lineage would derive with the last chain's. Only `post` posts a root flow, and the oracle's mutant that drops `begin` is killed.
+3. **A derived flow is a posting only through `all_postings`.** Its state is its root's (`Posting::derived` reads `run.posted[root]`), its place
+   among the day's postings is `sequence`, and `postings` stays the journal's, so every view that lists flows must know to ask for the one and not
+   the other. `register`, `flow`, `balance` and `why` of an asset ask for the one; `why` of a code and of a description (`why/code.rs`, `why/text.rs`) ask for the other and list lines, so `why ^c4` does not list what the card derived from `^c4`, though a register row says it has that code; a next view would be easy to get wrong, and the
+   mutant that makes `sequence` give every derived flow its root's number survives, because the sort is stable and the iterator already puts it
+   right (an equivalent mutant today, and a fragile one).
+
+## 17. For the merge
+
+K5d is in `occurrence.rs`, `monitor.rs`, `promising.rs`, `reconcile.rs`, `explain.rs`, `promise/*`, `lower/contracts.rs` and `std.ax`; this
+lane edits none of them. **Where the two meet** and a conflict is likely: `engine/src/lib.rs` (`Run.offspring`, `Recorded` and the `mod`
+lines), `engine/src/state.rs` (`Record` fields and `forked`), `engine/src/ledger.rs` (`Course` in `post_journal` and `post_computed`, `Run`
+assembly in `finish`: one line), `engine/src/fire.rs` (`Outcome::Derive` calls `derive_later`; `fault` is `pub(crate)`), `engine/src/motion.rs`
+(`Course`, `derives`), `engine/src/occurrence/derive.rs` (calls `Derived::flow_from` in place of K6's `derived_flow`, which moved to the model: 4 lines
+added, 32 removed), and `model/src/book.rs`/`journal.rs`/`law.rs`/`rules.rs` where the other lane adds a `Watch` row or a `Shape`. I merge nothing
+of K5d's logic: the dependency is that `Cause` moved to the model (a `pub use` keeps every path), and that `Shape::Flow` ends are `Stand`, not
+`Option<Id<Place>>` (any test of K5d's that builds a `Shape::Flow` by hand writes `Stand::Flow` or `Stand::At(place)`).
