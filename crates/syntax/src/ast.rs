@@ -664,6 +664,16 @@ pub enum Quantity<'s> {
     Whole,
 }
 
+impl<'s> Quantity<'s> {
+    /// The amount a quantity writes out, if it writes one: not a marker, a share, a computation or a pending amount.
+    pub fn literal(self) -> Option<Literal<'s>> {
+        match self {
+            Quantity::Amount(Amount::Literal(literal)) => Some(literal),
+            _ => None,
+        }
+    }
+}
+
 /// An indented line under a flow that names an end: `retirement 800 USD ^pretax`.
 /// The same line is a leg of an occurrence's overrides (where `NAME = AMOUNT`
 /// states an input, or a target balance: the model tells them apart), of a

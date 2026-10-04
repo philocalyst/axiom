@@ -140,7 +140,7 @@ impl<'a, 's> Upgrade<'a, 's> {
         let toward = match (name(&flow.from), name(&flow.to), legs) {
             (Some(source), Some(target), false) => {
                 self.priced(flow, &mut h, assumed)?;
-                self.written_from(flow, &mut h, source, target)?;
+                self.written_from(flow, &mut h, source, target);
                 Junction::Out
             }
             (Some(source), None, true) => {
@@ -156,12 +156,11 @@ impl<'a, 's> Upgrade<'a, 's> {
         Ok((h, toward))
     }
 
-    /// Whose line it is: the book's own end is written first, so a payment that arrives from a party is `<-`.
-    fn written_from(&self, flow: &Flow<'s>, h: &mut Header, source: &str, target: &str) -> Result<(), Refusal> {
-        match (self.registry.standing(source), self.registry.standing(target)) {
-            (Standing::Own, _) => Ok(()),
-            (_, Standing::Own) => Ok(self.take(flow, h)),
-            _ => Err(Refusal::NeitherOwn),
+    /// Whose line it is: the book's own end is written first, so a payment that arrives from a party is `<-`. A line
+    /// that neither end of owns, or that starts from its own end, is written as it was.
+    fn written_from(&self, flow: &Flow<'s>, h: &mut Header, source: &str, target: &str) {
+        if self.registry.standing(source) != Standing::Own && self.registry.standing(target) == Standing::Own {
+            self.take(flow, h);
         }
     }
 
@@ -291,12 +290,8 @@ struct Money<'s> {
 }
 
 fn money<'s>(quantity: Option<Quantity<'s>>) -> Option<Money<'s>> {
-    match quantity {
-        Some(Quantity::Amount(Amount::Literal(literal))) => {
-            Some(Money { number: literal.num(), unit: literal.unit()?.0, text: literal.0 })
-        }
-        _ => None,
-    }
+    let literal = quantity?.literal()?;
+    Some(Money { number: literal.num(), unit: literal.unit()?.0, text: literal.0 })
 }
 
 fn is_literal(quantity: Option<Quantity<'_>>) -> bool {
@@ -369,8 +364,6 @@ fn inexact(kept: &Money<'_>, dropped: &Money<'_>, quote: &str, scale: u8) -> Ref
 
 /// Why a line was not rewritten.
 enum Refusal {
-    /// Neither end is the book's own.
-    NeitherOwn,
     /// The own accounts a split ends in have two owners.
     Owners(String, String),
     /// Two amounts and no price that a person would write: what they are, the nearest price that makes them agree (in
@@ -381,9 +374,6 @@ enum Refusal {
 impl Refusal {
     fn at(self, line: Loc) -> Diagnostic {
         match self {
-            Refusal::NeitherOwn => Diagnostic::error("upgrade-sides", "neither end of this line is the book's own")
-                .label(line, "which side is the owners' is not written, and is not guessed")
-                .help("write the account or owner whose book it is first: `checking -> acme 100 USD`"),
             Refusal::Owners(first, second) => {
                 Diagnostic::error("upgrade-owner", "this split ends in accounts of two owners")
                     .label(line, format!("`{first}` and `{second}` both hold part of it"))

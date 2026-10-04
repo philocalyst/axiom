@@ -7,8 +7,8 @@
 //! An upgrade needs what no text says (which end of a line is the book's own,
 //! and who owns it), so it opens the project as a session and asks the book
 //! ([`BookRegistry`]). It then checks its own work: a file's new text is tried
-//! on a copy of the session, and kept only if the book finds nothing it did not
-//! find before and says what it said.
+//! on a copy of the session, and kept only if the book says what it said. A line
+//! it cannot place is left as it was, and said; the rest of its file is written.
 
 use std::fs;
 use std::path::Path;
@@ -55,17 +55,24 @@ struct Planned<'a> {
 fn plan<'a>(sources: &'a Sources<'_>, format: &Format<'_>, options: Options) -> Result<Planned<'a>, Diagnostic> {
     let selected = selected(sources, &format.files)?;
     let (parsed, _) = sources.parse();
-    let session = (format.rewrite == Rewrite::Upgrade).then(|| Session::open(sources.clone(), options));
+    let upgrade = (format.rewrite == Rewrite::Upgrade).then(|| {
+        let session = Session::open(sources.clone(), options);
+        let before = Said::of(&session);
+        (session, before)
+    });
     let mut planned = Planned { changes: Vec::new(), refused: Vec::new() };
     for path in selected {
         let source = parsed
             .iter()
             .find(|source| source.path == path)
             .ok_or_else(|| Diagnostic::error("missing-source", format!("could not parse project source `{path}`")))?;
-        match &session {
+        match &upgrade {
             None => planned.changes.push(Change { path, output: source.file.format() }),
-            Some(session) => match upgraded(session, &source.file) {
-                Ok(output) => planned.changes.push(Change { path, output }),
+            Some((session, before)) => match upgraded(session, before, &source.file) {
+                Ok((output, mut lines)) => {
+                    planned.changes.push(Change { path, output });
+                    planned.refused.append(&mut lines);
+                }
                 Err(mut lines) => planned.refused.append(&mut lines),
             },
         }
@@ -102,16 +109,19 @@ fn selected<'a>(sources: &'a Sources<'_>, wanted: &[&str]) -> Result<Vec<&'a str
     }))
 }
 
-/// `file` written the v5 way, if that changes nothing the book says; otherwise why it is not.
-fn upgraded(session: &Session<'_>, file: &axiom_syntax::File<'_>) -> Result<String, Vec<Diagnostic>> {
+/// `file` written the v5 way, with the lines of it that could not be and were left as they were; or why the file is left
+/// altogether: its upgrade would change what the book says.
+fn upgraded(
+    session: &Session<'_>,
+    before: &Said,
+    file: &axiom_syntax::File<'_>,
+) -> Result<(String, Vec<Diagnostic>), Vec<Diagnostic>> {
     let source = session.sources().get(file.id).expect("a parsed file is a source");
     let registry = BookRegistry(session.book());
     let found = axiom_syntax::upgrade(&source.text, file, Folder::of(&source.path), &registry);
     let whole = Edit::Replace { at: Loc::new(file.id, 0, source.text.len() as u32), text: found.text.clone() };
-    let before = Said::of(session);
     match session.what_if(&whole, |after| before.changed_by(&Said::of(after))) {
-        Ok(None) if found.refused.is_empty() => Ok(found.text),
-        Ok(None) => Err(found.refused),
+        Ok(None) => Ok((found.text, found.refused)),
         Ok(Some(what)) => {
             let changed = Diagnostic::error("upgrade-changes-the-book", format!("the upgrade would change {what}"))
                 .note(format!("`{}` is left as it was", source.path));
@@ -138,7 +148,9 @@ impl Said {
             ("net worth", format!("{:?}", summary.net_worth)),
             ("unpriced holdings", summary.unpriced.to_string()),
         ];
-        let found = session.diagnostics().map(|d| format!("{:?} {} {}", d.severity, d.code, d.message)).collect();
+        // The warning that a file is written the v4 way is what an upgrade is for: it is the one thing allowed to go.
+        let found = session.diagnostics().filter(|d| d.code != "v4-syntax");
+        let found = found.map(|d| format!("{:?} {} {}", d.severity, d.code, d.message)).collect();
         let by_month = FlowBy::Period(Period::Month);
         let queries = [
             Query::Balance { globs: vec![], at: None, value: false, monthly: false },

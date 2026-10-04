@@ -140,11 +140,11 @@ fn a_line_the_book_rejects_is_left_as_it_was() {
 
 #[test]
 fn a_line_it_cannot_place_is_refused_and_not_guessed() {
-    let found = upgraded("2026-01-15 acme -> irs 40 USD\n");
-    assert_eq!(found.refused[0].code, "upgrade-sides");
-    assert_eq!(found.text, "2026-01-15 acme -> irs 40 USD\n");
+    // A split whose legs end in the accounts of two owners: whose book the money passes through is not guessed.
     let found = upgraded("2026-01-15 acme -> 8_000 USD\n  joint 800 USD\n  sam-401k 800 USD\n");
     assert_eq!(found.refused[0].code, "upgrade-owner");
+    // A flow that neither end owns is the book's business and no spelling's: it stays as it was.
+    assert_eq!(written("2026-01-15 acme -> irs 40 USD\n"), "2026-01-15 acme -> irs 40 USD\n");
 }
 
 #[test]

@@ -350,13 +350,14 @@ fn an_upgrade_writes_the_junctions_and_leaves_the_book_as_it_was() {
 
 #[test]
 fn an_upgrade_does_not_guess_a_price_and_names_the_one_that_would_do() {
-    let sale = "2026-01-20 checking 9_799.99 USD -> broker 99.0799 NWND\n";
+    let sale = "2026-01-20 checking 9_799.99 USD -> broker 99.0799 NWND #contribution\n";
     let folder = project_written_the_v4_way("upgrade-price", sale);
-    let before = fs::read_to_string(folder.join("journal.ax")).unwrap();
     let output = axiom(&["fmt", "--upgrade", "--color", "never"]).current_dir(&folder).output().expect("axiom runs");
     assert_eq!(output.status.code(), Some(1), "{}", text(&output.stdout));
     let said = text(&output.stderr);
     assert!(said.contains("error[upgrade-price]") && said.contains("@ 98.91 USD"), "{said}");
-    assert_eq!(fs::read_to_string(folder.join("journal.ax")).unwrap(), before, "a refused file is not touched");
+    let journal = fs::read_to_string(folder.join("journal.ax")).unwrap();
+    assert!(journal.contains("checking <- employer"), "the rest of the file is upgraded:\n{journal}");
+    assert!(journal.ends_with(sale), "the line it would not guess is as it was:\n{journal}");
     let _ = fs::remove_dir_all(folder);
 }
