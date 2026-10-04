@@ -21,9 +21,9 @@ fn options() -> Options {
 
 /// Folds `book` a day at a time from `first` through `last`, and holds each position's history to what the ledger holds on
 /// the day. Every holding the ledger has is a position of the history, and the history ends where the holdings end.
-fn history_is_the_fold(book: &Book, first: Day, last: Day) -> Run {
-    let (plan, run) = (Plan::new(book), crate::run(book, options()));
-    let mut ledger = plan.start(options());
+fn history_is_the_fold(book: &Book, options: Options, first: Day, last: Day) -> Run {
+    let (plan, run) = (Plan::new(book), crate::run(book, options));
+    let mut ledger = plan.start(options);
     let mut day = first;
     while day <= last {
         ledger.advance(day);
@@ -55,7 +55,7 @@ fn flows_a_day_apart_and_on_the_same_day_are_each_a_step_or_one() {
     f.flow(2, checking, savings, 100_00);
     f.flow(5, savings, checking, 100_00);
     let book = f.book();
-    let run = history_is_the_fold(&book, Day(0), Day(8));
+    let run = history_is_the_fold(&book, options(), Day(0), Day(8));
     let steps = |place, unit| {
         let (id, _) = run.histories.positions().find(|(_, at)| at.place == place && at.unit == unit).unwrap();
         run.histories.steps(id).iter().map(|(day, held)| (day.0, held.0)).collect::<Vec<_>>()
@@ -77,7 +77,7 @@ fn a_pending_flow_moves_nothing_until_it_settles_and_a_returned_one_is_undone_on
     f.event(5, "#c1", EventState::Settled);
     f.event(7, "#b1", EventState::Returned);
     let book = f.book();
-    history_is_the_fold(&book, Day(0), Day(9));
+    history_is_the_fold(&book, options(), Day(0), Day(9));
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn lots_a_sale_and_a_split_that_scales_every_parcel_of_a_commodity() {
     f.sell(6, 7, 1_000_00);
     f.buy(8, 500_00, 3);
     let book = f.book();
-    history_is_the_fold(&book, Day(0), Day(10));
+    history_is_the_fold(&book, options(), Day(0), Day(10));
 }
 
 #[test]
@@ -102,12 +102,44 @@ fn a_padded_gap_is_a_step_on_the_day_of_its_assertion() {
     f.assert(3, checking, 900_00);
     f.pad_last();
     let book = f.book();
-    let run = history_is_the_fold(&book, Day(0), Day(5));
+    let run = history_is_the_fold(&book, options(), Day(0), Day(5));
     let (checking_at, _) = run.histories.positions().find(|(_, at)| at.place == checking && at.unit == usd).unwrap();
     assert_eq!(run.histories.at(checking_at, Day(2)), Qty(1_000_00));
     assert_eq!(run.histories.at(checking_at, Day(3)), Qty(900_00));
     let (unknown_at, _) = run.histories.positions().find(|(_, at)| at.place == unknown).unwrap();
     assert_eq!(run.histories.at(unknown_at, Day(3)), Qty(100_00));
+}
+
+/// A tenant who does not pay: each claim is made on the day the monitor finds a due day missed, a day that holds no fact of
+/// the journal, so the history must have a step there and not wait for the next fact (there is none).
+const RENT: &str = "\
+base USD
+commodity USD
+  precision 2
+account assets/checking
+entity ann
+opening 2026-01-01
+  checking 1_000 USD
+contract rent with ann
+  1_000 USD monthly on 1 into checking
+  from 2026-01-01
+  due 5d
+";
+
+#[test]
+fn a_claim_the_monitor_makes_is_a_step_on_the_day_it_finds_a_due_day_missed() {
+    let (file, parsed) = axiom_syntax::parse(FileId(0), RENT, Folder::default());
+    assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
+    let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
+    assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");
+    let day = |month, date| Day::from_ymd(2026, month, date).unwrap();
+    let run = history_is_the_fold(&book, Options { today: day(3, 1), relaxed: false }, day(1, 1), day(3, 1));
+    let is_tab = |place: &axiom_model::Place| matches!(place.role, Role::Tab(_));
+    let tab = book.places.iter().find(|(_, place)| is_tab(place)).map(|(id, _)| id).expect("ann's tab");
+    let (tab_at, _) = run.histories.positions().find(|(_, at)| at.place == tab).expect("the tab held something");
+    let held = |day| run.histories.at(tab_at, day).0;
+    let found = [held(day(1, 16)), held(day(1, 17)), held(day(2, 16)), held(day(2, 17))];
+    assert_eq!(found, [0, 100_000, 100_000, 200_000], "a claim on each day the monitor finds a due day missed");
 }
 
 /// Claims: made, settled in part by a payment from the party, and the rest forgiven, are changes to the places a flow does
@@ -136,7 +168,7 @@ fn a_payment_from_a_party_and_a_write_off_relieve_the_tab_on_their_days() {
     let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
     assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");
     let day = |month, date| Day::from_ymd(2026, month, date).unwrap();
-    let run = history_is_the_fold(&book, day(1, 1), day(3, 1));
+    let run = history_is_the_fold(&book, Options { today: day(3, 1), relaxed: false }, day(1, 1), day(3, 1));
     let is_ann = |place: &axiom_model::Place| matches!(place.role, Role::Tab(entity) if book.name(book.entities[entity].path) == "ann");
     let tab = book.places.iter().find(|(_, place)| is_ann(place)).map(|(id, _)| id).expect("ann's tab");
     let (tab_at, _) = run.histories.positions().find(|(_, at)| at.place == tab).expect("the tab held something");

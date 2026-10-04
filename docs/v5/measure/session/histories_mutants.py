@@ -14,6 +14,8 @@ COMMANDS = [
     ["test", "--release", "-p", "axiom-session", "--test", "histories"],
     ["test", "--release", "-p", "axiom-report", "--lib"],
 ]
+# Fail on the integration branch with no mutant at all (STATUS, "Waiting on you" 10): they kill nothing.
+KNOWN = ["a_context_forecast_keeps_historical_and_same_day_obligations_once", "a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot"]
 MUTANTS = [
     # the steps of a position
     ("same-day-step-dropped", ENGINE + "histories.rs", "Some((was, _)) if was == day => Step::Replace,", "Some((was, _)) if was == day => Step::Skip,"),

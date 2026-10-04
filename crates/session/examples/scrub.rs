@@ -61,49 +61,52 @@ fn main() {
     let texts = Texts::default();
     let started = Instant::now();
     let sources = Sources::assemble(&texts, files, axiom_systems::SYSTEMS).expect("a project is few files");
-    let session = Session::open(sources, Options { today, relaxed: false });
+    let options = Options { today, relaxed: false };
+    let session = Session::open(sources, options);
     let opened = started.elapsed();
     let started = Instant::now();
     let held = session.run().posted.len();
-    let folded = started.elapsed();
-    println!("open {opened:.2?}, first fold {folded:.2?}, {held} flows");
-    // What every answer pays before it reads anything: the plan the session builds for each.
-    let planned = per_question(sweeps, 1, || drop(axiom_engine::Plan::new(session.book())));
-    println!("{:<28} {planned:>10.2?} a question", "a plan, built for each answer");
+    println!("open {opened:.2?}, first fold {:.2?}, {held} flows", started.elapsed());
 
-    let sweep = days(&session, 40);
     let book = session.book();
+    let sweep = days(&session, 40);
     let place = book.listed_places().into_iter().next().map(|id| book.name(book.places[id].path));
-    asked(&session, sweeps, "balance --at", &sweep, &|at| Query::Balance {
-        globs: vec![],
-        at: Some(at),
-        value: false,
-        monthly: false,
-    });
-    asked(&session, sweeps, "balance --at --value", &sweep, &|at| Query::Balance {
-        globs: vec![],
-        at: Some(at),
-        value: true,
-        monthly: false,
-    });
-    asked(&session, sweeps, "balance --monthly --at", &sweep, &|at| Query::Balance {
-        globs: vec![],
-        at: Some(at),
-        value: false,
-        monthly: true,
-    });
-    if let Some(place) = place {
-        asked(&session, sweeps, "register --to", &sweep, &|to| Query::Register { place, from: None, to: Some(to) });
-    }
-    asked(&session, sweeps, "claims --at", &sweep[..8], &|at| Query::Claims { at: Some(at) });
-}
+    let questions = |at: Day| {
+        let balance = |value, monthly| Query::Balance { globs: vec![], at: Some(at), value, monthly };
+        let mut asked = vec![
+            ("balance --at", balance(false, false), 40),
+            ("balance --at --value", balance(true, false), 40),
+            ("balance --monthly --at", balance(false, true), 40),
+        ];
+        asked.extend(place.map(|place| ("register --to", Query::Register { place, from: None, to: Some(at) }, 40)));
+        asked.push(("claims --at", Query::Claims { at: Some(at) }, 8));
+        asked
+    };
+    let names: Vec<_> = questions(today).into_iter().map(|(name, _, over)| (name, over)).collect();
 
-/// Each of `over` asked of the session as `query` says, `sweeps` times; the fastest sweep, as a time a question.
-fn asked<'q>(session: &Session<'_>, sweeps: usize, name: &str, over: &[Day], query: &dyn Fn(Day) -> Query<'q>) {
-    let each = per_question(sweeps, over.len(), || {
-        for &day in over {
-            session.query(&query(day), None).expect("a view");
-        }
-    });
-    println!("{name:<28} {each:>10.2?} a question, over {} days", over.len());
+    // A session builds the plan its answer needs, for each answer: a client that cannot hold the plan beside the book pays it.
+    let planned = per_question(sweeps, 1, || drop(axiom_engine::Plan::new(book)));
+    println!("\nthe session, which builds a plan for each answer (a plan alone: {planned:.2?})");
+    for (at, (name, over)) in names.iter().enumerate() {
+        let each = per_question(sweeps, *over, || {
+            for &day in &sweep[..*over] {
+                session.query(&questions(day)[at].1, None).expect("a view");
+            }
+        });
+        println!("  {name:<26} {each:>10.2?} a question, over {over} days");
+    }
+
+    // A client that keeps the book in a frame of its own can keep the plan beside it: the view alone is what is left.
+    let plan = axiom_engine::Plan::new(book);
+    let folded = axiom_report::Folded::of(&plan, options);
+    let context = axiom_report::Context::over(plan, folded, None).expect("everyone's books");
+    println!("\na context that keeps its plan: the view alone");
+    for (at, (name, over)) in names.iter().enumerate() {
+        let each = per_question(sweeps, *over, || {
+            for &day in &sweep[..*over] {
+                context.report(&questions(day)[at].1).expect("a view");
+            }
+        });
+        println!("  {name:<26} {each:>10.2?} a question, over {over} days");
+    }
 }
