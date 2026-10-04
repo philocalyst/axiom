@@ -29,7 +29,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: Id<Contrac
         .with(about_section(lens, contract))
         .with(terms_section(lens, contract))
         .with(promises_section(lens, run, contract_id))
-        .with(flows_table(lens, derived, "Derived flows"));
+        .with(flows_table(lens, derived, "Flows"));
     schedule_section(lens, run, contract_id).into_iter().fold(report, Report::with)
 }
 

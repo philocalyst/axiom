@@ -28,7 +28,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
     Report::new(format!("Why {name}"))
         .with(overview(lens, asset, state))
         .with(parts(lens, run, asset_id, state))
-        .with(flows_table(lens, about, "Flows about it"))
+        .with(flows_table(lens, about, "Flows"))
 }
 
 /// Who owns it, what it is part of, and what it is worth and cost.

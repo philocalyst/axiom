@@ -30,5 +30,5 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, name: &str) -> Report<'
     }
     let gains = gains::section(book, &sold).headed("Gains realized");
     let behind = flows.iter().map(|&id| Posting::at(book, run, id));
-    Report::new(format!("Why {name}")).with(tallied).with(flows_table(lens, behind, "Flows behind it")).with(gains)
+    Report::new(format!("Why {name}")).with(tallied).with(flows_table(lens, behind, "Flows")).with(gains)
 }

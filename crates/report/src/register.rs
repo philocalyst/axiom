@@ -76,10 +76,15 @@ pub(crate) fn view_with_lens<'s>(
 }
 
 /// A place is somebody's: another owner's register is not part of whose money this is.
-fn place_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>, window: Window) -> Report<'s> {
+pub(crate) fn place_register<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    place: Id<Place>,
+    window: Window,
+) -> Report<'s> {
     let book = lens.book();
     let register = match lens.owns(place) {
-        true => section_with_sign(lens, run, place, window, lens.display_sign(place)),
+        true => section_with_sign(lens, run, place, window),
         false => Section::note_only(format!(
             "{} belongs to {}, whose money this is not.",
             path(book, place),
@@ -91,14 +96,14 @@ fn place_register<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>, w
 
 /// The days a register covers: from a day if there is one, up to a cutoff.
 #[derive(Clone, Copy)]
-struct Window {
+pub(crate) struct Window {
     from: Option<Day>,
     cutoff: Day,
 }
 
 impl Window {
     /// The days from `from` to `to`, which is today if there is none.
-    fn new(from: Option<Day>, to: Option<Day>, run: &Run) -> Window {
+    pub(crate) fn new(from: Option<Day>, to: Option<Day>, run: &Run) -> Window {
         Window { from, cutoff: to.unwrap_or(run.today) }
     }
 
@@ -254,25 +259,8 @@ fn place_owned_by(lens: Lens<'_, '_, '_, '_>, place: Id<Place>, entity: Id<Entit
     lens.plan().owners_of(place).iter().any(|owner| owner.owner == entity && !owner.share.is_zero())
 }
 
-/// Builds a register for a place within an owner's view.
-pub(crate) fn section_for_lens<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    place: Id<Place>,
-    from: Option<Day>,
-    to: Option<Day>,
-) -> Section<'s> {
-    section_with_sign(lens, run, place, Window::new(from, to, run), lens.display_sign(place))
-}
-
-fn section_with_sign<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    place: Id<Place>,
-    window: Window,
-    sign: i64,
-) -> Section<'s> {
-    let book = lens.book();
+fn section_with_sign<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>, window: Window) -> Section<'s> {
+    let (book, sign) = (lens.book(), lens.display_sign(place));
     let steps = steps(lens, run, place, window.cutoff);
     let split = window.from.map_or(0, |from| steps.partition_point(|step| step.day < from));
     let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));

@@ -987,12 +987,15 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
     let plan = axiom_engine::Plan::new(&house.book);
     let whose = Whose::default();
     let lens = crate::lens::Lens::new(&plan, &whose, house.run.today);
-    let section = crate::register::section_for_lens(lens, &house.run, checking, None, None);
-    let rows = lines(&section);
+    let register = |from| {
+        let window = crate::register::Window::new(from, None, &house.run);
+        crate::register::place_register(lens, &house.run, checking, window).sections.remove(0)
+    };
+    let rows = lines(&register(None));
     assert_eq!(rows.len(), 11);
     assert_eq!(rows[6], "~2026-03-01 | expenses/repairs |  | ^check-1041 · pending | -350.00 USD | 5,115.80 USD");
     // A window opens with the balance carried in.
-    let march = crate::register::section_for_lens(lens, &house.run, checking, Some(day(2026, 3, 1)), None);
+    let march = register(Some(day(2026, 3, 1)));
     assert_eq!(lines(&march)[0], "=2026-03-01 | opening balance |  |  |  | 5,115.80 USD");
 }
 
@@ -1003,10 +1006,11 @@ fn the_register_of_a_liability_reads_the_way_a_statement_does() {
     let plan = axiom_engine::Plan::new(&house.book);
     let whose = Whose::default();
     let lens = crate::lens::Lens::new(&plan, &whose, house.run.today);
-    let section = crate::register::section_for_lens(lens, &house.run, bills, None, None);
+    let register =
+        crate::register::place_register(lens, &house.run, bills, crate::register::Window::new(None, None, &house.run));
     // A bill of 1,200 is owed; 500 paid leaves 700.
     assert_eq!(
-        lines(&section),
+        lines(&register.sections[0]),
         [
             "2026-03-05 | expenses/repairs |  | ^bill-7 | 1,200.00 USD | 1,200.00 USD",
             "2026-03-12 | assets/bank/jordan-checking |  | ^bill-7 | -500.00 USD | 700.00 USD"
@@ -1157,7 +1161,7 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
     let report = house.why(Target::Place(house.place("assets/retirement")));
     let headings: Vec<_> =
         report.sections.iter().map(|section| section.heading.as_ref().map_or_else(String::new, cell)).collect();
-    assert_eq!(headings, ["Composition", "Parcels", "Limits", "Governed by", "Recent flows"]);
+    assert_eq!(headings, ["Composition", "Parcels", "Limits", "Governed by", "Flows"]);
     let limits = lines(&report.sections[2]);
     assert_eq!(limits.len(), 1);
     assert!(
