@@ -7,7 +7,7 @@ use axiom_core::FileId;
 
 const WARMUPS: usize = 2;
 const SAMPLES: usize = 30;
-const RECORD: &str = "2026-01-15 checking -> 5 USD\n  groceries 5 USD\n";
+const RECORD: &str = "2026-01-15 checking -> 5 USD\n  -> groceries 5 USD\n";
 
 struct CountingAllocator;
 
