@@ -128,9 +128,10 @@ fn parcels<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s> {
 /// more are written for it that today is outside.
 fn governing(book: &Book, run: &Run, place: Id<Place>) -> (Vec<Id<Law>>, usize) {
     let rules = &book.rules;
-    let watching = [Watch::In(place), Watch::Out(place), Watch::Gain(place), Watch::Always(place)]
-        .into_iter()
-        .flat_map(|watch| rules.at(watch));
+    let watching =
+        [Watch::In(place), Watch::Out(place), Watch::Gain(place), Watch::Always(place), Watch::Touching(place)]
+            .into_iter()
+            .flat_map(|watch| rules.at(watch));
     let timed = rules.timed().iter().filter(|rule| rule.subject == Subject::Place(place));
     let (now, later): (Vec<&Rule>, Vec<&Rule>) = watching.chain(timed).partition(|rule| rule.days.contains(run.today));
     let laws: Vec<Id<Law>> = now.iter().map(|rule| rule.law).collect();

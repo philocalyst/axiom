@@ -36,6 +36,8 @@ mod tax;
 mod why;
 
 #[cfg(test)]
+mod offspring_tests;
+#[cfg(test)]
 mod recognition_tests;
 #[cfg(test)]
 mod source_tests;

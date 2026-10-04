@@ -14,7 +14,7 @@ use axiom_model::{
 };
 
 use crate::calendar::Periods;
-use crate::history::postings;
+use crate::history::all_postings;
 use crate::lens::Lens;
 use crate::pivot::{Grid, Pivot};
 use crate::places::path;
@@ -478,11 +478,11 @@ pub(crate) fn for_each_counted<'a>(
 ) {
     let (book, plan) = (lens.book(), lens.plan());
     let (mut shares, mut pieces) = (MovementShares::default(), Vec::new());
-    for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
+    for posting in all_postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let (flow, posted) = (posting.flow, posting.posted);
-        Counting::posted(plan, flow, posted, posting.settlement).pieces(book, &mut pieces);
+        Counting::posted(plan, flow, &posted, posting.settlement).pieces(book, &mut pieces);
         for piece in pieces.iter().filter(|piece| wanted(flow, piece)) {
-            let (place, signed) = counted_at(book, flow, posted, piece);
+            let (place, signed) = counted_at(book, flow, &posted, piece);
             if !lens.owns(place) {
                 continue;
             }

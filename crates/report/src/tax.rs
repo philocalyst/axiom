@@ -30,8 +30,8 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
     // missing, not nothing, and what was counted is counted so far.
     let closes = pending_closings(lens, run, year);
     let several = owners.len() > 1;
-    let mut tallies = tallies(book, &tallied, several);
-    let mut obligations = obligations(book, &owed, several, !closes.is_empty());
+    let mut tallies = tallies(book, run, &tallied, several);
+    let mut obligations = obligations(book, run, &owed, several, !closes.is_empty());
     if !closes.is_empty() {
         let note = not_closed(year, &closes);
         if obligations.rows.is_empty() {
@@ -133,18 +133,18 @@ fn lines(effects: &[&Effect]) -> Vec<Line> {
     lines
 }
 
-fn tallies<'s>(book: &'s Book<'_>, lines: &[Line], several: bool) -> Section<'s> {
+fn tallies<'s>(book: &'s Book<'_>, run: &Run, lines: &[Line], several: bool) -> Section<'s> {
     let mut section =
         Section::new([Column::left("Tally"), Column::right("Amount"), Column::left("From")]).headed("Counted");
     let cells =
-        |line: &Line| vec![Cell::text(book.name(line.name)), Cell::amount(book, line.amount), source(book, line)];
+        |line: &Line| vec![Cell::text(book.name(line.name)), Cell::amount(book, line.amount), source(book, run, line)];
     grouped(&mut section, book, lines, several, cells, |_, _| Vec::new());
     section
 }
 
 /// Obligations, and what each jurisdiction is owed. `unfinished`: a law that
 /// owes has not judged the year yet, so the totals are what is owed so far.
-fn obligations<'s>(book: &'s Book<'_>, lines: &[Line], several: bool, unfinished: bool) -> Section<'s> {
+fn obligations<'s>(book: &'s Book<'_>, run: &Run, lines: &[Line], several: bool, unfinished: bool) -> Section<'s> {
     let columns =
         [Column::left("Owed"), Column::left("To"), Column::left("Due"), Column::right("Amount"), Column::left("From")];
     let mut section = Section::new(columns).headed("Owed");
@@ -154,7 +154,7 @@ fn obligations<'s>(book: &'s Book<'_>, lines: &[Line], several: bool, unfinished
         });
         let name = book.name(line.name);
         let name = if line.priced { format!("{name} (penalty)") } else { name.to_string() };
-        vec![Cell::text(name), to, due, Cell::amount(book, line.amount), source(book, line)]
+        vec![Cell::text(name), to, due, Cell::amount(book, line.amount), source(book, run, line)]
     };
     // Each jurisdiction is owed its own total, when there is more than one to tell apart.
     let several_groups = lines.chunk_by(|a, b| (a.owner, a.system) == (b.owner, b.system)).nth(1).is_some();
@@ -188,9 +188,9 @@ fn totals<'s>(book: &'s Book<'_>, lines: &[Line], label: &str) -> Vec<Row<'s>> {
 }
 
 /// Where a line comes from: the one flow behind it, or how many there are.
-fn source<'s>(book: &'s Book<'_>, line: &Line) -> Cell<'s> {
+fn source<'s>(book: &'s Book<'_>, run: &Run, line: &Line) -> Cell<'s> {
     match line.contributions {
-        1 => cause_cell(book, line.cause),
+        1 => cause_cell(book, run, line.cause),
         many => Cell::text(plural(many, "source")),
     }
 }

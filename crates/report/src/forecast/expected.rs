@@ -114,7 +114,7 @@ fn habit<'b>(book: &'b Book, group: &[Posting], today: Day) -> Option<Expectatio
     Some(Expectation {
         origin: Origin::Habit { occurrences: group.len() },
         schedule: recurrence.schedule(),
-        template: &book.flows[last.id],
+        template: &book.flows[last.id.journal()?],
         out,
         arrive,
     })
@@ -158,6 +158,7 @@ mod tests {
     use axiom_model::Mode;
 
     use super::*;
+    use crate::history::PostingId;
     use crate::tests::household;
 
     fn day(y: i32, m: u32, d: u32) -> Day {
@@ -179,8 +180,10 @@ mod tests {
                 (flow, Posted { out: Qty(150_000), arrive: Qty(quanta), state: State::Actual })
             })
             .into();
-        let group: Vec<Posting> =
-            buys.iter().map(|(flow, posted)| Posting { id: template, flow, posted, settlement: None }).collect();
+        let group: Vec<Posting> = buys
+            .iter()
+            .map(|&(ref flow, posted)| Posting { id: PostingId::Journal(template), flow, posted, settlement: None })
+            .collect();
         // The last buy fetched 5.400 shares for 1,500.00: the projection buys the same 1,500.00
         // at that price, not the median share count at some other cost.
         let habit = habit(&house.book, &group, day(2026, 4, 20)).expect("a monthly standing order");

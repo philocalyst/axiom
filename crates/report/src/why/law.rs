@@ -41,11 +41,14 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<
     for violation in recent(&violations).0 {
         let message = &run.diagnostics[violation.diagnostic as usize].message;
         let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
-        let cells =
-            [Cell::Day(violation.day), Cell::text(headline(message).to_string()), cause_cell(book, violation.cause)];
+        let cells = [
+            Cell::Day(violation.day),
+            Cell::text(headline(message).to_string()),
+            cause_cell(book, run, violation.cause),
+        ];
         broken.push(Row::new(cells).style(style));
     }
-    let caused = effects_table(book, &effects, "Recent effects");
+    let caused = effects_table(book, run, &effects, "Recent effects");
     Report::new(format!("Why {}", book.name(law.name))).with(about).with(broken).with(caused)
 }
 
