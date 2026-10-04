@@ -5,9 +5,9 @@
 
 use std::fmt::Write as _;
 
-use crate::{Align, Cell, Column, Fact, Report, ReportRenderer, Row, Section, SourceProvider, Style, When};
-use axiom_core::{Days, Diagnostic, Loc, Qty, calendar::Window};
-use axiom_model::{Closing, Period, Trigger};
+use crate::plain::{CellSink, write_trigger};
+use crate::{Align, Cell, Column, Fact, Report, ReportRenderer, Row, Section, SourceProvider, Style, When, percent};
+use axiom_core::{Days, Diagnostic, Loc, Qty};
 
 /// The report renderer used by clients that want the stable JSON shape.
 #[derive(Clone, Copy, Debug, Default)]
@@ -178,7 +178,7 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
             write_period(out, *days);
             out.push('}');
         }
-        Cell::Percent(ratio) => shown_cell(out, "percent", |value| write_percent(value, *ratio)),
+        Cell::Percent(ratio) => shown_cell(out, "percent", |value| value.write_str(&percent(*ratio))),
         Cell::Number(ratio) => shown_cell(out, "number", |value| write!(value, "{ratio}")),
         Cell::Count(count, noun) => {
             out.push_str("{\"type\":\"count\",\"value\":");
@@ -186,7 +186,7 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
             string(out, noun);
             out.push('}');
         }
-        Cell::Trigger(trigger) => shown_cell(out, "trigger", |value| write_trigger_words(value, *trigger)),
+        Cell::Trigger(trigger) => shown_cell(out, "trigger", |value| write_trigger(value, *trigger)),
         Cell::Source(loc) => {
             out.push_str("{\"type\":\"source\",");
             location(out, *loc, sources);
@@ -226,82 +226,11 @@ fn start_cell(out: &mut String, kind: &str, write: impl FnOnce(&mut Escaped<'_>)
     out.push('"');
 }
 
+/// A cell's human-readable form, written directly into an escaped JSON string: a sentence's parts never make a `String`.
 fn plain_string(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
     out.push('"');
-    let _ = write_plain(&mut Escaped(out), cell, sources);
+    let _ = cell.write_plain(&mut Escaped(out), sources);
     out.push('"');
-}
-
-/// Writes a cell's human-readable form directly into an escaped JSON string.
-/// In particular, nested sentence parts never allocate a temporary `String`.
-fn write_plain(out: &mut impl std::fmt::Write, cell: &Cell<'_>, sources: &dyn SourceProvider) -> std::fmt::Result {
-    match cell {
-        Cell::Blank => Ok(()),
-        Cell::Word(word) => out.write_str(word),
-        Cell::Text(text) | Cell::Said(text) => out.write_str(text),
-        Cell::Name(name) => out.write_str(name),
-        Cell::Code(code) => write!(out, "^{code}"),
-        Cell::Purpose(purpose) => write!(out, "#{purpose}"),
-        Cell::Amount { qty, scale, unit } => write!(out, "{} {unit}", qty.show(*scale)),
-        Cell::Day(day) => write!(out, "{day}"),
-        Cell::Span(span) => write!(out, "{span}"),
-        Cell::Period(days) => write_period_words(out, *days),
-        Cell::Percent(ratio) => write_percent(out, *ratio),
-        Cell::Number(ratio) => write!(out, "{ratio}"),
-        Cell::Count(count, noun) if noun.is_empty() => {
-            write!(out, "{}", Qty(*count as i64).show(0))
-        }
-        Cell::Count(count, noun) => {
-            write!(out, "{count} {noun}{}", if *count == 1 { "" } else { "s" })
-        }
-        Cell::Trigger(trigger) => write_trigger_words(out, *trigger),
-        Cell::Source(loc) => {
-            if let Some(position) = SourceProvider::describe(sources, *loc) {
-                write!(out, "{}:{}", position.path, position.line)
-            } else {
-                Ok(())
-            }
-        }
-        Cell::Join(separator, parts) => {
-            let mut any = false;
-            for part in parts.iter().filter(|part| plain_visible(part, sources)) {
-                if any && !(*separator == " " && starts_with_punctuation(part, sources)) {
-                    out.write_str(separator)?;
-                }
-                write_plain(out, part, sources)?;
-                any = true;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn plain_visible(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
-    match cell {
-        Cell::Blank => false,
-        Cell::Text(text) | Cell::Said(text) => !text.is_empty(),
-        Cell::Word(text) | Cell::Name(text) | Cell::Purpose(text) => !text.is_empty(),
-        Cell::Source(loc) => SourceProvider::describe(sources, *loc).is_some_and(|pos| !pos.path.is_empty()),
-        Cell::Join(_, parts) => parts.iter().any(|part| plain_visible(part, sources)),
-        _ => true,
-    }
-}
-
-fn starts_with_punctuation(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
-    let first = match cell {
-        Cell::Text(text) | Cell::Said(text) => text.chars().next(),
-        Cell::Word(text) | Cell::Name(text) => text.chars().next(),
-        Cell::Purpose(text) => text.chars().next().or(Some('#')),
-        Cell::Join(_, parts) => {
-            return parts
-                .iter()
-                .find(|part| plain_visible(part, sources))
-                .is_some_and(|part| starts_with_punctuation(part, sources));
-        }
-        Cell::Source(loc) => SourceProvider::describe(sources, *loc).and_then(|pos| pos.path.chars().next()),
-        _ => None,
-    };
-    first.is_some_and(|ch| matches!(ch, ',' | ';' | ':' | '.' | ')'))
 }
 
 struct Escaped<'a>(&'a mut String);
@@ -312,6 +241,9 @@ impl std::fmt::Write for Escaped<'_> {
         Ok(())
     }
 }
+
+/// JSON draws nothing, groups no count and pads no unit: the defaults.
+impl CellSink for Escaped<'_> {}
 
 fn write_fact(out: &mut String, fact: &Fact<'_>) {
     out.push('{');
@@ -366,74 +298,6 @@ fn optional_day(out: &mut String, day: Option<axiom_core::Day>) {
             out.push('"');
         }
         None => out.push_str("null"),
-    }
-}
-
-fn write_period_words(out: &mut impl std::fmt::Write, days: Days) -> std::fmt::Result {
-    match (Window::exactly(days), days.single()) {
-        (Some(window), _) => write!(out, "{window}"),
-        (None, Some(day)) => write!(out, "on {day}"),
-        (None, None) if days == Days::ALWAYS => out.write_str("ever"),
-        (None, None) => write!(out, "{}..{}", days.first(), days.last()),
-    }
-}
-
-fn write_trigger_words(out: &mut impl std::fmt::Write, trigger: Trigger) -> std::fmt::Result {
-    match trigger {
-        Trigger::In => out.write_str("on in"),
-        Trigger::Out => out.write_str("on out"),
-        Trigger::Gain => out.write_str("on gain"),
-        Trigger::Spend => out.write_str("on spend"),
-        Trigger::Flow => out.write_str("on flow"),
-        Trigger::Each(Period::Month, _) => out.write_str("each month"),
-        Trigger::Each(Period::Year, None) => out.write_str("each year"),
-        Trigger::Each(Period::Year, Some(Closing { month, day })) => {
-            write!(out, "each year closing {month:02}-{day:02}")
-        }
-        Trigger::By(_) => out.write_str("by a date"),
-        Trigger::Always => out.write_str("always"),
-    }
-}
-
-fn write_percent(out: &mut impl std::fmt::Write, ratio: axiom_core::Ratio) -> std::fmt::Result {
-    let Some(hundredths) = Qty(10_000).scale(ratio) else {
-        return write!(out, "{ratio}");
-    };
-    let mut shown = StackText::new();
-    write!(&mut shown, "{}", hundredths.show(2))?;
-    while shown.len > 0 && shown.bytes[shown.len - 1] == b'0' {
-        shown.len -= 1;
-    }
-    if shown.len > 0 && shown.bytes[shown.len - 1] == b'.' {
-        shown.len -= 1;
-    }
-    out.write_str(shown.as_str())?;
-    out.write_char('%')
-}
-
-struct StackText {
-    bytes: [u8; 64],
-    len: usize,
-}
-
-impl StackText {
-    fn new() -> StackText {
-        StackText { bytes: [0; 64], len: 0 }
-    }
-
-    fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.len]).expect("formatted quantities are UTF-8")
-    }
-}
-
-impl std::fmt::Write for StackText {
-    fn write_str(&mut self, text: &str) -> std::fmt::Result {
-        let Some(end) = self.len.checked_add(text.len()).filter(|&end| end <= self.bytes.len()) else {
-            return Err(std::fmt::Error);
-        };
-        self.bytes[self.len..end].copy_from_slice(text.as_bytes());
-        self.len = end;
-        Ok(())
     }
 }
 

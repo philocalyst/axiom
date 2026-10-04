@@ -28,6 +28,7 @@ mod limits;
 mod lots;
 mod pivot;
 mod places;
+mod plain;
 mod register;
 mod resolve;
 mod synth;
@@ -213,6 +214,7 @@ pub struct Fact<'s> {
 }
 
 pub use context::{Context, Folded};
+pub use plain::{CellSink, Mark};
 pub use table::percent;
 
 /// A source position as a client can display it. Lines and columns are
