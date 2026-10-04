@@ -275,7 +275,9 @@ the lane's code answered rather than the tests, because they were not mutants of
 pays its bills" (a clause the code did not need, removed) and "a bill made `since` another day is made on the day written" (an
 argument a bill does not have, removed). The ones killed by tests were run again against the strengthened tests ("a loan's tab is
 settled by what is paid to its lender" among them): killed by the tests every time. Final: every mutant killed by the oracle or by a
-test; none survives.
+test; none survives. The commit of the timings (`0592e23`) rewrote the code of seven of them (the gate, `claim_made_in`, `paid_to_party`,
+`relieve_balance`) and added one (the code index asks only a transaction that has a code): those eight ran again after it, all killed by the
+oracle.
 
 **`fuzz.py ... diff`** (1,000 mutants of the examples, seed 5): panics old = new = 0, output differs 0, regressions 0.
 **`splits.py all`**: 300 projects, 8,413 commands, 0 projects differ.
@@ -297,7 +299,8 @@ what the report loses. No function this lane adds is over 40 lines; three it tou
 **Timings** (`axiom check` on the bench, three runs interleaved with the baseline, the fastest of each, load average in
 brackets; the machine was shared with other lanes): 100k base 0.462 s [5.4], now 0.458 s [5.4]; 1m base 4.772 s [5.4], now 4.441 s
 [5.8]. More runs, alternating the order, at lower load (best of 15 at 100k, best of 7 at 1m): 100k 0.423 -> 0.417 s (-1.4%), 1m
-4.629 -> 4.547 s (-1.8%). Instructions, which load does not move (`valgrind --tool=callgrind`, 100k): 1,877.6M -> 1,867.9M (-0.5%).
+4.629 -> 4.547 s (-1.8%). Instructions, which load does not move (`valgrind --tool=callgrind`): 100k 1,877.6M -> 1,867.9M (-0.5%), 1m
+17,331.9M -> 17,229.1M (-0.6%).
 They were +0.4% with the gates as first written: the gate read a debt end's traits and the settlement the party's tab on every flow,
 and the code index asked every flow if it makes a claim, which its own transaction needs to learn only when it has a code; the three
 are cheaper now (commit `0592e23`). The bench has no claims and no bills, so what it pays is the check itself.
