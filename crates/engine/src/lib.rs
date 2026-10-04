@@ -162,7 +162,8 @@ pub struct Run {
     pub posted: Box<[Posted]>,
     /// The final state, by place then commodity.
     pub holdings: Vec<Holding>,
-    /// What every position held on every day, as the fold recorded it.
+    /// What every position held on every day, as the fold recorded it. A fold resumed from a checkpoint (the forecast's) records
+    /// from the checkpoint on, so before it a position holds nothing: ask of the run a fold made from its first day.
     pub histories: Histories,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,

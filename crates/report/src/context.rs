@@ -111,20 +111,11 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
                 Ok(super::budget::view_with_lens(self.lens(at.unwrap_or(run.today)), run, *at, *by))
             }
             Query::Limits { year } => Ok(super::limits::view_with_lens(self.lens(run.today), run, *year)),
-            Query::Claims { at } => {
-                let at = at.unwrap_or(run.today);
-                let ledger = self.ledger_at(at, run.today);
-                Ok(super::claims::view_from(self.lens(at), run, ledger.holdings()))
-            }
+            Query::Claims { at } => Ok(self.claims(at.unwrap_or(run.today))),
             Query::Contracts => Ok(super::contracts::view_with_lens(self.lens(run.today), run)),
             Query::Tax { year } => Ok(super::tax::view_with_lens(self.lens(run.today), run, *year)),
             Query::Gains { year } => Ok(super::gains::view_with_lens(self.lens(run.today), run, *year)),
-            Query::Lots { place, at } => {
-                let scope = place.map(|text| resolve::place(self.plan.book(), text)).transpose()?;
-                let at = at.unwrap_or(run.today);
-                let ledger = self.ledger_at(at, run.today);
-                Ok(super::lots::view_from(self.lens(at), scope, ledger.holdings()))
-            }
+            Query::Lots { place, at } => self.lots(*place, at.unwrap_or(run.today)),
             Query::Forecast { until, paths } => Ok(self.forecast(*until, *paths)),
             Query::Why { target } => {
                 let lens = self.lens(run.today);
@@ -132,6 +123,19 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
             }
             Query::Line { loc } => Ok(super::why::line_with_lens(self.lens(run.today), run, *loc)),
         }
+    }
+
+    /// The claims open at `at`, from the parcels a fold to that day holds.
+    fn claims(&self, at: Day) -> Report<'b> {
+        let ledger = self.ledger_at(at, self.run().today);
+        super::claims::view_from(self.lens(at), self.run(), ledger.holdings())
+    }
+
+    /// What is held at `at`, with its cost and its gain: everywhere, or in the place `scope` names.
+    fn lots(&self, scope: Option<&str>, at: Day) -> Result<Report<'b>, Diagnostic> {
+        let place = scope.map(|text| resolve::place(self.plan.book(), text)).transpose()?;
+        let ledger = self.ledger_at(at, self.run().today);
+        Ok(super::lots::view_from(self.lens(at), place, ledger.holdings()))
     }
 
     /// What can be spent at `at`, and what more costs.
