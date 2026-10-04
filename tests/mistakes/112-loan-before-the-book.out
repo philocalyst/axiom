@@ -1,0 +1,25 @@
+warning[missed-occurrence]: `mortgage` was due 5 times and no occurrence was written (the last on 2026-06-01)
+   ╭─[112-loan-before-the-book.ax:12:1]
+   │
+12 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── last due 29 days ago, on 2026-06-01
+   │
+   = note: not kept: 2026-02-01, 2026-03-01, 2026-04-01, 2026-05-01, 2026-06-01
+   = help: write what happened: `2026-06-01 mortgage`, with its own amount if it was another
+   = help: or say it was not owed: `2026-06-01 mortgage waived`
+
+note[loan-opening]: `mortgage` opens owing 85,591.44 USD, what its terms say on 2026-01-01
+   ╭─[112-loan-before-the-book.ax:12:1]
+   │
+12 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── made on 2025-01-15, before the book begins
+   │
+   = note: the payments due since are not in the book, so the debt opens after them
+   = help: if the lender says another number, write it in an opening: that replaces this
+10 +   mortgage 85_591.44 USD
+
+1 warning
+✓ 2 flows · 10 places · 1 law enforced · net worth 813,980.60 USD
+[exit status 0]

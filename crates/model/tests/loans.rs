@@ -306,6 +306,23 @@ fn what_a_statement_says_is_explained_by_the_one_thing_that_explains_it_to_the_c
 }
 
 #[test]
+fn a_payment_due_before_the_book_began_is_not_one_that_was_missed() {
+    // The loan was made a year before the book (the prelude's opening, on 2026-01-01, is its first fact), so 11 payments, the
+    // last on 2025-12-01, are behind it. The book's lines keep 2026-01-01 and 2026-03-01; 2026-02-01 is missed. No line can keep
+    // a payment from before the book (a line is a fact, and the book's first is on 2026-01-01): a statement of the principal of
+    // the payment of 2026-02-01 over the schedule is that payment missed, and not "the 12 payments no line keeps".
+    let text = "contract home-loan with bank\n  loan 120_000 USD on 2025-01-15 at 6% over 3y for condo\n  monthly on 1 from \
+                checking\n  from 2025-02-01\n2026-01-01 home-loan\n2026-03-01 home-loan\n";
+    let (book, _) = built(text);
+    let contract = book.contract("home-loan").unwrap();
+    let schedule = book.promises.loan(contract).unwrap();
+    let owed = schedule.open_on(day(2026, 3, 2)).unwrap();
+    let february = schedule.entries().iter().find(|entry| entry.day == day(2026, 2, 1)).unwrap().paid.principal;
+    let found = book.promises.reconcile(&book, contract, day(2026, 3, 2), owed + february).unwrap();
+    assert_eq!(found.cause, Cause::Missed(vec![(day(2026, 2, 1), february)]));
+}
+
+#[test]
 fn a_short_payment_and_an_extra_are_each_a_cause_and_two_that_tie_are_no_cause() {
     // 02-01 pays 2,000.00 of a 3,650.63 payment (interest 600.00, so 1,400.00 of principal where 3,050.63 was due);
     // 03-01 states 4,650.63, a thousand over; 04-01 is kept as it is.

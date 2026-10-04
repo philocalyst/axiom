@@ -79,6 +79,8 @@ mod fixture;
 #[cfg(test)]
 mod histories_tests;
 #[cfg(test)]
+mod loan_opening_tests;
+#[cfg(test)]
 mod loan_tests;
 #[cfg(test)]
 mod payment_tests;

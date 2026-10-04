@@ -13,6 +13,8 @@
 //! | `missed`   | a due day nothing kept, that the monitor found                                                            |
 //! | `open`     | what the schedule says is owed at each month end                                                          |
 //! | `tab`      | what the debt tab holds on the day of the run, as owed                                                    |
+//! | `opening`  | each opening line that opened the debt tab (the book's own, or the one its terms imply): its day, its amount |
+//! | `note`     | the note that says a loan was opened from its terms                                                       |
 //! | `diag`     | an `assertion` the fold reported, and each `loan-balance` with the cause its note names                   |
 //!
 //! Nothing here judges; two of these files, one from the engine and one from the reference, are compared line by line.
@@ -21,7 +23,7 @@ use axiom_core::calendar::Window;
 use axiom_core::{Day, FileId, Period};
 use axiom_engine::{Options, Plan};
 use axiom_model::promise::Kind;
-use axiom_model::{Book, RuntimeFlow, Source};
+use axiom_model::{Book, Mode, RuntimeFlow, Source};
 use axiom_syntax::Folder;
 
 /// The day of the run and how far the forecast looks: the reference's `TODAY` and `UNTIL`.
@@ -82,6 +84,9 @@ fn main() {
     for diagnostic in built.iter().filter(|diagnostic| diagnostic.is_error()) {
         println!("builderror {}", diagnostic.code);
     }
+    for _ in built.iter().filter(|diagnostic| &*diagnostic.code == "loan-opening") {
+        println!("note loan-opening");
+    }
     let (today, until) = (day(TODAY), day(UNTIL));
     let plan = Plan::new(&book);
     let options = Options { today, relaxed: false };
@@ -119,6 +124,10 @@ fn main() {
         }
         let owed: i64 = run.holdings.iter().filter(|holding| holding.place == terms.debt).map(|holding| -holding.qty().0).sum();
         println!("tab {name} {today} {owed}");
+        let opens = |flow: &&axiom_model::Flow| flow.mode == Mode::Opening && (flow.from == terms.debt || flow.to == terms.debt);
+        for flow in book.flows.iter().map(|(_, flow)| flow).filter(opens) {
+            println!("opening {name} {} {}", flow.day, flow.out.qty.0);
+        }
     }
     for diagnostic in run.diagnostics.iter() {
         match &*diagnostic.code {

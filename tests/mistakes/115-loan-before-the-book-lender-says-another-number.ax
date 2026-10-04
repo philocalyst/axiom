@@ -1,0 +1,18 @@
+// MISTAKE: a payment before the book began was missed, so the lender's number is higher than the schedule's. The statement is held to the schedule that opened the debt, no payment of the book explains it, and `check` says so instead of blaming the 11 payments before the book.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+opening 2026-01-01
+  checking 900_000 USD
+
+contract mortgage with bank
+  loan 120_000 USD on 2025-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2025-02-01
+
+2026-01-01 mortgage
+2026-01-31 mortgage = 85_048.55 USD

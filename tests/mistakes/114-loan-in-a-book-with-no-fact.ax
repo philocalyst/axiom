@@ -1,0 +1,12 @@
+// NOTE AND WARNING: a book that says nothing but a loan is begun by it: the debt opens on the day the loan was made, and every payment since is waited for until a line keeps it.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+contract mortgage with bank
+  loan 120_000 USD on 2025-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2025-02-01

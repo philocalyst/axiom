@@ -2,7 +2,8 @@
 """The oracle of lane K5d: a loan is a state machine with four inputs, and it is held to an independent ACTUS annuity.
 
     loans.py selftest                       the reference against a textbook, 07-landlord's statements and its own laws
-    loans.py gen DIR N [SEED]               write N projects (DIR/pNNNN/main.ax and expect.txt), and DIR/forms.json
+    loans.py gen DIR N [SEED] [pre]         write N projects (DIR/pNNNN/main.ax and expect.txt), and DIR/forms.json;
+                                            with `pre`, books that began after their loan was made (lane K5e)
     loans.py build TREE OUT                 build the dump (loans/) against the crates of TREE into OUT/
     loans.py check BINARY DIR [JOBS]        what BINARY says of every project, against what the reference says
     loans.py cover DIR                      what the corpus holds: its forms, and the lines the reference expects of it
@@ -35,6 +36,16 @@ prepayment nobody wrote or an extra counted as principal explains. For every one
 (`expect.txt`): each payment's interest, principal and balance, each prepayment, the balance of the schedule on probe days,
 what the kept lines post and what the forecast promises, the debt tab on the day of the run, the occurrences nothing kept,
 and the diagnostics of the statements (and the cause each names, when exactly one candidate explains the difference).
+
+Lane K5e adds the books the examples have and the first corpus did not: **a book that began after its loan was made** (`gen ... pre`).
+Its first fact is a day after some of the loan's payments (none of them, sometimes, and all of them, 6% of the time), no line
+originates the loan, and the book's own opening is dated that day or a little after. What the reference says of them is what the
+language says: the debt is opened on the book's first day with what the schedule owed the day before (or with the number of an
+`opening` line that names the loan, which agrees with the schedule, or does not), with a note that says so when the terms did it; the
+tab on every statement's day is that opening less what the book's lines and flows paid into it; and a payment due before the book
+began is nobody's to have missed, so no statement's cause counts it. The first fact is the earliest of the book's opening, the lines
+that keep a due day, the flows into the loan and the statements of what is held; a rate a statement says is not one. A line that is
+late for a payment due before the book's first fact is the one thing the opening cannot see (the K5e map, section 7), and is not drawn.
 """
 import calendar
 import datetime
@@ -288,9 +299,9 @@ entity me : person
 entity bank : org
 account checking : bank
 asset condo : property
-opening 2022-01-01
-  checking 90_000_000 USD
 """
+
+BORN = datetime.date(2022, 1, 1)     # the day the opening of a book whose loan is made in it is dated: before every loan
 
 
 class Case:
@@ -299,13 +310,20 @@ class Case:
     # Two of these are the names of kinds in std (`loan`, `mortgage`), which a statement about the contract must not mistake it for.
     NAMES = ["loan", "mortgage", "home-loan", "car-note"]
 
-    def __init__(self, seed, number):
+    def __init__(self, seed, number, pre=False):
+        """A book that makes its loan (`pre` false: the loan is originated by a line, in a book that began before it) or a
+        book that began after the loan was made (`pre`: no origination, and the first fact is a day that follows some of the
+        loan's payments)."""
         self.rng = random.Random(seed * 1_000_003 + number)
+        self.pre = pre
+        self.opening_day, self.explicit = BORN, None
         self.forms = Counter()
         self.name = self.rng.choice(self.NAMES)
-        while not self.draw():
-            pass
-        self.settle()
+        while True:
+            while not self.draw():
+                pass
+            if self.settle():
+                break
 
     # -- what is drawn
     def draw(self):
@@ -335,15 +353,18 @@ class Case:
         if span < 60 or sum(d <= TODAY for d in self.dues) < 3:
             return False
         self.span = span
+        self.book_day = self.begins
+        if self.pre and not self.draw_book_day():
+            return False
         self.rates = sorted((self.begins + datetime.timedelta(days=rng.randint(20, span)), Fraction(rng.randint(100, 1100), 10000))
                             for _ in range(rng.choice([0, 0, 1, 2])))
         forms["rate-change"] += bool(self.rates)
-        self.prepays = sorted((self.begins + datetime.timedelta(days=rng.randint(10, span)), rng.randint(1, 400) * 100 + rng.choice([0, 33]))
+        self.prepays = sorted((self.after(10, span), rng.randint(1, 400) * 100 + rng.choice([0, 33]))
                               for _ in range(rng.choice([0, 0, 1, 2, 3])))
         forms["prepayment-flow"] += bool(self.prepays)
         # the lines that keep due days: most are written, on the day or a day or two off; some are not (missed)
         self.lines = {}
-        for due in (d for d in self.dues if d <= TODAY):
+        for due in (d for d in self.dues if d <= TODAY and d >= self.book_day):
             if rng.random() < 0.12:
                 continue
             off = rng.choice([0, 0, 0, 1, -1, 2]) if self.reach >= 3 else 0
@@ -354,6 +375,32 @@ class Case:
         self.over = {due: rng.choice([1, 1, -1, -2]) * rng.randint(1, 60_000) for due in self.lines if rng.random() < 0.12}
         self.payoff = rng.random() < 0.12
         self.seed_statements = rng.randint(0, 4)
+        return True
+
+    def after(self, lowest, span):
+        """A day between LOWEST days after the loan was made and SPAN, and never before the book's first day."""
+        day = self.begins + datetime.timedelta(days=self.rng.randint(lowest, span))
+        return max(day, self.book_day)
+
+    def draw_book_day(self):
+        """Where the book begins in a loan's life: after some payments (none, sometimes), on or between due days. The book's
+        own opening is dated then or a little after, and what else it says (lines, flows, statements) is on or after it."""
+        rng, forms = self.rng, self.forms
+        before = [d for d in self.dues if d <= TODAY]
+        if len(before) < 4:
+            return False
+        paid = rng.randint(0, len(before) - 3)
+        start = (before[paid - 1] if paid else self.begins) + datetime.timedelta(days=1)
+        self.book_day = start + datetime.timedelta(days=rng.randint(0, (before[paid] - start).days))
+        if len(before) == len(self.dues) and rng.random() < 0.06 and (TODAY - before[-1]).days > 1:
+            # the loan was paid off before the book began: nothing is owed, so nothing is opened
+            self.book_day = before[-1] + datetime.timedelta(days=rng.randint(1, min(20, (TODAY - before[-1]).days)))
+            forms["pre:paid-off-before"] += 1
+        self.first_is = rng.choice(["opening", "opening", "later"])
+        self.opening_day = self.book_day + datetime.timedelta(days=0 if self.first_is == "opening" else rng.randint(1, 20))
+        self.explicit = rng.choice([None, None, "agrees", "differs"])
+        forms[f"pre:paid-{'none' if paid == 0 else 'some'}"] += 1
+        forms[f"pre:opening-{self.first_is}"] += 1
         return True
 
     # -- what the reference makes of it
@@ -369,7 +416,7 @@ class Case:
         payments = {row[1]: row[2] + row[3] for row in first if row[0] == "pay"}
         self.stated = {d: max(1, payments[d] + over) for d, over in self.over.items() if d in payments}
         if self.payoff:
-            day = self.begins + datetime.timedelta(days=rng.randint(self.span // 2, self.span))
+            day = self.after(self.span // 2, self.span)
             owed = open_on(self.principal, self.run(self.prepays, self.stated), day)
             if owed > 0:
                 self.prepays = sorted(self.prepays + [(day, owed)])
@@ -378,11 +425,48 @@ class Case:
         self.paid = {row[1]: row for row in self.rows if row[0] == "pay"}
         self.kept = {due: at for due, at in self.lines.items() if due in self.paid}
         forms["line-with-amount"] += bool(self.stated and set(self.stated) & set(self.kept))
+        self.statement_days = self.draw_statement_days() if self.pre else []
+        self.first = self.first_fact()
+        if any(due < self.first for due in self.kept):
+            # A late line that is the book's first fact keeps a payment due before it, which the opening has already counted as
+            # made: the one thing a loan that began before its book cannot see (the K5e map, section 7), and not drawn.
+            return False
+        self.opens()
         self.excess = {}
         for due, amount in self.stated.items():
             if due in self.paid and amount > self.paid[due][2] + self.paid[due][3]:
                 self.excess[due] = amount - self.paid[due][2] - self.paid[due][3]
         self.statements()
+        return True
+
+    def draw_statement_days(self):
+        last = min(TODAY, self.dues[-1] + datetime.timedelta(days=30))
+        room = (last - self.book_day).days
+        return sorted(self.book_day + datetime.timedelta(days=self.rng.randint(0, room)) for _ in range(self.seed_statements) if room > 0)
+
+    def first_fact(self):
+        """The day the book begins: its earliest fact. A declaration and a rate a statement says (`now at`) are not facts;
+        the book's opening, a line that keeps a due day, a flow and a statement of what is held are."""
+        facts = [self.opening_day, *self.kept.values(), *(day for day, _ in self.prepays), *self.statement_days]
+        return min(facts)
+
+    def opens(self):
+        """What the debt tab is opened with, and by what. A loan the book makes is opened by its origination, with all it
+        borrowed. A loan that began before the book is owed what its schedule says when the book begins (after every payment
+        due before that day) unless the book's opening says it, and then it is the opening's number."""
+        self.opened = open_on(self.principal, self.rows, self.first - datetime.timedelta(days=1)) if self.pre else self.principal
+        if self.explicit == "agrees" and self.opened == 0:
+            self.explicit = None
+        self.said_open = self.opened if self.explicit == "agrees" else None
+        if self.explicit == "differs":
+            self.said_open = self.opened + self.rng.randint(1, 600) * 100 + 7
+        self.base = self.said_open if self.said_open is not None else self.opened
+        if self.pre:
+            self.forms[f"pre:explicit-{self.explicit or 'none'}"] += 1
+            self.forms["pre:owed-zero" if self.opened == 0 else "pre:owed-positive"] += 1
+            self.forms["pre:first-is-" + ("opening" if self.first == self.opening_day else
+                       "line" if self.first in self.kept.values() else
+                       "flow" if self.first in [day for day, _ in self.prepays] else "statement")] += 1
 
     def posted(self, due):
         """What the fold posts for the line that keeps `due`: the interest, then what the amount it states leaves."""
@@ -392,20 +476,25 @@ class Case:
         return paid, header - paid
 
     def tab_on(self, day):
-        """The debt tab as the books have it after what is written on or before `day`: the principal the origination made,
-        less the principal each kept line posted and each flow written to the loan."""
-        tab = self.principal - sum(self.posted(due)[1] for due, at in self.kept.items() if at <= day)
+        """The debt tab as the books have it after what is written on or before `day`: what opened it (the principal the
+        origination made, the schedule's balance when the book began, or the book's own opening), less the principal each kept
+        line posted and each flow written to the loan."""
+        # what opens the tab does so on its day: a book's own opening on its own, and the schedule's on the book's first
+        tab = (self.base if day >= (self.opening_day if self.said_open is not None else self.first) else 0)
+        tab -= sum(self.posted(due)[1] for due, at in self.kept.items() if at <= day)
         return tab - sum(amount for when, amount in self.prepays if when <= day)
 
     def statements(self):
         rng = self.rng
         last = min(TODAY, self.dues[-1] + datetime.timedelta(days=30))
         self.values = []
-        for _ in range(self.seed_statements):
-            day = self.begins + datetime.timedelta(days=rng.randint(5, (last - self.begins).days))
+        for number in range(len(self.statement_days) if self.pre else self.seed_statements):
+            # (a book that makes its loan draws each day as it goes, as the corpus of lane K5d did)
+            day = self.statement_days[number] if self.pre else self.begins + datetime.timedelta(days=rng.randint(5, (last - self.begins).days))
             owed = open_on(self.principal, self.rows, day)
             extras = [amount for due, amount in self.excess.items() if due <= day]
-            unkept = [row[3] for row in self.rows if row[0] == "pay" and row[1] <= day and row[1] not in self.kept]
+            unkept = [row[3] for row in self.rows
+                      if row[0] == "pay" and self.first <= row[1] <= day and row[1] not in self.kept]
             stated = {"schedule": owed, "tab": self.tab_on(day), "prepayment": owed - rng.randint(1, 50) * 100,
                       "off": owed + rng.randint(1, 5000), "extra": owed + (rng.choice(extras) if extras else 0),
                       "extras": owed + sum(extras), "missed": owed + (rng.choice(unkept) if unkept else 0),
@@ -419,7 +508,8 @@ class Case:
         gap = stated - open_on(self.principal, self.rows, day)
         if gap == 0:
             return None
-        payments = [row for row in self.rows if row[0] == "pay" and row[1] <= day]
+        # a payment due before the book began is nobody's to keep: the book is not asked for it, and the opening has it paid
+        payments = [row for row in self.rows if row[0] == "pay" and self.first <= row[1] <= day]
         holds = []
         if gap < 0:
             holds.append("prepayment")
@@ -448,7 +538,7 @@ class Case:
         loan.append(f"    prepay {self.mode}")
         lines = [f"contract {self.name} with bank", *loan, f"  {c['text']}{' ' + c['on'] if c['on'] else ''} from checking",
                  f"  from {self.anchor}"]
-        events = [(self.begins, f"{self.begins} {self.name}")]
+        events = [] if self.pre else [(self.begins, f"{self.begins} {self.name}")]
         for due, at in self.lines.items():
             if due in self.paid:
                 events.append((at, f"{at} {self.name}" + (f" {money(self.stated[due])}" if due in self.stated else "")))
@@ -456,7 +546,9 @@ class Case:
         events += [(day, f"{day} checking -> {self.name} {money(amount)}") for day, amount in self.prepays]
         events += [(day, f"{day} {self.name} = {money(stated)}") for day, stated in self.values]
         events.sort(key=lambda event: event[0])
-        return "\n".join([PRELUDE.rstrip("\n"), *lines, *(text for _, text in events)]) + "\n"
+        opening = [f"opening {self.opening_day}", "  checking 90_000_000 USD"]
+        opening += [f"  {self.name} {money(self.said_open)}"] if self.said_open is not None else []
+        return "\n".join([PRELUDE.rstrip("\n"), *opening, *lines, *(text for _, text in events)]) + "\n"
 
     def expectation(self):
         name, out = self.name, []
@@ -468,7 +560,7 @@ class Case:
                 out.append(f"planned {name} {due} {self.paid[due][2]} {self.paid[due][3]}")
         last_kept = max(self.kept, default=None)
         for due in self.dues:
-            if due in self.paid and due not in self.kept:
+            if due in self.paid and due not in self.kept and due >= self.first:
                 if due + datetime.timedelta(days=self.reach + 1) <= TODAY or (last_kept and due < last_kept):
                     out.append(f"missed {name} {due}")
         probe, end = self.begins, UNTIL
@@ -477,6 +569,10 @@ class Case:
             probe = add_months(probe.replace(day=1), 1)
             probe = probe.replace(day=calendar.monthrange(probe.year, probe.month)[1])
         out.append(f"tab {name} {TODAY} {self.tab_on(TODAY)}")
+        if self.said_open is not None:
+            out.append(f"opening {name} {self.opening_day} {self.said_open}")
+        elif self.pre and self.opened > 0:
+            out += [f"opening {name} {self.first} {self.opened}", "note loan-opening"]
         last_tab = 0
         for day, stated in self.values:
             gap_tab = stated - self.tab_on(day)
@@ -539,20 +635,38 @@ def selftest():
     for index, want in [(8, 6), (10, 7), (20, 8)]:
         loan.reset(Fraction(index, 100))
         assert loan.annual == Fraction(want, 100), (index, loan.annual)
+    # `11-sam`'s loan, whose book begins on 2026-01-01 with no word of it but a comment ("312,441.12 owed to rocket, from its
+    # terms"): 22 payments have fallen due since 2024-02-20, and the 23rd, the book's first, is the split its comment says.
+    loan = Loan(320_000_00, Fraction(5875, 100000), Fraction(1, 12), 360)
+    for _ in range(22):
+        loan.pay()
+    assert loan.open == 312_441_12, loan.open
+    assert loan.pay() == (1_529_66, 363_26)
     # The corpus is deterministic, and what it writes is consistent with itself.
     a, b = Case(7, 3), Case(7, 3)
     assert a.text() == b.text() and a.expectation() == b.expectation()
     for number in range(200):
         case = Case(1, number)
         assert sum(row[3] for row in case.rows) <= case.principal
+        assert case.first == BORN and case.base == case.principal
+    # A book that began after its loan: the first fact is no later than any fact, what is owed then is the schedule's balance the
+    # day before, nothing of the book is before it, and a payment due before it is nobody's to have missed.
+    for number in range(200):
+        case = Case(2, number, True)
+        facts = [case.opening_day, *case.kept.values(), *(day for day, _ in case.prepays), *case.statement_days]
+        assert case.first == min(facts) and case.first > case.begins
+        assert all(due >= case.book_day for due in case.kept), "a line keeps a payment due before the book began"
+        assert case.opened == open_on(case.principal, case.rows, case.first - datetime.timedelta(days=1))
+        assert case.base == (case.said_open if case.said_open is not None else case.opened)
+        assert not any(line.startswith("missed") and line.split()[2] < str(case.first) for line in case.expectation())
     print("selftest ok")
 
 
-def gen(directory, count, seed):
+def gen(directory, count, seed, pre=False):
     os.makedirs(directory, exist_ok=True)
     forms = Counter()
     for number in range(count):
-        case = Case(seed, number)
+        case = Case(seed, number, pre)
         path = os.path.join(directory, f"p{number:04d}")
         os.makedirs(path, exist_ok=True)
         with open(os.path.join(path, "main.ax"), "w") as handle:
@@ -704,6 +818,9 @@ OCC = "crates/engine/src/occurrence.rs"
 LOW = "crates/model/src/lower/contracts.rs"
 REC = "crates/engine/src/reconcile.rs"
 BAL = "crates/engine/src/loan_balance.rs"
+LOP = "crates/model/src/lower/loan_opening.rs"
+BOK = "crates/model/src/book.rs"
+RCD = "crates/model/src/lower/record.rs"
 
 RANKS = "    Reset,\n    Rate,\n    Pay,\n    Prepay,\n}"
 INTEREST = "let held = mul_div(i128::from(open.0), i128::from(rate.num()), i128::from(rate.den())).unwrap_or(0);"
@@ -806,7 +923,7 @@ MUTANTS = [
     (RES, ".max(first)", "", "the monitor waits for payments from before the loan was made"),
     # the causes
     (CAU, "gap if gap < Qty::ZERO => Cause::Prepaid,", "gap if gap < Qty::ZERO => Cause::Unknown,", "a statement that owes less than the schedule names no cause"),
-    (CAU, "filter(|payment| payment.day <= day)", "filter(|payment| payment.day < day)", "a payment due on the day of the statement is not counted in its causes"),
+    (CAU, "(said.begins..=day).contains(&payment.day)", "(said.begins..day).contains(&payment.day)", "a payment due on the day of the statement is not counted in its causes"),
     (CAU, "None => missed.push((due, paid.principal)),", "None => {}", "a payment no line keeps is not a cause"),
     (CAU, "short.push((due, paid.principal - principal));", "short.push((due, principal));", "what a short payment left unpaid is what it paid"),
     (CAU, "(stated - paid.interest).clamp(Qty::ZERO, paid.principal)", "(stated - paid.interest).min(paid.principal)", "a line that states less than the interest paid negative principal"),
@@ -826,6 +943,49 @@ MUTANTS = [
     (REC, "found.gap() == gap) => now,", "found.gap() != gap) => now,", "the book's assertion is said where the loan's is"),
     (BAL, "if !matches!(assert.gap, Gap::Refused) ||", "if false ||", "a statement that accepts its gap is held to the schedule"),
     (BAL, "found.filter(|_| assert.amount.unit == loan.principal.unit)", "found.filter(|_| true)", "a statement in another commodity is held to the schedule"),
+    # a loan that began before the book (lane K5e): which loans, on what day, how much, and the cause of a statement. Each is asked of
+    # the `pre` corpus (`mutate TREE WORK DIR 78,79,..`), whose books are the ones that open a debt.
+    (LOP, "Begins::With { day, .. } => (made < day).then_some(day),", "Begins::With { day, .. } => (made <= day).then_some(day),",
+     "a loan made on the book's first day is opened as if it were before it"),
+    (LOP, "Begins::WithTheLoan => Some(made),", "Begins::WithTheLoan => None,", "a book with no fact opens no loan"),
+    (LOP, ".filter(|&owed| owed > Qty::ZERO)", ".filter(|&owed| owed >= Qty::ZERO)", "a loan paid off before the book opens a debt of nothing"),
+    (LOP, "!named.contains(name) && ", "", "an opening that names the loan does not replace the one its terms say"),
+    (LOP, " && !made.is_some_and(|made| originated.contains(&(name, made)))", "", "a loan whose origination is written is opened as well"),
+    (LOP, "            loans.sort_by_key(|(_, contract)| contract.loan.map(|loan| loan.on));\n", "",
+     "the loans of a book with no fact open in the order they were declared, and not the order they were made"),
+    (LOP, "for id in std::mem::take(&mut self.0) {", "for id in self.0.clone() {", "a loan is opened again after every record"),
+    (LOP, "from: debt,\n        to: opening,", "from: opening,\n        to: debt,", "the debt opens as an asset: into the tab and not out of it"),
+    (LOP, "mode: Mode::Opening,", "mode: Mode::Actual,", "the opening is a flow the laws see"),
+    (LOP, "origin: Origin::Derived(Derivation::Opening(id)),", "origin: Origin::Written,", "an opening the terms made says that the book wrote it"),
+    (LOP, "Insertion::Line { before, indent } => (*before, format!(\"{indent}{said}\\n\")),", "Insertion::Line { before, .. } => (*before, format!(\"{said}\\n\")),",
+     "the line the note offers is not indented as the opening's own"),
+    (LOP, "format!(\"opening {day}\\n  {said}\\n\\n\")", "format!(\"opening {day}\\n{said}\\n\\n\")", "the opening the note offers has its line unindented"),
+    (LOP, ".replace(',', \"_\")", ".replace(',', \"\")", "the amount the note offers is not written as the language writes it"),
+    (PRO, "halt.day >= day", "halt.day > day", "a schedule that stopped on the book's first day is not followed to it"),
+    (PRO, "let followed = loan.terms().halted().is_none_or(|halt| halt.day >= day);", "let followed = true;",
+     "a schedule that stopped before the book began is followed to it"),
+    (PRO, "&Said::rated(contract))?", "&Said::default())?", "the rates said before the book began are not in what is owed then"),
+    (AMO, "self.open_on(day.add_days(-1)).unwrap_or(self.annuity.principal().qty)", "self.open_on(day).unwrap_or(self.annuity.principal().qty)",
+     "what is owed when a day begins includes the payments due on it"),
+    (AMO, "self.open_on(day.add_days(-1)).unwrap_or(self.annuity.principal().qty)", "self.open_on(day.add_days(-1)).unwrap_or(Qty::ZERO)",
+     "a loan made on or after a day owes nothing when it begins"),
+    (AMO, "let begins = book.first_fact().unwrap_or(Day::MIN);", "let begins = Day::MIN;", "a payment before the book began is counted among those that were missed"),
+    (AMO, "let rates = contract.rates.iter().map(|change| (change.day, change.rate)).collect();", "let rates = Vec::new();",
+     "the rates a statement says are not in the schedule of a loan"),
+    (CAU, "(said.begins..=day).contains(&payment.day)", "(said.begins.add_days(1)..=day).contains(&payment.day)",
+     "a payment due on the day the book begins is not one it can have missed"),
+    (BOK, "first_split, first_claim_change].into_iter().flatten().min()", "first_split, first_claim_change].into_iter().flatten().max()",
+     "the book begins with its latest fact"),
+    (BOK, "let first_assert = self.asserts.first().map(|assert| assert.day);", "let first_assert = None::<Day>;", "an assertion is not a fact the book begins with"),
+    (BOK, "let first_split = self.splits.first().map(|split| split.day);", "let first_split = None::<Day>;", "a split is not a fact the book begins with"),
+    (BOK, "let first_flow = self.flows.as_slice().first().map(|flow| flow.day);", "let first_flow = None::<Day>;", "a flow is not a fact the book begins with"),
+    (BOK, "let first_occurrence = self.txns.values().filter(|txn| txn.occurrence.is_some()).map(|txn| txn.day).min();",
+     "let first_occurrence = None::<Day>;", "a kept occurrence is not a fact the book begins with"),
+    (BOK, "let first_claim_change = self.claim_changes.first().map(|change| change.day);", "let first_claim_change = None::<Day>;",
+     "a claim change is not a fact the book begins with (equivalent: a claim is made by a flow, which is earlier)"),
+    (RCD, "    unopened.finish(world, diags);\n", "", "a book with no fact is not begun by its loans"),
+    (RCD, "        unopened.after(world, || record.insertion(), diags);\n", "", "no loan is opened when the book begins"),
+    (RCD, ".rfind('\\n').map_or(0, |newline| newline + 1)", ".rfind('\\n').map_or(0, |newline| newline)", "the edit is put before the newline that ends the line above"),
 ]
 
 
@@ -872,7 +1032,7 @@ def main(argv):
     if command == "selftest":
         return selftest() or 0
     if command == "gen":
-        return gen(rest[0], int(rest[1]), int(rest[2]) if len(rest) > 2 else 7) or 0
+        return gen(rest[0], int(rest[1]), int(rest[2]) if len(rest) > 2 else 7, rest[3:] == ["pre"]) or 0
     if command == "build":
         print(build(rest[0], rest[1]))
         return 0

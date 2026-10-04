@@ -64,7 +64,7 @@ fn checking(book: &Book, run: &Run) -> i64 {
 }
 
 /// What the occurrence of `due` posted, by purpose name: `(interest, principal)`.
-fn split(book: &Book, run: &Run, due: Day) -> (i64, i64) {
+pub(crate) fn split(book: &Book, run: &Run, due: Day) -> (i64, i64) {
     let promise =
         run.promises.iter().find(|promise| promise.due == due && promise.kept.is_some()).expect("a kept payment");
     let purposed = |name: &str| -> i64 {

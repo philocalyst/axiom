@@ -10,6 +10,7 @@ use super::flow::{
     keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_item_root,
     push_quantity_root, push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
 };
+use super::loan_opening::{Insertion, Unopened};
 use super::push_amount_root;
 use super::staged::Staged;
 use super::statements::{
@@ -57,6 +58,29 @@ impl<'a, 's> Record<'a, 's> {
             Record::Statement(written) => (written.node.date, written.order),
             Record::Opening(written) => (written.node.date, written.order),
         }
+    }
+
+    /// The item the record is written as.
+    fn item(&self) -> &ast::Item<'s> {
+        match self {
+            Record::Txn(written) => written.item,
+            Record::Statement(written) => written.item,
+            Record::Opening(written) => written.item,
+        }
+    }
+
+    /// Where a line that says what the book begins with goes, if this is the record that begins it: among the lines of an
+    /// opening, before its first and indented as it is, else as an opening before the record.
+    fn insertion(&self) -> Insertion {
+        let at = self.item().loc;
+        let before_record = Insertion::Opening { before: Loc::new(at.file, at.start, at.start) };
+        let Record::Opening(written) = self else { return before_record };
+        let file = written.file();
+        let Some(first) = file[written.node.lines].first() else { return before_record };
+        let start = first.loc.start as usize;
+        let line = file.src[..start].rfind('\n').map_or(0, |newline| newline + 1);
+        let before = Loc::new(file.id, line as u32, line as u32);
+        Insertion::Line { before, indent: file.src[line..start].to_owned() }
     }
 
     /// How many flows the record is expected to make, to reserve room for them.
@@ -165,6 +189,7 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
     world.book.flows.reserve(dated.iter().map(Record::flows).sum());
 
     let mut code_index = CodeIndex::default();
+    let mut unopened = Unopened::of(world, collected);
     for record in dated {
         let txn_start = world.book.txns.len();
         let diagnostic_start = diags.len();
@@ -188,8 +213,15 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
                 code_index.add(world, Id::new(txn_index as u32));
             }
         }
+        unopened.after(world, || record.insertion(), diags);
     }
+    unopened.finish(world, diags);
+    index_flows(world);
+}
 
+/// What the book's flows say that is read by place and by pair of commodities, once they are all lowered: the prices their
+/// exchanges imply, and the flows that touch each place.
+fn index_flows(world: &mut World<'_>) {
     // Actual, known exchanges provide dated price evidence for their
     // commodity pair. Derive these after successful transaction lowering so
     // rollback cannot leave a quote from a rejected record. Written quotes
