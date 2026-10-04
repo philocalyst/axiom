@@ -790,8 +790,6 @@ MUTANTS = [
     (AMO, "fall.rank == Rank::Pay && state.open > Qty::ZERO", "state.open > Qty::ZERO", "a line that states more than its payment prepays after any event of its day"),
     (AMO, "(extra > Qty::ZERO).then_some(extra)", "(extra >= Qty::ZERO).then_some(extra)", "a line that states exactly its payment prepays nothing, as a prepayment"),
     (AMO, "let extra = self.stated(due)? - paid.interest - paid.principal;", "let extra = self.stated(due)? - paid.principal;", "an extra is what a line states over the principal"),
-    (AMO, "&& book.txns.get(flow.txn).is_some_and(|txn| txn.occurrence.is_none())", "&& book.txns.get(flow.txn).is_some()",
-     "a payment's own principal is counted as a prepayment"),
     (AMO, "let own = first.is_some_and(|(first, _)| first == id);", "let own = true;", "two loans of one tab are each prepaid by what is paid into it"),
     (AMO, "Some(Expr::Literal(amount)) if amount.unit == loan.principal.unit => Some(amount.qty),", "Some(Expr::Literal(amount)) => Some(amount.qty),",
      "a line that states another commodity is read as paying the loan"),

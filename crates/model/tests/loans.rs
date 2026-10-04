@@ -214,6 +214,29 @@ fn a_reset_reads_the_index_and_is_held_to_the_cap_and_to_the_life() {
 }
 
 #[test]
+fn a_rate_said_on_the_day_of_a_reset_is_the_one_the_payment_of_that_day_is_at() {
+    // The reset of 2026-08-01 reads 5.5% + 2.5%, held to 7%; the lender says 9% the same day, and what is said is last. The interest of
+    // that day's payment is 9% of 10,146,590 a year over twelve, not 7%.
+    let text = LOAN.replace("for condo\n", "for condo\n    resets 1y from 2026-08-01 to idx + 2.5% cap 1% life 3%\n");
+    let rows = entries(&book(&format!("{text}2026-08-01 home-loan now at 9%\n")), "home-loan");
+    assert_eq!(pays(&rows)[6], ("2026-08-01".into(), 76_099, 302_857, 9_843_733));
+}
+
+#[test]
+fn a_rate_said_on_the_day_the_loan_was_made_is_the_rate_from_its_first_payment() {
+    let rows = entries(&book(&format!("{LOAN}2026-01-15 home-loan now at 9%\n")), "home-loan");
+    assert_eq!(pays(&rows)[0], ("2026-02-01".into(), 90_000, 291_597, 11_708_403));
+}
+
+#[test]
+fn a_reset_on_the_day_of_the_last_payment_is_the_rate_of_that_payment() {
+    // `late` reads 5.5% until 2029-01-01, the last due day, and 3% from it: 3% + 2.5% = 5.5% there, and not the 8% of the resets before.
+    let resets = LOAN.replace("for condo\n", "for condo\n    resets 1y from 2027-01-01 to late + 2.5%\n");
+    let rows = entries(&book(&format!("param late\n  2026-01-01 5.5%\n  2029-01-01 3%\n{resets}")), "home-loan");
+    assert_eq!(pays(&rows).last().unwrap(), &("2029-01-01".to_string(), 1_697, 370_363, 0));
+}
+
+#[test]
 fn a_reset_whose_index_the_book_does_not_have_stops_the_schedule_and_says_why() {
     // `late` has no row before 2026-09-01, so the reset of 2026-08-01 has nothing to read.
     let resets = LOAN.replace("for condo\n", "for condo\n    resets 1y from 2026-08-01 to late + 2% cap 1%\n");
@@ -235,6 +258,15 @@ fn a_line_that_states_more_than_its_payment_prepays_the_difference_and_one_that_
     assert_eq!(rows[2].1, "2026-03-01");
     assert_eq!(rows[2].0, "pay");
     assert_eq!(rows[3].1, "2026-04-01", "a payment that states less is still the schedule's payment");
+}
+
+#[test]
+fn a_line_that_states_exactly_its_payment_or_another_commodity_prepays_nothing() {
+    let rows = entries(&book(&format!("{LOAN}2026-02-01 home-loan 3_650.63 USD\n")), "home-loan");
+    assert!(rows.iter().all(|row| row.0 == "pay"), "the payment is what it states: {:?}", &rows[..2]);
+    // Whatever the book says of a payment in euros, the loan is in dollars and the schedule takes none of it as principal.
+    let (euros, _) = built(&format!("commodity EUR\n  precision 2\n{LOAN}2026-02-01 home-loan 5_000 EUR\n"));
+    assert!(entries(&euros, "home-loan").iter().all(|row| row.0 == "pay"));
 }
 
 #[test]

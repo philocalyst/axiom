@@ -460,6 +460,16 @@ mod tests {
     }
 
     #[test]
+    fn the_factor_rounds_the_rate_and_every_step_of_its_loop_and_truncates_neither() {
+        // A sixth of a period: 0.1666... rounds up at the 18th place, and so does the power at its second and third step. The
+        // numbers are the reference's (docs/v5/measure/loans.py, Python integers).
+        let sixth = Ratio::new(1, 6).unwrap();
+        let places = |digits: i128| Ratio::new(digits, 1_000_000_000_000_000_000).unwrap();
+        assert_eq!(payment_factor(sixth, 2), Some(places(628_205_128_205_128_205)));
+        assert_eq!(payment_factor(sixth, 3), Some(places(450_131_233_595_800_525)));
+    }
+
+    #[test]
     fn a_payment_that_is_half_a_cent_rounds_to_the_even_cent() {
         // 1_000 quanta at a factor of exactly 1/200 is 5 quanta; 1_050 is 5.25; 1_100 is 5.5 (even is 6); 1_300 is 6.5 (even is 6).
         let one_in_200 = Ratio::new(1, 200).unwrap();
