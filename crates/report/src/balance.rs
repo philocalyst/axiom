@@ -24,22 +24,22 @@ pub(crate) fn view_with_lens<'s>(
     lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     globs: &[&str],
-    value: bool,
+    unpriced: Option<&Unpriced>,
     monthly: bool,
 ) -> Result<Report<'s>, Diagnostic> {
-    let (book, at) = (lens.book(), lens.day);
+    let (book, at, value) = (lens.book(), lens.day, unpriced.is_some());
     let selection = Selection::new(book, globs)?;
     let days = column_days(book, at, monthly);
     let snapshots = Balances::of(lens, run, &days);
 
     let mut table = Section::new(iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)));
-    let mut unpriced = 0;
+    let mut unpriced_holdings = 0;
     for place in book.listed_places() {
         match selection.mark(place) {
             Mark::Hidden => {}
             Mark::Context => table.push(context_row(book, place, snapshots.days().len())),
             Mark::Chosen if on_balance_sheet(book.places[place].class) => {
-                unpriced += push_place(&mut table, lens, place, &snapshots, value)
+                unpriced_holdings += push_place(&mut table, lens, place, &snapshots, value)
             }
             Mark::Chosen => {}
         }
@@ -47,10 +47,10 @@ pub(crate) fn view_with_lens<'s>(
     if table.rows.is_empty() {
         table.note(format!("Nothing is held on {at}."));
     }
-    if unpriced > 0 {
+    if unpriced_holdings > 0 {
         table.note("Holdings without a price are muted, in their own commodity, and left out of every total.");
     }
-    let unpriced_flows = if value { unpriced_flows(lens, run, &days) } else { 0 };
+    let unpriced_flows = unpriced.map_or(0, |ends| ends.standing(lens, &days));
     if unpriced_flows > 0 {
         table.note(format!("{unpriced_flows} flows have no price on their day and are not counted in the value."));
     }
@@ -108,23 +108,37 @@ fn column_days(book: &Book, at: Day, monthly: bool) -> Vec<Day> {
     Periods::covering(Period::Month, first, at).last(MONTHLY_COLUMNS).ends().map(|end| end.min(at)).collect()
 }
 
-/// How many flow ends the books cannot price on the day the flow moved, in places that are not on the balance sheet, for
-/// flows that stood on one of `days` (ascending): what `--value` has no worth for. Such a flow adds to no balance a view
-/// shows, so this count is the one thing the value of a book says of them.
-fn unpriced_flows(lens: Lens, run: &Run, days: &[Day]) -> usize {
-    let book = lens.book();
-    let stands_on_a_day =
-        |(start, past): (Day, Day)| days.get(days.partition_point(|&day| day < start)).is_some_and(|&day| day < past);
-    let mut unpriced = 0;
-    for posting in postings(book, run).filter(|posting| posting.standing().is_some_and(stands_on_a_day)) {
-        let on_its_day = lens.on(posting.flow.day);
-        for end in [End::From, End::To] {
-            let (place, Change::Moved(moved)) = (posting.place(end), posting.change(end));
-            let counts = lens.owns(place) && !on_balance_sheet(book.places[place].class);
-            unpriced += usize::from(counts && on_its_day.value(moved).is_none());
+/// The flow ends the books cannot price on the day the flow moved, at places that are not on the balance sheet, each with
+/// the days its flow stands on: what `--value` has no worth for. Such a flow adds to no balance a view shows, so how many of
+/// these stand on the days a view asks is the one thing the value of a book says of them. Which ends cannot be priced is the
+/// book's and the run's, whoever's money a view is about, and there are few: the run's [`Folded`](crate::Folded) is asked
+/// once, by the first view that wants a value, and each view counts what it needs.
+pub(crate) struct Unpriced(Vec<(Day, Day, Id<Place>)>);
+
+impl Unpriced {
+    pub(crate) fn of(lens: Lens, run: &Run) -> Unpriced {
+        let book = lens.book();
+        let mut ends = Vec::new();
+        for posting in postings(book, run) {
+            let Some((start, past)) = posting.standing() else { continue };
+            let on_its_day = lens.on(posting.flow.day);
+            for end in [End::From, End::To] {
+                let (place, Change::Moved(moved)) = (posting.place(end), posting.change(end));
+                if !on_balance_sheet(book.places[place].class) && on_its_day.value(moved).is_none() {
+                    ends.push((start, past, place));
+                }
+            }
         }
+        Unpriced(ends)
     }
-    unpriced
+
+    /// How many are in places `lens` owns and stand on one of `days` (ascending).
+    fn standing(&self, lens: Lens, days: &[Day]) -> usize {
+        let stands = |&(start, past, _): &(Day, Day, Id<Place>)| {
+            days.get(days.partition_point(|&day| day < start)).is_some_and(|&day| day < past)
+        };
+        self.0.iter().filter(|end| stands(end) && lens.owns(end.2)).count()
+    }
 }
 
 fn amount_columns<'s>(book: &'s Book<'_>, snapshots: &Balances, value: bool) -> Vec<Column<'s>> {

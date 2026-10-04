@@ -98,7 +98,9 @@ fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Rep
     let at = |at: &Option<Day>| lens.on(at.unwrap_or(run.today));
     Ok(match query {
         Query::Balance { globs, at: day, value, monthly } => {
-            return balance::view_with_lens(at(day), run, globs, *value, *monthly);
+            let lens = at(day);
+            let unpriced = value.then(|| balance::Unpriced::of(lens, run));
+            return balance::view_with_lens(lens, run, globs, unpriced.as_ref(), *monthly);
         }
         Query::Register { place, from, to } => return register::view_with_lens(at(to), run, place, *from, *to),
         Query::Flow { by: FlowBy::Period(by), from, to } => flow::view_with_lens(at(to), run, *by, *from),

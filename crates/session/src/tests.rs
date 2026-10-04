@@ -286,3 +286,46 @@ fn an_unknown_owner_is_an_error_and_the_book_is_still_folded() {
     assert_eq!(refused.code, "unknown-entity");
     assert_eq!(session.diagnostics().count(), 0, "the book's own diagnostics are there to be shown beside it");
 }
+
+/// Two owners, each with money in a commodity nothing prices: what a value cannot price is not the same for each.
+const TWO_OWNERS: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+entity me
+entity jordan
+entity shop
+purpose food : spending
+account assets/mine
+account assets/theirs
+  owner jordan
+opening 2026-01-01
+  assets/mine 100 EUR
+  assets/theirs 200 EUR
+2026-01-02 assets/mine -> shop 5 EUR #food
+2026-01-03 assets/theirs -> shop 6 EUR #food
+2026-01-04 assets/theirs -> shop 7 EUR #food
+";
+
+#[test]
+fn what_a_value_could_not_price_does_not_depend_on_whose_books_asked_first() {
+    let value = Query::Balance { globs: vec![], at: None, value: true, monthly: false };
+    let texts = Texts::default();
+    let fresh = || Session::open(Sources::in_memory(&texts, &[("axiom.ax", TWO_OWNERS)], &[]), options());
+    let ask = |session: &Session<'_>, owner| {
+        json::render(&session.query(&value, owner).expect("the value resolves"), session.sources())
+    };
+    let owners = [None, Some("me"), Some("jordan")];
+    let alone: Vec<_> = owners.iter().map(|&owner| ask(&fresh(), owner)).collect();
+    assert!(alone[1] != alone[2], "the two owners are not told the same: {alone:?}");
+    let session = fresh();
+    for (&owner, said) in owners.iter().zip(&alone) {
+        assert_eq!(&ask(&session, owner), said, "asked in turn: {owner:?}");
+    }
+    let session = fresh();
+    for (&owner, said) in owners.iter().zip(&alone).rev() {
+        assert_eq!(&ask(&session, owner), said, "asked in turn, the other way: {owner:?}");
+    }
+}

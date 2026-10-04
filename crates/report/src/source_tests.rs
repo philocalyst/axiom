@@ -1476,8 +1476,12 @@ purpose food : spending
 account checking
 opening 2026-01-01
   checking 1_000 EUR
+  checking 500 USD
 2026-02-01 checking -> shop 10 EUR #food
 2026-03-01 checking -> shop 20 EUR #food
+2026-03-10 checking -> shop 5 EUR #food ^s1
+2026-03-12 checking -> shop 7 USD #food
+2026-03-20 ^s1 returned
 ";
     with_run(source, day(2026, 3, 31), |book, run| {
         let note = |at: Day| {
@@ -1492,11 +1496,14 @@ opening 2026-01-01
         };
         let said =
             |count: usize| vec![format!("{count} flows have no price on their day and are not counted in the value.")];
-        // The opening's source and the shop are the places that are not on the balance sheet: a flow end each.
+        // The opening's source and the shop are the places that are not on the balance sheet: a flow end each, when the
+        // commodity of the flow has no price (a flow of dollars is worth what it says).
         assert_eq!(note(day(2026, 1, 15)), said(1));
         assert_eq!(note(day(2026, 2, 1)), said(2), "a flow stands on its own day");
         assert_eq!(note(day(2026, 2, 15)), said(2));
-        assert_eq!(note(day(2026, 3, 15)), said(3));
+        assert_eq!(note(day(2026, 3, 5)), said(3));
+        assert_eq!(note(day(2026, 3, 19)), said(4), "a flow stands until the day it is returned");
+        assert_eq!(note(day(2026, 3, 20)), said(3), "and not on that day");
         assert_eq!(note(day(2025, 12, 1)), Vec::<String>::new(), "nothing had happened");
     });
 }

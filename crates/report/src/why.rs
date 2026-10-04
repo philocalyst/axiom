@@ -199,10 +199,15 @@ impl<'a> Target<'a> {
         if run.effects.iter().any(|effect| book.name(effect.name) == text) {
             return Ok(Target::TaxLine(text));
         }
+        Err(Target::nothing_named(book, run, text))
+    }
+
+    /// The error for a name that is none of those, with the nearest names of every kind to suggest.
+    fn nothing_named(book: &Book, run: &Run, text: &str) -> Diagnostic {
         let laws = book.laws.values().map(|law| book.name(law.name));
         let tallies = run.effects.iter().map(|effect| book.name(effect.name));
         let things = names(book).chain(book.entities.values().map(|entity| book.name(entity.path)));
-        Err(resolve::nothing_named(
+        resolve::nothing_named(
             "place, entity:NAME, system, ^code, #purpose, asset:NAME, contract:NAME, law, tax line or description",
             text,
             things
@@ -211,7 +216,7 @@ impl<'a> Target<'a> {
                 .chain(book.purposes.values().map(|purpose| book.name(purpose.name)))
                 .chain(book.assets.values().map(|asset| book.name(asset.name)))
                 .chain(book.contracts.values().map(|contract| book.name(contract.name))),
-        ))
+        )
     }
 
     /// The page about it.
