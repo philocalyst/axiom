@@ -5,6 +5,15 @@
 purpose business-income : income
 purpose design : business-income
 
+/// What Lumen adds to each paycheck's retirement deferral: money into Sam's 401(k)
+/// from the employer, a kind of contribution.
+purpose match : contribution
+
+/// What each mortgage payment sets aside with the lender for property tax and
+/// insurance: a move between Sam's own accounts, not a cost until it is paid out.
+/// (Not `escrow`: that is the account's name, and an account and a purpose may not share one.)
+purpose escrow-deposit : transfer
+
 kind sole-proprietorship : entity
   /// The business identity used to recognize owner allocations on spending.
 

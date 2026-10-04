@@ -31,7 +31,7 @@ def money(s):
 
 # ── the journal in order: flows, the statements between them, and the words that change a pending flow ─────
 ASSERT = re.compile(r"^(\d{4}-\d\d-\d\d) (\S+) = ([\d_.]+) USD( !)?\s*(//.*)?$")
-STATUS = re.compile(r"^(\d{4}-\d\d-\d\d) #(\S+) (settled|void|returned)\s*$")
+STATUS = re.compile(r"^(\d{4}-\d\d-\d\d) \^(\S+) (settled|void|returned)\s*$")
 events = [(f.file, f.lineno, "flow", f) for f in flows]
 for path in sorted(os.popen(f"find {ROOT}/journal -name '*.ax'").read().split()):
     for i, l in enumerate(open(path).read().split("\n"), start=1):
@@ -102,7 +102,7 @@ for _, _, kind, e in events:
                 held[name] = said
         continue
     f = e
-    code = f.codes[0].lstrip("#") if f.codes else None
+    code = next((c.lstrip("^") for c in f.codes if c.startswith("^")), None)
     if f.pending:                                         # `(240 USD)`: written, not yet real
         pending[code] = f
         continue
@@ -111,16 +111,12 @@ for _, _, kind, e in events:
         continue
     if f.legs:
         listed = sum((a for p, a, u in f.legs if a is not None), D(0))
-        for place, amt, unit in f.legs:
+        for place, amt, unit in f.legs:                   # the premium: the legs are the sources
             amt = f.into - listed if amt is None else amt
-            if f.src == "studio":                         # a pay stub: the legs are where the gross goes
-                if place == "checking":
-                    held["checking"] += amt
-            else:                                         # the premium: the legs are the sources
-                if place in FUNDS:
-                    tied[place] -= amt
-                else:
-                    held[place] -= amt
+            if place in FUNDS:
+                tied[place] -= amt
+            else:
+                held[place] -= amt
         continue
     if code and code.startswith("deposit-"):
         actual[code] = f
@@ -132,7 +128,7 @@ names = {"emergency-fund": "emergency fund", "car-fund": "car fund", "insurance-
 print("the envelopes:", {names[c]: str(tied[c]) for c in names}, "| the savings account", sum(tied.values()))
 print("amounts left blank at the ATM, solved from the statements:", [(d, str(a)) for d, a in solved])
 print("gaps accepted with !:", [(d, n, str(g)) for d, n, g in gaps])
-premium = [f for f in flows if f.dst == "insurance" and f.legs][0]
+premium = [f for f in flows if f.dst == "progressive" and f.legs][0]
 from_fund = [a for p, a, u in premium.legs if p in FUNDS][0]
 print("premium", premium.into, "= from the insurance fund", from_fund, "+ from checking", premium.into - from_fund)
 net = held["checking"] + held["wallet"] + sum(tied.values()) + held["visa"]
@@ -156,20 +152,24 @@ def share(f, start, end):
     return through(end) - through(start - timedelta(days=1))
 
 
-VIA = {"jo": "fun", "food-bank": "gifts"}                  # an entity written where a place goes stands for its place
+# A merchant carries the purpose of what it sells (`entity aldi #groceries`); a payment to no one says its own.
+CARRIES = dict(re.findall(r"^entity (\S+) #(\S+)\s*$", open(os.path.join(ROOT, "accounts.ax")).read(), re.M))
 
 
-def spent(account, start, end):
-    """What the flows into the account count in the window. A written check counts on the day it is written
+def purpose_of(f):
+    said = [c[1:] for c in f.codes if c.startswith("#")]
+    return said[0] if said else CARRIES.get(f.dst)
+
+
+def spent(purpose, start, end):
+    """What the flows for the purpose count in the window. A written check counts on the day it is written
     unless it was voided."""
     total = D(0)
-    voided = {"#check-1029"}
+    voided = {"^check-1029"}
     for f in flows:
-        if f.legs and not f.dst:                           # a pay stub: not a place under a budget
-            continue
         if set(f.codes) & voided:
             continue
-        if VIA.get(f.dst, f.dst) == account:
+        if purpose_of(f) == purpose:
             total += share(f, start, end)
     return total
 
@@ -189,8 +189,8 @@ for account, window, label in [("dining", month(2025, 11), "2025-11"), ("dining"
 # ── the 2025 return ──────────────────────────────────────────────────────────────────────────────────────
 stubs = [f for f in flows if f.src == "studio" and f.day.year == 2025]
 wages = sum((f.into for f in stubs), D(0))
-pretax = sum((a for f in stubs for p, a, u in f.legs if p == "health"), D(0))
-withheld = sum((a for f in stubs for p, a, u in f.legs if p == "taxes/federal"), D(0))
+pretax = sum((f.into for f in flows if f.dst == "health-plan" and f.day.year == 2025), D(0))
+withheld = sum((f.into for f in flows if f.dst == "irs" and f.day.year == 2025), D(0))
 std = D(15750)
 taxable = wages - pretax - std
 single = [(0, "0.10"), (11925, "0.12"), (48475, "0.22")]

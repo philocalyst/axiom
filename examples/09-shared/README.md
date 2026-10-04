@@ -10,7 +10,7 @@ net worth from the journal text, without Axiom.
 
 ```text
 axiom.ax          root: me (single, born 1996, lives us), green-table (an org that lives nowhere)
-accounts.ax       kinds (friend, garden), accounts, entities, codes
+accounts.ax       the friend kind, accounts, purposes (the garden's among them), the grant, payees, codes
 journal/2025/*    March-December 2025
 journal/2026/01   January: the roommates pay December's bills
 outputs/          every command, run with --today 2026-04-16 unless it says otherwise
@@ -18,45 +18,53 @@ outputs/          every command, run with --today 2026-04-16 unless it says othe
 
 ## What it models
 
-- **People owe Alex as claims.** One `receivable` place per person (`assets/owed/by-ben`, `by-cleo`,
-  `by-riley`), and each claim is its own parcel, kept apart by the flow that made it. Rent is 3,150.00 USD
-  paid by Alex to the landlord (`/ landlord` on the header): one flow with three legs, `#rent-2025-03 due
-  2025-03-08`, Alex's third an expense and Ben's and Cleo's thirds claims on them. A leg into an entity is a
-  claim on that entity, whatever payee the header names, so `axiom claims` says Cleo, not her place, and a leg
-  may carry a `due` of its own. A payment is `for` the code, `ben -> checking 1_050 USD for
-  #rent-2025-03`, and settles that claim, in part or in full: Ben pays half of June and the rest on July 8,
-  Cleo is eleven days late in August and 50.00 USD short in November. The 50.00 USD stays open and
-  overdue, and `check` says so.
-- **The small shared bills are one code a month.** Internet, and groceries on the card, are split three
-  ways with `#shared-2025-03` on each; at month end Ben and Cleo each pay with one flow `for` that
+- **People owe Alex as claims.** A claim is a tab on the person: `ben owes me 1_050.00 USD #rent due 2025-03-08
+  ^rent-2025-03` moves no money, and `axiom claims` lists it with its age and due day. Rent is 3,150.00 USD paid
+  by Alex to the landlord (`checking -> landlord 3_150.00 USD #rent`), and under it Ben's and Cleo's thirds are two
+  claims, so Alex's third is the rent and the others are claims on them. A payment carries the claim's code, `checking <- ben
+  1_050.00 USD ^rent-2025-03`, and settles it, in part or in full: Ben pays half of June and the rest on July 8,
+  Cleo is eleven days late in August and 50.00 USD short in November. The 50.00 USD stays open and overdue, and
+  `check` says so. A claim with a purpose (`#rent`) counts as that purpose when it is paid, so what a roommate pays
+  takes it off Alex's rent.
+- **The small shared bills are one code a month.** Internet, and groceries on the card, are split three ways
+  with `^shared-2025-03` on each claim; at month end Ben and Cleo each pay with one flow that carries that
   code, which settles the month's claims oldest first.
-- **What Alex owes is a claim too.** Ben's name is on the electricity: `owed-to-ben -> utilities 29.47
-  USD #power-2025-03 due ...` is a payable, and Alex pays it `for` its code. Cleo's Costco runs are the
-  same. Nothing nets: money moves each way, and `claims` lists both directions.
-- **A loan to a friend**: 2,000.00 USD on 2025-04-10, `#loan-riley due 2025-12-15` (250.00 USD a month from
-  May 15, so the last payment falls due then). Riley pays 250.00 USD in May, June, July and August, 500.00 USD
-  in November (two months missed) and 250.00 USD in December, each `for #loan-riley`, and 200.00 USD is
-  forgiven at Christmas as a gift: `riley -> gifts 200 USD for #loan-riley` settles that part of the
-  claim without money moving. 50.00 USD is left, overdue.
-- **A weekend away, split four ways.** The cabin, gas and food, 1,182.80 USD on the card, one flow with legs:
-  Alex's 295.70 USD share is an expense, Ben, Cleo and Riley each owe 295.70 USD by September 15
-  (`#trip-2025-08`). Riley also owes the loan, and a payment `for #trip-2025-08` settles the trip and
+- **What Alex owes is a claim too.** Ben's name is on the electricity: `me owes ben 29.47 USD #utilities due
+  2025-04-11 ^power-2025-03` is a bill of his, and Alex pays it with its code (`checking -> ben 29.47 USD
+  ^power-2025-03`); the electricity is spending on the day it is paid. Cleo's Costco runs are the same. Nothing nets:
+  money moves each way, and `claims` lists both directions.
+- **A loan to a friend**: 2,000.00 USD on 2025-04-10, `checking -> riley 2_000 USD #loan` (a transfer, not spending) and
+  `riley owes me 2_000 USD due 2025-12-15 ^loan-riley` (250.00 USD a month from May 15, so the last payment falls due
+  then). Riley pays 250.00 USD in May, June, July and August, 500.00 USD in November (two months missed) and 250.00 USD
+  in December, each with `^loan-riley`. At Christmas 200.00 USD is forgiven as a gift: Riley's 200.00 USD settles that
+  part of the claim and Alex gives it straight back, `checking -> riley 200 USD #gifts`, so no money moves in the end.
+  50.00 USD is left, overdue. (A claim can be written off only whole, `^loan-riley waived`, not in part.)
+- **A weekend away, split four ways.** The cabin, gas and food, 1,182.80 USD on the card, one flow and three claims:
+  Alex's 295.70 USD share is the trip, Ben, Cleo and Riley each owe 295.70 USD by September 15
+  (`^trip-2025-08`). Riley also owes the loan, and a payment carrying `^trip-2025-08` settles the trip and
   not the loan. Cleo pays 200.00 USD on September 5 and 95.70 USD on October 3.
-- **The `by-` names are a choice, and a place that ends in an entity's name is reported.** `assets/owed/lantern`
-  next to `entity lantern`, the payroll, would be an `ambiguous-name` error (a flow that writes `lantern` means the
-  entity), so the Lantern's receivable is `by-lantern`, and the others follow it.
+- **Claims are on people, not on places.** The first version of the book gave each person a `receivable` account
+  (`by-ben`, `by-cleo`) and a statement of it at every month end; a claim is a tab on its party now, a tab has no name
+  a statement can be written about, and the book's reconciliation of claims is `axiom claims`, the README table
+  below, and `verify09.py`.
 - **A work expense.** 138.50 USD for an apron and a tablet stand, on the card on 2025-06-02, is not Alex's
-  expense: it is `visa -> lantern-owes 138.50 USD #expense-2025-06 due 2025-07-15`, a claim on the employer. When
-  the Lantern pays on July 11 (`for #expense-2025-06`) it settles the claim: it is not wages, and not income.
-- **Cash tips**: counted every Sunday into `income/tips` (kind `wages`, so the tax law counts them), paid
-  into the bank monthly, and one `wallet = X !` that accepts a 23.00 USD gap, visibly (`equity/unknown`).
-- **The collective.** `owner green-table` puts the bank account, cash box, donations, grant and garden
-  expenses in the collective's name, in Alex's ledger. The Riverfront Foundation's 6,000.00 USD
-  (`entity riverfront : grant`, `purpose garden`, `until 2025-10-31`) lands tied to the foundation; seven
-  garden purchases from the grant (5,942.75 USD) spend it; pizza for volunteers (not a garden
-  supply) and the summer's water are paid from the untied donations, because relief goes to untied money
-  first; and on 2025-10-28 the 57.25 USD that is left is returned to the foundation. The `deadline` law finds
-  nothing left on 2025-10-31.
+  expense: `visa -> ? 138.50 USD #job-supplies` and `lantern owes me 138.50 USD #job-supplies due 2025-07-15
+  ^expense-2025-06`, a claim on the employer that takes the spending back. When the Lantern pays on July 11
+  (`#reimbursement ^expense-2025-06`) it settles the claim: it is not wages (the employer's payments are wages unless
+  the line says what this one is for), and not income.
+- **Cash tips**: counted every Sunday, `wallet <- ? 163.14 USD #tips` (`purpose tips : wages`, so the tax law counts
+  them), paid into the bank monthly, and one `wallet = X !` that accepts a 23.00 USD gap, visibly (booked from `unknown`).
+- **A pay stub is the gross wages and what comes out of it**: `checking <- lantern 1_440.25 USD #wages`, then the
+  federal withholding to the IRS and the payroll tax to the SSA (`entity ssa #payroll-tax`), so the wage law counts the
+  1,440.25 USD and the withholding is what the return pays.
+- **The collective.** `owner green-table` puts the bank account and cash box in the collective's name, in Alex's ledger.
+  The Riverfront Foundation's 6,000.00 USD (`entity riverfront : grant`, `grant-purpose garden`, `until 2025-10-31`)
+  lands tied to the foundation; the garden is a purpose with a child for each kind of supply (`#soil`, `#seeds`,
+  `#lumber`, `#irrigation`, `#tools`, `#fencing`, `#water`), each supplier carries its own
+  (`entity bayview-soil #soil`), and seven garden purchases from the grant (5,942.75 USD) spend it; pizza for
+  volunteers (`#volunteer-food`, not a garden supply) and the summer's water are paid from the untied donations,
+  because relief goes to untied money first; and on 2025-10-28 the 57.25 USD that is left is returned to the foundation.
+  The `deadline` law finds nothing left on 2025-10-31.
 
 ## What the commands should show (hand-verified)
 
@@ -79,8 +87,8 @@ agrees with Axiom.
 
 The return closes on 2026-04-15 with a **refund of 1,159.56 USD**; the reimbursement, the grant, the donations,
 the loan and the roommates' claims are not income. `axiom check`: no errors, two warnings, both overdue
-claims (Cleo's 50.00 USD and Riley's 50.00 USD), and the note for the 23.00 USD wallet gap. 496 flows, 40 places,
-11 laws, net worth 22,917.53 USD.
+claims (Cleo's 50.00 USD and Riley's 50.00 USD), and the note for the 23.00 USD wallet gap. 499 flows, 45 places,
+11 laws enforced, net worth 22,917.53 USD.
 
 `axiom claims --today 2025-09-20` shows the trip, the month's small bills and the loan owed to Alex, and September's
 electricity owed by Alex, each with its age and due day; `outputs/claims.txt` shows the two that are still open
@@ -91,7 +99,7 @@ USD held for the foundation), and 4,100.00 USD *coming in*, listed below and not
 
 F06 (a roommate's third, a loan, a reimbursement, a trip share and a bill in someone else's name are claims:
 each is its own parcel with an age and a due day, `claims` lists both directions, `check` warns on the overdue
-ones, and a payment says which it settles with `for #code`), F10 (`available` no longer counts the 2,000.00 USD lent
+ones, and a payment says which it settles with its `^code`), F10 (`available` no longer counts the 2,000.00 USD lent
 and the 2,100.00 USD the roommates owed as money to spend: they are *coming in*), F15 in part (`!` accepts the wallet
 gap and is reported), F27 in part (Riley's loan needs no monthly law that fires in April, the month it is made: the
 claim has a due day and `check` reports it when it is missed).
@@ -100,13 +108,19 @@ claim has a due day and `check` reports it when it is missed).
 
 - **No owner scope in the reports.** `available` counts the collective's bank account and cash box
   (2,763.61 USD) as Alex's to spend, and `flow` puts the grant's 5,942.75 USD and 6,220.94 USD of garden spending
-  in Alex's income and expenses. Only the grant's unspent money is held back.
-- **The forecast still projects Riley's 250.00 USD a month** after 50.00 USD is left: a recurrence learned from
-  history knows nothing about the claim's balance, and adds 3,000.00 USD to the year's committed money.
+  in Alex's income and spending. Only the grant's unspent money is held back.
+- **The forecast reads recent history only.** On 2026-04-16, three months after the last line, nothing recurs and the
+  forecast is flat; on 2026-01-06 it projects Riley's 250.00 USD a month (found 8 times) though 50.00 USD is left: a
+  recurrence learned from history knows nothing about the claim's balance.
 - **A schedule is one due day.** The loan is repaid 250.00 USD a month, but the claim has one due date, the last
   payment's; nothing says that May's payment was late.
-- **Thirds are hand-rounded.** 69.99 USD is 23.33 + 23.33 + 23.33, and any extra cent (73.54 USD is 24.52 + 24.51 + 24.51) is on Alex's
-  leg; the language does no splitting.
-- **`axiom balance --at DATE` panics before an accepted gap.** The wallet's `!` on 2025-08-31 is a pad, and a balance at
-  an earlier day stops in `crates/report/src/history.rs:220` (index out of bounds), so there is no
-  mid-year balance output here.
+- **A claim is written off whole or not at all.** Forgiving 200.00 USD of Riley's 250.00 USD is written as a payment and a
+  gift of the same money; `waived` takes the whole 250.00 USD and refuses a purpose or a recoverable part.
+- **No statement for a claim.** A balance can be asserted of an account, an asset, a code or a commodity, not of what
+  someone owes: the month-end `by-cleo = 95.70 USD` statements of the first version have nothing to be written about.
+- **A claim on the employer counts at the claim.** The Lantern's payments are wages by its kind, so the claim for
+  the apron says `#job-supplies` and the payment says `#reimbursement`; left to the party, either would count 138.50 USD
+  of wages.
+- **Thirds are hand-rounded.** 69.99 USD is 23.33 each, and any extra cent (73.54 USD is 24.52 for Alex and 24.51 for each of
+  the others) is Alex's: the claims say what each roommate owes and the rest of the line is Alex's; the language does
+  no splitting.

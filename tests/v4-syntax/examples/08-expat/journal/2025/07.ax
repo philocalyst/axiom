@@ -1,39 +1,41 @@
-2025-07-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
-2025-07-03 visa -> subscriptions 15.49 USD / netflix
+2025-07-01 girokonto -> hausverwaltung 1_450 EUR
+2025-07-03 visa -> netflix 15.49 USD
 
 /// The savings move to a German high-interest account. The US bank does the transfer and keeps a rate spread of about 1.1% instead of writing a fee: the flow states the euros received and the rate it charged (the mid-market rate of the day is in prices/fx.ax), so the 24,000.00 dollars out follow from it and the cost is implicit.
 2025-07-03 us-savings -> tagesgeld 20_334.11 EUR @ 1.180283 USD
-2025-07-03 girokonto -> groceries 47.09 EUR
-2025-07-05 us-checking -> 420 USD / mohela
+2025-07-03 girokonto -> ? 47.09 EUR #groceries
+2025-07-05 us-checking -> 420 USD
   student-loan            309.44 USD   // principal
-  loan-interest           110.56 USD   // interest
-2025-07-05 girokonto -> transit 58 EUR / bvg
-2025-07-06 girokonto -> dining 24.61 EUR
-2025-07-07 visa -> subscriptions 2.99 USD / apple
-2025-07-09 girokonto -> groceries 54.32 EUR
-2025-07-10 girokonto -> phone 19.99 EUR
-2025-07-13 girokonto -> dining 46.47 EUR
-2025-07-15 visa -> subscriptions 35 USD / us-phone
-2025-07-15 girokonto -> groceries 45.43 EUR
-2025-07-17 girokonto -> shopping 82.45 EUR
-2025-07-20 girokonto -> dining 35.30 EUR
+  mohela                  110.56 USD   // interest
+2025-07-05 girokonto -> bvg 58 EUR
+2025-07-06 girokonto -> ? 24.61 EUR #dining
+2025-07-07 visa -> apple 2.99 USD
+2025-07-09 girokonto -> ? 54.32 EUR #groceries
+2025-07-10 girokonto -> ? 19.99 EUR #phone
+2025-07-13 girokonto -> ? 46.47 EUR #dining
+2025-07-15 visa -> us-phone 35 USD
+2025-07-15 girokonto -> ? 45.43 EUR #groceries
+2025-07-17 girokonto -> ? 82.45 EUR #shopping
+2025-07-20 girokonto -> ? 35.30 EUR #dining
 
 /// June's statement, paid in full.
 2025-07-20 us-checking -> visa 2_200.13 USD
-2025-07-22 girokonto -> groceries 58.05 EUR
-2025-07-27 girokonto -> groceries 49.24 EUR
+2025-07-22 girokonto -> ? 58.05 EUR #groceries
+2025-07-27 girokonto -> ? 49.24 EUR #groceries
 
-/// The Berlin job: 5,400.00 EUR gross a month. Income tax (Lohnsteuer) and social contributions come off before the money arrives.
-2025-07-31 employer-gmbh -> 5_400.00 EUR
-  lohnsteuer              905.00 EUR   // income tax, tax class 1
-  sozialabgaben           1_163.70 EUR   // pension, health, unemployment, care
-  girokonto               ...
-2025-07-31 interest -> us-savings 63.61 USD
+/// The Berlin job: 5,400.00 EUR gross a month. Income tax (Lohnsteuer) and social contributions come off before the money arrives: the gross passes through
+/// the clearing account and leaves as the tax, the contributions and the net pay, the way the payslip reads. The employer's pay is foreign wages by its kind.
+2025-07-31 employer-gmbh -> de-clearing 5_400.00 EUR
+2025-07-31 de-clearing -> finanzamt 905.00 EUR   // income tax, tax class 1
+2025-07-31 de-clearing -> sozialversicherung 1_163.70 EUR   // pension, health, unemployment, care
+2025-07-31 de-clearing -> girokonto 3_331.30 EUR   // net pay
+2025-07-31 ? -> us-savings 63.61 USD #interest-income
 
 /// Interest, with German withholding tax (26.375%) taken by the bank before it is paid.
-2025-07-31 income/interest-de -> 33.55 EUR
-  kapitalertragsteuer     8.85 EUR
-  tagesgeld               ...
+2025-07-31 ? -> de-clearing 33.55 EUR #interest-income
+2025-07-31 de-clearing -> finanzamt 8.85 EUR
+2025-07-31 de-clearing -> tagesgeld 24.70 EUR
+2025-07-31 de-clearing = empty
 2025-07-31 visa = 53.48 USD
 2025-07-31 us-checking = 18_139.04 USD
 2025-07-31 us-savings = 18_238.53 USD

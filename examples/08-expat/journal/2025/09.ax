@@ -1,39 +1,40 @@
-2025-09-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
-2025-09-03 visa -> subscriptions 15.49 USD / netflix
-2025-09-03 girokonto -> groceries 56.23 EUR
-2025-09-05 us-checking -> 420 USD / mohela
-  student-loan            311.78 USD   // principal
-  loan-interest           108.22 USD   // interest
-2025-09-05 girokonto -> transit 58 EUR / bvg
-2025-09-06 girokonto -> dining 25.31 EUR
-2025-09-07 visa -> subscriptions 2.99 USD / apple
-2025-09-08 girokonto -> 900.00 EUR
-  -> fx-fees         4.77 EUR
+2025-09-01 girokonto   -> hausverwaltung 1_450 EUR
+2025-09-03 visa        -> netflix        15.49 USD
+2025-09-03 girokonto   -> ?              56.23 EUR #groceries
+2025-09-05 us-checking ->                420 USD
+  -> student-loan 311.78 USD              // principal
+  -> mohela       108.22 USD              // interest
+2025-09-05 girokonto -> bvg   58 EUR
+2025-09-06 girokonto -> ?     25.31 EUR  #dining
+2025-09-07 visa      -> apple 2.99 USD
+2025-09-08 girokonto ->       900.00 EUR
+  -> wise-fees       4.77 EUR
   -> us-checking 1_048.85 USD
-2025-09-09 girokonto -> groceries 60.51 EUR
-2025-09-10 girokonto -> phone     19.99 EUR
-2025-09-13 girokonto -> dining    68.79 EUR
-2025-09-15 visa -> subscriptions 35 USD / us-phone
-2025-09-15 girokonto -> groceries 51.69 EUR
-2025-09-17 girokonto -> shopping  71.79 EUR
-2025-09-20 girokonto -> dining    27 EUR
+2025-09-09 girokonto -> ?        60.51 EUR #groceries
+2025-09-10 girokonto -> ?        19.99 EUR #phone
+2025-09-13 girokonto -> ?        68.79 EUR #dining
+2025-09-15 visa      -> us-phone 35 USD
+2025-09-15 girokonto -> ?        51.69 EUR #groceries
+2025-09-17 girokonto -> ?        71.79 EUR #shopping
+2025-09-20 girokonto -> ?        27 EUR    #dining
 
 /// August's statement, paid in full.
-2025-09-20 us-checking -> visa          53.48 USD
-2025-09-22 girokonto   -> groceries     30.53 EUR
-2025-09-27 girokonto   -> groceries     72.10 EUR
-2025-09-30 me          <- employer-gmbh 5_400.00 EUR
-  -> lohnsteuer      905.00 EUR           // income tax, tax class 1
-  -> sozialabgaben 1_163.70 EUR           // pension, health, unemployment, care
-  -> girokonto     ...
-2025-09-30 us-savings <- interest           64.06 USD
-2025-09-30 me         <- income/interest-de 33.63 EUR
-  -> kapitalertragsteuer 8.87 EUR
-  -> tagesgeld           ...
-2025-09-30 visa         = 53.48 USD
-2025-09-30 us-checking  = 19_268.56 USD
-2025-09-30 us-savings   = 18_366.42 USD
-2025-09-30 student-loan = 28_356.24 USD
-2025-09-30 girokonto    = 6_789.83 EUR
-2025-09-30 tagesgeld    = 20_408.30 EUR
-2025-09-30 kaution      = 3_600.00 EUR
+2025-09-20 us-checking  -> visa               53.48 USD
+2025-09-22 girokonto    -> ?                  30.53 EUR    #groceries
+2025-09-27 girokonto    -> ?                  72.10 EUR    #groceries
+2025-09-30 de-clearing  <- employer-gmbh      5_400.00 EUR
+2025-09-30 de-clearing  -> finanzamt          905.00 EUR    // income tax, tax class 1
+2025-09-30 de-clearing  -> sozialversicherung 1_163.70 EUR  // pension, health, unemployment, care
+2025-09-30 de-clearing  -> girokonto          3_331.30 EUR  // net pay
+2025-09-30 us-savings   <- ?                  64.06 USD    #interest-income
+2025-09-30 de-clearing  <- ?                  33.63 EUR    #interest-income
+2025-09-30 de-clearing  -> finanzamt          8.87 EUR
+2025-09-30 de-clearing  -> tagesgeld          24.76 EUR
+2025-09-30 de-clearing  =  empty
+2025-09-30 visa         =  53.48 USD
+2025-09-30 us-checking  =  19_268.56 USD
+2025-09-30 us-savings   =  18_366.42 USD
+2025-09-30 student-loan =  28_356.24 USD
+2025-09-30 girokonto    =  6_789.83 EUR
+2025-09-30 tagesgeld    =  20_408.30 EUR
+2025-09-30 kaution      =  3_600.00 EUR

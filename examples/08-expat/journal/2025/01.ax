@@ -6,38 +6,38 @@ opening 2025-01-01
   student-loan 31_120.40 USD
   visa          1_284.19 USD
 
-2025-01-01 us-checking -> sf-rent 3_400 USD / landlord-sf
+2025-01-01 us-checking  -> landlord-sf   3_400 USD
 2025-01-01 us-checking  =  15_020.55 USD
 2025-01-01 us-savings   =  41_300.00 USD
 2025-01-01 student-loan =  31_120.40 USD
 2025-01-01 visa         =  1_284.19 USD
-2025-01-04 visa         -> groceries     90.40 USD
+2025-01-04 visa         -> ?             90.40 USD #groceries
 
 /// The student loan: 420.00 USD a month, split by the servicer's statement into principal and interest.
-2025-01-05 us-checking -> 420 USD / mohela
-  student-loan            302.52 USD   // principal
-  loan-interest           117.48 USD   // interest
-2025-01-09 visa -> dining    116.98 USD
-2025-01-11 visa -> groceries 71.37 USD
-2025-01-14 visa -> utilities 139.34 USD
-2025-01-16 visa -> transport 35.11 USD
-2025-01-18 visa -> groceries 102.27 USD
+2025-01-05 us-checking -> 420 USD
+  -> student-loan 302.52 USD              // principal
+  -> mohela       117.48 USD              // interest
+2025-01-09 visa -> ? 116.98 USD #dining
+2025-01-11 visa -> ? 71.37 USD  #groceries
+2025-01-14 visa -> ? 139.34 USD #utilities
+2025-01-16 visa -> ? 35.11 USD  #transport
+2025-01-18 visa -> ? 102.27 USD #groceries
 
 /// December's statement, paid in full.
-2025-01-20 us-checking -> visa      1_284.19 USD
-2025-01-21 visa        -> dining    109.93 USD
-2025-01-23 visa        -> shopping  65.60 USD
-2025-01-25 visa        -> groceries 111.35 USD
+2025-01-20 us-checking -> visa 1_284.19 USD
+2025-01-21 visa        -> ?    109.93 USD   #dining
+2025-01-23 visa        -> ?    65.60 USD    #shopping
+2025-01-25 visa        -> ?    111.35 USD   #groceries
 
-/// The San Francisco job: monthly pay in dollars, the last one on June 30.
-2025-01-31 me <- acme 10_416.67 USD
-  -> us-401k         625.00 USD           // 6% pre-tax
-  -> taxes/federal 1_180.00 USD
-  -> taxes/state     470.00 USD
-  -> taxes/payroll   796.87 USD           // Social Security and Medicare
-  -> taxes/sdi       125.00 USD           // California SDI
-  -> us-checking   ...
-2025-01-31 us-savings   <- interest      144.55 USD
+/// The San Francisco job: monthly pay in dollars, the last one on June 30. A stub is the gross pay (`#wages`) and what comes out of it: the 6% deferral
+/// into the 401(k) (`#payroll-deferral`, pre-tax), the withholding and the payroll taxes; the rest stays in checking.
+2025-01-31 us-checking  <- acme          10_416.67 USD #wages
+2025-01-31 us-checking  -> us-401k       625.00 USD    #payroll-deferral  // 6% pre-tax
+2025-01-31 us-checking  -> irs           1_180.00 USD
+2025-01-31 us-checking  -> ftb           470.00 USD
+2025-01-31 us-checking  -> ssa           796.87 USD                       // Social Security and Medicare
+2025-01-31 us-checking  -> edd           125.00 USD                       // California SDI
+2025-01-31 us-savings   <- ?             144.55 USD    #interest-income
 2025-01-31 visa         =  842.35 USD
 2025-01-31 us-checking  =  20_536.16 USD
 2025-01-31 us-savings   =  41_444.55 USD

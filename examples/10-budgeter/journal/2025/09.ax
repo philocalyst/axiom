@@ -4,65 +4,63 @@ opening 2025-09-01
   wallet         45 USD
 
 /// What is already set aside is moved to the savings account and tied to its envelope: the emergency fund and the insurance fund.
-2025-09-01 checking -> savings 2_400 USD for emergency-fund
-2025-09-01 checking -> savings 700 USD   for insurance-fund
-2025-09-01 checking -> rent 1_150 USD / landlord
-2025-09-01 checking -> transport 48 USD / metro
-2025-09-01 checking -> fun 29 USD / gym
-2025-09-01 checking = 615.10 USD
-2025-09-01 wallet   = 45.00 USD
-2025-09-01 savings  = 3_100.00 USD
-2025-09-03 checking -> utilities 61.84 USD / power-co
-2025-09-04 visa -> dining 21.14 USD
+2025-09-01 checking -> savings      2_400 USD for emergency-fund
+2025-09-01 checking -> savings      700 USD   for insurance-fund
+2025-09-01 checking -> landlord     1_150 USD
+2025-09-01 checking -> metro        48 USD
+2025-09-01 checking -> gym          29 USD
+2025-09-01 checking =  615.10 USD
+2025-09-01 wallet   =  45.00 USD
+2025-09-01 savings  =  3_100.00 USD
+2025-09-03 checking -> power-co     61.84 USD
+2025-09-04 visa     -> ?            21.14 USD #dining
 
 /// Pay from the studio, every second Friday: gross 2,307.69, the health premium comes off before it lands.
-2025-09-05 me <- studio 2_307.69 USD
-  -> taxes/federal 226.00 USD
-  -> taxes/payroll 176.54 USD
-  -> health         60.00 USD
-  -> checking      ...
-2025-09-05 visa -> groceries 68.30 USD / trader-joes
+2025-09-05 checking <- studio      2_307.69 USD #wages
+2025-09-05 checking -> irs         226.00 USD
+2025-09-05 checking -> ssa         176.54 USD
+2025-09-05 checking -> health-plan 60.00 USD    #pretax-premium
+2025-09-05 visa     -> trader-joes 68.30 USD
 
 /// Sinking funds: money set aside each month for a bill that comes later, in the savings account and tied to its envelope with `for`.
 /// 100.00 USD a month for the car, 100.00 USD for the insurance premium, 250.00 USD for the June trip, 100.00 USD for emergencies.
-2025-09-06 checking -> savings 100 USD for car-fund
-2025-09-06 checking -> savings 100 USD for insurance-fund
-2025-09-06 checking -> savings 250 USD for trip-fund
-2025-09-06 checking -> savings 100 USD for emergency-fund
-2025-09-08 visa -> phone 40 USD / mint-mobile
-2025-09-09 visa -> transport 11.19 USD / rideshare
-2025-09-10 checking -> car 285.40 USD / carmax-finance
-2025-09-10 visa -> dining 27.88 USD
-2025-09-11 visa -> subscriptions 15.49 USD / netflix
-2025-09-12 visa -> groceries 71.55 USD / kroger
-2025-09-13 wallet -> dining 7.27 USD
-2025-09-14 visa -> subscriptions 11.99 USD / spotify
-2025-09-15 checking -> student-loan 190 USD / mohela
-2025-09-15 visa -> fun    13.97 USD
-2025-09-16 visa -> dining 24.50 USD
+2025-09-06 checking -> savings        100 USD    for car-fund
+2025-09-06 checking -> savings        100 USD    for insurance-fund
+2025-09-06 checking -> savings        250 USD    for trip-fund
+2025-09-06 checking -> savings        100 USD    for emergency-fund
+2025-09-08 visa     -> mint-mobile    40 USD
+2025-09-09 visa     -> rideshare      11.19 USD
+2025-09-10 checking -> carmax-finance 285.40 USD
+2025-09-10 visa     -> ?              27.88 USD  #dining
+2025-09-11 visa     -> netflix        15.49 USD
+2025-09-12 visa     -> kroger         71.55 USD
+2025-09-13 wallet   -> ?              7.27 USD   #dining
+2025-09-14 visa     -> spotify        11.99 USD
+2025-09-15 checking -> mohela         190 USD
+2025-09-15 visa     -> ?              13.97 USD  #fun
+2025-09-16 visa     -> ?              24.50 USD  #dining
 
 /// A streaming service I forgot about, cancelled in October.
-2025-09-17 visa -> subscriptions 17.99 USD / hulu
-2025-09-18 visa     -> clothing     47.60 USD
+2025-09-17 visa     -> hulu         17.99 USD
+2025-09-18 visa     -> ?            47.60 USD    #clothing
 2025-09-18 checking =  1_373.01 USD
-2025-09-19 me       <- studio       2_307.69 USD
-  -> taxes/federal 226.00 USD
-  -> taxes/payroll 176.54 USD
-  -> health         60.00 USD
-  -> checking      ...
-2025-09-19 visa -> groceries 59 USD / trader-joes
+2025-09-19 checking <- studio       2_307.69 USD #wages
+2025-09-19 checking -> irs          226.00 USD
+2025-09-19 checking -> ssa          176.54 USD
+2025-09-19 checking -> health-plan  60.00 USD    #pretax-premium
+2025-09-19 visa     -> trader-joes  59 USD
 
 /// The ATM: I did not write the amount down. The bank's balance the day before and the day after say what it was: exactly one unknown between two assertions.
-2025-09-19 checking -> wallet ? USD
-2025-09-20 visa -> subscriptions 2.99 USD / apple
-2025-09-20 checking = 3_138.16 USD
-2025-09-21 visa -> transport 23.96 USD / rideshare
-2025-09-23 visa   -> dining 17.60 USD
-2025-09-24 visa   -> fun    57.01 USD
-2025-09-24 wallet -> dining 9.22 USD
-2025-09-26 visa -> subscriptions 22.99 USD / adobe
-2025-09-27 visa -> groceries 65.84 USD / kroger
-2025-09-28 visa     -> dining       26.54 USD
+2025-09-19 checking -> wallet       ? USD
+2025-09-20 visa     -> apple        2.99 USD
+2025-09-20 checking =  3_138.16 USD
+2025-09-21 visa     -> rideshare    23.96 USD
+2025-09-23 visa     -> ?            17.60 USD #dining
+2025-09-24 visa     -> ?            57.01 USD #fun
+2025-09-24 wallet   -> ?            9.22 USD  #dining
+2025-09-26 visa     -> adobe        22.99 USD
+2025-09-27 visa     -> kroger       65.84 USD
+2025-09-28 visa     -> ?            26.54 USD #dining
 2025-09-30 visa     =  647.53 USD
 2025-09-30 checking =  3_138.16 USD
 2025-09-30 savings  =  3_650.00 USD
