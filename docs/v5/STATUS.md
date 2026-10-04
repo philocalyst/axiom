@@ -24,10 +24,10 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | **K5c** forecast | the forecast is the fold past today (`Ledger::promise`: a heap of due days, one `Residual` per stream); a missed `Due` the party owes is a claim | **merged** (`bdc25f9`) |
 | **K3d** claims, recognition | a split payment settles by what the party pays in all; `books cash\|accrual` read once and one rule (`engine/recognition.rs`) says when a claim counts, asked by the fold and every reader; the default is cash; a write-off takes back each line for its own purpose. **Debts as parcels: not built** (design in K3d-map §6) | **merged** (`3f17468`) |
 | K4c flows in columns | `Flow` (192 bytes) as hot columns and a cold record, a quantity as a tag and a payload, K4b's cleanup list | brief written |
-| K6b the post host | a law of a kind, purpose, entity or account derives a flow from a posted one (cash back, a processor's fee), with a cause, a record, a cycle guard and returns that reverse | brief written |
+| K6b the post host | a law of a kind, purpose, entity or account derives a flow from a posted one (cash back, a processor's fee), with a cause, a record, a cycle guard and returns that reverse | running (map first) |
 | **K6** norms and relators | one purpose ranking (`classify`); the nine tables of laws are one `Rules` index keyed by `Watch`; a law may `derive` a flow or an item and a contract's laws fire with its occurrences; a contract's `also` and `share` are the laws they abbreviate; `kind X : contract` and `contract NAME : KIND` write a relator's legs once, true from both books (Layer 3 stops at the map) | **merged** (`17da806`) |
 | **K7a** the `Session` | the library surface an MCP server and a GUI are written against; the CLI becomes a client | **merged** (`368e5e8`) |
-| K7b facts out | steppers, pivots, provenance `why`; the views stop re-folding | running (map first) |
+| **K7b** facts out | the fold records every position's balance as steps (`engine/histories.rs`), so `balance --at/--monthly/--value` is a binary search; the postings count through one pivot; `why` asks one question of a target; the free-function path is gone | **merged** (`990ddb5`) |
 | K3f debts as parcels | a bill you owe is a parcel on a Debt tab, a payment to the party settles it; `owed_by_you`, the `payable` gate and `makes_debt` go | brief written (after K6, K3d) |
 | K3e parcels in columns | `lots.rs`, `assets*.rs` (~2,500 lines): hot columns, an identity key, relief as a ranking plus a way of taking, asset parts if the smaller cut is a net deletion | brief written (after K3d, K4c) |
 | K5d loans | a loan is a state machine with four inputs; a payment says `#interest` and `#principal`; resets, prepay, `for ASSET`, a statement reconciles the schedule; `deposit` if K3d's debts-as-parcels landed (`match` is K6's) | running (map first) |
@@ -55,7 +55,7 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
    lane C3 built the `postings` kernel from them: no `unsafe`, 1.8-2.7× the scalar merge. If you would like lanes to be
    able to read the crate, allow `~/.cargo/registry/src/*/fearless_simd-*`.
 2. **The budget ceiling.** The design lands at about 27,000 lines, with a floor of about 24,500 and levers to about
-   20,000 (PROPOSAL §7). The tree is at about 54,500 non-test lines: the lanes so far built structure (K12, K4b, K5a add
+   20,000 (PROPOSAL §7). The tree is at about 54,500 non-test lines (K7b: -63): the lanes so far built structure (K12, K4b, K5a add
    code; K4a, K3a delete) and the deletions are ahead of us (K5b, K5c, K3c, K6, K7). Say if you want the levers pulled.
 3. **Prorata basis semantics** (K3c): whether a prorata sale carries basis per unit or by exact share. K3c describes the two
    readings and what each changes, and decides neither.
@@ -126,6 +126,20 @@ ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAIN
     (`claim-debt-tab.ax`: `available` 857.50 against 665.00 when the `payable` gate is dropped). K3d stopped at the design
     (its map §6); it is the next claims lane and belongs before K3e (parcels in columns).
 
+14. **Where the old `--at` balance was wrong (K7b), and a decision about output unifications.** The replay behind `balance --at`,
+    `--monthly`, `--value` and `register` added up *flows*, so it could not see what the fold does to a place that is not a flow's
+    end: **177 (book, position) rows across 21 books** where the baseline contradicted its own final state, in `K7b-baseline-wrong.tsv`
+    with the day, the position, both numbers and the cause (a kept occurrence's template flows never counted: 94; a claim settled,
+    forgiven or made by the monitor, tabs never relieved: 70; an asset counted twice, opening line plus holding: 13). First differing days:
+    `02-household` checking 2026-01-01 **9,200.00 to 5,750.00**; `04-freelancer` brightwave 2025-02-12 -9,600.00 to -6,400.00;
+    `07-landlord` lender 2025-02-01 3,842.30 to 5,651.89. The fold is right every time (an exact oracle advances the ledger a day at a time;
+    the baseline's own plain `balance` on the last day gives the fold's number). No golden moved; 20 of 796 commands differ and only balance
+    forms. K7b offered **five output unifications for a possible K7c** (about -320 lines in all; report would still be about 6,425 against the
+    brief's 5,500): U1 `balance --value` without the "N flows have no price" note (-45), U2 entity/asset/contract registers as the place
+    register's columns (-130), U3 `why asset:`/`why contract:` through the shared flows table (-45), U4 `why #purpose` limits/budgets through the limits
+    and budget rows (-60), U5 `flow --by party` as the periods table (-40); each changes the bytes of the views it names (none changes a golden but
+    U6, one `why` layout, which changes three). Say if you want any.
+
 ## What the grammar accepts and the engine does nothing with
 
 Found by K5a's map (`K5a-map.md` §0, §1, §6) and K4b's: **written, checked, and read by nothing.** None of this is a
@@ -142,6 +156,17 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 | `grace SPAN` on a contract | lowered, read by nothing: matching uses a full cadence (LANGUAGE §7 says its `grace`, default half a cadence) | K5b implements it as written |
 | `due SPAN else ITEM` | lowered, validated, carried; no reader (the monitor does not exist) | K5b makes the overdue list, K5c the claim |
 | `?` beside `...` in a split | `cannot-infer`; the remainder takes the whole total meanwhile | K4b limitation |
+
+## K7b, in numbers
+
+| | |
+|---|---|
+| what it is | **A**: `engine/histories.rs`, a recorder in the fold at the one choke point (`Holdings::entry`/`scale`, drained once per fact by `Ledger::record_balances`): per position (a place's holding of one commodity) the days its balance changed and what it was from each, laid out as columns (`days`, `balances`, an offset per position, a counting sort at freeze; places are in pre-order so the positions beneath a place are one run and a subtree's balance is a slice sum); `Steps::extremes` builds a sparse table for a window's peak or low (no consumer yet). **B**: `report/pivot.rs`: the postings count through one grid (`Counted`), the purpose and party flow views and `why #purpose` are its rows. **C**: `why` is one `Target` and one walk; what a line caused is read in one pass. The free-function path (`report`, `report_with_sources`, `views`, `holdings_at`, `available::view_with_lens`, `Context::new`, `Past::Journal`) and `Snapshots::replay` (116 lines) are deleted |
+| speed (in-process, `crates/session/examples/scrub.rs`) | `balance --at` 6.24 to 0.053 ms at 100k (117x) and 78.2 to 0.48 ms at 1m (164x); `--value` 112x and 189x; `--monthly` 15x and 31x. **Through a `Session` it is 1.5x** (21.4 to 14.1 ms at 100k, 254 to 160 ms at 1m): `Session::query` builds a `Plan` per answer, 14.6 ms or 161 ms, which is now the floor. The lever is known (`Standing`: what `plan.sides`/`known` read) and not built. One-shot CLI: `check` +1.1% instructions (the recorder), RSS +0.4% at 100k and -0.02% at 1m; the histories are 1.4 MB at 100k and 11.9 MB at 1m |
+| lines | engine +218, report -281, **tree -63**; `report` is 6,746 against the brief's 5,500 (246 over the 6,500 I accepted); no 5,500 path exists inside `report` without changing bytes. 38 function definitions deleted; functions over 80 lines: 8 to 6 (`Snapshots::replay` 116 and `why/asset::report` 106, split) |
+| behaviour | see Waiting on you 14: balance forms only, where the old replay contradicted the fold; 60 goldens and 213 mistakes byte-identical |
+| proof | an exact fold oracle (the ledger advanced a day at a time) holds on every example and probe book; a session oracle (52 projects, 11,922 days); 200 fuzz books, 127,442 days, 628 replay-wrong positions, none unexplained; `dates.py`: 6,928 commands, 614 differ, all balance forms of 16 books of the TSV, 0 unexplained; `whys.py` 14,568, 0 differ; 30 mutants of the recording (28 killed at once, 3 only by a baseline-failing test: tests added and re-killed; 1 survivor after the unpriced list became a list: killed by a pinned test) and 12 of the pivot (11 killed, 1 survivor: a test added); **the 6 mutants of `why` are written and not run** |
+| left | `claims`, `lots` and `available --at` still re-fold (`Context::ledger_at`: state at a day is parcels, not balances; needs K3e or month-end checkpoints); `Session` builds a plan per answer; `Steps::extremes` has no product consumer; `register` stays a statement (a running balance as of the cutoff is not `at(day)`); no cause index and no `Cause::Time { law, period }`; the cache of unpriced flows (`OnceLock` in `Folded`) is right only because `Lens::value` never reads whose (one test and one mutant guard it) |
 
 ## K6, in numbers
 
