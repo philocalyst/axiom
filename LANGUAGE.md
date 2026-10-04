@@ -655,13 +655,23 @@ for the tenant; yours to a landlord is a claim on it). In accrual books an
 occurrence is income or spending on its due day, and the payment settles it.
 
 **Loans** follow the ACTUS annuity. `loan AMOUNT on DATE at RATE over SPAN` is a
-debt of the owner to the party. Its schedule gives each payment's interest
-(`#interest`, `of` the asset when `for` names one) and principal, and its balance
-on any day, which a value on the contract's name checks. A rate `now` changed, or
-`resets` from an index param, refigures the payment over the rest of the term from
-that day's balance (capped per reset and for life). A flow to the contract is a
-prepayment: by default it `shortens` the loan and the payment stays; `recasts`
-lowers the payment instead. Escrow and an employer's match are `also` lines:
+debt of the owner to the party, and its life is one schedule, worked out once from
+the terms and everything the book says of it. Each payment is two flows: the
+interest to the lender (`#interest`, `of` the asset when `for` names one) and the
+principal to the loan's debt (`#principal`, a built-in purpose a book may not
+declare again). They add up to the level payment, to the cent; the last payment is
+what is left, so a loan is owed nothing after it. The schedule also gives the
+balance on any day. A rate `now` changed (`2029-03-01 mortgage now at 6.25%`), or
+`resets` from an index param, refigures the payment over the payments left from
+that day's balance (a reset is held to the previous rate by `cap` and to the first
+rate by `life`). Money paid into the loan beyond the payment (a flow to the
+contract, or a line that states more than its payment) is a prepayment: by default
+it `shortens` the loan and the payment stays; `recasts` lowers the payment instead.
+A value on the contract's name is held to the schedule's balance as well as the
+book's flows; where they differ the error says the amount and, when exactly one
+thing explains it to the cent (a payment nobody wrote, one that was short, an extra
+counted as principal, a prepayment nobody recorded), which. `why contract` shows the
+schedule around today. Escrow and an employer's match are `also` lines:
 
 ```text
 contract mortgage with rocket
@@ -889,7 +899,7 @@ editor shows it as a hint on that line.
 
 | derived | from | what it is |
 |---------|------|------------|
-| a loan payment's interest and principal | the contract's `loan`, its resets and prepayments | `#interest` (of its asset) and the debt's decrease |
+| a loan payment's interest and principal | the contract's `loan`, its resets, rates and prepayments | `#interest` (of its asset) to the lender, `#principal` off the debt |
 | an implied item or flow | `also` on a promise, party, kind or purpose | escrow, an employer's match, a card's cash back, sales tax collected, payroll taxes, a processor's fee |
 | a share | `share SHARE for ENTITY`, `owner A 60%, B 40%`, `part of` | that share of each flow, of the same purpose, borne by an owner (an allocation) or owed by a party (a claim) |
 | recognition | `covers`, `for PERIOD` | how a flow's amount spreads over days |
