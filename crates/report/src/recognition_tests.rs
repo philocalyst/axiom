@@ -48,9 +48,9 @@ fn flow(book: &Book, run: &axiom_engine::Run, by: FlowBy) -> Vec<String> {
 }
 
 const CLAIM: &str = "\
-2026-01-02 ann owes me 300 USD due 2026-02-01 #design ^i1
-2026-02-10 ann -> checking 100 USD ^i1
-2026-03-15 ^i1 waived \"not collected\"
+2026-01-02 ann      owes   me  300 USD #design ^i1 due 2026-02-01
+2026-02-10 checking <-     ann 100 USD ^i1
+2026-03-15 ^i1      waived             \"not collected\"
 ";
 
 #[test]
@@ -102,10 +102,10 @@ fn flow_by_party_counts_what_a_party_settled_as_the_claims_purpose() {
 #[test]
 fn a_payment_net_of_a_fee_is_the_invoice_as_income_and_the_fee_as_spending() {
     let lines = "\
-2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
-2026-01-20 ann -> 3_100 USD #design ^i1
-  checking 3_009.80 USD
-  stripe 90.20 USD #fees
+2026-01-02 ann owes me  3_100 USD #design ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD #design ^i1
+  -> checking 3_009.80 USD
+  -> stripe      90.20 USD #fees
 ";
     with_run(&book("cash", lines), day(2026, 1, 31), |book, run| {
         let rows = flow(book, run, FlowBy::Period(axiom_model::Period::Month));

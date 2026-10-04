@@ -1,91 +1,91 @@
-2025-08-01 bluefin -> joint-checking 3_803.08 USD #wages
-2025-08-01 joint-checking -> jordan-401k 228.18 USD #household-deferral // 6% deferral
-2025-08-01 joint-checking -> irs 330.00 USD #federal-tax
-2025-08-01 joint-checking -> ftb 126.00 USD #state-tax
-2025-08-01 joint-checking -> ssa 290.93 USD #payroll-tax // Social Security + Medicare
-2025-08-01 joint-checking -> edd 45.64 USD #state-disability // CA SDI
-2025-08-01 bluefin -> jordan-401k 114.09 USD #contribution
-2025-08-01 joint-checking -> mortgage 481.46 USD ^mortgage-2025-08 // principal
-2025-08-01 joint-checking -> lender 2_003.00 USD #interest of house // interest
-2025-08-01 joint-checking -> escrow 690.00 USD // taxes and insurance
-2025-08-02 card -> netflix 17.99 USD
-2025-08-03 card -> costco 254.99 USD
-2025-08-03 joint-checking -> st-annes-parish 200 USD #charity
-2025-08-04 card -> amazon 129.67 USD #household
-2025-08-05 joint-checking -> car-loan 522.34 USD // principal
-2025-08-05 joint-checking -> honda-finance 80.07 USD #interest // interest
-2025-08-05 dcfsa -> little-sprouts 416.66 USD #childcare
-2025-08-05 joint-checking -> little-sprouts 1_233.34 USD #childcare
-2025-08-06 card -> restaurant 46.99 USD #dining
-2025-08-07 card -> trader-joes 116.32 USD
-2025-08-08 card -> target 49.35 USD #kids
-2025-08-08 joint-checking -> riley-529 250 USD ^529-monthly #contribution
-2025-08-09 card -> shell 62.46 USD #transport
-2025-08-10 joint-checking -> joint-savings 2_800 USD
-2025-08-11 card -> spotify 19.99 USD
-2025-08-12 card -> amazon 118.70 USD #household
-2025-08-12 card -> comcast 89.99 USD
-2025-08-13 card -> restaurant 56.43 USD #dining
+2025-08-01 joint-checking <- bluefin         3_803.08 USD #wages
+2025-08-01 joint-checking -> jordan-401k     228.18 USD   #household-deferral  // 6% deferral
+2025-08-01 joint-checking -> irs             330.00 USD   #federal-tax
+2025-08-01 joint-checking -> ftb             126.00 USD   #state-tax
+2025-08-01 joint-checking -> ssa             290.93 USD   #payroll-tax         // Social Security + Medicare
+2025-08-01 joint-checking -> edd             45.64 USD    #state-disability    // CA SDI
+2025-08-01 jordan-401k    <- bluefin         114.09 USD   #contribution
+2025-08-01 joint-checking -> mortgage        481.46 USD   ^mortgage-2025-08    // principal
+2025-08-01 joint-checking -> lender          2_003.00 USD #interest of house   // interest
+2025-08-01 joint-checking -> escrow          690.00 USD                        // taxes and insurance
+2025-08-02 card           -> netflix         17.99 USD
+2025-08-03 card           -> costco          254.99 USD
+2025-08-03 joint-checking -> st-annes-parish 200 USD      #charity
+2025-08-04 card           -> amazon          129.67 USD   #household
+2025-08-05 joint-checking -> car-loan        522.34 USD                        // principal
+2025-08-05 joint-checking -> honda-finance   80.07 USD    #interest            // interest
+2025-08-05 dcfsa          -> little-sprouts  416.66 USD   #childcare
+2025-08-05 joint-checking -> little-sprouts  1_233.34 USD #childcare
+2025-08-06 card           -> restaurant      46.99 USD    #dining
+2025-08-07 card           -> trader-joes     116.32 USD
+2025-08-08 card           -> target          49.35 USD    #kids
+2025-08-08 joint-checking -> riley-529       250 USD      #contribution ^529-monthly
+2025-08-09 card           -> shell           62.46 USD    #transport
+2025-08-10 joint-checking -> joint-savings   2_800 USD
+2025-08-11 card           -> spotify         19.99 USD
+2025-08-12 card           -> amazon          118.70 USD   #household
+2025-08-12 card           -> comcast         89.99 USD
+2025-08-13 card           -> restaurant      56.43 USD    #dining
 
 /// A returned stroller organizer: the purchase is reversed onto the card.
-2025-08-14 amazon -> card 189.99 USD #household
-2025-08-15 acme -> joint-checking 5_750.00 USD #wages
-2025-08-15 joint-checking -> alex-401k 575.00 USD #household-deferral // 10% pre-tax deferral
-2025-08-15 joint-checking -> hsa 250.00 USD #household-pre-tax // family HSA, through the cafeteria plan
-2025-08-15 joint-checking -> blue-shield 212.50 USD #household-pre-tax // medical, dental, vision: pre-tax
-2025-08-15 joint-checking -> dcfsa 208.33 USD #household-pre-tax // dependent-care FSA
-2025-08-15 joint-checking -> irs 692.00 USD #federal-tax
-2025-08-15 joint-checking -> ftb 285.00 USD #state-tax
-2025-08-15 joint-checking -> ssa 388.56 USD #payroll-tax // Social Security + Medicare
-2025-08-15 joint-checking -> edd 60.95 USD #state-disability // CA SDI
-2025-08-15 acme -> alex-401k 230 USD #contribution
-2025-08-15 bluefin -> joint-checking 3_803.08 USD #wages
-2025-08-15 joint-checking -> jordan-401k 228.18 USD #household-deferral // 6% deferral
-2025-08-15 joint-checking -> irs 330.00 USD #federal-tax
-2025-08-15 joint-checking -> ftb 126.00 USD #state-tax
-2025-08-15 joint-checking -> ssa 290.93 USD #payroll-tax // Social Security + Medicare
-2025-08-15 joint-checking -> edd 45.64 USD #state-disability // CA SDI
-2025-08-15 bluefin -> jordan-401k 114.09 USD #contribution
-2025-08-16 card -> pge 158.20 USD
-2025-08-17 card -> costco 232.24 USD
-2025-08-18 card -> verizon 142.50 USD
-2025-08-19 card -> amazon 51.86 USD #household
-2025-08-20 card -> restaurant 52.22 USD #dining
+2025-08-14 card           <- amazon      189.99 USD   #household
+2025-08-15 joint-checking <- acme        5_750.00 USD #wages
+2025-08-15 joint-checking -> alex-401k   575.00 USD   #household-deferral  // 10% pre-tax deferral
+2025-08-15 joint-checking -> hsa         250.00 USD   #household-pre-tax   // family HSA, through the cafeteria plan
+2025-08-15 joint-checking -> blue-shield 212.50 USD   #household-pre-tax   // medical, dental, vision: pre-tax
+2025-08-15 joint-checking -> dcfsa       208.33 USD   #household-pre-tax   // dependent-care FSA
+2025-08-15 joint-checking -> irs         692.00 USD   #federal-tax
+2025-08-15 joint-checking -> ftb         285.00 USD   #state-tax
+2025-08-15 joint-checking -> ssa         388.56 USD   #payroll-tax         // Social Security + Medicare
+2025-08-15 joint-checking -> edd         60.95 USD    #state-disability    // CA SDI
+2025-08-15 alex-401k      <- acme        230 USD      #contribution
+2025-08-15 joint-checking <- bluefin     3_803.08 USD #wages
+2025-08-15 joint-checking -> jordan-401k 228.18 USD   #household-deferral  // 6% deferral
+2025-08-15 joint-checking -> irs         330.00 USD   #federal-tax
+2025-08-15 joint-checking -> ftb         126.00 USD   #state-tax
+2025-08-15 joint-checking -> ssa         290.93 USD   #payroll-tax         // Social Security + Medicare
+2025-08-15 joint-checking -> edd         45.64 USD    #state-disability    // CA SDI
+2025-08-15 jordan-401k    <- bluefin     114.09 USD   #contribution
+2025-08-16 card           -> pge         158.20 USD
+2025-08-17 card           -> costco      232.24 USD
+2025-08-18 card           -> verizon     142.50 USD
+2025-08-19 card           -> amazon      51.86 USD    #household
+2025-08-20 card           -> restaurant  52.22 USD    #dining
 
 /// Kindergarten tuition at St. Anne's, first installment, straight out of the 529.
 2025-08-20 riley-529 -> st-annes-school 4_800 USD #education
-2025-08-21 card -> trader-joes 94.69 USD
-2025-08-22 card -> target 34.09 USD #kids
-2025-08-23 card -> shell 53.80 USD #transport
+2025-08-21 card      -> trader-joes     94.69 USD
+2025-08-22 card      -> target          34.09 USD #kids
+2025-08-23 card      -> shell           53.80 USD #transport
 
 /// The July statement, paid in full.
-2025-08-25 joint-checking -> card 3_125.39 USD
-2025-08-26 card -> restaurant 28.63 USD #dining
-2025-08-27 hsa -> cvs 97.35 USD #medical
-2025-08-28 card -> trader-joes 145.95 USD
-2025-08-29 bluefin -> joint-checking 3_803.08 USD #wages
-2025-08-29 joint-checking -> jordan-401k 228.18 USD #household-deferral // 6% deferral
-2025-08-29 joint-checking -> irs 330.00 USD #federal-tax
-2025-08-29 joint-checking -> ftb 126.00 USD #state-tax
-2025-08-29 joint-checking -> ssa 290.93 USD #payroll-tax // Social Security + Medicare
-2025-08-29 joint-checking -> edd 45.64 USD #state-disability // CA SDI
-2025-08-29 bluefin -> jordan-401k 114.09 USD #contribution
-2025-08-31 acme -> joint-checking 5_750.00 USD #wages
-2025-08-31 joint-checking -> alex-401k 575.00 USD #household-deferral // 10% pre-tax deferral
-2025-08-31 joint-checking -> hsa 250.00 USD #household-pre-tax // family HSA, through the cafeteria plan
-2025-08-31 joint-checking -> blue-shield 212.50 USD #household-pre-tax // medical, dental, vision: pre-tax
-2025-08-31 joint-checking -> dcfsa 208.33 USD #household-pre-tax // dependent-care FSA
-2025-08-31 joint-checking -> irs 692.00 USD #federal-tax
-2025-08-31 joint-checking -> ftb 285.00 USD #state-tax
-2025-08-31 joint-checking -> ssa 388.56 USD #payroll-tax // Social Security + Medicare
-2025-08-31 joint-checking -> edd 60.95 USD #state-disability // CA SDI
-2025-08-31 acme -> alex-401k 230 USD #contribution
-2025-08-31 interest-source -> joint-savings 221.80 USD #interest-income
-2025-08-31 mortgage = 408_641.56 USD
-2025-08-31 car-loan = 19_087.67 USD
-2025-08-31 card = 1_767.07 USD
-2025-08-31 joint-checking = 29_396.66 USD
-2025-08-31 joint-savings = 65_138.23 USD
-2025-08-31 escrow = 1_860.00 USD
-2025-08-31 dcfsa = 416.66 USD
-2025-08-31 hsa = 12_307.05 USD
+2025-08-25 joint-checking -> card            3_125.39 USD
+2025-08-26 card           -> restaurant      28.63 USD    #dining
+2025-08-27 hsa            -> cvs             97.35 USD    #medical
+2025-08-28 card           -> trader-joes     145.95 USD
+2025-08-29 joint-checking <- bluefin         3_803.08 USD #wages
+2025-08-29 joint-checking -> jordan-401k     228.18 USD   #household-deferral  // 6% deferral
+2025-08-29 joint-checking -> irs             330.00 USD   #federal-tax
+2025-08-29 joint-checking -> ftb             126.00 USD   #state-tax
+2025-08-29 joint-checking -> ssa             290.93 USD   #payroll-tax         // Social Security + Medicare
+2025-08-29 joint-checking -> edd             45.64 USD    #state-disability    // CA SDI
+2025-08-29 jordan-401k    <- bluefin         114.09 USD   #contribution
+2025-08-31 joint-checking <- acme            5_750.00 USD #wages
+2025-08-31 joint-checking -> alex-401k       575.00 USD   #household-deferral  // 10% pre-tax deferral
+2025-08-31 joint-checking -> hsa             250.00 USD   #household-pre-tax   // family HSA, through the cafeteria plan
+2025-08-31 joint-checking -> blue-shield     212.50 USD   #household-pre-tax   // medical, dental, vision: pre-tax
+2025-08-31 joint-checking -> dcfsa           208.33 USD   #household-pre-tax   // dependent-care FSA
+2025-08-31 joint-checking -> irs             692.00 USD   #federal-tax
+2025-08-31 joint-checking -> ftb             285.00 USD   #state-tax
+2025-08-31 joint-checking -> ssa             388.56 USD   #payroll-tax         // Social Security + Medicare
+2025-08-31 joint-checking -> edd             60.95 USD    #state-disability    // CA SDI
+2025-08-31 alex-401k      <- acme            230 USD      #contribution
+2025-08-31 joint-savings  <- interest-source 221.80 USD   #interest-income
+2025-08-31 mortgage       =  408_641.56 USD
+2025-08-31 car-loan       =  19_087.67 USD
+2025-08-31 card           =  1_767.07 USD
+2025-08-31 joint-checking =  29_396.66 USD
+2025-08-31 joint-savings  =  65_138.23 USD
+2025-08-31 escrow         =  1_860.00 USD
+2025-08-31 dcfsa          =  416.66 USD
+2025-08-31 hsa            =  12_307.05 USD

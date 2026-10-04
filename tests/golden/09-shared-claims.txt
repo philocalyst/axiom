@@ -464,18 +464,18 @@ error[assertion]: assets/bank/checking holds 5,218.44 USD, not 2,068.44 USD
    ╭─[journal/2025/03.ax:15:1]
    │
  2 │ opening 2025-03-01
- 3 │   checking              5_218.44 USD
-   │   ─────────────────┬────────────────
-   │                    ╰── +5,218.44 USD from opening
+ 3 │   checking            5_218.44 USD
+   │   ────────────────┬───────────────
+   │                   ╰── +5,218.44 USD from opening
    ⋮
-15 │ 2025-03-01 checking = 2_068.44 USD
-   │ ─────────────────┬────────────────
-   │                  ╰── 3,150.00 USD less than the ledger holds
+15 │ 2025-03-01 checking            = 2_068.44 USD
+   │ ──────────────────────┬──────────────────────
+   │                       ╰── 3,150.00 USD less than the ledger holds
    │
    = note: 3,150.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-15 + 2025-03-01 checking = 2_068.44 USD !
+15 + 2025-03-01 checking            = 2_068.44 USD !
 
 error[hash-code]: a code is written `^code`, and `#name` is a purpose
    ╭─[journal/2025/03.ax:24:45]

@@ -1,11 +1,11 @@
 // June 2026.
 
-01 mortgage                                                   // ▸ 2,937.45: #interest of triplex 1,547.06 · principal 520.39 · escrow 870.00
-01 lease-b                                                    // ▸ 1,850.00 from the tenant into pm-trust · - 148.00 #management (8%)
-01 lease-c2 waived "first full month free: the concession"    // ▸ kept at nothing: not late, nothing owed
-01 insurance                                                  // ▸ 2,600.00 from escrow · #insurance of triplex, recognized over the year
-10 pm-trust -> checking 2_736.25 USD                          // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
-18 pm-trust -> ace-plumbing 240.00 USD #repair of unit-b "toilet fill valve and flapper"
-30 mortgage = 353_092.49 USD
-30 escrow = 2_960.00 USD
-30 pm-trust = 5_362.00 USD
+01 mortgage                                                                              // ▸ 2,937.45: #interest of triplex 1,547.06 · principal 520.39 · escrow 870.00
+01 lease-b                                                                               // ▸ 1,850.00 from the tenant into pm-trust · - 148.00 #management (8%)
+01 lease-c2  waived                             "first full month free: the concession"  // ▸ kept at nothing: not late, nothing owed
+01 insurance                                                                             // ▸ 2,600.00 from escrow · #insurance of triplex, recognized over the year
+10 pm-trust  ->     checking       2_736.25 USD                                          // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
+18 pm-trust  ->     ace-plumbing   240.00 USD   #repair of unit-b "toilet fill valve and flapper"
+30 mortgage  =      353_092.49 USD
+30 escrow    =      2_960.00 USD
+30 pm-trust  =      5_362.00 USD

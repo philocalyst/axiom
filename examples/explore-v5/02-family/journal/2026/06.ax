@@ -1,23 +1,23 @@
 // June 2026.
 
 // 06-01: no mortgage payment is due. The old contract ended on 05-20 and the new one starts 07-01.
-05 escrow -> me-checking 2_341.70 USD                         // the old servicer's refund of the escrow balance
-05 escrow ends
-06 joint-visa -> trader-joes 102.35 USD
+05 escrow         ->   me-checking     2_341.70 USD                                   // the old servicer's refund of the escrow balance
+05 escrow         ends
+06 joint-visa     ->   trader-joes     102.35 USD
 12 electricity-ca
-13 me-checking -> joint-checking 6_400 USD                    // ▸ both are Priya's until today, and the household's from it   // ✗ 02a8: an owner-to-owner flow
-13 jamie-checking -> joint-checking 6_400 USD
-13 joint-visa -> venue-marin 9_200 USD #wedding "balance"
-13 joint-visa -> aurora-catering 5_800 USD #wedding "balance"
-13 joint-visa -> blooming-events 2_400 USD #wedding "photographer and flowers"
-14 car-loan                                                   // ▸ 560.20: #interest of car2 136.62 · principal 423.58
-14 ? -> joint-checking 5_600 USD "wedding gifts, cash and checks"  // ▸ unclassified: not income, not a refund      // ✗ 02a10: no purpose root fits a gift
+13 me-checking    ->   joint-checking  6_400 USD                                      // ▸ both are Priya's until today, and the household's from it   // ✗ 02a8: an owner-to-owner flow
+13 jamie-checking ->   joint-checking  6_400 USD
+13 joint-visa     ->   venue-marin     9_200 USD    #wedding "balance"
+13 joint-visa     ->   aurora-catering 5_800 USD    #wedding "balance"
+13 joint-visa     ->   blooming-events 2_400 USD    #wedding "photographer and flowers"
+14 car-loan                                                                           // ▸ 560.20: #interest of car2 136.62 · principal 423.58
+14 joint-checking <-   ?               5_600 USD    "wedding gifts, cash and checks"  // ▸ unclassified: not income, not a refund      // ✗ 02a10: no purpose root fits a gift
 15 job-lumen
 15 job-jamie
-16 joint-visa -> target 188.90 USD
-20 joint-visa -> delta 1_640 USD #travel "honeymoon flights"
-27 joint-visa -> whole-foods 118.44 USD
-30 car-loan = 27_364.34 USD
+16 joint-visa     ->   target          188.90 USD
+20 joint-visa     ->   delta           1_640 USD    #travel "honeymoon flights"
+27 joint-visa     ->   whole-foods     118.44 USD
+30 car-loan       =    27_364.34 USD
 30 job-lumen
 30 job-jamie
 30 hsa-employer

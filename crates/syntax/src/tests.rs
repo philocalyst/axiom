@@ -302,6 +302,28 @@ fn parse_clean(src: &str) -> File<'_> {
     file
 }
 
+/// A file written the way v4 did: it says so once, for the whole file, and nothing else.
+fn parse_legacy(src: &str) -> File<'_> {
+    let (file, diags) = parse(FileId(0), src);
+    assert!(
+        matches!(&diags[..], [only] if only.code == "v4-syntax" && !only.is_error()),
+        "expected the one v4-syntax warning, got:\n{}",
+        render(src, &diags)
+    );
+    file
+}
+
+/// What is asserted of `v4`, a text written the way v4 did, and of `v5`, which says the same the way v5 does: the first
+/// says it is old, once, and the second says nothing. `check` is given each text and the file it parsed to.
+fn in_both(folder: Folder, v4: &str, v5: &str, check: impl Fn(&str, &File<'_>)) {
+    let (file, diags) = crate::parse(FileId(0), v4, folder);
+    assert!(matches!(&diags[..], [only] if only.code == "v4-syntax"), "{}", render(v4, &diags));
+    check(v4, &file);
+    let (file, diags) = crate::parse(FileId(0), v5, folder);
+    assert!(diags.is_empty(), "unexpected diagnostics:\n{}", render(v5, &diags));
+    check(v5, &file);
+}
+
 /// The one error a source must produce, checking its code.
 fn only_error(src: &str, code: &str) -> Diagnostic {
     let mut errors: Vec<Diagnostic> = parse(FileId(0), src).1.into_iter().filter(Diagnostic::is_error).collect();
@@ -418,7 +440,7 @@ fn the_v4_sketch_parses_clean() {
 
 #[test]
 fn a_realistic_file_parses_into_the_expected_shapes() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     assert_eq!(file.items.len(), 81);
     let txns = txns(&file);
 
@@ -464,7 +486,7 @@ fn properties(file: &File, contract: &Contract, src: &str) -> Vec<(String, Vec<S
 
 #[test]
 fn a_contract_has_a_schedule_properties_and_a_template() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let contracts: Vec<&Contract> = file.iter().collect();
     assert_eq!(contracts.len(), 7);
     let props = |contract: usize| properties(&file, contracts[contract], EXAMPLE);
@@ -543,38 +565,52 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
 
 #[test]
 fn a_contracts_lines_come_in_any_order() {
-    let src = "contract a with p\n  covers 6m\n  retirement 6%\n  5 USD monthly from x\n  from 07-01\n";
-    let (file, diags) = crate::parse(FileId(0), src, YEAR);
-    assert!(diags.is_empty(), "{}", render(src, &diags));
-    let contract: &Contract = file.iter().next().unwrap();
-    assert!(contract.schedule.is_some() && contract.body.legs.len() == 1 && contract.props.len() == 2);
-    // A short date in a property is completed as anywhere else.
-    assert!(
-        matches!(file.exprs[file[file[contract.props][1].args][0]].kind, ExprKind::Date(d) if d == day(2026, 7, 1))
+    let (v4, v5) = (
+        "contract a with p\n  covers 6m\n  retirement 6%\n  5 USD monthly from x\n  from 07-01\n",
+        "contract a with p\n  covers 6m\n  -> retirement 6%\n  5 USD monthly from x\n  from 07-01\n",
     );
+    in_both(YEAR, v4, v5, |_, file| {
+        let contract: &Contract = file.iter().next().unwrap();
+        assert!(contract.schedule.is_some() && contract.body.legs.len() == 1 && contract.props.len() == 2);
+        // A short date in a property is completed as anywhere else.
+        assert!(
+            matches!(file.exprs[file[file[contract.props][1].args][0]].kind, ExprKind::Date(d) if d == day(2026, 7, 1))
+        );
+    });
 }
 
 #[test]
 fn a_contract_of_a_kind_has_slot_lines_that_no_leg_is() {
-    let src = "contract alex-pay : employment with acme\n  employee alex\n  employer acme\n  5 USD monthly from x\n  irs 3 USD\n  savings ...\n";
-    let file = parse_clean(src);
-    let contract: &Contract = file.iter().next().unwrap();
-    assert_eq!(
-        (contract.kind.map(|kind| kind.0), contract.party.map(|party| party.0)),
-        (Some("employment"), Some("acme"))
-    );
-    let fills: Vec<_> = file[contract.fills].iter().map(|fill| (fill.slot.0, fill.filler.0)).collect();
-    assert_eq!(fills, [("employee", "alex"), ("employer", "acme")], "two names and nothing else fill a slot");
-    assert!(contract.props.is_empty());
-    assert_eq!(contract.body.legs.len(), 2, "a leg has an amount: `irs 3 USD`, `savings ...`");
+    let written = |legs: &str| {
+        format!(
+            "contract alex-pay : employment with acme\n  employee alex\n  employer acme\n  5 USD monthly from x\n{legs}"
+        )
+    };
+    let (v4, v5) = (written("  irs 3 USD\n  savings ...\n"), written("  -> irs 3 USD\n  -> savings ...\n"));
+    in_both(Folder::default(), &v4, &v5, |_, file| {
+        let contract: &Contract = file.iter().next().unwrap();
+        assert_eq!(
+            (contract.kind.map(|kind| kind.0), contract.party.map(|party| party.0)),
+            (Some("employment"), Some("acme"))
+        );
+        let fills: Vec<_> = file[contract.fills].iter().map(|fill| (fill.slot.0, fill.filler.0)).collect();
+        assert_eq!(fills, [("employee", "alex"), ("employer", "acme")], "two names and nothing else fill a slot");
+        assert!(contract.props.is_empty());
+        assert_eq!(contract.body.legs.len(), 2, "a leg has an amount: `irs 3 USD`, `savings ...`");
+    });
 }
 
 #[test]
 fn a_contract_with_no_kind_reads_two_names_as_it_always_did() {
-    let file = parse_clean("contract c with p\n  5 USD monthly from x\n  savings rest\n");
-    let contract: &Contract = file.iter().next().unwrap();
-    assert!(contract.kind.is_none() && contract.props.is_empty() && contract.fills.is_empty());
-    assert_eq!(contract.body.legs.len(), 1, "a leg whose amount is a name");
+    let (v4, v5) = (
+        "contract c with p\n  5 USD monthly from x\n  savings rest\n",
+        "contract c with p\n  5 USD monthly from x\n  -> savings rest\n",
+    );
+    in_both(Folder::default(), v4, v5, |_, file| {
+        let contract: &Contract = file.iter().next().unwrap();
+        assert!(contract.kind.is_none() && contract.props.is_empty() && contract.fills.is_empty());
+        assert_eq!(contract.body.legs.len(), 1, "a leg whose amount is a name");
+    });
 }
 
 #[test]
@@ -799,21 +835,29 @@ fn ends_may_be_commodities_and_an_exchange_may_name_only_its_source() {
     let src = "2026-02-03 VTI 280.14 USD\n";
     assert_eq!(first_fix(src, &only_error(src, "price-needs-equals")), ("", "= "));
 
-    let file = parse_clean("2026-03-26 VXUS -> 25.09 USD\n  foreign-tax 2.49 USD\n  fidelity ...\n");
-    assert_eq!(file[txns(&file)[0].flow.body.legs].len(), 2);
-    // Both amounts are what says it is an exchange; a lone source is not one.
-    only_error("2026-02-05 fidelity -> 481.14 USD\n", "missing-legs");
+    let (v4, v5) = (
+        "2026-03-26 VXUS -> 25.09 USD\n  foreign-tax 2.49 USD\n  fidelity ...\n",
+        "2026-03-26 VXUS -> 25.09 USD\n  -> foreign-tax 2.49 USD\n  -> fidelity ...\n",
+    );
+    in_both(Folder::default(), v4, v5, |_, file| assert_eq!(file[txns(file)[0].flow.body.legs].len(), 2));
+    // A price is what says it is an exchange; a lone source and an amount is not one.
+    only_error("2026-02-05 fidelity -> 481.14 USD\n", "exchange-no-price");
     only_error("2026-02-05 fidelity 1.62 VTI ->\n", "missing-legs");
 }
 
 #[test]
 fn a_leg_may_be_a_share_of_the_header_and_an_opening_line_an_asset() {
-    let file = parse_clean("2026-01-31 lumen -> 4_600 USD\n  retirement 6%\n  checking ...\n");
-    let legs = &file[txns(&file)[0].flow.body.legs];
-    // A share alone is a node of the arena: the percent, of what the header says.
-    assert!(
-        matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 })))
+    let (v4, v5) = (
+        "2026-01-31 lumen -> 4_600 USD\n  retirement 6%\n  checking ...\n",
+        "2026-01-31 lumen -> 4_600 USD\n  -> retirement 6%\n  -> checking ...\n",
     );
+    in_both(Folder::default(), v4, v5, |_, file| {
+        let legs = &file[txns(file)[0].flow.body.legs];
+        // A share alone is a node of the arena: the percent, of what the header says.
+        assert!(
+            matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 })))
+        );
+    });
     only_error("2026-01-31 lumen -> 6%\n", "expected-end-of-line");
 
     let file = parse_clean("opening 2026-01-01\n  condo basis 402_000 USD since 2024-02-20\n  checking 5 USD\n");
@@ -848,11 +892,16 @@ fn a_basis_is_no_end_any_more() {
 
 #[test]
 fn a_header_may_state_both_amounts_while_naming_one_end() {
-    let file = parse_clean("2026-12-29 house 1 HOME -> 431_500 USD\n  closing 25_000 USD\n  checking ...\n");
-    let flow = &txns(&file)[0].flow;
-    assert!(flow.from.end.is_some() && flow.from.amount.is_some());
-    assert!(flow.to.end.is_none() && matches!(flow.to.amount, Some(Quantity::Amount(_))));
-    assert_eq!(file[flow.body.legs].len(), 2);
+    let (v4, v5) = (
+        "2026-12-29 house 1 HOME -> 431_500 USD\n  closing 25_000 USD\n  checking ...\n",
+        "2026-12-29 house 1 HOME -> 431_500 USD\n  -> closing 25_000 USD\n  -> checking ...\n",
+    );
+    in_both(Folder::default(), v4, v5, |_, file| {
+        let flow = &txns(file)[0].flow;
+        assert!(flow.from.end.is_some() && flow.from.amount.is_some());
+        assert!(flow.to.end.is_none() && matches!(flow.to.amount, Some(Quantity::Amount(_))));
+        assert_eq!(file[flow.body.legs].len(), 2);
+    });
 }
 
 #[test]
@@ -869,15 +918,17 @@ fn basis_is_an_asset_arriving_when_an_amount_follows_and_a_kinds_property_when_n
 
 #[test]
 fn a_dated_name_is_an_occurrence_unless_it_says_something_else() {
-    let file = parse_clean(
-        "2026-01-16 paycheck\n2026-03-13 paycheck 5_900 USD\n  taxes 950 USD\n2026-01-31 paycheck = 5 USD\n",
-    );
-    let said = statements(&file);
-    assert!(matches!(said[0].subject, Subject::Name(Name("paycheck"))));
-    assert!(matches!(said[0].verb, Verb::Occurrence(None)) && said[0].body.legs.is_empty());
-    assert!(matches!(said[1].verb, Verb::Occurrence(Some(Amount::Literal(amount))) if amount.0 == "5_900 USD"));
-    assert_eq!(said[1].body.legs.len(), 1);
-    assert!(matches!(said[2].verb, Verb::Value(_)));
+    let written = |leg: &str| {
+        format!("2026-01-16 paycheck\n2026-03-13 paycheck 5_900 USD\n  {leg}\n2026-01-31 paycheck = 5 USD\n")
+    };
+    in_both(Folder::default(), &written("taxes 950 USD"), &written("-> taxes 950 USD"), |_, file| {
+        let said = statements(file);
+        assert!(matches!(said[0].subject, Subject::Name(Name("paycheck"))));
+        assert!(matches!(said[0].verb, Verb::Occurrence(None)) && said[0].body.legs.is_empty());
+        assert!(matches!(said[1].verb, Verb::Occurrence(Some(Amount::Literal(amount))) if amount.0 == "5_900 USD"));
+        assert_eq!(said[1].body.legs.len(), 1);
+        assert!(matches!(said[2].verb, Verb::Value(_)));
+    });
 
     // A commodity amount is what was bought, and a contract may end.
     let file = parse_clean("2026-01-20 vti-monthly 1.620 VTI\n2026-03-10 netflix ends\n");
@@ -896,7 +947,7 @@ fn a_dated_name_is_an_occurrence_unless_it_says_something_else() {
 
 #[test]
 fn a_claim_says_who_owes_whom_and_is_flow_shaped() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let claims: Vec<&Statement> =
         file.iter::<Statement>().filter(|said| matches!(said.verb, Verb::Owes { .. })).collect();
     assert_eq!(claims.len(), 3, "two dated claims, and the one an opening states");
@@ -972,7 +1023,7 @@ fn values_may_be_negative_and_may_say_where_a_gap_goes() {
 
 #[test]
 fn splits_and_openings() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let split = statements(&file).into_iter().find(|said| matches!(said.verb, Verb::Split { .. })).unwrap();
     let Verb::Split { numerator, denominator } = split.verb else { unreachable!() };
     assert!(matches!(split.subject, Subject::Unit(Name("FAST"))));
@@ -991,7 +1042,7 @@ fn splits_and_openings() {
 
 #[test]
 fn every_verb_says_one_thing_about_its_subject() {
-    let file = parse_clean(STATEMENTS);
+    let file = parse_legacy(STATEMENTS);
     let said = statements(&file);
     let verb = |verb: &Verb| -> &'static str {
         match verb {
@@ -1052,7 +1103,7 @@ fn every_verb_says_one_thing_about_its_subject() {
 
 #[test]
 fn a_change_restates_part_of_a_declaration() {
-    let file = parse_clean(STATEMENTS);
+    let file = parse_legacy(STATEMENTS);
     let said = statements(&file);
     let terms = |index: usize| match &said[index].verb {
         Verb::Now(Change::Terms(id)) => &file[*id],
@@ -1251,7 +1302,7 @@ fn amounts_are_written_as_the_book_computes_them() {
 
 #[test]
 fn declarations_take_lists_institutions_and_several_globs() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let decls: Vec<&Decl> = file.iter::<Decl>().collect();
     let names: Vec<&str> = decls.iter().map(|decl| decl.name.0).collect();
     assert_eq!(&names[..8], ["USD", "acme", "me", "aldi", "kroger", "checking", "joint/savings", "retirement"]);
@@ -1336,7 +1387,7 @@ fn a_slot_line_that_is_wrong_is_said_where_it_goes_wrong_and_the_others_stay() {
 
 #[test]
 fn assets_purposes_and_budgets_are_declared() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let decls: Vec<&Decl> = file.iter::<Decl>().collect();
     let of = |what| decls.iter().filter(|decl| decl.what == what).map(|decl| decl.name.0).collect::<Vec<_>>();
     assert_eq!(of(DeclKind::Asset), ["condo"]);
@@ -1526,7 +1577,7 @@ contract flat with greystar
 
 #[test]
 fn laws_take_closing_days_and_desugar_their_sources() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let laws: Vec<&Law> = file.iter::<Law>().collect();
     assert_eq!(laws[0].name.0, "deferral-limit");
     assert_eq!(laws[0].trigger, Trigger::In);
@@ -1607,9 +1658,14 @@ fn a_line_that_names_no_end_is_an_item_of_the_flow_above_it() {
     assert!(matches!(tail[..], [ClauseKind::Purpose(_), ClauseKind::Description(Text("for jo's birthday"))]));
     assert!(flow.body.legs.is_empty());
     // What names an end is a leg, and under a one-sided flow the two may be mixed.
-    let file = parse_clean("2026-03-14 lumen -> 4_600 USD\n  retirement 6%\n  - 100 USD #fees\n  checking ...\n");
-    let flow = &txns(&file)[0].flow;
-    assert_eq!((flow.body.legs.len(), flow.body.items.len()), (2, 1));
+    let (v4, v5) = (
+        "2026-03-14 lumen -> 4_600 USD\n  retirement 6%\n  - 100 USD #fees\n  checking ...\n",
+        "2026-03-14 lumen -> 4_600 USD\n  -> retirement 6%\n  - 100 USD #fees\n  -> checking ...\n",
+    );
+    in_both(Folder::default(), v4, v5, |_, file| {
+        let flow = &txns(file)[0].flow;
+        assert_eq!((flow.body.legs.len(), flow.body.items.len()), (2, 1));
+    });
     // An item has an amount, and its tail is a flow's.
     only_error("2026-03-14 a -> b 5 USD\n  + #fees\n", "expected-amount");
     // An amount first and then an end is a leg written backwards.
@@ -1633,11 +1689,15 @@ fn items_follow_occurrences_and_claims_and_may_be_lined_up_by_indenting() {
     let src = "2026-01-27 a -> b 5 USD\n  c 1 USD\n    d 2 USD\n";
     only_error(src, "unexpected-indent");
     // A contract's template may have them too, and its schedule is not one.
-    let src = "contract c with p\n  45 USD monthly from x\n  - 2 USD #fee\n  5%\n  y 3 USD\n";
-    let file = parse_clean(src);
-    let contract: &Contract = file.iter().next().unwrap();
-    assert_eq!((contract.body.legs.len(), contract.body.items.len()), (1, 2));
-    assert!(contract.schedule.is_some());
+    let (v4, v5) = (
+        "contract c with p\n  45 USD monthly from x\n  - 2 USD #fee\n  5%\n  y 3 USD\n",
+        "contract c with p\n  45 USD monthly from x\n  - 2 USD #fee\n  5%\n  -> y 3 USD\n",
+    );
+    in_both(Folder::default(), v4, v5, |_, file| {
+        let contract: &Contract = file.iter().next().unwrap();
+        assert_eq!((contract.body.legs.len(), contract.body.items.len()), (1, 2));
+        assert!(contract.schedule.is_some());
+    });
 }
 
 #[test]
@@ -2447,11 +2507,11 @@ fn assert_post_order(file: &File, whole: bool) {
 
 #[test]
 fn expressions_are_post_order_with_first_nodes() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     assert!(file.exprs.len() > 60);
     assert_post_order(&file, true);
     // The forms of amounts and statements are where a node is most likely to be left behind.
-    assert_post_order(&parse_clean(STATEMENTS), true);
+    assert_post_order(&parse_legacy(STATEMENTS), true);
 }
 
 /// What a damaged file's changed bytes are taken from: punctuation and signs.
@@ -2608,7 +2668,7 @@ fn expressions_name_purposes_codes_and_last_years_tallies() {
 
 #[test]
 fn laws_may_fire_on_flows_and_consume_or_carry() {
-    let file = parse_clean(EXAMPLE);
+    let file = parse_legacy(EXAMPLE);
     let laws: Vec<&Law> = file.iter().collect();
     let rental = laws.iter().find(|law| law.name.0 == "rental-expenses").unwrap();
     assert_eq!(rental.trigger, Trigger::Flow);
@@ -2722,7 +2782,7 @@ fn mistakes_in_structure_are_explained() {
     assert_eq!(&src[error.labels[0].loc.range()], "retirement 800 USD");
     assert!(error.help.iter().any(|help| help.text.contains("two transactions")));
 
-    only_error("2026-01-15 checking -> 5_200 USD\n", "missing-legs");
+    only_error("2026-01-15 checking -> 5_200 USD\n", "exchange-no-price");
     only_error("2026-01-15 acme -> 5 USD\n  a ...\n  b ...\n", "two-remainders");
 
     let src = "2026-01-15 acme -> 5_200 USD\n  retirement 800 USD\n   checking ...\n";
@@ -2737,13 +2797,21 @@ fn mistakes_in_structure_are_explained() {
 
 #[test]
 fn tabs_are_reported_once_for_the_file_with_their_count() {
-    let src = "2026-01-15 acme -> 5_200 USD\n\tchecking 100 USD\n\tsavings ...\n2026-01-16 acme -> 5_200 USD\n\t\tchecking ...\n";
-    let (file, diags) = parse(FileId(0), src);
-    assert_eq!(diags.len(), 1, "{}", render(src, &diags));
-    assert_eq!(diags[0].message, "3 lines are indented with a tab");
-    assert_eq!(first_fix(src, &diags[0]), ("\t", "  "));
-    assert_eq!(file.items.len(), 2, "the tabbed lines still parse, at two columns each");
-    let (_, diags) = parse(FileId(0), "2026-01-15 acme -> 5_200 USD\n\tchecking ...\n");
+    let tabbed = |arrow: &str| {
+        format!(
+            "2026-01-15 acme -> 5_200 USD\n\t{arrow}checking 100 USD\n\t{arrow}savings ...\n2026-01-16 acme -> 5_200 USD\n\t\t{arrow}checking ...\n"
+        )
+    };
+    // Written the v4 way the legs also say they are old, which is another warning and not another report of the tabs.
+    for (src, others) in [(tabbed(""), 1), (tabbed("-> "), 0)] {
+        let (file, diags) = parse(FileId(0), &src);
+        assert_eq!(diags.len(), 1 + others, "{}", render(&src, &diags));
+        let tabs = diags.iter().find(|diag| diag.code == "tab-indent").expect("the tabs are reported");
+        assert_eq!(tabs.message, "3 lines are indented with a tab");
+        assert_eq!(first_fix(&src, tabs), ("\t", "  "));
+        assert_eq!(file.items.len(), 2, "the tabbed lines still parse, at two columns each");
+    }
+    let (_, diags) = parse(FileId(0), "2026-01-15 acme -> 5_200 USD\n\t-> checking ...\n");
     assert_eq!(diags[0].message, "a line is indented with a tab");
 }
 
@@ -2825,7 +2893,8 @@ account food : expense
 /// and the blanks taken out.
 fn shape(src: &str, folder: Folder) -> String {
     let (file, diags) = crate::parse(FileId(0), src, folder);
-    assert!(diags.is_empty(), "unexpected diagnostics:\n{}", render(src, &diags));
+    // The formatter lays a line out and does not respell it, so a file written the v4 way is still written so.
+    assert!(diags.iter().all(|diag| diag.code == "v4-syntax"), "unexpected diagnostics:\n{}", render(src, &diags));
     let mut text = dump(&file);
     while let Some(start) = text.find("Loc {") {
         let end = start + text[start..].find('}').unwrap() + 1;
@@ -3327,4 +3396,115 @@ fn cuts_fall_between_items_and_keep_docs_with_theirs() {
             assert!(src[boundary..].starts_with("// note") || src[boundary..].starts_with("law"), "{boundary}");
         }
     }
+}
+
+// ─── The junction ───────────────────────────────────────────────────────────
+
+/// What the model reads of a flow: the name of each end and the text of each amount.
+fn reads<'a>(flow: &'a Flow<'a>) -> [(Option<&'a str>, Option<&'a str>); 2] {
+    let side = |side: &'a Side<'a>| {
+        let amount = match side.amount {
+            Some(Quantity::Amount(Amount::Literal(literal))) => Some(literal.0),
+            _ => None,
+        };
+        (side.end.map(|end| end.name.0), amount)
+    };
+    [side(&flow.from), side(&flow.to)]
+}
+
+#[test]
+fn a_take_is_a_give_written_from_the_other_end() {
+    let take = parse_clean("2026-01-15 checking <- acme 3_200 USD #wages\n");
+    let give = parse_clean("2026-01-15 acme -> checking 3_200 USD #wages\n");
+    let (take, give) = (&txns(&take)[0].flow, &txns(&give)[0].flow);
+    assert_eq!((take.course.junction(), give.course.junction()), (Junction::In, Junction::Out));
+    assert_eq!(reads(take), reads(give), "the model reads the same flow");
+    assert_eq!(reads(take), [(Some("acme"), None), (Some("checking"), Some("3_200 USD"))]);
+}
+
+#[test]
+fn a_purchase_and_a_sale_have_their_end_on_both_sides() {
+    let buy = parse_clean("2026-03-04 brokerage <- 7 VTI @ 285.70 USD\n");
+    let v4 = parse_clean("2026-03-04 brokerage -> brokerage 7 VTI @ 285.70 USD\n");
+    assert_eq!(reads(&txns(&buy)[0].flow), reads(&txns(&v4)[0].flow));
+
+    let sell = parse_clean("2026-03-05 brokerage[fifo] -> 1.62 VTI @ 297.00 USD\n");
+    let v4 = parse_clean("2026-03-05 brokerage[fifo] 1.62 VTI -> brokerage @ 297.00 USD\n");
+    let flow = &txns(&sell)[0].flow;
+    assert_eq!(reads(flow), reads(&txns(&v4)[0].flow));
+    assert_eq!(file_select(&sell, flow.from.end), 1, "the lots to sell are the source's");
+    assert_eq!(file_select(&sell, flow.to.end), 0, "and the proceeds' end names none");
+}
+
+fn file_select(file: &File<'_>, end: Option<End<'_>>) -> usize {
+    file[end.expect("an end").select].len()
+}
+
+/// The owner a flow passes through, by name.
+fn through<'s>(file: &File<'s>, flow: &Flow<'s>) -> Option<&'s str> {
+    flow.course.through().map(|owner| file[owner].name.0)
+}
+
+#[test]
+fn legs_lead_with_their_arrow_and_an_owner_passes_a_partys_money_through() {
+    let src = "2026-03-14 me <- acme 12_000 USD #wages\n  -> irs 2_640 USD\n  -> checking ...\n";
+    let file = parse_clean(src);
+    let flow = &txns(&file)[0].flow;
+    assert_eq!(through(&file, flow), Some("me"));
+    assert_eq!(reads(flow), [(Some("acme"), None), (None, Some("12_000 USD"))], "what the model reads is v4's split");
+    assert!(file[flow.body.legs].iter().all(|leg| leg.arrow == Some(Junction::Out)));
+
+    let file = parse_clean("2026-03-14 me -> shop 100 USD\n  <- savings 30 USD\n  <- checking ...\n");
+    let flow = &txns(&file)[0].flow;
+    assert_eq!(through(&file, flow), Some("me"));
+    assert_eq!(reads(flow), [(None, None), (Some("shop"), Some("100 USD"))]);
+
+    let file = parse_clean("2026-03-14 checking <- 100 USD\n  <- shop 30 USD\n  <- acme ...\n");
+    assert_eq!(reads(&txns(&file)[0].flow), [(None, None), (Some("checking"), Some("100 USD"))]);
+}
+
+#[test]
+fn a_leg_that_points_the_wrong_way_or_not_at_all_is_told_which_arrow_to_write() {
+    let src = "2026-03-14 me <- acme 12_000 USD\n  <- irs 2_640 USD\n  -> checking ...\n";
+    let error = only_error(src, "leg-direction");
+    assert_eq!(first_fix(src, &error), ("<-", "->"));
+
+    let src = "2026-03-14 me <- acme 12_000 USD\n  irs 2_640 USD\n  -> checking ...\n";
+    let error = only_error(src, "leg-needs-arrow");
+    assert_eq!(first_fix(src, &error), ("", "-> "));
+
+    let src = "2026-03-14 checking -> 100 USD\n  <- shop 30 USD\n  -> savings ...\n";
+    only_error(src, "leg-direction");
+    let src = "2026-03-14 me <- acme 12_000 USD\n  shop 30 USD\n";
+    only_error(src, "leg-needs-arrow");
+}
+
+#[test]
+fn an_exchange_names_its_price_and_a_take_names_its_amount_last() {
+    only_error("2026-03-04 brokerage <- 7 VTI\n", "exchange-no-price");
+    only_error("2026-03-04 brokerage -> 7 VTI\n", "exchange-no-price");
+    only_error("2026-03-04 checking 5 USD <- acme\n", "amount-before-take");
+    only_error("2026-03-04 <- acme 5 USD\n", "expected-subject");
+    only_error("2026-03-04 checking <-\n", "takes-nothing");
+    let src = "2026-03-04 checking ← acme 5 USD\n";
+    let error = only_error(src, "unknown-arrow");
+    assert_eq!(first_fix(src, &error), ("←", "<-"));
+}
+
+#[test]
+fn a_less_than_a_negative_number_is_not_an_arrow() {
+    let file = parse_clean("law cap\n  on flow\n  require amount <-5 USD\n");
+    assert!(matches!(file.items[0].kind, ItemKind::Law(_)));
+    assert_eq!(tokens("a <- b"), [Tok::Name("a"), Tok::Punct(Punct::Back), Tok::Name("b")]);
+    assert_eq!(
+        tokens("a <-5")[1..],
+        [Tok::Punct(Punct::Lt), Tok::Punct(Punct::Minus), Tok::Number(Dec::parse(b"5").unwrap())]
+    );
+}
+
+#[test]
+fn the_house_style_writes_the_arrows_of_a_split_in_a_column() {
+    let src = "2026-03-14 me   <-   acme 12_000 USD #wages\n  -> irs 2_640 USD\n  ->   checking ...\n";
+    let once = formatted(src, Folder::default());
+    assert_eq!(once, "2026-03-14 me <- acme 12_000 USD #wages\n  -> irs      2_640 USD\n  -> checking ...\n");
 }

@@ -17,15 +17,15 @@ dependencies already present in the Cargo cache. The release profile is
 optimized, and the program prints median parse nanoseconds and mean allocation
 calls and requested bytes for each fixture.
 
-Each fixture repeats this exact 47-byte record:
+Each fixture repeats this exact 50-byte record:
 
 ```text
 2026-01-15 checking -> 5 USD
-  groceries 5 USD
+  -> groceries 5 USD
 ```
 
-The small input repeats it 700 times (32,900 bytes and 700 parsed items); the
-large input repeats it 30,000 times (1,410,000 bytes and 30,000 parsed items).
+The small input repeats it 700 times (35,000 bytes and 700 parsed items); the
+large input repeats it 30,000 times (1,500,000 bytes and 30,000 parsed items).
 The generator reserves `n * 54` bytes before appending the records.
 
 For each fixture, the program parses twice to warm the parser, then records 30

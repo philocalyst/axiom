@@ -3,37 +3,37 @@
 // savings held `for` an envelope. A feed writes the rest.
 
 opening 01
-  checking         3_412.60 USD
-  savings          6_000.00 USD for emergency
-  savings            640.00 USD for car
-  savings            180.00 USD for gifts
-  savings          1_120.00 USD for travel
-  savings             90.00 USD for subs
-  savings            210.00 USD for medical
-  card               486.20 USD                          // owed
-  venmo               62.15 USD
-  gc-target           35.00 USD                          // a gift card, from a birthday
-  delta-miles     24_500 MILES                           // no basis: a rebate
+  checking    3_412.60 USD
+  savings     6_000.00 USD   for emergency
+  savings       640.00 USD   for car
+  savings       180.00 USD   for gifts
+  savings     1_120.00 USD   for travel
+  savings        90.00 USD   for subs
+  savings       210.00 USD   for medical
+  card          486.20 USD                               // owed
+  venmo          62.15 USD
+  gc-target      35.00 USD                               // a gift card, from a birthday
+  delta-miles   24_500 MILES                             // no basis: a rebate
 
-01 rent                                                         // ▸ 3,150.00 #rent · 1,050.00 paid for ben, 1,050.00 for cleo
+01 rent                                                                                  // ▸ 3,150.00 #rent · 1,050.00 paid for ben, 1,050.00 for cleo
 01 gym
 03 phone
-04 card -> king-soopers 86.42 USD
-08 card -> trader-joes 54.10 USD
-09 internet                                                     // ▸ 60.00: the promotion  · ben owes 20.00, cleo 20.00
-11 card -> sprouts 41.75 USD
-12 electric 104.80 USD                                          // ▸ ben owes 34.93, cleo 34.93
-14 gas 84.20 USD
-15 job                                                          // ▸ 2,450.00: 197.50 to the envelopes, 2,252.50 to checking
-17 card -> king-soopers 92.38 USD
-20 ben -> venmo 1_132.99 USD "rent + power, gas, wifi"          // ▸ settles rent 1,050.00, and this month's third of electric 34.93, gas 28.06 and wifi 20.00, oldest first
-21 cleo -> venmo 1_132.99 USD "rent + power, gas, wifi"
+04 card     -> king-soopers  86.42 USD
+08 card     -> trader-joes   54.10 USD
+09 internet                                                                              // ▸ 60.00: the promotion  · ben owes 20.00, cleo 20.00
+11 card     -> sprouts       41.75 USD
+12 electric 104.80 USD                                                                   // ▸ ben owes 34.93, cleo 34.93
+14 gas      84.20 USD
+15 job                                                                                   // ▸ 2,450.00: 197.50 to the envelopes, 2,252.50 to checking
+17 card     -> king-soopers  92.38 USD
+20 venmo    <- ben           1_132.99 USD "rent + power, gas, wifi"                      // ▸ settles rent 1,050.00, and this month's third of electric 34.93, gas 28.06 and wifi 20.00, oldest first
+21 venmo    <- cleo          1_132.99 USD "rent + power, gas, wifi"
 22 netflix
-23 card -> target 38.60 USD #household
-24 venmo -> checking 2_265.98 USD                               // a transfer: the wallet's balance goes to the bank
-24 card -> tacos-el-jefe 61.40 USD #dining ! "Cleo's birthday, agreed exception"  // ▸ over the January budget of nothing: waived, and reported
-26 venmo -> jo 27.30 USD #dining "my share of the ramen night"  // ⇄ 05d2: `jo` is in the note, not a column
-27 card -> king-soopers 77.05 USD
-30 card -> rei 64.00 USD #clothing "base layers"
+23 card     -> target        38.60 USD    #household
+24 venmo    -> checking      2_265.98 USD                                                // a transfer: the wallet's balance goes to the bank
+24 card     -> tacos-el-jefe 61.40 USD    #dining ! "Cleo's birthday, agreed exception"  // ▸ over the January budget of nothing: waived, and reported
+26 venmo    -> jo            27.30 USD    #dining "my share of the ramen night"          // ⇄ 05d2: `jo` is in the note, not a column
+27 card     -> king-soopers  77.05 USD
+30 card     -> rei           64.00 USD    #clothing "base layers"
 31 job
-31 chase -> card 10.90 USD #rebate "cash back, 2% of 544.79"    // ▸ what the card's terms say it should be: a flow the statement also shows   // ✗ 05a1
+31 card     <- chase         10.90 USD    #rebate "cash back, 2% of 544.79"              // ▸ what the card's terms say it should be: a flow the statement also shows   // ✗ 05a1

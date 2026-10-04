@@ -1,0 +1,111 @@
+// What `us` does not know about a sole proprietor: the business's profit,
+// self-employment tax, the qualified business income deduction, and the check on
+// the 1040-ES installments. Each one counts into a line `us` reads (total-income,
+// adjustments, deductions, other-taxes), so `us` needs no copy and no file name
+// matters: a law that reads a tally runs after every law that counts into it.
+//
+// Simplified: no QBI wage or property limits (income is far below the
+// threshold), no state tax, no underpayment penalty.
+
+// ─── The return ─────────────────────────────────────────────────────────────
+
+/// Schedule C: net profit is receipts less business expenses, and it is income
+/// (IRC §61(a)(2)). Receipts count when the money arrives, expenses when they
+/// are recognized.
+///
+/// To fix: `axiom why net-profit` lists the receipts and the expenses behind it.
+law business-profit
+  each year closing 04-15
+  let net = value(tally(gross-receipts), USD) - value(tally(business-expenses), USD)
+  count net as net-profit
+  count net as total-income
+
+/// Schedule SE: 12.4% Social Security up to the wage base and 2.9% Medicare, on
+/// 92.35% of net earnings (IRC §1401). It is a tax on top of income tax, so it
+/// counts into `other-taxes`, and half of it comes off income (IRC §164(f)).
+///
+/// To fix: the base is net profit; a loss owes nothing.
+law self-employment-tax
+  each year closing 04-15
+  let earnings = max(value(tally(net-profit), USD), empty) * 92.35%
+  let tax = min(earnings, ss-wage-base[year]) * 12.4% + earnings * 2.9%
+  count tax as se-tax
+  count tax as other-taxes
+  count tax * 50% as se-deduction
+  count tax * 50% as adjustments
+
+/// The qualified business income deduction is 20% of the business's income after
+/// what is attributable to it (half of self-employment tax, health premiums, the
+/// SEP-IRA), limited to 20% of taxable income before it (IRC §199A). It is added
+/// to the deduction `us` took.
+///
+/// To fix: the deduction cannot exceed a fifth of taxable income; a lower
+/// deduction means less income before it.
+law qbi-deduction
+  each year closing 04-15
+  let attributable = value(tally(net-profit), USD) - value(tally(se-deduction), USD) - value(tally(health-premiums), USD) - value(tally(sep-contributions), USD)
+  let before = max(value(tally(agi), USD) - value(tally(deductions), USD), empty)
+  count min(max(attributable, empty), before) * 20% as deductions
+
+
+// ─── Estimated payments ─────────────────────────────────────────────────────
+
+// Form 1040-ES: four installments, each due on a fixed day. Paying 100% of last
+// year's tax in four equal parts is the safe harbor from the underpayment
+// penalty (IRC §6654(d)). A `by` law fires when the journal reaches its date and
+// reads what has been paid for that year so far. Each names one day, so 2025's
+// first three installments are three laws; the fourth falls in the next
+// January, for the year that ended, which one law covers for every year: it
+// closes on January 15 and reads the year it closes.
+
+/// First installment, due April 15 2025.
+///
+/// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
+law estimate-1-2025
+  by 2025-04-15
+  warn value(tally(payments), USD) >= prior-year-tax[2025] * 25% "estimated tax: first installment short"
+
+/// Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
+///
+/// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
+law estimate-2-2025
+  by 2025-06-16
+  warn value(tally(payments), USD) >= prior-year-tax[2025] * 50% "estimated tax: second installment short"
+
+/// Third installment, due September 15 2025.
+///
+/// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
+law estimate-3-2025
+  by 2025-09-15
+  warn value(tally(payments), USD) >= prior-year-tax[2025] * 75% "estimated tax: third installment short"
+
+/// The fourth installment of any year is due on January 15 of the next, and pays
+/// what is still short of the safe harbor. It is `for` the year that ended, so
+/// this law reads that year's payments on the day it closes.
+///
+/// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
+law estimate-4
+  each year closing 01-15
+  warn value(tally(payments), USD) >= prior-year-tax[year] * 100% "estimated tax: fourth installment short"
+
+
+// ─── Figures ────────────────────────────────────────────────────────────────
+
+// The Social Security wage base (SSA, October 2024 and October 2025 releases).
+param ss-wage-base
+  2025 176_100 USD
+  2026 184_500 USD
+
+// The SEP-IRA dollar cap (IRC §415(c)).
+param sep-limit
+  2025 70_000 USD
+  2026 72_000 USD
+
+// The share of the home used for work.
+param office-share
+  2025 15%
+
+// Last year's total tax, from that year's return: the safe-harbor amount.
+param prior-year-tax
+  2025 9_200 USD
+  2026 11_301.28 USD

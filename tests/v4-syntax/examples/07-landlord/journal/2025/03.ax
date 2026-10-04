@@ -1,0 +1,23 @@
+2025-03-01 rent-a
+2025-03-01 checking -> oak-street 1_950 USD #rent
+2025-03-01 home-loan
+// Historical loan split, independently checked from the contract terms: home-loan            241.57 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_568.02 USD   // interest
+
+/// Property management, 8% of the rent, paid the month after: the plan `manager-fee` says 192.00 USD, and an
+/// occurrence writes the amount when it differs. There is no fee for September's empty month.
+2025-03-05 manager-fee
+2025-03-08 checking -> trader-joes 144.50 USD #groceries
+
+/// REPAIR: a leaking trap and faucet. Ordinary, deducted now.
+2025-03-12 rental-bank -> quick-plumbing 385 USD #repair of house
+2025-03-15 checking -> trader-joes 172.04 USD #groceries
+2025-03-19 checking -> cafe 101.88 USD #dining
+2025-03-22 checking -> home-supplies 229.03 USD #household
+2025-03-28 paycheck
+// Previous hand-entered depreciation: 913.58 USD on 2025-03-31. v4 derives this from the house parts.
+2025-03-31 home-loan = 278_518.22 USD
+2025-03-31 rental-bank = 5_351.52 USD
+2025-03-31 checking = 30_450.32 USD
+2025-03-31 deposit-bank = 2_400.00 USD
+2025-03-31 deposits = 2_400.00 USD

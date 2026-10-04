@@ -1,0 +1,12 @@
+error[exchange-no-price]: this line has one end and an amount, but no price and no legs
+   ╭─[120-purchase-has-no-price.ax:18:22]
+   │
+18 │ 2026-01-22 brokerage <- 7 VTI
+   │                      ─┬
+   │                       ╰── nothing says what the amount was exchanged for, or where it goes
+   │
+   = help: an exchange says its price: `brokerage <- 7 VTI @ 297.00 USD`
+   = help: or indent legs below the line to split the amount among ends
+
+✗ 1 error
+[exit status 1]

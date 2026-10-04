@@ -26,7 +26,8 @@ purpose wages : income
 
 fn parsed_source<'s>(id: u16, path: &'s str, text: &'s str, embedded: bool) -> Source<'s> {
     let (file, diagnostics) = parse(FileId(id), text, Folder::default());
-    assert!(diagnostics.is_empty(), "{path} should parse: {diagnostics:?}");
+    // A text that says a line is written the v4 way is read all the same, and says so once.
+    assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{path} should parse: {diagnostics:?}");
     Source { path, file, embedded }
 }
 
@@ -607,7 +608,8 @@ commodity GBP : currency
 
 #[test]
 fn a_rejected_record_leaves_nothing_of_itself_in_the_pooled_arenas() {
-    let project = "\
+    for project in [
+        "\
 use std
 base USD
 commodity USD : currency
@@ -618,15 +620,31 @@ account savings : bank
   savings 6 USD ^lost-leg
   savings 4 USD #nonsense
 2026-01-03 checking -> savings 3 USD ^third
-";
-    let (book, diagnostics) = build_project(project);
+",
+        "\
+use std
+base USD
+commodity USD : currency
+account checking : bank
+account savings : bank
+2026-01-01 checking -> savings 1 USD  ^first
+2026-01-02 checking ->         10 USD ^lost
+  -> savings 6 USD ^lost-leg
+  -> savings 4 USD #nonsense
+2026-01-03 checking -> savings 3 USD ^third
+",
+    ] {
+        let (book, diagnostics) = build_project(project);
 
-    assert_eq!(codes(&diagnostics), ["unknown-purpose"], "{diagnostics:?}");
-    assert_eq!(book.flows.len(), 2, "the leg lowered before the failure is taken back");
-    let kept: Vec<_> = book.codes.values().map(|&code| book.name(code)).collect();
-    assert_eq!(kept, ["first", "third"]);
-    assert_eq!(book.txns.len(), 3, "the rejected record still owns a transaction");
-    assert!(book.txns[Id::new(1)].flows.is_empty());
+        // An amount before the arrow, with only legs after it, is the v4 spelling and says so once.
+        let found: Vec<_> = codes(&diagnostics).into_iter().filter(|code| *code != "v4-syntax").collect();
+        assert_eq!(found, ["unknown-purpose"], "{diagnostics:?}");
+        assert_eq!(book.flows.len(), 2, "the leg lowered before the failure is taken back");
+        let kept: Vec<_> = book.codes.values().map(|&code| book.name(code)).collect();
+        assert_eq!(kept, ["first", "third"]);
+        assert_eq!(book.txns.len(), 3, "the rejected record still owns a transaction");
+        assert!(book.txns[Id::new(1)].flows.is_empty());
+    }
 }
 
 #[test]
@@ -909,7 +927,8 @@ fn conflicting_overlapping_residence_rate_policies_are_reported_deterministicall
 
 #[test]
 fn known_exchange_adds_a_spot_quote_used_by_owner_conversion() {
-    let project = "\
+    for project in [
+        "\
 use std
 base USD
 commodity USD : currency
@@ -919,27 +938,42 @@ commodity VTI : fund
 account checking : bank
 account brokerage : bank
 2026-02-10 checking 1_999.90 USD -> brokerage 7 VTI
-";
-    let (book, diagnostics) = build_project(project);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let vti = book.commodity("VTI").unwrap();
-    let usd = book.commodity("USD").unwrap();
-    let day = Day::from_ymd(2026, 2, 10).unwrap();
-    let quote = book
-        .prices
-        .quotes()
-        .iter()
-        .find(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
-        .expect("a known actual exchange records an implied quote");
-    assert!(quote.implied);
-    assert_eq!(quote.rate, Ratio::new(2857, 10).unwrap());
-    let conversion = book.convert_for(Amount::new(axiom_core::Qty(7), vti), usd, book.roots.me, day, None).unwrap();
-    assert_eq!(conversion.amount(), Amount::new(axiom_core::Qty(199_990), usd));
+",
+        "\
+use std
+base USD
+commodity USD : currency
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account checking : bank
+account brokerage : bank
+2026-02-10 checking -> brokerage 7 VTI @ 285.70 USD
+",
+    ] {
+        let (book, diagnostics) = build_project(project);
+        // The text with both amounts is the v4 spelling, and says so once.
+        assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{diagnostics:?}");
+        let vti = book.commodity("VTI").unwrap();
+        let usd = book.commodity("USD").unwrap();
+        let day = Day::from_ymd(2026, 2, 10).unwrap();
+        let quote = book
+            .prices
+            .quotes()
+            .iter()
+            .find(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
+            .expect("a known actual exchange records an implied quote");
+        assert!(quote.implied);
+        assert_eq!(quote.rate, Ratio::new(2857, 10).unwrap());
+        let conversion = book.convert_for(Amount::new(axiom_core::Qty(7), vti), usd, book.roots.me, day, None).unwrap();
+        assert_eq!(conversion.amount(), Amount::new(axiom_core::Qty(199_990), usd));
+    }
 }
 
 #[test]
 fn written_same_day_price_beats_an_implied_exchange_quote() {
-    let project = "\
+    for project in [
+        "\
 use std
 base USD
 commodity USD : currency
@@ -950,25 +984,40 @@ account checking : bank
 account brokerage : bank
 2026-02-10 VTI = 300 USD
 2026-02-10 checking 1_999.90 USD -> brokerage 7 VTI
-";
-    let (book, diagnostics) = build_project(project);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let vti = book.commodity("VTI").unwrap();
-    let usd = book.commodity("USD").unwrap();
-    let day = Day::from_ymd(2026, 2, 10).unwrap();
-    let pair: Vec<_> = book
-        .prices
-        .quotes()
-        .iter()
-        .filter(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
-        .collect();
-    assert_eq!(pair.len(), 2, "the written quote and implied evidence are both retained");
-    assert!(pair[0].implied);
-    let quote = pair[1];
-    assert!(!quote.implied);
-    assert_eq!(quote.rate, Ratio::new(300, 1).unwrap());
-    let conversion = book
-        .convert_for(Amount::new(axiom_core::Qty(7), vti), usd, book.roots.me, day, Some(RatePolicy::Spot))
-        .unwrap();
-    assert_eq!(conversion.amount(), Amount::new(axiom_core::Qty(210_000), usd));
+",
+        "\
+use std
+base USD
+commodity USD : currency
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account checking : bank
+account brokerage : bank
+2026-02-10 VTI      =  300 USD
+2026-02-10 checking -> brokerage 7 VTI @ 285.70 USD
+",
+    ] {
+        let (book, diagnostics) = build_project(project);
+        // The text with both amounts is the v4 spelling, and says so once.
+        assert!(diagnostics.iter().all(|found| found.code == "v4-syntax"), "{diagnostics:?}");
+        let vti = book.commodity("VTI").unwrap();
+        let usd = book.commodity("USD").unwrap();
+        let day = Day::from_ymd(2026, 2, 10).unwrap();
+        let pair: Vec<_> = book
+            .prices
+            .quotes()
+            .iter()
+            .filter(|quote| quote.unit == vti && quote.quote == usd && quote.day == day)
+            .collect();
+        assert_eq!(pair.len(), 2, "the written quote and implied evidence are both retained");
+        assert!(pair[0].implied);
+        let quote = pair[1];
+        assert!(!quote.implied);
+        assert_eq!(quote.rate, Ratio::new(300, 1).unwrap());
+        let conversion = book
+            .convert_for(Amount::new(axiom_core::Qty(7), vti), usd, book.roots.me, day, Some(RatePolicy::Spot))
+            .unwrap();
+        assert_eq!(conversion.amount(), Amount::new(axiom_core::Qty(210_000), usd));
+    }
 }

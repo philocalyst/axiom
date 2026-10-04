@@ -1,0 +1,39 @@
+// Money sits in accounts. Parties name the other end of a flow; purposes say
+// what it is for. There are no income, expense or equity accounts.
+
+commodity VTI : fund
+  name "Total stock market ETF"
+  precision 0
+
+account checking : deposit at chase
+account savings : deposit at chase
+account cash : cash
+account brokerage : brokerage at fidelity
+account retirement : 401k at fidelity
+  employer acme
+account college : 529-plan at fidelity
+  beneficiary me
+account visa : card at chase
+
+budget food 650 USD monthly
+
+purpose tuition : education
+
+entity chase : org
+entity fidelity : org
+entity acme : employer
+entity landlord : landlord
+entity trader-joes : grocer
+entity utility #utilities
+entity insurer #insurance
+entity plumber #repair
+entity state-u #tuition
+entity travel-agent #travel
+entity cafe #dining
+entity noodle-house #dining
+entity metro #transport
+entity scholarship : grant
+  purpose education
+
+code check-*
+  on deposit

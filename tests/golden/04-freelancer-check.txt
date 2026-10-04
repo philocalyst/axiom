@@ -1,7 +1,7 @@
 warning[overdue]: northpeak still owes 2,600.00 USD, 106 days past its due day 2025-12-31
   ╭─[journal/2025/12.ax:6:3]
   │
-5 │ 2025-12-01 northpeak owes me due 30d ^inv-2025-n3
+5 │ 2025-12-01 northpeak owes me ^inv-2025-n3 due 30d
 6 │   2_600 USD #design
   │   ────────┬────────
   │           ╰── claimed on 2025-12-01, due 2025-12-31
@@ -12,7 +12,7 @@ warning[overdue]: northpeak still owes 2,600.00 USD, 106 days past its due day 2
 warning[overdue]: orbit-labs still owes 6,000.00 USD, 7 days past its due day 2026-04-09
    ╭─[journal/2026/03.ax:15:3]
    │
-14 │ 2026-03-10 orbit-labs owes me due 30d ^inv-2026-o1
+14 │ 2026-03-10 orbit-labs owes me ^inv-2026-o1 due 30d
 15 │   6_000 USD #design
    │   ────────┬────────
    │           ╰── claimed on 2026-03-10, due 2026-04-09

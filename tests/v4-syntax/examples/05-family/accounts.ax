@@ -1,0 +1,130 @@
+// Native v4 accounts and counterparties for the household. Places describe
+// custody and ownership; parties and purposes describe what each flow means.
+
+kind dependent-care-fsa : tax-deferred
+  basis zero
+  liquidity 5d
+  pays childcare
+  law contribution-limit
+    on in
+    when purpose is #household-pre-tax
+    count amount as dcfsa-contributions
+    require value(tally(dcfsa-contributions), USD) <= dependent-care-limit[year] "dependent-care FSA over the yearly cap"
+
+purpose childcare : spending
+purpose payroll-tax : spending
+purpose school-expense : spending
+purpose auto-expense : spending
+purpose shopping : spending
+purpose kids : spending
+purpose subscriptions : spending
+purpose dcfsa-contributions : spending
+purpose state-disability : tax-paid
+  law itemize-sdi
+    on flow
+    count amount as salt
+purpose household-pre-tax : pretax-benefit
+  law household-pre-tax
+    on flow
+    count amount as pretax
+    count -amount as total-income
+purpose household-deferral : pre-tax-deferral
+  law household-deferral
+    on flow
+    count amount as pretax
+    count -amount as total-income
+
+commodity HOME : real-estate
+  name "the house"
+  precision 0
+commodity CRV : commodity
+  name "the car"
+  precision 0
+
+account joint-checking : deposit at chase
+  owner family
+account joint-savings : deposit at chase
+  owner family
+account escrow : escrow at lender
+  owner family
+
+account alex-401k : 401k at fidelity
+  employer acme
+account jordan-401k : 401k at fidelity
+  owner jordan
+  employer bluefin
+account hsa : hsa at fidelity
+  owner me
+  coverage family
+account dcfsa : dependent-care-fsa at acme
+  owner family
+account riley-529 : 529-plan at fidelity
+  owner family
+  beneficiary riley
+
+asset house : home
+  owner family
+asset crv : vehicle
+  owner family
+
+account mortgage : mortgage at lender
+  owner family
+account car-loan : loan at honda-finance
+  owner family
+account card : credit-card at chase
+  owner family
+
+entity chase : org
+entity fidelity : org
+entity acme : employer
+entity bluefin : employer
+entity lender : lender
+entity honda-finance : lender
+entity county : government
+entity homeguard : insurer
+entity costco : grocer
+entity trader-joes : grocer
+entity shell : merchant
+entity amazon : store
+entity target : store
+entity pge : utility
+entity comcast : utility
+entity verizon : utility
+entity netflix : streaming
+entity spotify : streaming
+entity statefarm : insurer
+entity brake-shop : contractor
+entity st-annes-parish #charity
+entity food-bank #charity
+entity little-sprouts #childcare
+entity kids-club #childcare
+entity st-annes-school #education
+entity dr-chen #medical
+entity smile-dental #medical
+entity cvs #medical
+entity er-clinic #medical
+entity grandma : org
+entity interest-source #interest-income
+entity payroll-office #payroll-tax
+entity ssa #payroll-tax
+entity edd #payroll-tax
+entity restaurant #dining
+entity household-store : store
+entity kids-market : store
+entity trip-vendor : merchant
+entity gifts #contribution
+entity rewards #contribution
+entity blue-shield : health-insurer
+
+code mortgage-* on mortgage
+code car-loan-* on car-loan
+code 529-* on riley-529
+
+param dependent-care-limit
+  2024 5_000 USD
+  2025 5_000 USD
+  2026 7_500 USD
+
+// Statements identify the employer and custodian; payroll destinations are
+// separate native flows so the tax systems can classify the gross pay and each
+// pretax, withholding, and net-pay leg.

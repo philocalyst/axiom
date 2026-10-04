@@ -1,0 +1,54 @@
+2025-06-01 business-card -> google 7.20 USD #business-software
+2025-06-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-06-01 personal-checking -> bluecross 412 USD #health-premium
+2025-06-02 brightwave owes me due 30d ^inv-2025-b06
+  3_200 USD #design
+
+/// Catalogue redesign. Never paid.
+2025-06-02 delta-rugs owes me due 30d ^inv-2025-d1
+  3_800 USD #design
+2025-06-03 business-card -> notion 10 USD #business-software
+2025-06-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2025-06-04 car used 63 MI #business-mile for orbit-labs
+2025-06-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-06-05 personal-checking -> trader-joes 60.40 USD #groceries
+2025-06-08 business-card -> adobe 59.99 USD #business-software
+2025-06-08 personal-checking -> restaurant 77.36 USD #dining
+2025-06-10 brightwave 3_200 USD -> business-checking #design ^inv-2025-b05
+2025-06-10 business-checking -> tax-vault 640 USD for vault
+2025-06-10 personal-checking -> transit-agency 60.06 USD #transport
+2025-06-12 orbit-labs -> 2_750 USD #design ^inv-2025-o1
+  business-checking 2_735.00 USD
+  stripe 15.00 USD #business-fees // incoming wire fee
+2025-06-12 business-checking -> tax-vault 547 USD for vault
+2025-06-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-06-12 personal-checking -> safeway 116.05 USD #groceries
+2025-06-14 business-card -> figma 15 USD #business-software
+2025-06-16 personal-checking -> pge 55.60 USD #home-office-cost
+2025-06-18 personal-checking -> tmobile 64 USD #business-phone
+2025-06-19 business-card -> monotype 240 USD #business-fonts
+
+/// The May statement, paid in full.
+2025-06-20 business-checking -> business-card 1_927.27 USD
+2025-06-20 business-card -> apple 649 USD #business-equipment
+2025-06-20 personal-checking -> safeway 98.90 USD #groceries
+2025-06-22 business-card -> freshbooks 21 USD #business-software
+2025-06-22 personal-checking -> restaurant 48.87 USD #dining
+
+/// Second quarter, a week late (due Monday June 16).
+2025-06-23 tax-vault -> irs 2_400 USD #federal-tax ^q2-2025
+2025-06-26 car used 38 MI #business-mile for brightwave
+2025-06-27 personal-checking -> trader-joes 85.23 USD #groceries
+
+/// First SEP-IRA contribution of the year.
+2025-06-27 business-checking -> sep 2_000 USD
+2025-06-30 fernhill -> 2_800 USD #design ^inv-2025-f2
+  business-checking 2_718.50 USD
+  stripe 81.50 USD #business-fees // Stripe fee
+2025-06-30 business-checking -> tax-vault 543.70 USD for vault
+2025-06-30 interest-source -> tax-vault 18.21 USD #interest-income for vault
+2025-06-30 sep = 21_442.03 USD via market
+2025-06-30 business-card = 1_002.19 USD
+2025-06-30 business-checking = 5_246.89 USD
+2025-06-30 personal-checking = 3_427.01 USD
+2025-06-30 tax-vault = 5_222.46 USD

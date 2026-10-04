@@ -1,0 +1,15 @@
+error[unknown-address]: there is no address `jordan/bluefin/roth-irc`
+   ╭─[127-unknown-address-not-pasteable.ax:21:12]
+   │
+21 │ 2026-01-31 jordan/bluefin/roth-irc = 3_000 USD
+   │            ───────────┬───────────
+   │                       ╰── not a known address
+   │
+   = help: did you mean `jordan/fidelity/roth-ira`?
+21 - 2026-01-31 jordan/bluefin/roth-irc = 3_000 USD
+21 + 2026-01-31 jordan/fidelity/roth-ira = 3_000 USD
+   = help: an address is the entities that fill an account's slots, in order, then its name:
+           `jordan/bluefin/401k`
+
+✗ 1 error
+[exit status 1]

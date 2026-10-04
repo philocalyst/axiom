@@ -9,14 +9,14 @@
 
 /// Rent is an occurrence of the plan `rent-a`. It comes on the third this month, and on the first after that.
 2025-02-03 rent-a
-2025-02-08 checking -> trader-joes 204.31 USD #groceries
-2025-02-15 checking -> trader-joes 163.88 USD #groceries
-2025-02-19 checking -> cafe 99.86 USD #dining
+2025-02-08 checking -> trader-joes   204.31 USD #groceries
+2025-02-15 checking -> trader-joes   163.88 USD #groceries
+2025-02-19 checking -> cafe          99.86 USD  #dining
 2025-02-22 checking -> home-supplies 362.38 USD #household
 2025-02-28 paycheck
 // Previous hand-entered depreciation: 913.57 USD on 2025-02-28. v4 derives this from the house parts.
-2025-02-28 home-loan = 278_759.79 USD
-2025-02-28 rental-bank = 5_338.11 USD
-2025-02-28 checking = 26_874.77 USD
+2025-02-28 home-loan    = 278_759.79 USD
+2025-02-28 rental-bank  = 5_338.11 USD
+2025-02-28 checking     = 26_874.77 USD
 2025-02-28 deposit-bank = 2_400.00 USD
-2025-02-28 deposits = 2_400.00 USD
+2025-02-28 deposits     = 2_400.00 USD

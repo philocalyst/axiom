@@ -329,6 +329,9 @@ fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut 
     let from = flow.from.end.map(|end| resolve_end(staged, &cx, end, diags));
     let to = flow.to.end.map(|end| resolve_end(staged, &cx, end, diags));
     built.successful &= from.is_none_or(|end| end.is_some()) && to.is_none_or(|end| end.is_some());
+    if let Some(problem) = party_subject(staged, &cx, flow, [from, to].map(Option::flatten), diags) {
+        return built.reject(problem, diags);
+    }
     let has_legs = !cx.file[flow.body.legs].is_empty();
     match (from, to) {
         (Some(Some(from)), Some(Some(to))) => {
@@ -351,6 +354,45 @@ fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut 
             built.reject(problem, diags);
         }
     }
+}
+
+/// A line written `<-`, as a purchase or a sale, or as a split through an owner is about its subject, whose book it is,
+/// so the subject is an owner's. A party reaches an owner's book by the other end: `checking -> acme 3_200 USD`.
+fn party_subject<'s>(
+    staged: &mut Staged<'_, 's>,
+    cx: &FlowCx<'_, 's>,
+    flow: &ast::Flow<'s>,
+    [from, to]: [Option<ResolvedEnd>; 2],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Diagnostic> {
+    let named = flow.owner(cx.file)?;
+    let subject = match flow.course {
+        ast::Course::Through(..) => resolve_end(staged, cx, named, diags),
+        ast::Course::Direct(ast::Junction::In) => to,
+        ast::Course::Direct(ast::Junction::Out) => from,
+    }?;
+    let party = |end: ResolvedEnd| staged.book.places[end.place].class == crate::book::Class::Outside;
+    if !party(subject) {
+        return None;
+    }
+    let (name, ends) = (named.name.0, [(flow.from.end, from), (flow.to.end, to)]);
+    let other =
+        ends.into_iter().find_map(|(written, end)| Some((written?.name.0, party(end?)))).filter(|o| o.0 != name);
+    let (label, help) = match other {
+        Some((other, false)) => (format!("`{name}` is a party"), format!("swap the ends: `{other} -> {name} ...`")),
+        Some((other, true)) => {
+            (format!("`{name}` and `{other}` are both parties"), "write one of your books first".into())
+        }
+        None => (
+            format!("`{name}` is a party"),
+            "name the book it happens in first: `brokerage <- 7 VTI @ 285.70 USD`".into(),
+        ),
+    };
+    let said = format!(
+        "`{name}` is a party, and a `{}` line is written from one of your books",
+        flow.course.junction().spelling()
+    );
+    Some(Diagnostic::error("junction-subject", said).label(cx.file.arrow_after(named), label).help(help))
 }
 
 /// A header that names both its ends is one flow, with the items under it as a group of their own.

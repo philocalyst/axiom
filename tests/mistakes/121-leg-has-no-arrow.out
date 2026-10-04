@@ -1,0 +1,14 @@
+error[leg-needs-arrow]: a leg of this flow leads with its arrow
+   ╭─[121-leg-has-no-arrow.ax:20:3]
+   │
+20 │   checking    4_200 USD
+   │   ──────────┬──────────
+   │             ╰── this leg names no arrow
+   │
+   = note: under a header written with `<-`, or a split through an owner, each leg says which way
+           its value goes
+   = help: insert `-> `
+20 +   -> checking    4_200 USD
+
+✗ 1 error
+[exit status 1]

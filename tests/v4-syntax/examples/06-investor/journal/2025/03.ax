@@ -1,0 +1,42 @@
+2025-03-01 checking -> landlord 2_650 USD
+2025-03-02 savings -> checking 15_000 USD
+
+/// Moving the international fund and the bonds to Schwab, in kind: `all VXUS` is every parcel of it, and
+/// each keeps its basis and its date.
+2025-03-03 fidelity all VXUS -> schwab
+2025-03-03 fidelity all BND -> schwab
+2025-03-05 checking 1_500.00 USD -> fidelity 5.3086 VTI @ 282.56 USD
+2025-03-09 checking -> utility-co 160.79 USD
+
+/// ...and a second one in March.
+2025-03-11 checking 4_699.97 USD -> fidelity 9.7153 UNH @ 483.77 USD
+2025-03-12 checking -> grocer 292.41 USD
+2025-03-12 checking 2_499.99 USD -> fidelity 37.7871 VXUS @ 66.16 USD
+2025-03-13 dividend-source -> fidelity 30.15 USD
+2025-03-16 checking -> cafe 407.36 USD
+2025-03-20 checking -> grocer 305.94 USD
+2025-03-24 checking -> misc-vendor 192.31 USD
+2025-03-26 dividend-source -> schwab 27.51 USD
+2025-03-26 dividend-source 58.08 USD -> fidelity 0.2124 VTI @ 273.46 USD // reinvested: 58.09 USD dividend
+2025-03-26 dividend-source -> fidelity 0.01 USD
+2025-03-28 dividend-source -> schwab 75.53 USD
+2025-03-31 northwind -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2025-03-31 interest-source -> savings 284.55 USD
+2025-03-31 interest-source -> fidelity 179.78 USD
+2025-03-31 checking = 21_540.34 USD
+2025-03-31 savings = 85_648.81 USD
+2025-03-31 espp-cash = 4_200.01 USD
+2025-03-31 fidelity = 67.757 VTI
+2025-03-31 fidelity = 36.3264 MSFT
+2025-03-31 fidelity = 24.6225 UNH
+2025-03-31 fidelity = 50.9847 FAST
+2025-03-31 fidelity = 37.7871 VXUS
+2025-03-31 schwab = 333.4448 BND
+2025-03-31 schwab = 38.2029 VXUS
+2025-03-31 etrade = 187.4775 NWND
+2025-03-31 coinbase = 0.3 BTC

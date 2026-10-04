@@ -2,64 +2,64 @@
   rent                    1_050.00 USD
   ben                     1_050.00 USD
   cleo                    1_050.00 USD
-2025-11-02 income/tips -> wallet 200.69 USD
+2025-11-02 wallet <- income/tips 200.69 USD
 2025-11-02 ben -> checking 1_050.00 USD for #rent-2025-11
 2025-11-03 checking -> car 128 USD / progressive
 
 /// November: Cleo sends 1,000.00 USD, 50.00 USD short. The claim stays open, past due.
 2025-11-05 cleo -> checking 1_000.00 USD for #rent-2025-11
 2025-11-06 wallet -> dining 20.01 USD
-2025-11-07 visa -> 86.22 USD #shared-2025-11 due 2025-12-22
-  groceries               28.74 USD
-  ben                     28.74 USD
-  cleo                    28.74 USD
+2025-11-07 visa   ->        86.22 USD #shared-2025-11 due 2025-12-22
+  -> groceries 28.74 USD
+  -> ben       28.74 USD
+  -> cleo      28.74 USD
 2025-11-08 visa -> phone 45 USD / mint-mobile
-2025-11-09 income/tips -> wallet 233.04 USD
+2025-11-09 wallet <- income/tips 233.04 USD
 2025-11-09 checking -> 69.99 USD / fiberco #shared-2025-11 due 2025-12-24
   utilities               23.33 USD
   ben                     23.33 USD
   cleo                    23.33 USD
-2025-11-09 income/donations -> collective-checking 25 USD
-2025-11-12 owed-to-ben -> utilities 30.83 USD #power-2025-11 due 2025-12-12   // my third of 92.50, from power-co
+2025-11-09 collective-checking <- income/donations 25 USD
+2025-11-12 owed-to-ben         -> utilities        30.83 USD #power-2025-11 due 2025-12-12  // my third of 92.50, from power-co
 2025-11-12 checking -> car 330.50 USD / carmax-finance
-2025-11-13 wallet -> dining 19.20 USD
-2025-11-14 lantern -> 1_295.91 USD   // 962.00 wages + 333.91 card tips
-  taxes/federal           160.69 USD
-  taxes/payroll           99.14 USD
-  checking                ...
+2025-11-13 wallet -> dining  19.20 USD
+2025-11-14 me     <- lantern 1_295.91 USD  // 962.00 wages + 333.91 card tips
+  -> taxes/federal 160.69 USD
+  -> taxes/payroll  99.14 USD
+  -> checking      ...
 2025-11-14 visa -> dining 28.57 USD
 2025-11-15 checking -> health 189.40 USD / marketplace-plan
-2025-11-16 income/tips -> wallet 248.39 USD
+2025-11-16 wallet <- income/tips 248.39 USD
 
 /// Two months missed, paid together in November.
 2025-11-17 riley -> checking 500 USD for #loan-riley
 2025-11-17 visa -> groceries 37.58 USD / farmers-market
-2025-11-18 wallet -> transport 6.28 USD
-2025-11-19 visa -> entertainment 65.55 USD
-2025-11-21 visa -> 99.47 USD #shared-2025-11 due 2026-01-05
-  groceries               33.15 USD
-  ben                     33.16 USD
-  cleo                    33.16 USD
-2025-11-22 checking -> visa 427.19 USD
-2025-11-23 income/tips -> wallet 203.09 USD
-2025-11-24 wallet -> checking 950 USD
-2025-11-26 visa -> clothing 18.07 USD
-2025-11-27 wallet -> dining 20.29 USD
-2025-11-28 lantern -> 1_411.49 USD   // 962.00 wages + 449.49 card tips
-  taxes/federal           175.02 USD
-  taxes/payroll           107.98 USD
-  checking                ...
-2025-11-28 checking -> savings 700 USD
-2025-11-30 income/tips -> wallet 209.13 USD
+2025-11-18 wallet -> transport     6.28 USD
+2025-11-19 visa   -> entertainment 65.55 USD
+2025-11-21 visa   ->               99.47 USD #shared-2025-11 due 2026-01-05
+  -> groceries 33.15 USD
+  -> ben       33.16 USD
+  -> cleo      33.16 USD
+2025-11-22 checking -> visa        427.19 USD
+2025-11-23 wallet   <- income/tips 203.09 USD
+2025-11-24 wallet   -> checking    950 USD
+2025-11-26 visa     -> clothing    18.07 USD
+2025-11-27 wallet   -> dining      20.29 USD
+2025-11-28 me       <- lantern     1_411.49 USD  // 962.00 wages + 449.49 card tips
+  -> taxes/federal 175.02 USD
+  -> taxes/payroll 107.98 USD
+  -> checking      ...
+2025-11-28 checking -> savings     700 USD
+2025-11-30 wallet   <- income/tips 209.13 USD
 2025-11-30 ben -> checking 85.23 USD for #shared-2025-11
 2025-11-30 cleo -> checking 85.23 USD for #shared-2025-11
 2025-11-30 checking -> owed-to-ben 30.83 USD for #power-2025-11
-2025-11-30 by-ben = 0.00 USD
-2025-11-30 by-cleo = 50.00 USD
-2025-11-30 owed-to-ben = 0.00 USD
-2025-11-30 owed-to-cleo = 0.00 USD
-2025-11-30 visa = 380.46 USD
-2025-11-30 checking = 9_488.06 USD
-2025-11-30 savings = 9_400.00 USD
+2025-11-30 by-ben              = 0.00 USD
+2025-11-30 by-cleo             = 50.00 USD
+2025-11-30 owed-to-ben         = 0.00 USD
+2025-11-30 owed-to-cleo        = 0.00 USD
+2025-11-30 visa                = 380.46 USD
+2025-11-30 checking            = 9_488.06 USD
+2025-11-30 savings             = 9_400.00 USD
 2025-11-30 collective-checking = 2_609.61 USD
-2025-11-30 wallet = 385.16 USD
+2025-11-30 wallet              = 385.16 USD

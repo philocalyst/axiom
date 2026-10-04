@@ -1,0 +1,38 @@
+// A family: two adults filing jointly and one child. Calendar year 2025.
+//
+// The folders are constraints: journal/2025/03.ax holds March 2025 only.
+// journal/2024/12.ax holds the opening balances, dated 2024-12-31.
+
+base USD
+
+use std
+use us/401k
+use us/529
+use us/hsa
+use us/ca
+
+/// The household: what the two of them share. It files one joint return, lives in
+/// California, and has one child to claim. Its members' pay counts into that one
+/// return, and `filing joint` means the joint brackets apply to the sum.
+entity family : household
+  filing   joint
+  children 1
+  lives    us/ca
+
+
+/// Alex, 37, the primary taxpayer, and `me`: every place that does not say
+/// otherwise is Alex's, and belongs to the household through them.
+entity me : person
+  born   1988-02-10
+  member family
+
+/// Jordan, 37. Keeps their own 401(k) and its yearly limit; their pay counts into
+/// the household's return like Alex's.
+entity jordan : person
+  born   1987-06-21
+  member family
+
+/// Riley, five, the 529 plan's beneficiary and the child on the return.
+entity riley : person
+  born   2019-08-22
+  member family

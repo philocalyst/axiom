@@ -11,6 +11,6 @@ account equity/opening
 entity acme : employer
   via income/salary
 
-2026-01-15 acme -> 5_000 USD
-  savings   800 USD
-  checking  4_000 USD
+2026-01-15 me <- acme 5_000 USD
+  -> savings    800 USD
+  -> checking 4_000 USD

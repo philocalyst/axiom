@@ -1,0 +1,34 @@
+2025-10-01 checking -> landlord 2_650 USD
+2025-10-01 staking-source 39.40 USD -> wallet 0.00952977 ETH @ 4134.48 USD
+2025-10-05 checking 1_499.98 USD -> fidelity 4.6330 VTI @ 323.76 USD
+2025-10-09 checking -> utility-co 189.99 USD
+
+/// Selling 10 VTI, choosing the lots by date: the two oldest are past a year, so the gain is long-term.
+2025-10-10 fidelity[2024-09-05, 2024-10-05] 10 VTI -> checking 3_252.30 USD
+2025-10-12 checking -> grocer 249.69 USD
+2025-10-16 checking -> cafe 269.95 USD
+2025-10-20 checking -> grocer 334.34 USD
+2025-10-24 checking -> misc-vendor 263.20 USD
+2025-10-28 dividend-source -> schwab 30.23 USD
+2025-10-31 northwind -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2025-10-31 interest-source -> savings 274.25 USD
+2025-10-31 interest-source -> fidelity 234.02 USD
+2025-10-31 checking = 70_713.11 USD
+2025-10-31 savings = 82_549.54 USD
+2025-10-31 espp-cash = 5_600.00 USD
+2025-10-31 fidelity = 93.5732 VTI
+2025-10-31 fidelity = 36.3264 MSFT
+2025-10-31 fidelity = 19.7153 UNH
+2025-10-31 fidelity = 41.9694 FAST
+2025-10-31 fidelity = 106.4467 VXUS
+2025-10-31 schwab = 133.4448 BND
+2025-10-31 schwab = 38.2029 VXUS
+2025-10-31 etrade = 249.6388 NWND
+2025-10-31 coinbase = 0.15 BTC
+2025-10-31 coinbase = 0.95668225 ETH
+2025-10-31 wallet = 6.05838521 ETH

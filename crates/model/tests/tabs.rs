@@ -121,14 +121,15 @@ fn tabs_come_in_the_order_the_journal_is_lowered_in_and_not_the_order_it_is_writ
 
 #[test]
 fn a_party_a_flow_mentions_with_due_for_or_via_has_no_tab_until_a_claim_asks_for_one() {
-    let flows = "2026-01-05 checking -> jo 5 USD due 30d for bank via pat\n2026-01-06 bank -> checking 5 USD for jo\n";
+    let flows =
+        "2026-01-05 checking -> jo   5 USD for bank due 30d via pat\n2026-01-06 checking <- bank 5 USD for jo\n";
     with_book(&format!("{PARTIES}{flows}"), |book| assert_eq!(tabs(book), []));
 }
 
 #[test]
 fn a_template_may_name_a_loan_declared_after_it_and_its_name_stands_for_the_debt_tab() {
     let contracts =
-        "contract plan with jo\n  100 USD monthly on 2 from checking\n  from 2026-02-01\n  mortgage 20 USD\n";
+        "contract plan with jo\n  100 USD monthly on 2 from checking\n  from 2026-02-01\n  -> mortgage 20 USD\n";
     with_book(&format!("{PARTIES}{contracts}{LOAN}"), |book| {
         let debt = book.contracts[book.contract("mortgage").unwrap()].loan.expect("a loan").debt;
         let plan = &book.contracts[book.contract("plan").unwrap()];

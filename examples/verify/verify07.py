@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from decimal import Decimal as D, ROUND_HALF_EVEN
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.join(HERE, "..", "07-landlord")
+ROOT = os.path.join(HERE, "..", "..", "tests", "v4-syntax", "examples", "07-landlord")
 
 
 def cents(x):

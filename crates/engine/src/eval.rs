@@ -1704,7 +1704,8 @@ account temporary : temporary-account
 
     #[test]
     fn selected_template_groups_filter_by_purpose_and_choose_the_matching_side() {
-        let text = "\
+        for text in [
+            "\
 base USD
 kind currency : commodity
 kind security : commodity
@@ -1724,90 +1725,114 @@ entity employer
   10 USD #fees
 2026-01-02 checking 90_000 USD -> savings 3 VTI #wages
   5 USD #fees
-";
-        let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
-        assert!(parsed.is_empty(), "{parsed:?}");
-        let (mut book, diagnostics) =
-            axiom_model::build(&[axiom_model::Source { path: "axiom.ax", file, embedded: false }]);
-        assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
-        let checking = book.place("checking").unwrap();
-        let retirement = book.place("ira").unwrap();
-        let savings = book.place("savings").unwrap();
-        let owner = book.entities[book.roots.me].place.expect("me has an outside place");
-        let owner = book.places[owner].owner;
-        let wages = book.purpose("wages").unwrap();
-        let retirement_purpose = book.purpose("rollover").unwrap();
-        let usd = book.base;
-        let vti = book.commodity("VTI").unwrap();
-        let missing_code = book.names.intern("missing");
+",
+            "\
+base USD
+kind currency : commodity
+kind security : commodity
+kind bank : asset
+commodity USD : currency
+  precision 2
+commodity VTI : security
+  precision 3
+purpose wages : income
+purpose rollover : spending
+purpose fees : spending
+account checking : bank
+account ira : bank
+account savings
+entity employer
+2026-01-01 checking -> ira 7 VTI @ 3_571.43 USD #rollover
+  10 USD #fees
+2026-01-02 checking -> savings 3 VTI @ 30_000.00 USD #wages
+  5 USD #fees
+",
+        ] {
+            let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
+            // Two amounts and no price, which this test is about, is the v4 spelling and says so once.
+            assert!(parsed.iter().all(|found| found.code == "v4-syntax"), "{parsed:?}");
+            let (mut book, diagnostics) =
+                axiom_model::build(&[axiom_model::Source { path: "axiom.ax", file, embedded: false }]);
+            assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+            let checking = book.place("checking").unwrap();
+            let retirement = book.place("ira").unwrap();
+            let savings = book.place("savings").unwrap();
+            let owner = book.entities[book.roots.me].place.expect("me has an outside place");
+            let owner = book.places[owner].owner;
+            let wages = book.purpose("wages").unwrap();
+            let retirement_purpose = book.purpose("rollover").unwrap();
+            let usd = book.base;
+            let vti = book.commodity("VTI").unwrap();
+            let missing_code = book.names.intern("missing");
 
-        let first_header = book.txns.get(Id::new(0)).unwrap().flows.start();
-        let second_header = book.txns.get(Id::new(1)).unwrap().flows.start();
-        let mut selected = book.flows.get(first_header).unwrap().clone();
-        selected.from = checking;
-        selected.to = retirement;
-        selected.out = Amount::new(Qty(25_000), usd);
-        selected.arrive = Amount::new(Qty(7), vti);
-        selected.purpose =
-            Some(Purposed { purpose: retirement_purpose, of: None, source: axiom_model::Provenance::Written });
-        let mut unrelated = book.flows.get(second_header).unwrap().clone();
-        unrelated.from = checking;
-        unrelated.to = savings;
-        unrelated.out = Amount::new(Qty(90_000), usd);
-        unrelated.arrive = unrelated.out;
-        unrelated.purpose = Some(Purposed { purpose: wages, of: None, source: axiom_model::Provenance::Written });
-        let mut mixed = book.flows.get(second_header).unwrap().clone();
-        mixed.from = checking;
-        mixed.to = retirement;
-        mixed.out = Amount::new(Qty(1_000), usd);
-        mixed.arrive = mixed.out;
-        mixed.purpose = Some(Purposed { purpose: wages, of: None, source: axiom_model::Provenance::Written });
-        let flows = [
-            RuntimeFlow::source_at(selected, 0),
-            RuntimeFlow::source_at(unrelated, 1),
-            RuntimeFlow::source_at(mixed, 2),
-        ];
-        let details = Arena::new();
-        let plan = Plan::new(&book);
-        let world = World::new(&book, &plan.watch);
-        let day = Day::from_ymd(2026, 1, 2).unwrap();
-        let occasion = Occasion::time(day, Days::on(day));
-        let context = Context::new(Subject::Entity(owner), owner, &occasion).with_template_flows(&flows, &details);
-        let nodes = Arena::new();
-        let mut values = Vec::new();
-        let mut budget_values = Vec::new();
-        let mut out = Vec::new();
-        let machine = Machine {
-            env: Env { plan: &plan, world: &world },
-            nodes: &nodes,
-            law: None,
-            law_id: None,
-            ctx: &context,
-            values: &mut values,
-            budget_values: &mut budget_values,
-            out: &mut out,
-        };
+            let first_header = book.txns.get(Id::new(0)).unwrap().flows.start();
+            let second_header = book.txns.get(Id::new(1)).unwrap().flows.start();
+            let mut selected = book.flows.get(first_header).unwrap().clone();
+            selected.from = checking;
+            selected.to = retirement;
+            selected.out = Amount::new(Qty(25_000), usd);
+            selected.arrive = Amount::new(Qty(7), vti);
+            selected.purpose =
+                Some(Purposed { purpose: retirement_purpose, of: None, source: axiom_model::Provenance::Written });
+            let mut unrelated = book.flows.get(second_header).unwrap().clone();
+            unrelated.from = checking;
+            unrelated.to = savings;
+            unrelated.out = Amount::new(Qty(90_000), usd);
+            unrelated.arrive = unrelated.out;
+            unrelated.purpose = Some(Purposed { purpose: wages, of: None, source: axiom_model::Provenance::Written });
+            let mut mixed = book.flows.get(second_header).unwrap().clone();
+            mixed.from = checking;
+            mixed.to = retirement;
+            mixed.out = Amount::new(Qty(1_000), usd);
+            mixed.arrive = mixed.out;
+            mixed.purpose = Some(Purposed { purpose: wages, of: None, source: axiom_model::Provenance::Written });
+            let flows = [
+                RuntimeFlow::source_at(selected, 0),
+                RuntimeFlow::source_at(unrelated, 1),
+                RuntimeFlow::source_at(mixed, 2),
+            ];
+            let details = Arena::new();
+            let plan = Plan::new(&book);
+            let world = World::new(&book, &plan.watch);
+            let day = Day::from_ymd(2026, 1, 2).unwrap();
+            let occasion = Occasion::time(day, Days::on(day));
+            let context = Context::new(Subject::Entity(owner), owner, &occasion).with_template_flows(&flows, &details);
+            let nodes = Arena::new();
+            let mut values = Vec::new();
+            let mut budget_values = Vec::new();
+            let mut out = Vec::new();
+            let machine = Machine {
+                env: Env { plan: &plan, world: &world },
+                nodes: &nodes,
+                law: None,
+                law_id: None,
+                ctx: &context,
+                values: &mut values,
+                budget_values: &mut budget_values,
+                out: &mut out,
+            };
 
-        assert_eq!(
-            machine.select(&[SelectKey::Purpose(retirement_purpose)]),
-            Value::Amount(Amount::new(Qty(25_000), usd)),
-            "a purpose-only selector takes the selected flow's outgoing amount"
-        );
-        assert_eq!(
-            machine.select(&[SelectKey::End(retirement), SelectKey::Unit(vti)]),
-            Value::Amount(Amount::new(Qty(7), vti)),
-            "endpoint and unit keys identify the arrival side of an exchange"
-        );
-        assert_eq!(
-            machine.select(&[SelectKey::End(retirement), SelectKey::Code(missing_code)]),
-            Value::Empty,
-            "a selector with no matching group is empty, so a percentage of it is zero"
-        );
-        assert_eq!(
-            machine.select(&[SelectKey::End(retirement)]),
-            Value::Fault(Fault::UnitMismatch { found: usd, expected: vti }),
-            "matching both sides with incompatible units refuses to invent a sum"
-        );
+            assert_eq!(
+                machine.select(&[SelectKey::Purpose(retirement_purpose)]),
+                Value::Amount(Amount::new(Qty(25_000), usd)),
+                "a purpose-only selector takes the selected flow's outgoing amount"
+            );
+            assert_eq!(
+                machine.select(&[SelectKey::End(retirement), SelectKey::Unit(vti)]),
+                Value::Amount(Amount::new(Qty(7), vti)),
+                "endpoint and unit keys identify the arrival side of an exchange"
+            );
+            assert_eq!(
+                machine.select(&[SelectKey::End(retirement), SelectKey::Code(missing_code)]),
+                Value::Empty,
+                "a selector with no matching group is empty, so a percentage of it is zero"
+            );
+            assert_eq!(
+                machine.select(&[SelectKey::End(retirement)]),
+                Value::Fault(Fault::UnitMismatch { found: usd, expected: vti }),
+                "matching both sides with incompatible units refuses to invent a sum"
+            );
+        }
     }
 
     #[test]

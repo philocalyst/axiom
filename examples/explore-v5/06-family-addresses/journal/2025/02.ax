@@ -1,83 +1,83 @@
-2025-02-01 checking -> mortgage 467.56 USD ^mortgage-2025-02 // principal
-2025-02-01 checking -> lender 2_016.90 USD #interest of house // interest
-2025-02-01 checking -> escrow 690.00 USD // taxes and insurance
-2025-02-02 card -> netflix 17.99 USD
-2025-02-03 card -> costco 219.33 USD
-2025-02-03 checking -> st-annes-parish 200 USD #charity
-2025-02-04 card -> amazon 94.69 USD #household
-2025-02-05 checking -> car-loan 509.72 USD // principal
-2025-02-05 checking -> honda-finance 92.69 USD #interest // interest
-2025-02-05 dcfsa -> little-sprouts 416.66 USD #childcare
-2025-02-05 checking -> little-sprouts 1_233.34 USD #childcare
-2025-02-06 card -> restaurant 74.41 USD #dining
-2025-02-07 card -> trader-joes 73.22 USD
-2025-02-08 card -> target 88.41 USD #kids
-2025-02-08 checking -> riley/529 250 USD ^529-monthly #contribution
-2025-02-09 card -> shell 51.80 USD #transport
-2025-02-10 checking -> savings 2_800 USD
-2025-02-11 card -> spotify 19.99 USD
-2025-02-12 card -> amazon 115.25 USD #household
-2025-02-12 card -> comcast 89.99 USD
+2025-02-01 checking -> mortgage        467.56 USD   ^mortgage-2025-02   // principal
+2025-02-01 checking -> lender          2_016.90 USD #interest of house  // interest
+2025-02-01 checking -> escrow          690.00 USD                       // taxes and insurance
+2025-02-02 card     -> netflix         17.99 USD
+2025-02-03 card     -> costco          219.33 USD
+2025-02-03 checking -> st-annes-parish 200 USD      #charity
+2025-02-04 card     -> amazon          94.69 USD    #household
+2025-02-05 checking -> car-loan        509.72 USD                       // principal
+2025-02-05 checking -> honda-finance   92.69 USD    #interest           // interest
+2025-02-05 dcfsa    -> little-sprouts  416.66 USD   #childcare
+2025-02-05 checking -> little-sprouts  1_233.34 USD #childcare
+2025-02-06 card     -> restaurant      74.41 USD    #dining
+2025-02-07 card     -> trader-joes     73.22 USD
+2025-02-08 card     -> target          88.41 USD    #kids
+2025-02-08 checking -> riley/529       250 USD      #contribution ^529-monthly
+2025-02-09 card     -> shell           51.80 USD    #transport
+2025-02-10 checking -> savings         2_800 USD
+2025-02-11 card     -> spotify         19.99 USD
+2025-02-12 card     -> amazon          115.25 USD   #household
+2025-02-12 card     -> comcast         89.99 USD
 
 /// Pediatrician, paid from the HSA.
-2025-02-12 hsa -> dr-chen 184 USD #medical
-2025-02-13 card -> restaurant 77.92 USD #dining
-2025-02-14 bluefin -> checking 3_692.31 USD #wages
-2025-02-14 checking -> jordan/401k 221.54 USD #household-deferral // 6% deferral
-2025-02-14 checking -> irs 312.00 USD #federal-tax
-2025-02-14 checking -> ftb 118.00 USD #state-tax
-2025-02-14 checking -> ssa 282.46 USD #payroll-tax // Social Security + Medicare
-2025-02-14 checking -> edd 44.31 USD #state-disability // CA SDI
-2025-02-14 bluefin -> jordan/401k 110.77 USD #contribution
+2025-02-12 hsa         -> dr-chen     184 USD      #medical
+2025-02-13 card        -> restaurant  77.92 USD    #dining
+2025-02-14 checking    <- bluefin     3_692.31 USD #wages
+2025-02-14 checking    -> jordan/401k 221.54 USD   #household-deferral  // 6% deferral
+2025-02-14 checking    -> irs         312.00 USD   #federal-tax
+2025-02-14 checking    -> ftb         118.00 USD   #state-tax
+2025-02-14 checking    -> ssa         282.46 USD   #payroll-tax         // Social Security + Medicare
+2025-02-14 checking    -> edd         44.31 USD    #state-disability    // CA SDI
+2025-02-14 jordan/401k <- bluefin     110.77 USD   #contribution
 
 /// Valentine's dinner, the good restaurant.
-2025-02-14 card -> restaurant 212.40 USD #dining
-2025-02-15 acme -> checking 5_750.00 USD #wages
-2025-02-15 checking -> me/401k 575.00 USD #household-deferral // 10% pre-tax deferral
-2025-02-15 checking -> hsa 250.00 USD #household-pre-tax // family HSA, through the cafeteria plan
-2025-02-15 checking -> blue-shield 212.50 USD #household-pre-tax // medical, dental, vision: pre-tax
-2025-02-15 checking -> dcfsa 208.33 USD #household-pre-tax // dependent-care FSA
-2025-02-15 checking -> irs 692.00 USD #federal-tax
-2025-02-15 checking -> ftb 285.00 USD #state-tax
-2025-02-15 checking -> ssa 388.56 USD #payroll-tax // Social Security + Medicare
-2025-02-15 checking -> edd 60.95 USD #state-disability // CA SDI
-2025-02-15 acme -> me/401k 230 USD #contribution
-2025-02-16 card -> pge 198.15 USD
-2025-02-17 card -> costco 221.11 USD
-2025-02-18 card -> verizon 142.50 USD
-2025-02-19 card -> amazon 32.60 USD #household
-2025-02-20 card -> restaurant 90.95 USD #dining
-2025-02-21 card -> trader-joes 86.92 USD
-2025-02-22 card -> target 119.37 USD #kids
-2025-02-23 card -> shell 50.49 USD #transport
+2025-02-14 card     -> restaurant  212.40 USD   #dining
+2025-02-15 checking <- acme        5_750.00 USD #wages
+2025-02-15 checking -> me/401k     575.00 USD   #household-deferral  // 10% pre-tax deferral
+2025-02-15 checking -> hsa         250.00 USD   #household-pre-tax   // family HSA, through the cafeteria plan
+2025-02-15 checking -> blue-shield 212.50 USD   #household-pre-tax   // medical, dental, vision: pre-tax
+2025-02-15 checking -> dcfsa       208.33 USD   #household-pre-tax   // dependent-care FSA
+2025-02-15 checking -> irs         692.00 USD   #federal-tax
+2025-02-15 checking -> ftb         285.00 USD   #state-tax
+2025-02-15 checking -> ssa         388.56 USD   #payroll-tax         // Social Security + Medicare
+2025-02-15 checking -> edd         60.95 USD    #state-disability    // CA SDI
+2025-02-15 me/401k  <- acme        230 USD      #contribution
+2025-02-16 card     -> pge         198.15 USD
+2025-02-17 card     -> costco      221.11 USD
+2025-02-18 card     -> verizon     142.50 USD
+2025-02-19 card     -> amazon      32.60 USD    #household
+2025-02-20 card     -> restaurant  90.95 USD    #dining
+2025-02-21 card     -> trader-joes 86.92 USD
+2025-02-22 card     -> target      119.37 USD   #kids
+2025-02-23 card     -> shell       50.49 USD    #transport
 
 /// The January statement, paid in full.
-2025-02-25 checking -> card 2_028.75 USD
-2025-02-26 card -> restaurant 80.93 USD #dining
-2025-02-28 acme -> checking 5_750.00 USD #wages
-2025-02-28 checking -> me/401k 575.00 USD #household-deferral // 10% pre-tax deferral
-2025-02-28 checking -> hsa 250.00 USD #household-pre-tax // family HSA, through the cafeteria plan
-2025-02-28 checking -> blue-shield 212.50 USD #household-pre-tax // medical, dental, vision: pre-tax
-2025-02-28 checking -> dcfsa 208.33 USD #household-pre-tax // dependent-care FSA
-2025-02-28 checking -> irs 692.00 USD #federal-tax
-2025-02-28 checking -> ftb 285.00 USD #state-tax
-2025-02-28 checking -> ssa 388.56 USD #payroll-tax // Social Security + Medicare
-2025-02-28 checking -> edd 60.95 USD #state-disability // CA SDI
-2025-02-28 acme -> me/401k 230 USD #contribution
-2025-02-28 bluefin -> checking 3_692.31 USD #wages
-2025-02-28 checking -> jordan/401k 221.54 USD #household-deferral // 6% deferral
-2025-02-28 checking -> irs 312.00 USD #federal-tax
-2025-02-28 checking -> ftb 118.00 USD #state-tax
-2025-02-28 checking -> ssa 282.46 USD #payroll-tax // Social Security + Medicare
-2025-02-28 checking -> edd 44.31 USD #state-disability // CA SDI
-2025-02-28 bluefin -> jordan/401k 110.77 USD #contribution
-2025-02-28 card -> trader-joes 149.93 USD
-2025-02-28 interest-source -> savings 160.59 USD #interest-income
-2025-02-28 mortgage = 411_495.38 USD
-2025-02-28 car-loan = 22_190.00 USD
-2025-02-28 card = 2_308.35 USD
-2025-02-28 checking = 17_111.30 USD
-2025-02-28 savings = 47_161.09 USD
-2025-02-28 escrow = 2_760.00 USD
-2025-02-28 dcfsa = 416.66 USD
-2025-02-28 hsa = 9_236.00 USD
+2025-02-25 checking    -> card            2_028.75 USD
+2025-02-26 card        -> restaurant      80.93 USD    #dining
+2025-02-28 checking    <- acme            5_750.00 USD #wages
+2025-02-28 checking    -> me/401k         575.00 USD   #household-deferral  // 10% pre-tax deferral
+2025-02-28 checking    -> hsa             250.00 USD   #household-pre-tax   // family HSA, through the cafeteria plan
+2025-02-28 checking    -> blue-shield     212.50 USD   #household-pre-tax   // medical, dental, vision: pre-tax
+2025-02-28 checking    -> dcfsa           208.33 USD   #household-pre-tax   // dependent-care FSA
+2025-02-28 checking    -> irs             692.00 USD   #federal-tax
+2025-02-28 checking    -> ftb             285.00 USD   #state-tax
+2025-02-28 checking    -> ssa             388.56 USD   #payroll-tax         // Social Security + Medicare
+2025-02-28 checking    -> edd             60.95 USD    #state-disability    // CA SDI
+2025-02-28 me/401k     <- acme            230 USD      #contribution
+2025-02-28 checking    <- bluefin         3_692.31 USD #wages
+2025-02-28 checking    -> jordan/401k     221.54 USD   #household-deferral  // 6% deferral
+2025-02-28 checking    -> irs             312.00 USD   #federal-tax
+2025-02-28 checking    -> ftb             118.00 USD   #state-tax
+2025-02-28 checking    -> ssa             282.46 USD   #payroll-tax         // Social Security + Medicare
+2025-02-28 checking    -> edd             44.31 USD    #state-disability    // CA SDI
+2025-02-28 jordan/401k <- bluefin         110.77 USD   #contribution
+2025-02-28 card        -> trader-joes     149.93 USD
+2025-02-28 savings     <- interest-source 160.59 USD   #interest-income
+2025-02-28 mortgage    =  411_495.38 USD
+2025-02-28 car-loan    =  22_190.00 USD
+2025-02-28 card        =  2_308.35 USD
+2025-02-28 checking    =  17_111.30 USD
+2025-02-28 savings     =  47_161.09 USD
+2025-02-28 escrow      =  2_760.00 USD
+2025-02-28 dcfsa       =  416.66 USD
+2025-02-28 hsa         =  9_236.00 USD

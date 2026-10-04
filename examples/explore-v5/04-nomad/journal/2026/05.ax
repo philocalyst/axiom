@@ -1,27 +1,27 @@
 // May 2026.
 
-01 staking 0.001452 ETH                                         // ▸ #staking income: 4.68 USD at 3,220.00
+01 staking             0.001452 ETH                             // ▸ #staking income: 4.68 USD at 3,220.00
 01 lisbon-rent
 02 cowork
-08 staking 0.001453 ETH
+08 staking             0.001453 ETH
 08 github
 08 notion
 08 internet
 12 nordlicht-retainer
-12 metamask 0.5000 ETH -> 1_608.40 USDC                            // ▸ realizes a gain on 0.5 ETH: basis 131.27 USD each, price 3,220.00
+12 metamask 0.5000 ETH -> 1_608.40 USDC                         // ▸ realizes a gain on 0.5 ETH: basis 131.27 USD each, price 3,220.00
   + 0.0032 ETH #gas-fees                                             // ▸ a cost of the swap: the gain is 10.30 USD less
 14 cloudflare
-15 staking 0.001452 ETH
+15 staking                 0.001452 ETH
 15 brightside-retainer
 20 edp
-20 brightside owes me 1_200 GBP due 14d ^inv-2026-024 #consulting "extra sprint"
-21 harborview -> chase-checking 4_500.00 USD ^inv-2026-025      // ▸ wire
-21 chase-checking -> chase 15.00 USD #fees "incoming wire fee"
-22 staking 0.001453 ETH
+20 brightside              owes me         1_200 GBP    #consulting "extra sprint" ^inv-2026-024 due 14d
+21 chase-checking          <-   harborview 4_500.00 USD ^inv-2026-025                           // ▸ wire
+21 chase-checking          ->   chase      15.00 USD    #fees "incoming wire fee"
+22 staking                 0.001453 ETH
 25 health
-26 brightside 1_200.00 GBP -> paypal-bal 1_464.43 USD ^inv-2026-024 via paypal   // ▸ settles a GBP claim with USD: 1,525.44 at mid-market, 61.01 exchange cost
+26 brightside 1_200.00 GBP ->   paypal-bal              @ 1.22036 USD ^inv-2026-024 via paypal  // ▸ settles a GBP claim with USD: 1,525.44 at mid-market, 61.01 exchange cost
   - 3.49% #fees
   - 0.35 USD #fees
-27 paypal-bal -> chase-checking 1_412.97 USD
-29 staking 0.001458 ETH
-31 kraken-stake = 2.441795 ETH
+27 paypal-bal   -> chase-checking 1_412.97 USD
+29 staking      0.001458 ETH
+31 kraken-stake =  2.441795 ETH

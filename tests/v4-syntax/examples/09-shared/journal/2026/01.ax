@@ -1,0 +1,8 @@
+/// January: the roommates pay December's small bills, and I pay Ben December's electricity.
+2026-01-03 ben -> checking 81.11 USD for #shared-2025-12
+2026-01-03 checking -> owed-to-ben 43.90 USD for #power-2025-12
+2026-01-05 cleo -> checking 81.11 USD for #shared-2025-12
+2026-01-05 checking = 10_025.80 USD
+2026-01-05 by-ben = 0.00 USD
+2026-01-05 by-cleo = 50.00 USD
+2026-01-05 owed-to-ben = 0.00 USD

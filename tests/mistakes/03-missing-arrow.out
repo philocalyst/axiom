@@ -39,12 +39,12 @@ error[unknown-place]: there is no place `expenses/food/groceries`
    = note: assets, liabilities, income, expenses and equity are not special account roots
    = help: declare a full account path and its kind: `account expenses/food/groceries`
 
-error[expected-arrow]: expected `->`, found `groceries`
+error[expected-arrow]: expected `->` or `<-`, found `groceries`
    ╭─[03-missing-arrow.ax:15:21]
    │
 15 │ 2026-01-18 checking groceries 84.20 USD
    │                     ────┬────
-   │                         ╰── expected `->`
+   │                         ╰── expected `->` or `<-`
    │
    = help: a flow moves value from one end to another: `checking -> food 84.20 USD`
    = help: insert the arrow

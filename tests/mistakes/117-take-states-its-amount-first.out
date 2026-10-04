@@ -1,0 +1,11 @@
+error[amount-before-take]: a `<-` line states its amount after the end it takes from
+   ╭─[117-take-states-its-amount-first.ax:18:31]
+   │
+18 │ 2026-01-16 checking 3_200 USD <- acme
+   │                               ─┬
+   │                                ╰── the amount belongs to the right of this arrow
+   │
+   = help: write `checking <- acme 3_200 USD`, with the amount last
+
+✗ 1 error
+[exit status 1]

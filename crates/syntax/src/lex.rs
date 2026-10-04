@@ -57,6 +57,8 @@ pub(crate) enum Tok<'s> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Punct {
     Arrow,
+    /// `<-`, the arrow turned: the subject takes what the other end gives.
+    Back,
     Ellipsis,
     DotDot,
     EqEq,
@@ -90,6 +92,8 @@ impl Punct {
         Some(match rest {
             [b'-', b'>', ..] | [b'=', b'>', ..] => (Punct::Arrow, 2),
             [0xE2, 0x86, 0x92, ..] => (Punct::Arrow, 3),
+            [b'<', b'-', after @ ..] if after.first().is_none_or(u8::is_ascii_whitespace) => (Punct::Back, 2),
+            [0xE2, 0x86, 0x90, ..] => (Punct::Back, 3),
             [b'.', b'.', b'.', ..] => (Punct::Ellipsis, 3),
             [b'.', b'.', ..] => (Punct::DotDot, 2),
             [b'=', b'=', ..] => (Punct::EqEq, 2),
@@ -128,6 +132,7 @@ impl Punct {
     pub fn spelling(self) -> &'static str {
         match self {
             Punct::Arrow => "->",
+            Punct::Back => "<-",
             Punct::Ellipsis => "...",
             Punct::DotDot => "..",
             Punct::EqEq => "==",

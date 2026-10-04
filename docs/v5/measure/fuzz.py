@@ -5,7 +5,8 @@ usage: fuzz.py OLD_BINARY NEW_BINARY EXAMPLES_DIR SEED COUNT [diff [CODE,CODE..]
 
 With `diff`, a mutant on which the two builds print different output (or exit differently) is a regression too: the
 tool for a lane that claims to change no behaviour. The codes are diagnostics the new build says and the old one cannot
-(a lane that adds a warning or a note): each block of them, and its count in the summary line, is left out of what is compared.
+(a lane that adds a warning or a note): with codes the project is checked with `--json --all`, which writes each
+diagnostic on a line of its own and no summary, and the lines of those codes are left out of what is compared.
 
 A model that trusts the parser (an `unreachable!` where a diagnostic used to be) is only as good as the parser's
 guarantees. This is how to find out when a lane has loosened one: it takes a random example project, makes one to
@@ -47,27 +48,14 @@ def mutate(text):
 
 
 def without(output):
-    """The output with every diagnostic of an ignored code taken out (a block runs to the next empty line), and the
-    warnings it counted."""
-    if not ignored:
-        return output
-    blocks, kept, dropped = output.split("\n\n"), [], 0
-    for block in blocks:
-        block = block.lstrip("\n")
-        if any(block.startswith(f"{severity}[{code}]") for code in ignored for severity in ("warning", "note")):
-            # a note is not counted in the summary line, and a warning is
-            dropped += block.startswith("warning")
-        else:
-            kept.append(block)
-    text = "\n\n".join(kept)
-    import re
-    return re.sub(r" · (\d+) warnings?", lambda m: "" if int(m.group(1)) <= dropped else f" · {int(m.group(1)) - dropped} warnings", text)
+    """The output with every diagnostic of an ignored code taken out: with `--json` each is one line."""
+    return "\n".join(line for line in output.split("\n") if not any(f'"code":"{code}"' in line for code in ignored))
 
 
 def panics(binary, project):
     """Whether it panicked, what it said on stderr, and everything it printed."""
     try:
-        run = subprocess.run([binary, "check", "-C", project, "--today", "2026-06-01", "--color", "never"],
+        run = subprocess.run([binary, "check", "-C", project, "--today", "2026-06-01", "--color", "never"] + (["--json", "--all"] if ignored else []),
                              capture_output=True, text=True, timeout=15)
     except subprocess.TimeoutExpired:
         return False, "", "timeout"

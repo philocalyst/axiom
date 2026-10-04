@@ -9,13 +9,13 @@
 
 opening 01
   checking    6_062.55 USD
-  checking    2_350.00 USD for dana                 // her deposit: held, not Sam's
-  savings    15_000.00 USD for emergency            // an envelope Sam keeps
-  fidelity   210 VTI  basis 48_300 USD since 2021-06-01
-  fidelity    60 VXUS basis  3_420 USD since 2023-11-10
+  checking    2_350.00 USD  for dana                            // her deposit: held, not Sam's
+  savings    15_000.00 USD  for emergency                       // an envelope Sam keeps
+  fidelity         210 VTI  basis 48_300 USD since 2021-06-01
+  fidelity          60 VXUS basis 3_420 USD since 2023-11-10
   retirement 56_900.00 USD
-  visa        1_240.18 USD                          // owed to chase, as the statement says
-  condo      basis 402_000 USD since 2024-02-20     // ▸ 18,372.73 already depreciated (2024–2025)
+  visa        1_240.18 USD                                      // owed to chase, as the statement says
+  condo                     basis 402_000 USD since 2024-02-20  // ▸ 18,372.73 already depreciated (2024–2025)
                                                     // ▸ mortgage: 312,078.60 owed to rocket, from its terms
 
 01 flat          // ▸ 2,900.00 #rent from checking · 348.00 of it the studio's office
@@ -24,50 +24,50 @@ opening 01
 01 mortgage      // ▸ 2,302.90: #interest of condo 1,527.88 · principal 365.02 · escrow 410.00
 03 figma         // ▸ 15.00 · the studio's
 
-05 checking -> me 100 USD                           // cash in hand
-05 me -> taqueria-cancun 18.50 USD #dining          // ▸ an untyped party, so the purpose is written
-06 visa -> trader-joes 84.20 USD                    // ▸ #groceries (trader-joes : grocer) · food 84.20 of 900
-07 me -> corner-store 12.40 USD "food for the routine"
+05 checking -> me              100 USD              // cash in hand
+05 me       -> taqueria-cancun 18.50 USD #dining    // ▸ an untyped party, so the purpose is written
+06 visa     -> trader-joes     84.20 USD            // ▸ #groceries (trader-joes : grocer) · food 84.20 of 900
+07 me       -> corner-store    12.40 USD "food for the routine"
                                                     // ▸ unclassified, described · 3 flows say "food for the routine":
                                                     //   make it a purpose? (a code action)
 08 phone         // ▸ 45.00 from visa · 27.00 of it the studio's
-09 visa -> amazon 62.40 USD #household "hooks for the hallway"
+09 visa  -> amazon 62.40 USD #household "hooks for the hallway"
 
-12 checking -> jo 600 USD due 04-01 "for the car repair"
+12 checking -> jo 600 USD "for the car repair" due 04-01
                                                     // ▸ lent: jo owes 600.00
 
 15 job           // ▸ lumen, 4,600.00 gross · #wages
-  retirement      276.00 USD                        // ▸ pre-tax deferral · lumen adds 138.00
-  blue-shield     184.20 USD                        // ▸ #premium, pre-tax
-  irs             498.00 USD                        // ▸ #tax-paid for 2026 (irs : tax-authority)
-  ftb             196.30 USD                        // ▸ #tax-paid for 2026
-  ssa             337.81 USD                        // ▸ #payroll-tax
-  edd              52.99 USD                        // ▸ #tax-paid: SDI
-  checking        ...                               // ▸ 3,054.70
+  -> retirement  276.00 USD                            // ▸ pre-tax deferral · lumen adds 138.00
+  -> blue-shield 184.20 USD                            // ▸ #premium, pre-tax
+  -> irs         498.00 USD                            // ▸ #tax-paid for 2026 (irs : tax-authority)
+  -> ftb         196.30 USD                            // ▸ #tax-paid for 2026
+  -> ssa         337.81 USD                            // ▸ #payroll-tax
+  -> edd          52.99 USD                            // ▸ #tax-paid: SDI
+  -> checking    ...                                   // ▸ 3,054.70
 
-16 checking -> savings 400 USD for emergency
-20 vti-monthly 1.620 VTI                            // ▸ 500.00 from checking at 308.64
-22 netflix       // ▸ 15.49 from visa · #fun
+16 checking    -> savings 400 USD for emergency
+20 vti-monthly 1.620 VTI  // ▸ 500.00 from checking at 308.64
+22 netflix                // ▸ 15.49 from visa · #fun
 
 24 visa -> best-buy 1_739.13 USD #purchase of laptop "the studio's new laptop"
                                                     // ▸ the laptop arrives: equipment of studio · 138.09 of it
                                                     //   sales tax, part of its cost · expensed (§179)
 25 checking -> visa 1_240.18 USD "December's statement"
 
-27 halcyon owes studio due 30d ^inv-2026-01         // ▸ invoiced: halcyon owes 3,800.00, due 2026-02-26
+27 halcyon owes studio ^inv-2026-01 due 30d         // ▸ invoiced: halcyon owes 3,800.00, due 2026-02-26
   3_000 USD #design "brand refresh"
     800 USD #design "icon set"
 
 30 visa -> safeway 132.77 USD                       // ▸ #groceries · food 216.97 of 900
 
 31 job
-  retirement      276.00 USD
-  blue-shield     184.20 USD
-  irs             498.00 USD
-  ftb             196.30 USD
-  ssa             337.81 USD
-  edd              52.99 USD
-  checking        ...
+  -> retirement  276.00 USD
+  -> blue-shield 184.20 USD
+  -> irs         498.00 USD
+  -> ftb         196.30 USD
+  -> ssa         337.81 USD
+  -> edd          52.99 USD
+  -> checking    ...
 
 31 checking   = 8_828.87 USD
 31 visa       = 2_333.99 USD                        // owed, as the statement shows it

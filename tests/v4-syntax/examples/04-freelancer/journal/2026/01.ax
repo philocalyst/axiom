@@ -1,0 +1,38 @@
+2026-01-01 business-card -> google 7.20 USD #business-software
+2026-01-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2026-01-01 personal-checking -> bluecross 425 USD #health-premium
+2026-01-02 brightwave owes me due 30d ^inv-2026-b01
+  3_200 USD #design
+2026-01-03 business-card -> notion 10 USD #business-software
+2026-01-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2026-01-05 personal-checking -> statefarm 22 USD #home-office-cost
+2026-01-05 personal-checking -> trader-joes 86.39 USD #groceries
+2026-01-08 personal-checking -> restaurant 51.28 USD #dining
+2026-01-10 personal-checking -> transit-agency 62.04 USD #transport
+2026-01-12 personal-checking -> comcast 80 USD #home-office-cost
+2026-01-12 personal-checking -> safeway 83.41 USD #groceries
+2026-01-13 brightwave 3_200 USD -> business-checking #design ^inv-2025-b12
+2026-01-13 business-checking -> tax-vault 640 USD for vault
+2026-01-14 business-card -> figma 15 USD #business-software
+
+/// Fourth quarter of 2025, due January 15, 2026. It moves in 2026 and is `for 2025`.
+2026-01-14 tax-vault -> irs 2_400 USD #federal-tax ^q4-2025 for 2025
+2026-01-16 personal-checking -> pge 96.20 USD #home-office-cost
+2026-01-18 personal-checking -> tmobile 64 USD #business-phone
+
+/// The December statement, paid in full.
+2026-01-20 business-checking -> business-card 685.68 USD
+2026-01-20 personal-checking -> safeway 76.23 USD #groceries
+2026-01-21 car used 44 MI #business-mile for brightwave
+2026-01-22 business-card -> freshbooks 21 USD #business-software
+2026-01-22 personal-checking -> restaurant 54.98 USD #dining
+2026-01-27 personal-checking -> trader-joes 101.51 USD #groceries
+
+/// A top-up made in January that counts toward 2025: the SEP deadline is the return's due
+/// date. `for 2025` puts it in 2025's books, and the return, which closes on 2026-04-15, counts it.
+2026-01-28 business-checking -> sep 2_000 USD for 2025
+2026-01-31 interest-source -> tax-vault 36.35 USD #interest-income for vault
+2026-01-31 business-card = 53.20 USD
+2026-01-31 business-checking = 13_888.54 USD
+2026-01-31 personal-checking = 4_303.50 USD
+2026-01-31 tax-vault = 10_420.95 USD

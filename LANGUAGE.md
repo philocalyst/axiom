@@ -88,7 +88,7 @@ Source is UTF-8, read line by line.
 | purpose     | `#` then a name                                         | `#groceries`, `#repair` |
 | code        | `^` then `[a-z0-9][a-z0-9_:./-]*`, may contain `*`      | `^inv-2026-01`, `^check-1041` |
 | string      | `"…"` with `\" \\ \n \t`                                | `"food for the routine"` |
-| punct       | `-> .. ... = == != < <= > >= + - * / @ ( ) [ ] , : ! ? . \|` | |
+| punct       | `-> <- .. ... = == != < <= > >= + - * / @ ( ) [ ] , : ! ? . \|` | |
 
 A token starting with a digit is a date, month, number, percent, fraction or span
 if it matches that shape exactly, and a name otherwise (`401k`). At the start of an
@@ -112,7 +112,8 @@ Every journal line is `DATE SUBJECT …`, and the word after the subject says wh
 kind of line it is. A reader skims that column.
 
 ```text
-06 visa -> trader-joes 84.20 USD                    ->     a flow (§3)
+06 visa -> trader-joes 84.20 USD                    ->     a flow: it gave (§3)
+15 checking <- acme 3_200 USD                       <-     a flow: it took (§3)
 01 flat                                             —      a promise kept (§7)
 08 phone 47.30 USD                                  AMOUNT kept, differently this once
 27 halcyon owes studio 3_800 USD due 30d ^inv-12    owes   a promise of one flow: a claim (§7)
@@ -135,15 +136,45 @@ columns, and each flow's tail in one order.
 
 ```text
 DATE FLOW
-FLOW   := SOURCE -> TARGET [@ PRICE] TAIL (INDENT (LEG | ITEM))*
-SOURCE := [END [SELECT]] [AMOUNT | all [UNIT]]
-TARGET := [END] [AMOUNT]
-END    := ACCOUNT | OWNER | PARTY | UNIT | PROMISE | ?
-LEG    := END [SELECT] LEGAMOUNT [@ PRICE] TAIL
-ITEM   := [+ | -] AMOUNT TAIL
-TAIL   := [#PURPOSE [of THING]] [STRING] CODE* [for WHOM|PERIOD] [due WHEN] [against CODE] [via PARTY] [basis AMOUNT] [! [STRING]]
+FLOW      := SUBJECT -> OBJECT [AMOUNT] [@ PRICE] TAIL      gave
+           | SUBJECT <- OBJECT [AMOUNT] TAIL                took
+           | SUBJECT -> AMOUNT @ PRICE TAIL                 sold
+           | SUBJECT <- AMOUNT @ PRICE TAIL                 bought
+           (INDENT (LEG | ITEM))*
+SUBJECT   := END [SELECT] [AMOUNT | all [UNIT]]
+OBJECT    := END
+END       := ACCOUNT | OWNER | PARTY | UNIT | PROMISE | ?
+LEG       := (-> | <-) END [SELECT] LEGAMOUNT [@ PRICE] TAIL
+ITEM      := [+ | -] AMOUNT TAIL
+TAIL      := [#PURPOSE [of THING]] [STRING] CODE* [for WHOM|PERIOD] [due WHEN] [against CODE] [via PARTY] [basis AMOUNT] [! [STRING]]
 LEGAMOUNT := AMOUNT | ... | = AMOUNT | all [UNIT]
 ```
+
+**The arrow says what happened.** A flow line is about its subject, the end written first, which is meant to be the
+book's own: `->` says the subject gave, `<-` says it took. `checking <- acme 3_200 USD` and `acme -> checking 3_200 USD`
+are one flow, written from either end; the first is the way to write it because a reader of the book is the one who
+took. An amount belongs after the arrow, to the right of the end it is of (`S <- O A`: A came from O); the subject's own
+amount may stand before an arrow that gives (`fidelity[2026-01-20] 1.62 VTI -> checking @ 297.00 USD`).
+
+| line | what happened |
+|---|---|
+| `checking -> shop 84.20 USD` | gave |
+| `checking <- acme 3_200 USD` | took (the flow `acme -> checking 3_200 USD`) |
+| `broker -> 1.62 VTI @ 297.00 USD` | sold: one end, an amount and its price; the proceeds stay at the end |
+| `broker <- 7 VTI @ 285.70 USD` | bought: the price says what it cost |
+| `checking -> 900.00 EUR` with `->` legs | gave, split among the legs |
+| `me <- acme 8_000 USD` with `->` legs | the owner took it, and passes it on to each leg |
+| `checking <- 100 USD` with `<-` legs | took, from each of the legs |
+| `me -> shop 45_046.25 USD` with `<-` legs | the owner paid it, out of the accounts the legs name |
+
+The subject of a `<-`, of a purchase or sale, and of a split through an owner is one of the owners' books, because the line
+says what that book did. A party reaches it by the other end of an arrow: `acme <- checking 1_200 USD` is an error
+(`junction-subject`) that says to write `checking -> acme`, and so is a `<-` between two parties. A `->` that starts at a
+party (`acme -> checking 3_200 USD`) is read as it always was.
+
+A line with one end and an amount, but no price and no legs, says nothing of what the amount was exchanged for, and is an
+error with the words that fix it. The price states one amount: the other is what the amount times the price comes to
+(`1_999.90 USD` out for `7 VTI @ 285.70 USD`), so a line never writes both.
 
 Amounts are the forms of §4. The tail's clauses may come in any order; `axiom fmt`
 writes them in the order above.
@@ -153,14 +184,14 @@ writes them in the order above.
 - an **account**: money leaves or joins a position with an institution;
 - an **owner**: money or a thing held directly (`checking -> me 100 USD` is cash in
   hand; `me -> taqueria 18.50 USD`);
-- a **party**: money leaves the book's owners to it, or comes to them from it;
-- a **commodity in party position**: its issuer, as in `VTI -> fidelity 198.12 USD`
+- a **party**: money leaves the book's owners to it, or comes to them from it (`checking <- acme 3_200 USD`);
+- a **commodity in party position**: its issuer, as in `fidelity <- VTI 198.12 USD`
   (a fund pays);
 - a **promise**: what it is owed or owes (`checking -> mortgage 1_000 USD` pays the
   loan's principal; §7);
 - `?`: an unknown party, for money whose other end nobody knows;
 - nothing: the other side is the legs (a one-sided split), or, for an exchange
-  written with only a source, the same account (`fidelity 20 VTI -> 5_940 USD`).
+  written with one end, the same account (`fidelity -> 20 VTI @ 297.00 USD`).
 
 An asset is never an end: a flow says which asset it concerns through its
 purpose's object (§9): `#purchase of laptop`, `#improvement of condo`, `#sale of
@@ -171,9 +202,9 @@ declaration, except that a contract may share its party's name (§7).
 ```text
 06 visa -> trader-joes 84.20 USD                      a payment, #groceries by its party
 09 visa -> amazon 62.40 USD #household "hooks"        purpose and description written
-20 checking 2_000 USD -> fidelity 7 VTI               an exchange
-20 checking -> fidelity 7 VTI @ 285.70 USD            price given: 1,999.90 USD out
-05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD        a sale; the proceeds stay at fidelity
+15 checking <- acme 3_200 USD #wages                  a payment that arrives
+20 checking -> fidelity 7 VTI @ 285.70 USD            an exchange: 1,999.90 USD out for 7 VTI
+05 fidelity[2026-01-20] -> 1.62 VTI @ 297.00 USD      a sale; the proceeds stay at fidelity
 24 visa -> best-buy 1_739.13 USD #purchase of laptop  the laptop arrives (§9)
 12 checking -> jo 600 USD due 04-01                   lent: jo owes it (§7)
 24 visa -> delta 420 USD for lumen                    paid for lumen: lumen owes it (§7)
@@ -187,15 +218,26 @@ declaration, except that a contract may share its party's name (§7).
 
 **Split flows.** When the header names only one end, the indented legs are the
 other side; their total is the header amount, or the sum of the legs, and at most
-one leg is `...` (the remainder). A leg `= AMOUNT` makes its account's balance
-equal that amount after the flow. A `?` leg beside a `...` leg is `cannot-infer`:
-both would take what the others leave, so write the amount of one of them, or
-assert the balance that solves it. Many-to-many is an error.
+one leg is `...` (the remainder). Each leg leads with its arrow: `->` where the
+header's end gives and the legs receive, `<-` where it takes and the legs give; a leg
+that points the other way is an error that says which arrow to write. A leg `=
+AMOUNT` makes its account's balance equal that amount after the flow. A `?` leg beside a
+`...` leg is `cannot-infer`: both would take what the others leave, so write the amount of
+one of them, or assert the balance that solves it. Many-to-many is an error, and so is a
+leg with no arrow where one is needed.
 
-**A leg between two parties passes through the transaction's owner.** When the
-header's end and a leg's end are both parties, the value is the owner's on the
-way: `lumen -> irs 498 USD` in Sam's paystub is Sam's wages, paid on to the IRS.
-The owner of a transaction is the owner of its accounts, or `me`.
+```text
+15 me <- acme 8_000 USD #wages                         the paycheck, passed on
+  -> retirement 800 USD ^pretax                        to each leg, which says where it goes
+  -> irs        880 USD
+  -> checking   ...                                    the remainder
+```
+
+**A party's money passes through the transaction's owner.** When the header's end
+and a leg's end are both parties, the value is the owner's on the way: in Sam's
+paystub `sam <- lumen 498 USD` with a leg `-> irs 498 USD` is Sam's wages, paid on
+to the IRS. The owner of a transaction is the owner of its accounts, or `me`;
+`axiom fmt --upgrade` writes the owner in.
 
 **Line items.** An indented line that names no end is an item of the flow above it,
 between the same two ends, with its own purpose, description and codes:
@@ -216,7 +258,7 @@ unit than the header's is an exchange of its own (gas paid in ETH on a swap).
 14 visa -> target 120.00 USD #household
   32.10 USD #groceries
   12.00 USD #gifts "for jo's birthday"                // 75.90 stays #household
-15 title-co -> checking 627_000 USD #sale of condo
+15 checking <- title-co 627_000 USD #sale of condo
   - 6% #selling-costs "commission"                    // 37,620 withheld
 ```
 
@@ -706,12 +748,12 @@ contract job with lumen
 
 ```text
 12 checking -> jo 600 USD due 04-01                lent: jo owes me 600
-12 jo -> checking 200 USD                          settles 200 of it
+12 checking <- jo 200 USD                          settles 200 of it
 24 visa -> delta 420 USD for lumen                 paid for lumen: lumen owes me 420
 27 halcyon owes studio due 30d ^inv-12             an invoice, itemized
   3_000 USD #design "brand refresh"
     800 USD #design "icon set"
-26 halcyon -> checking 3_800 USD ^inv-12           settles exactly that claim
+26 checking <- halcyon 3_800 USD ^inv-12           settles exactly that claim
 05 me owes pge 142.50 USD due 02-20 #utilities     a bill received
 ```
 
@@ -1083,8 +1125,18 @@ axiom lots      [ACCOUNT] [--at DATE]
 axiom forecast  [--until DATE] [--paths N]
 axiom why       TARGET                         a name, #purpose, ^code, law, tax line, "text" or FILE:LINE
 axiom sync      [NAME…] [--dry]                bring in what is new (§14)
-axiom fmt       [FILE…] [--check]              lay files out in the house style
+axiom fmt       [FILE…] [--check] [--upgrade]  lay files out in the house style; write v4 lines the v5 way
 ```
+
+**Books written the v4 way.** v4 had no `<-` and no arrow on a leg, and wrote an exchange with an amount on each side. A
+file that still does is read all the same, and `check` says so once for the file, with a label at the first of each form: a
+leg with no arrow, an amount on each side of an arrow that names two ends, an amount before an arrow with only legs after it,
+and an arrow with no subject. `axiom fmt --upgrade` rewrites them, and changes nothing the book says: it asks the book which
+end of a line is its own (a payment that arrives is written `<-`), whom a paystub passes through, and how many decimals a
+commodity has, writes each file's new text on a copy of the session, and keeps it only if the balances, the figures and every
+diagnostic are what they were. A line it would have to guess is left as it was and said: two amounts that no price a person
+would write relates (it names the shortest price that does), and a split whose legs end in the accounts of two owners. Plain
+`axiom fmt` lays a v4 line out and does not respell it.
 
 Global options: `--for ENTITY`, `--relaxed`, `--today DATE`, `--color
 auto|always|never`, and `--json`, which writes any view as JSON: tallies and totals

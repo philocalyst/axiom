@@ -1,0 +1,18 @@
+// MISTAKE: a sale has one end and an amount, but no price and no legs to say where the money went.
+base USD
+use std
+
+commodity VTI : security
+  precision 0
+
+account assets/brokerage : brokerage
+account assets/checking : bank
+account assets/savings  : bank
+
+entity acme : employer
+
+opening 2025-12-31
+  checking 3_000 USD
+  brokerage 10 VTI basis 2_800 USD since 2024-03-01
+
+2026-01-22 brokerage -> 2 VTI

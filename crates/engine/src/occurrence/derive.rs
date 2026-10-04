@@ -336,7 +336,7 @@ opening 2026-01-01
     fn an_amount_that_reads_the_occurrence_sees_the_header_as_given_and_the_flows_the_group_made() {
         // The header is 5,000.00 with 500.00 to the 401(k): a match of 40% of the smaller of that and 10% of the gross.
         let text = format!(
-            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  checking ...\n  law match\n    on flow\n    derive acme -> k401 40% of ([k401] up to 10% of amount) #match\n2026-01-01 pay\n"
+            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  -> k401 500.00 USD #match\n  -> checking ...\n  law match\n    on flow\n    derive acme -> k401 40% of ([k401] up to 10% of amount) #match\n2026-01-01 pay\n"
         );
         with_run(&text, day(2026, 1, 31), |book, run| {
             assert_eq!(held(book, run, "k401"), Qty(500_00 + 200_00), "40% of min(500.00, 500.00)");
@@ -351,7 +351,7 @@ opening 2026-01-01
     #[test]
     fn a_law_fires_for_the_header_and_reads_its_ends_whatever_legs_the_group_has() {
         let text = format!(
-            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  k401 500.00 USD #match\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
+            "{PRELUDE}contract pay with acme\n  5_000.00 USD monthly on 1 into checking\n  from 2026-01-01\n  -> k401 500.00 USD #match\n  law derived\n    on flow\n    when to is checking\n    derive -> escrow 10.00 USD #match\n2026-01-01 pay\n"
         );
         with_run(&text, day(2026, 1, 31), |book, run| {
             assert_eq!(

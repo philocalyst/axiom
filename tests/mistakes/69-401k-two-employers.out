@@ -43,15 +43,15 @@ error[unknown-place]: there is no place `income/salary-newco`
 error[deferral-limit]: 401(k) deferrals over the yearly limit: 27,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 2,500.00 USD
    ╭─[69-401k-two-employers.ax:32:3]
    │
-26 │ 2026-05-29 acme -> 20_000 USD
-27 │   retirement  15_000 USD
-   │   ───────────┬──────────
-   │              ╰── 2026-05-29: 15,000.00 USD from acme to assets/retirement
+26 │ 2026-05-29 me <- acme 20_000 USD
+27 │   -> retirement 15_000 USD
+   │   ────────────┬───────────
+   │               ╰── 2026-05-29: 15,000.00 USD from acme to assets/retirement
    ⋮
-31 │ 2026-06-26 newco -> 16_000 USD
-32 │   retirement-newco  12_000 USD
-   │   ──────────────┬─────────────
-   │                 ╰── this flow: 12,000.00 USD into assets/retirement-newco
+31 │ 2026-06-26 me <- newco 16_000 USD
+32 │   -> retirement-newco 12_000 USD
+   │   ───────────────┬──────────────
+   │                  ╰── this flow: 12,000.00 USD into assets/retirement-newco
    │
    ├─[us/401k.ax:44:13] (built in)
    │

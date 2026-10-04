@@ -61,6 +61,8 @@ use std::ops::{Deref, Index};
 
 use axiom_core::{Day, Dec, FileId, Loc, Span};
 
+use crate::lex::Punct;
+
 pub use crate::refs::{Many, Ref};
 
 // The calendar words a plan and a law's `each` trigger are written in are core's.
@@ -252,6 +254,17 @@ impl<'s> File<'s> {
         locate(self.id, self.src, text)
     }
 
+    /// The first arrow after `end`, which a header is read from: where a flow's junction is. A selector's dates have
+    /// hyphens, and none of them is an arrow.
+    pub fn arrow_after(&self, end: End<'s>) -> Loc {
+        let (bytes, after) = (self.src.as_bytes(), self.loc(end.name.0).end as usize);
+        let found = (after..bytes.len()).find_map(|at| match Punct::lex(&bytes[at..])? {
+            (Punct::Arrow | Punct::Back, len) => Some(Loc::new(self.id, at as u32, (at + len) as u32)),
+            _ => None,
+        });
+        found.unwrap_or_else(|| self.loc(end.name.0))
+    }
+
     /// This file laid out in the house style, using the source it borrows.
     pub fn format(&self) -> String {
         crate::style::format(self.src, self)
@@ -374,6 +387,8 @@ tables! {
     items: LineItem<'s>,
     /// The selectors of ends: [`End::select`].
     selects: Select<'s>,
+    /// The owners flows pass through: [`Course::Through`].
+    owners: End<'s>,
     /// The clauses of tails: [`Flow::tail`].
     clauses: Clause<'s>,
     /// The `also` lines of declarations: [`Contract::alsos`], [`Decl::alsos`].
@@ -508,25 +523,97 @@ pub struct Txn<'s> {
     pub flow: Flow<'s>,
 }
 
-/// `SOURCE -> TARGET TAIL` with optional indented legs and items.
+/// `SUBJECT -> OBJECT TAIL` or `SUBJECT <- OBJECT TAIL`, with optional indented legs and items.
 ///
-/// When both sides name an end there are no legs. When exactly one side does,
-/// the legs are the other side (a "one side split"), and the header may state
-/// an amount on either or both sides: `house 1 HOME -> 431_500 USD`. With no
-/// legs, a source and both amounts are an exchange that stays at the source:
-/// `fidelity 20 VTI -> 5_940 USD`. A flow with no date is what an `also` line
-/// of a declaration says.
+/// What the model reads is `from` and `to`, whichever way the arrow was written: `S <- O A` is `O -> S A`. When both
+/// sides name an end there are no legs. When exactly one side does, the legs are the other side (a "one side split"),
+/// and the header may state an amount on either or both sides: `house 1 HOME -> 431_500 USD`. With no legs, a
+/// source and both amounts are an exchange that stays at the source: `fidelity 20 VTI -> 5_940 USD`; and one end,
+/// one amount and a price are an exchange inside it: `fidelity -> 1.62 VTI @ 297 USD` (a sale) has the end on both
+/// sides and the amount on the source's, `fidelity <- 7 VTI @ 285.70 USD` (a purchase) has it on the target's. A flow
+/// with no date is what an `also` line of a declaration says.
 #[derive(Debug)]
 pub struct Flow<'s> {
-    /// What leaves: the left of the arrow.
+    /// What leaves.
     pub from: Side<'s>,
-    /// What arrives: the right of the arrow.
+    /// What arrives.
     pub to: Side<'s>,
     /// What the header says about the whole flow, which applies to every leg:
     /// `&file[flow.tail]`. A `DATE..DATE` spread is the clause `for DATE..DATE`.
     pub tail: Many<Clause<'s>>,
     /// The indented lines under the header.
     pub body: Body<'s>,
+    /// Which way the arrow was written, and whose book the flow passes through.
+    pub course: Course<'s>,
+}
+
+impl<'s> Flow<'s> {
+    /// The end the line says is an owner's, if how it is written says so: what a `<-` takes at, what a purchase or a sale
+    /// stays in, and the owner a split passes through. A `->` between two ends says only that value moved, and v4 books
+    /// are full of `acme -> checking`, so it names none.
+    pub fn owner(&self, file: &File<'s>) -> Option<End<'s>> {
+        let within = self.from.end.zip(self.to.end).is_some_and(|(from, to)| from.name == to.name);
+        match self.course {
+            Course::Through(_, owner) => Some(file[owner]),
+            Course::Direct(Junction::In) => self.to.end,
+            Course::Direct(Junction::Out) => self.from.end.filter(|_| within),
+        }
+    }
+}
+
+/// Which way a flow's arrow points, and whether the flow passes through an owner: the one the header names when it is
+/// no end of the flow, `me` in `me <- acme 12_000 USD` with legs (the split's source, or with `->` its destination, is
+/// the other end). One value, so that a flow costs one word for both and the owner is not stored where there is none.
+#[derive(Clone, Copy, Debug)]
+pub enum Course<'s> {
+    Direct(Junction),
+    Through(Junction, Ref<End<'s>>),
+}
+
+impl<'s> Course<'s> {
+    /// The way the arrow points.
+    pub const fn junction(self) -> Junction {
+        match self {
+            Course::Direct(junction) | Course::Through(junction, _) => junction,
+        }
+    }
+
+    /// The owner the flow passes through: `&file[through]`.
+    pub const fn through(self) -> Option<Ref<End<'s>>> {
+        match self {
+            Course::Direct(_) => None,
+            Course::Through(_, owner) => Some(owner),
+        }
+    }
+}
+
+/// Which way a flow's arrow points, and so what happened to the end it starts from or points at. A line is about its
+/// subject, the end written first: `->` says it gave, `<-` that it took. The two are one flow written from either
+/// side, and the subject is meant to be the book's own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Junction {
+    /// `->`
+    Out,
+    /// `<-`
+    In,
+}
+
+impl Junction {
+    /// How it is written.
+    pub const fn spelling(self) -> &'static str {
+        match self {
+            Junction::Out => "->",
+            Junction::In => "<-",
+        }
+    }
+
+    /// The other way.
+    pub const fn turned(self) -> Junction {
+        match self {
+            Junction::Out => Junction::In,
+            Junction::In => Junction::Out,
+        }
+    }
 }
 
 /// The indented lines under a header that says a flow, an occurrence or new
@@ -629,6 +716,16 @@ pub enum Quantity<'s> {
     Whole,
 }
 
+impl<'s> Quantity<'s> {
+    /// The amount a quantity writes out, if it writes one: not a marker, a share, a computation or a pending amount.
+    pub fn literal(self) -> Option<Literal<'s>> {
+        match self {
+            Quantity::Amount(Amount::Literal(literal)) => Some(literal),
+            _ => None,
+        }
+    }
+}
+
 /// An indented line under a flow that names an end: `retirement 800 USD ^pretax`.
 /// The same line is a leg of an occurrence's overrides (where `NAME = AMOUNT`
 /// states an input, or a target balance: the model tells them apart), of a
@@ -646,6 +743,9 @@ pub struct Leg<'s> {
     pub tail: Many<Clause<'s>>,
     /// The whole line, trailing comment excluded.
     pub loc: Loc,
+    /// The arrow it leads with, which says which way its value moves. An opening's lines and a return's tallies have
+    /// none, and neither has a leg written the way v4 did.
+    pub arrow: Option<Junction>,
 }
 
 /// An indented line under a flow that names no end (LANGUAGE §3): a part of the

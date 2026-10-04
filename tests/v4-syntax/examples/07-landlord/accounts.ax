@@ -1,0 +1,65 @@
+// Cash and claims. The v4 journal names the other party and purpose on each flow;
+// it does not create income, expense or equity chart accounts.
+account checking     : deposit at bank
+account rental-bank : deposit at bank
+account deposit-bank : deposit at bank
+account bills       : payable at summit-roofing
+account deposits    : payable
+
+// Project-specific purposes not supplied by std or us/rental.
+purpose advertising : spending
+  law count-rental-advertising
+    on flow
+    count amount as rental-expenses
+
+purpose management : spending
+  law count-rental-management
+    on flow
+    count amount as rental-expenses
+
+purpose loan-cost   : spending
+purpose selling-cost : spending
+purpose deposit-return : transfer
+purpose deposit : transfer
+purpose sale : capital
+purpose rental-utilities : spending
+  law count-rental-utilities
+    on flow
+    count amount as rental-expenses
+
+purpose late-fees : income
+  law count-rental-late-fees
+    on flow
+    count amount as rental-income
+
+purpose forfeited-deposit : income
+  law count-rental-forfeiture
+    on flow
+    count amount as rental-income
+
+entity bank : org
+entity lender : lender
+entity buyer : org
+entity title-co : org
+entity summit-roofing : contractor
+entity landlord-policy : insurer
+entity quick-plumbing : contractor
+entity appliance-doc : contractor
+entity green-yards : contractor
+entity fresh-paint : contractor
+entity hardware-hank : contractor
+entity rentlist : org
+entity city-power : utility
+entity city-water : utility
+entity county : government
+entity hartwell-pm : org
+entity oak-street : landlord
+entity tenant-a : tenant
+entity tenant-b : tenant
+entity acme : employer
+entity payroll-office : government
+entity trader-joes : grocer
+entity cafe : merchant
+entity home-supplies : store
+
+code inv-* on payable

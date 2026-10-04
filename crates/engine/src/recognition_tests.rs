@@ -122,10 +122,10 @@ fn what_a_payment_does_not_settle_counts_as_the_payment_says() {
 #[test]
 fn each_purpose_of_an_itemized_claim_counts_what_its_line_was() {
     let lines = "\
-2026-01-02 ann owes me due 2026-02-01 ^i1
+2026-01-02 ann owes me ^i1 due 2026-02-01
   3_000 USD #design
-  800 USD #retail
-2026-01-20 ann -> checking 3_800 USD ^i1
+    800 USD #retail
+2026-01-20 checking <- ann 3_800 USD ^i1
 ";
     with("cash", lines, |book, run| {
         assert_eq!(counted(book, run, "receipts"), [on("2026-01-20", 3_000_00)]);
@@ -136,7 +136,7 @@ fn each_purpose_of_an_itemized_claim_counts_what_its_line_was() {
 #[test]
 fn a_flow_out_of_a_claim_place_settles_it_too() {
     let lines = "\
-2026-01-02 ann -> owed 300 USD due 2026-02-01 #design ^i1
+2026-01-02 owed      <- ann      300 USD #design ^i1 due 2026-02-01
 2026-01-20 owed[^i1] -> checking 300 USD
 ";
     with("cash", lines, |book, run| assert_eq!(counted(book, run, "receipts"), [on("2026-01-20", 300_00)]));
@@ -146,8 +146,8 @@ fn a_flow_out_of_a_claim_place_settles_it_too() {
 #[test]
 fn a_claim_with_no_purpose_has_no_recognition_to_wait_for() {
     let lines = "\
-2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
-2026-01-20 ann -> checking 300 USD #design ^i1
+2026-01-02 ann      owes me  300 USD ^i1 due 2026-02-01
+2026-01-20 checking <-   ann 300 USD #design ^i1
 ";
     for books in ["cash", "accrual"] {
         with(books, lines, |book, run| {
@@ -190,12 +190,12 @@ fn a_write_off_reverses_in_accrual_books_what_the_claim_recognized() {
 #[test]
 fn a_write_off_takes_back_each_line_of_an_itemized_claim_for_its_own_purpose() {
     let lines = "\
-2026-01-02 ann owes me due 2026-02-01 ^i1
+2026-01-02 ann owes me ^i1 due 2026-02-01
   300 USD #design
   100 USD #retail
-2026-02-15 ^i1 waived \"not collected\"
-2026-03-01 ann -> checking 50 USD #design
-2026-03-02 ann -> checking 20 USD #retail
+2026-02-15 ^i1      waived            \"not collected\"
+2026-03-01 checking <-     ann 50 USD #design
+2026-03-02 checking <-     ann 20 USD #retail
 ";
     with("accrual", lines, |book, run| {
         assert_eq!(counted(book, run, "running"), [on("2026-01-02", 300_00), on("2026-03-01", 50_00)]);
@@ -220,10 +220,10 @@ fn a_payment_that_is_returned_takes_back_what_it_counted_in_cash_books() {
 #[test]
 fn the_fee_leg_counts_its_own_purpose_and_the_claim_its_own() {
     let lines = "\
-2026-01-02 ann owes me 3_100 USD due 2026-02-01 #design ^i1
-2026-01-20 ann -> 3_100 USD #design ^i1
-  checking 3_009.80 USD
-  stripe 90.20 USD #fees
+2026-01-02 ann owes me  3_100 USD #design ^i1 due 2026-02-01
+2026-01-20 me  <-   ann 3_100 USD #design ^i1
+  -> checking 3_009.80 USD
+  -> stripe      90.20 USD #fees
 ";
     with("cash", lines, |book, run| {
         let mut receipts = counted(book, run, "receipts");
@@ -252,10 +252,10 @@ fn named_as_counted(run: &Run) -> String {
 #[test]
 fn a_limit_that_broke_names_the_payments_that_counted_and_not_the_claims_made() {
     let lines = "\
-2026-01-02 ann owes me 200 USD due 2026-02-01 #design ^i1
-2026-01-03 ann owes me 100 USD due 2026-02-01 #design ^i2
-2026-01-20 ann -> checking 200 USD ^i1
-2026-01-25 ann -> checking 100 USD ^i2
+2026-01-02 ann      owes me  200 USD #design ^i1 due 2026-02-01
+2026-01-03 ann      owes me  100 USD #design ^i2 due 2026-02-01
+2026-01-20 checking <-   ann 200 USD ^i1
+2026-01-25 checking <-   ann 100 USD ^i2
 ";
     with("cash", lines, |_, run| {
         let counted = named_as_counted(run);

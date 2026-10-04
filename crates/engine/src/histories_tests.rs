@@ -154,11 +154,11 @@ entity ann
 entity bob
 opening 2026-01-01
   checking 1_000 USD
-2026-01-02 ann owes me 300 USD due 2026-02-01 ^i1
-2026-01-03 bob owes me 200 USD due 2026-02-01 ^i2
-2026-01-20 ann -> checking 100 USD ^i1
-2026-02-15 ^i1 waived \"not collected\"
-2026-02-16 bob -> checking 200 USD
+2026-01-02 ann      owes   me  300 USD ^i1 due 2026-02-01
+2026-01-03 bob      owes   me  200 USD ^i2 due 2026-02-01
+2026-01-20 checking <-     ann 100 USD ^i1
+2026-02-15 ^i1      waived             \"not collected\"
+2026-02-16 checking <-     bob 200 USD
 ";
 
 #[test]

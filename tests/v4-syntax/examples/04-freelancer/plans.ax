@@ -1,0 +1,12 @@
+// Estimated 2026 installments continue the written safe-harbor schedule.
+contract estimate-q2 with irs
+  3_000 USD yearly on 06-14 from tax-vault #federal-tax
+  from 2026-06-14
+
+contract estimate-q3 with irs
+  3_000 USD yearly on 09-14 from tax-vault #federal-tax
+  from 2026-09-14
+
+contract estimate-q4 with irs
+  3_000 USD yearly on 12-30 from tax-vault #federal-tax
+  from 2026-12-30

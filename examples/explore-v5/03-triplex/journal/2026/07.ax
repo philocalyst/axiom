@@ -6,7 +6,7 @@
   + 193.24 USD #utilities of unit-b "water, Q1: 32.81% of 588.90"
 01 lease-c2                                                   // ▸ 2,050.00 from the tenant into pm-trust · - 164.00 #management (8%)
   + 184.03 USD #utilities of unit-c "water, Q1: 31.25%"
-01 pm-trust -> elm-pm 100.00 USD #leasing-fee "renewal fee, unit B"
-10 pm-trust -> checking 1_462.00 USD                          // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
+01 pm-trust     -> elm-pm    100.00 USD   #leasing-fee "renewal fee, unit B"
+10 pm-trust     -> checking  1_462.00 USD                     // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
 31 property-tax                                               // ▸ 3,920.00 from escrow
-31 escrow = 50.00 USD
+31 escrow       =  50.00 USD

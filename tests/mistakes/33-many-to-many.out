@@ -42,6 +42,7 @@ error[many-to-many]: a transaction cannot name both sides and also list legs
    = note: legs spell out the side the header leaves unnamed: `acme -> 5_200 USD` with legs for
            where it goes
    = help: write two transactions, one for each flow
+   = help: or let the subject pass it on: `me <- acme 5_200 USD` with a leg `-> irs 692 USD`
 
 ✗ 4 errors
 [exit status 1]

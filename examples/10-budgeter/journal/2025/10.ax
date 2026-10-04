@@ -3,12 +3,12 @@
 2025-10-01 checking -> fun 29 USD / gym
 
 /// A check for Jo, my half of the concert tickets. Written, in the mail, not yet cashed: it counts against what I can spend but not against the bank's balance.
-2025-10-02 checking -> jo (240 USD) #check-1027
-2025-10-03 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
+2025-10-02 checking -> jo     (240 USD)    #check-1027
+2025-10-03 me       <- studio 2_307.69 USD
+  -> taxes/federal 226.00 USD
+  -> taxes/payroll 176.54 USD
+  -> health         60.00 USD
+  -> checking      ...
 2025-10-03 checking -> utilities 61.84 USD / power-co
 2025-10-04 visa -> dining 16.20 USD
 2025-10-05 visa -> groceries 55.08 USD / kroger
@@ -31,11 +31,11 @@
 /// Jo cashed it.
 2025-10-16 #check-1027 settled
 2025-10-16 visa -> dining 13.06 USD
-2025-10-17 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
+2025-10-17 me   <- studio 2_307.69 USD
+  -> taxes/federal 226.00 USD
+  -> taxes/payroll 176.54 USD
+  -> health         60.00 USD
+  -> checking      ...
 2025-10-17 visa -> subscriptions 17.99 USD / hulu
 2025-10-18 visa -> clothing 24.29 USD
 2025-10-19 visa -> groceries 52.97 USD / kroger
@@ -43,23 +43,23 @@
 2025-10-21 visa -> transport 17.97 USD / rideshare
 
 /// A 20.00 USD birthday gift from my aunt, source unclear in the app.
-2025-10-22 ? -> checking 20 USD
+2025-10-22 checking <- ? 20 USD
 
 /// September's statement, in full.
-2025-10-22 checking -> visa 647.53 USD
-2025-10-23 visa -> dining 43.79 USD
-2025-10-24 visa -> fun 26.01 USD
-2025-10-24 wallet -> dining 9.67 USD
+2025-10-22 checking -> visa   647.53 USD
+2025-10-23 visa     -> dining 43.79 USD
+2025-10-24 visa     -> fun    26.01 USD
+2025-10-24 wallet   -> dining 9.67 USD
 2025-10-26 visa -> subscriptions 22.99 USD / adobe
 2025-10-27 visa -> groceries 69.43 USD / kroger
 2025-10-28 visa -> dining 11.30 USD
-2025-10-31 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
+2025-10-31 me   <- studio 2_307.69 USD
+  -> taxes/federal 226.00 USD
+  -> taxes/payroll 176.54 USD
+  -> health         60.00 USD
+  -> checking      ...
 2025-10-31 visa = 593.08 USD
 
 /// The bank shows 27.60 USD less than I do. A Venmo I sent and never wrote down. I accept the gap, visibly, with `!`.
 2025-10-31 checking = 5_464.24 USD !
-2025-10-31 savings = 4_200.00 USD
+2025-10-31 savings  = 4_200.00 USD

@@ -1,0 +1,15 @@
+// A first ledger in three lines: who paid, what the money was for, and what
+// the bank says remains.
+
+base USD
+use std
+
+entity me : person
+entity acme : employer
+entity trader-joes : grocer
+entity chase : org
+account checking : deposit at chase
+
+2026-01-15 acme -> checking 3_200 USD
+2026-01-18 checking -> trader-joes 84.20 USD
+2026-01-31 checking = 3_115.80 USD

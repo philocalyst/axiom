@@ -1,38 +1,38 @@
-2025-07-01 brightwave owes me due 30d ^inv-2025-b07
+2025-07-01 brightwave owes me ^inv-2025-b07 due 30d
   3_200 USD #design
-2025-07-01 business-card -> google 7.20 USD #business-software
-2025-07-01 personal-checking -> landlord 1_750 USD #home-office-cost
-2025-07-01 personal-checking -> bluecross 412 USD #health-premium
-2025-07-03 business-card -> notion 10 USD #business-software
-2025-07-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
-2025-07-05 personal-checking -> statefarm 22 USD #home-office-cost
-2025-07-05 personal-checking -> trader-joes 78.55 USD #groceries
+2025-07-01 business-card     -> google            7.20 USD  #business-software
+2025-07-01 personal-checking -> landlord          1_750 USD #home-office-cost
+2025-07-01 personal-checking -> bluecross         412 USD   #health-premium
+2025-07-03 business-card     -> notion            10 USD    #business-software
+2025-07-03 business-checking -> personal-checking 2_950 USD #owner-draw  // owner's draw
+2025-07-05 personal-checking -> statefarm         22 USD    #home-office-cost
+2025-07-05 personal-checking -> trader-joes       78.55 USD #groceries
 
 /// Seasonal lookbook.
-2025-07-07 northpeak owes me due 30d ^inv-2025-n1
+2025-07-07 northpeak owes me ^inv-2025-n1 due 30d
   7_400 USD #design
-2025-07-08 business-card -> adobe 59.99 USD #business-software
-2025-07-08 personal-checking -> restaurant 41.50 USD #dining
-2025-07-10 business-card -> meal-vendor 118.60 USD #business-meal
-2025-07-10 personal-checking -> transit-agency 61.68 USD #transport
-2025-07-10 car used 27 MI #business-mile for northpeak
-2025-07-12 personal-checking -> comcast 80 USD #home-office-cost
-2025-07-12 personal-checking -> safeway 118.14 USD #groceries
-2025-07-14 business-card -> figma 15 USD #business-software
-2025-07-15 brightwave 3_200 USD -> business-checking #design ^inv-2025-b06
-2025-07-15 business-checking -> tax-vault 640 USD for vault
-2025-07-16 personal-checking -> pge 63.40 USD #home-office-cost
-2025-07-18 personal-checking -> tmobile 64 USD #business-phone
+2025-07-08 business-card     ->   adobe          59.99 USD  #business-software
+2025-07-08 personal-checking ->   restaurant     41.50 USD  #dining
+2025-07-10 business-card     ->   meal-vendor    118.60 USD #business-meal
+2025-07-10 personal-checking ->   transit-agency 61.68 USD  #transport
+2025-07-10 car               used 27 MI                     #business-mile for northpeak
+2025-07-12 personal-checking ->   comcast        80 USD     #home-office-cost
+2025-07-12 personal-checking ->   safeway        118.14 USD #groceries
+2025-07-14 business-card     ->   figma          15 USD     #business-software
+2025-07-15 business-checking <-   brightwave     3_200 USD  #design ^inv-2025-b06
+2025-07-15 business-checking ->   tax-vault      640 USD    for vault
+2025-07-16 personal-checking ->   pge            63.40 USD  #home-office-cost
+2025-07-18 personal-checking ->   tmobile        64 USD     #business-phone
 
 /// The June statement, paid in full.
-2025-07-20 business-checking -> business-card 1_002.19 USD
-2025-07-20 personal-checking -> safeway 100.72 USD #groceries
-2025-07-22 business-card -> freshbooks 21 USD #business-software
-2025-07-22 personal-checking -> restaurant 48.12 USD #dining
-2025-07-22 car used 92 MI #business-mile for northpeak
-2025-07-27 personal-checking -> trader-joes 118.86 USD #groceries
-2025-07-31 interest-source -> tax-vault 20.52 USD #interest-income for vault
-2025-07-31 business-card = 231.79 USD
-2025-07-31 business-checking = 3_854.70 USD
-2025-07-31 personal-checking = 3_418.04 USD
-2025-07-31 tax-vault = 5_882.98 USD
+2025-07-20 business-checking ->   business-card   1_002.19 USD
+2025-07-20 personal-checking ->   safeway         100.72 USD   #groceries
+2025-07-22 business-card     ->   freshbooks      21 USD       #business-software
+2025-07-22 personal-checking ->   restaurant      48.12 USD    #dining
+2025-07-22 car               used 92 MI                        #business-mile for northpeak
+2025-07-27 personal-checking ->   trader-joes     118.86 USD   #groceries
+2025-07-31 tax-vault         <-   interest-source 20.52 USD    #interest-income for vault
+2025-07-31 business-card     =    231.79 USD
+2025-07-31 business-checking =    3_854.70 USD
+2025-07-31 personal-checking =    3_418.04 USD
+2025-07-31 tax-vault         =    5_882.98 USD

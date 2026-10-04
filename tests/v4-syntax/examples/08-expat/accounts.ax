@@ -1,0 +1,194 @@
+// Where the money is, in three currencies, and who is paid. Euros and pounds are
+// cash here: they are declared in `std` as currencies, so spending them realizes
+// no capital gain, and `available` counts them. The foreign account reporting
+// check is the running-maximum trick described below.
+
+// ─── United States ──────────────────────────────────────────────────────────
+
+/// Interest paid on a student loan, which `tax.ax` deducts up to a limit.
+kind student-loan-interest : expense
+
+account assets/bank/us-checking : bank
+account assets/bank/us-savings  : bank
+account assets/retirement/us-401k : 401k
+  employer acme
+
+account liabilities/visa : credit-card
+
+/// 31,120.40 USD at 4.53% at the start of the year; 420.00 USD a month.
+account liabilities/student-loan : loan
+  rate     4.53%
+  maturity 2032-06-30
+
+
+// ─── Germany and the United Kingdom ─────────────────────────────────────────
+//
+// A US person with foreign accounts worth more than 10,000 USD in total at any
+// time in the year files an FBAR (FinCEN Form 114, due April 15, extended to
+// October 15) listing each account's highest balance in dollars. Axiom has no
+// running maximum, so each account keeps one in a tally: `always` fires after
+// each change, and `count max(v - tally(...), empty)` adds only the amount by
+// which today's value passes the highest so far. The tally is then the highest
+// value. A tally has one name per law, so it takes one law per account.
+
+/// The current account (Girokonto): salary arrives here and rent leaves.
+account assets/de/girokonto : bank
+  holds EUR
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
+  law fbar-max
+    always
+    let v = value(balance, USD)
+    count max(v - tally(fbar-girokonto), empty) as fbar-girokonto
+
+/// A high-interest savings account (Tagesgeld).
+account assets/de/tagesgeld : bank
+  holds EUR
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
+  law fbar-max
+    always
+    let v = value(balance, USD)
+    count max(v - tally(fbar-tagesgeld), empty) as fbar-tagesgeld
+
+/// The rent deposit (Mietkaution): three months of base rent, blocked in a
+/// savings account in my name until the lease ends.
+account assets/de/kaution : bank
+  holds EUR
+  liquidity 700d
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
+  law fbar-max
+    always
+    let v = value(balance, USD)
+    count max(v - tally(fbar-kaution), empty) as fbar-kaution
+
+/// A Wise account in pounds, for the trip. It is a foreign account too.
+account assets/uk/wise : bank
+  holds GBP
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
+  law fbar-max
+    always
+    let v = value(balance, USD)
+    count max(v - tally(fbar-wise), empty) as fbar-wise
+
+
+// ─── Income and equity ──────────────────────────────────────────────────────
+
+account income/salary-us : wages
+account income/salary-de : foreign-wages
+account income/interest    : interest
+account income/interest-de : interest
+
+
+// ─── Expenses ───────────────────────────────────────────────────────────────
+
+account expenses/sf-rent
+account expenses/de-rent
+account expenses/moving
+/// Groceries, in dollars in San Francisco and in euros in Berlin: one budget, in dollars.
+account expenses/groceries
+  budget 550 USD monthly
+account expenses/dining
+account expenses/utilities
+account expenses/transport
+account expenses/transit
+account expenses/shopping
+account expenses/subscriptions
+account expenses/phone
+account expenses/travel
+account expenses/conference
+account expenses/sightseeing
+/// Interest on the student loan: the servicer's statement splits each payment. `tax.ax` counts it.
+account expenses/loan-interest : student-loan-interest
+
+/// What conversions and card fees cost. Written by hand: a conversion with a
+/// spread, not a fee, has no line here.
+account expenses/fx-fees
+
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/state   : ca-tax
+account expenses/taxes/payroll
+account expenses/taxes/sdi
+
+/// German tax taken from pay and from interest.
+account expenses/taxes/de/lohnsteuer : de-tax
+account expenses/taxes/de/kapitalertragsteuer : de-tax
+account expenses/taxes/de/sozialabgaben
+
+
+// ─── Employers and payees ───────────────────────────────────────────────────
+
+entity acme : employer
+  via income/salary-us
+
+entity employer-gmbh : employer
+  via income/salary-de
+
+entity landlord-sf : org
+  via expenses/sf-rent
+entity mohela : org
+  via liabilities/student-loan
+entity sea-freight : org
+  via expenses/moving
+entity lufthansa : org
+  via expenses/travel
+entity london-hotel : org
+  via expenses/travel
+entity hausverwaltung : org
+  via expenses/de-rent
+entity bvg : org
+  via expenses/transit
+entity netflix : org
+  via expenses/subscriptions
+entity apple : org
+  via expenses/subscriptions
+entity us-phone : org
+  via expenses/subscriptions
+entity pret-a-manger : org
+  via expenses/dining
+entity tfl : org
+  via expenses/transit
+entity design-conf : org
+  via expenses/conference
+entity borough-market : org
+  via expenses/dining
+entity british-museum : org
+  via expenses/sightseeing
+entity dishoom : org
+  via expenses/dining
+entity liberty : org
+  via expenses/shopping
+entity the-pub : org
+  via expenses/dining
+entity black-cab : org
+  via expenses/transit
+entity cafe : org
+  via expenses/dining
+entity heathrow-express : org
+  via expenses/transit
+entity ryanair : org
+  via expenses/travel
+
+
+// ─── Foreign accounts: the yearly total ─────────────────────────────────────
+
+/// FBAR: the highest values of the year, account by account, added up. Each
+/// value is at the rate of the day, where the Treasury uses one year-end rate.
+///
+/// To fix: file FinCEN 114 by April 15 listing each foreign account's highest balance (the tallies
+/// `fbar-girokonto` and the others in `axiom tax`).
+law fbar
+  each year
+  let total = tally(fbar-girokonto) + tally(fbar-tagesgeld) + tally(fbar-kaution) + tally(fbar-wise)
+  count total as fbar-aggregate
+  warn total <= 10_000 USD "foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15"

@@ -56,7 +56,7 @@ base USD
 commodity USD : currency
 account bank/checking : bank
 entity checking : person
-2026-01-01 checking -> bank/checking 1 USD
+2026-01-01 bank/checking <- checking 1 USD
 ";
     let (_, diagnostics) = build_project(project);
 

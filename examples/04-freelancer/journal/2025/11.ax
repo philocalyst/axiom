@@ -1,45 +1,45 @@
-2025-11-01 business-card -> google 7.20 USD #business-software
-2025-11-01 personal-checking -> landlord 1_750 USD #home-office-cost
-2025-11-01 personal-checking -> bluecross 412 USD #health-premium
-2025-11-03 brightwave owes me due 30d ^inv-2025-b11
+2025-11-01 business-card     ->   google    7.20 USD  #business-software
+2025-11-01 personal-checking ->   landlord  1_750 USD #home-office-cost
+2025-11-01 personal-checking ->   bluecross 412 USD   #health-premium
+2025-11-03 brightwave        owes me                  ^inv-2025-b11 due 30d
   3_200 USD #design
-2025-11-03 business-card -> notion 10 USD #business-software
-2025-11-03 business-checking -> personal-checking 3_500 USD #owner-draw // owner's draw
-2025-11-05 personal-checking -> statefarm 22 USD #home-office-cost
-2025-11-05 personal-checking -> trader-joes 107.33 USD #groceries
-2025-11-06 business-card -> printing 96.75 USD #business-printing
-2025-11-06 car used 52 MI #business-mile for northpeak
-2025-11-08 business-card -> adobe 59.99 USD #business-software
-2025-11-08 personal-checking -> restaurant 32.01 USD #dining
-2025-11-10 personal-checking -> transit-agency 46.75 USD #transport
+2025-11-03 business-card     ->   notion            10 USD     #business-software
+2025-11-03 business-checking ->   personal-checking 3_500 USD  #owner-draw  // owner's draw
+2025-11-05 personal-checking ->   statefarm         22 USD     #home-office-cost
+2025-11-05 personal-checking ->   trader-joes       107.33 USD #groceries
+2025-11-06 business-card     ->   printing          96.75 USD  #business-printing
+2025-11-06 car               used 52 MI                        #business-mile for northpeak
+2025-11-08 business-card     ->   adobe             59.99 USD  #business-software
+2025-11-08 personal-checking ->   restaurant        32.01 USD  #dining
+2025-11-10 personal-checking ->   transit-agency    46.75 USD  #transport
 
 /// Holiday campaign.
-2025-11-12 fernhill owes me due 30d ^inv-2025-f4
+2025-11-12 fernhill owes me ^inv-2025-f4 due 30d
   3_100 USD #design
-2025-11-12 brightwave 3_200 USD -> business-checking #design ^inv-2025-b10
-2025-11-12 business-checking -> tax-vault 640 USD for vault
-2025-11-12 personal-checking -> comcast 80 USD #home-office-cost
-2025-11-12 personal-checking -> safeway 78.40 USD #groceries
-2025-11-14 business-card -> figma 15 USD #business-software
-2025-11-16 personal-checking -> pge 84.15 USD #home-office-cost
-2025-11-18 personal-checking -> tmobile 64 USD #business-phone
-2025-11-19 business-card -> meal-vendor 61.45 USD #business-meal
-2025-11-19 car used 29 MI #business-mile for fernhill
-2025-11-20 northpeak 5_900 USD -> business-checking #design ^inv-2025-n2
-2025-11-20 business-checking -> tax-vault 1_180 USD for vault
+2025-11-12 business-checking <-   brightwave  3_200 USD #design ^inv-2025-b10
+2025-11-12 business-checking ->   tax-vault   640 USD   for vault
+2025-11-12 personal-checking ->   comcast     80 USD    #home-office-cost
+2025-11-12 personal-checking ->   safeway     78.40 USD #groceries
+2025-11-14 business-card     ->   figma       15 USD    #business-software
+2025-11-16 personal-checking ->   pge         84.15 USD #home-office-cost
+2025-11-18 personal-checking ->   tmobile     64 USD    #business-phone
+2025-11-19 business-card     ->   meal-vendor 61.45 USD #business-meal
+2025-11-19 car               used 29 MI                 #business-mile for fernhill
+2025-11-20 business-checking <-   northpeak   5_900 USD #design ^inv-2025-n2
+2025-11-20 business-checking ->   tax-vault   1_180 USD for vault
 
 /// The October statement, paid in full.
 2025-11-20 business-checking -> business-card 145.29 USD
-2025-11-20 personal-checking -> safeway 78.32 USD #groceries
-2025-11-22 business-card -> freshbooks 21 USD #business-software
-2025-11-22 personal-checking -> restaurant 42.96 USD #dining
-2025-11-26 orbit-labs -> 4_200 USD #design ^inv-2025-o2
-  business-checking 4_185.00 USD
-  stripe 15.00 USD #business-fees // incoming wire fee
-2025-11-26 business-checking -> tax-vault 837 USD for vault
-2025-11-27 personal-checking -> trader-joes 105.25 USD #groceries
-2025-11-30 interest-source -> tax-vault 37.88 USD #interest-income for vault
-2025-11-30 business-card = 271.39 USD
-2025-11-30 business-checking = 17_217.77 USD
-2025-11-30 personal-checking = 4_385.92 USD
-2025-11-30 tax-vault = 10_860.28 USD
+2025-11-20 personal-checking -> safeway       78.32 USD  #groceries
+2025-11-22 business-card     -> freshbooks    21 USD     #business-software
+2025-11-22 personal-checking -> restaurant    42.96 USD  #dining
+2025-11-26 me                <- orbit-labs    4_200 USD  #design ^inv-2025-o2
+  -> business-checking 4_185.00 USD
+  -> stripe               15.00 USD #business-fees  // incoming wire fee
+2025-11-26 business-checking -> tax-vault       837 USD    for vault
+2025-11-27 personal-checking -> trader-joes     105.25 USD #groceries
+2025-11-30 tax-vault         <- interest-source 37.88 USD  #interest-income for vault
+2025-11-30 business-card     =  271.39 USD
+2025-11-30 business-checking =  17_217.77 USD
+2025-11-30 personal-checking =  4_385.92 USD
+2025-11-30 tax-vault         =  10_860.28 USD

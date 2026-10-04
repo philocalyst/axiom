@@ -1,0 +1,19 @@
+// MISTAKE: a `<-` line is about the book that took, and here the party did: the owner's book gave, so it is `checking -> acme`.
+base USD
+use std
+
+commodity VTI : security
+  precision 0
+
+account assets/brokerage : brokerage
+account assets/checking : bank
+account assets/savings  : bank
+
+entity acme : employer
+entity shop : merchant
+
+opening 2025-12-31
+  checking 3_000 USD
+  brokerage 10 VTI basis 2_800 USD since 2024-03-01
+
+2026-01-15 acme <- checking 1_200 USD

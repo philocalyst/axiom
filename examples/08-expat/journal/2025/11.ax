@@ -7,33 +7,33 @@
 2025-11-05 girokonto -> transit 58 EUR / bvg
 2025-11-06 girokonto -> dining 21.75 EUR
 2025-11-07 visa -> subscriptions 2.99 USD / apple
-2025-11-08 girokonto 900.00 EUR ->
-  fx-fees                 4.77 EUR
-  us-checking             1_034.26 USD
+2025-11-08 girokonto -> 900.00 EUR
+  -> fx-fees         4.77 EUR
+  -> us-checking 1_034.26 USD
 2025-11-09 girokonto -> groceries 34.90 EUR
-2025-11-10 girokonto -> phone 19.99 EUR
-2025-11-13 girokonto -> dining 47.01 EUR
+2025-11-10 girokonto -> phone     19.99 EUR
+2025-11-13 girokonto -> dining    47.01 EUR
 2025-11-15 visa -> subscriptions 35 USD / us-phone
 2025-11-15 girokonto -> groceries 59.29 EUR
-2025-11-17 girokonto -> shopping 75 EUR
-2025-11-20 girokonto -> dining 35.20 EUR
+2025-11-17 girokonto -> shopping  75 EUR
+2025-11-20 girokonto -> dining    35.20 EUR
 
 /// October's statement, paid in full.
-2025-11-20 us-checking -> visa 1_014.74 USD
-2025-11-22 girokonto -> groceries 58.33 EUR
-2025-11-27 girokonto -> groceries 81.16 EUR
-2025-11-28 employer-gmbh -> 5_400.00 EUR
-  lohnsteuer              905.00 EUR   // income tax, tax class 1
-  sozialabgaben           1_163.70 EUR   // pension, health, unemployment, care
-  girokonto               ...
-2025-11-30 interest -> us-savings 64.51 USD
-2025-11-30 income/interest-de -> 33.71 EUR
-  kapitalertragsteuer     8.89 EUR
-  tagesgeld               ...
-2025-11-30 visa = 53.48 USD
-2025-11-30 us-checking = 19_439.06 USD
-2025-11-30 us-savings = 18_495.21 USD
+2025-11-20 us-checking -> visa          1_014.74 USD
+2025-11-22 girokonto   -> groceries     58.33 EUR
+2025-11-27 girokonto   -> groceries     81.16 EUR
+2025-11-28 me          <- employer-gmbh 5_400.00 EUR
+  -> lohnsteuer      905.00 EUR           // income tax, tax class 1
+  -> sozialabgaben 1_163.70 EUR           // pension, health, unemployment, care
+  -> girokonto     ...
+2025-11-30 us-savings <- interest           64.51 USD
+2025-11-30 me         <- income/interest-de 33.71 EUR
+  -> kapitalertragsteuer 8.89 EUR
+  -> tagesgeld           ...
+2025-11-30 visa         = 53.48 USD
+2025-11-30 us-checking  = 19_439.06 USD
+2025-11-30 us-savings   = 18_495.21 USD
 2025-11-30 student-loan = 27_729.14 USD
-2025-11-30 girokonto = 6_991.67 EUR
-2025-11-30 tagesgeld = 20_457.91 EUR
-2025-11-30 kaution = 3_600.00 EUR
+2025-11-30 girokonto    = 6_991.67 EUR
+2025-11-30 tagesgeld    = 20_457.91 EUR
+2025-11-30 kaution      = 3_600.00 EUR

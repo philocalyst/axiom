@@ -45,9 +45,9 @@ warning[missed-occurrence]: `jordan-pay` was due 7 times since 2026-01-02 and no
 note[nonqualified-529-penalty]: 20.67 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
    ╭─[journal/2025/10.ax:42:1]
    │
-42 │ 2025-10-15 riley-529 -> joint-checking 1_500 USD
-   │ ────────────────────────┬───────────────────────
-   │                         ╰── this flow: a gain of 206.72 USD on 1,070.59 USD
+42 │ 2025-10-15 riley-529      -> joint-checking 1_500 USD
+   │ ──────────────────────────┬──────────────────────────
+   │                           ╰── this flow: a gain of 206.72 USD on 1,070.59 USD
    │
    ├─[us/529.ax:59:13] (built in)
    │
@@ -66,9 +66,9 @@ note[nonqualified-529-penalty]: 20.67 USD owed to irs as nonqualified-529-penalt
 note[nonqualified-529-penalty]: 18.62 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
    ╭─[journal/2025/10.ax:42:1]
    │
-42 │ 2025-10-15 riley-529 -> joint-checking 1_500 USD
-   │ ────────────────────────┬───────────────────────
-   │                         ╰── this flow: a gain of 186.22 USD on 186.22 USD
+42 │ 2025-10-15 riley-529      -> joint-checking 1_500 USD
+   │ ──────────────────────────┬──────────────────────────
+   │                           ╰── this flow: a gain of 186.22 USD on 186.22 USD
    │
    ├─[us/529.ax:59:13] (built in)
    │
@@ -87,10 +87,10 @@ note[nonqualified-529-penalty]: 18.62 USD owed to irs as nonqualified-529-penalt
 note[nonqualified-hsa-penalty]: waived: 124.00 USD would be owed to irs as nonqualified-hsa-penalty
    ╭─[journal/2025/11.ax:14:1]
    │
-14 │ 2025-11-05 hsa -> joint-checking 620 USD ! "reimburses 2025-05-09 dentist, receipt kept"
-   │ ────────────────────────────────────────────┬───────────────────┬───────────────────────
-   │                                             │                   ╰── waived here
-   │                                             ╰── this flow: a gain of 620.00 USD on 620.00 USD
+14 │ 2025-11-05 hsa            -> joint-checking 620 USD      ! "reimburses 2025-05-09 dentist, re…
+   │ ──────────────────────────────────────────────┬────────────────────────────┬─────────────────
+   │                                               │                            ╰── waived here
+   │                                               ╰── this flow: a gain of 620.00 USD on 620.00 USD
    │
    ├─[us/hsa.ax:60:14] (built in)
    │

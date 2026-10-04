@@ -988,7 +988,7 @@ account assets/checking
 account assets/retirement
 contract job with lumen
   4_600 USD twice monthly on 15, last into checking
-  retirement 6%
+  -> retirement 6%
   from 2026-01-01
 ";
         let book = source_book(source);
@@ -1098,11 +1098,11 @@ account bonus
 entity landlord
 contract rent with landlord
   100 USD monthly on 1 from checking
-  savings 30 USD
+  -> savings 30 USD
   from 2026-01-01
 2026-02-01 rent
-  savings 40 USD
-  bonus 10 USD
+  -> savings 40 USD
+  -> bonus   10 USD
 ";
         let book = source_book(source);
         let contract = book.contract("rent").expect("contract id");
@@ -1189,11 +1189,11 @@ account reserve
 entity landlord
 contract rent with landlord
   100 USD monthly on 1 from checking
-  savings 30 USD
+  -> savings 30 USD
   from 2026-01-01
 2026-02-01 rent
-  bonus 10 USD
-  reserve 20 USD
+  -> bonus   10 USD
+  -> reserve 20 USD
 ";
         let rows = kept_rent(source, Day::from_ymd(2026, 2, 1).unwrap());
         assert_eq!(
@@ -1218,10 +1218,10 @@ account savings
 entity landlord
 opening 2026-01-01
   checking 5_000 USD
-  savings 500 USD
+  savings    500 USD
 contract rent with landlord
   100 USD monthly on 1 from checking
-  savings = 530 USD
+  -> savings = 530 USD
   from 2026-01-01
 2026-02-01 rent
 ";
@@ -1307,7 +1307,7 @@ contract flat with landlord
   + 12% of water #utilities
   from 2026-01-01
 2026-02-01 flat
-  water = 155 USD
+  -> water = 155 USD
 ";
         let book = source_book(source);
         let flat = book.contract("flat").expect("contract id");
@@ -1392,7 +1392,7 @@ contract flat with landlord
   + 10% of gas #utilities
   from 2026-01-01
 2026-02-01 flat
-  water = 155 USD
+  -> water = 155 USD
 ";
         let book = source_book(source);
         let flat = book.contract("flat").expect("contract id");
@@ -1502,8 +1502,8 @@ account savings
 entity landlord
 contract split with landlord
   100 USD monthly on 1 from checking
-  landlord ...
-  savings 30 USD
+  -> landlord ...
+  -> savings 30 USD
   from 2026-01-01
 ";
         let book = source_book(source);

@@ -22,10 +22,10 @@ error[unknown-place]: there is no place `income/salary`
 error[no-param-row]: `us/401k` has no figures for 2023: its figures start in 2024
    ╭─[67-no-param-row.ax:20:3]
    │
-19 │ 2023-01-13 acme -> 6_000 USD
-20 │   retirement  800 USD
-   │   ─────────┬─────────
-   │            ╰── this flow: 800.00 USD into assets/retirement
+19 │ 2023-01-13 me <- acme 6_000 USD
+20 │   -> retirement 800 USD
+   │   ──────────┬──────────
+   │             ╰── this flow: 800.00 USD into assets/retirement
    │
    ├─[us/401k.ax:75:7] (built in)
    │

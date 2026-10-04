@@ -37,26 +37,26 @@ contract riley-tuition with st-annes-school
 /// rates. The journal holds the exact 2025 stubs; the contracts cover 2026 on.
 contract alex-pay with acme
   5_750 USD twice monthly on 15, last into checking #wages
-  me/401k 575 USD #household-deferral
-  hsa 250 USD
-  blue-shield 212.50 USD #pretax-benefit
-  dcfsa 208.33 USD
-  irs 692 USD #federal-tax
-  ftb 285 USD #state-tax
-  ssa 388.56 USD #payroll-tax
-  edd 60.95 USD #state-disability
-  checking ...
+  -> me/401k 575 USD #household-deferral
+  -> hsa 250 USD
+  -> blue-shield 212.50 USD #pretax-benefit
+  -> dcfsa 208.33 USD
+  -> irs 692 USD #federal-tax
+  -> ftb 285 USD #state-tax
+  -> ssa 388.56 USD #payroll-tax
+  -> edd 60.95 USD #state-disability
+  -> checking ...
   from 2026-01-01
   also acme -> me/401k 40% of ([me/401k] up to 10% of amount) #contribution
 
 contract jordan-pay with bluefin
   3_803.08 USD every 2w on friday into checking #wages
-  jordan/401k 228.18 USD #household-deferral
-  irs 330 USD #federal-tax
-  ftb 126 USD #state-tax
-  ssa 290.93 USD #payroll-tax
-  edd 45.64 USD #state-disability
-  checking ...
+  -> jordan/401k 228.18 USD #household-deferral
+  -> irs 330 USD #federal-tax
+  -> ftb 126 USD #state-tax
+  -> ssa 290.93 USD #payroll-tax
+  -> edd 45.64 USD #state-disability
+  -> checking ...
   from 2026-01-02
   also bluefin -> jordan/401k 50% of ([jordan/401k] up to 6% of amount) #contribution
 
@@ -64,11 +64,11 @@ contract jordan-pay with bluefin
 /// the 2025 bonus record.
 contract alex-bonus with acme
   12_000 USD yearly on 03-14 into checking #wages
-  me/401k 1_200 USD #household-deferral
-  irs 2_640 USD #federal-tax
-  ftb 1_227.60 USD #state-tax
-  ssa 918 USD #payroll-tax
-  edd 144 USD #state-disability
-  checking ...
+  -> me/401k 1_200 USD #household-deferral
+  -> irs 2_640 USD #federal-tax
+  -> ftb 1_227.60 USD #state-tax
+  -> ssa 918 USD #payroll-tax
+  -> edd 144 USD #state-disability
+  -> checking ...
   from 2026-03-14
   also acme -> me/401k 40% of ([me/401k] up to 10% of amount) #contribution

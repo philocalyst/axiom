@@ -12,7 +12,7 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.join(HERE, "..", "05-family")
+ROOT = os.path.join(HERE, "..", "..", "tests", "v4-syntax", "examples", "05-family")
 JOURNAL = os.path.join(ROOT, "journal", "2025")
 NUMBER = r"([\d_]+(?:\.\d+)?)"
 FLOW = re.compile(

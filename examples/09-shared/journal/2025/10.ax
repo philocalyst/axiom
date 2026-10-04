@@ -3,21 +3,21 @@
   ben                     1_050.00 USD
   cleo                    1_050.00 USD
 2025-10-02 ben -> checking 1_050.00 USD for #rent-2025-10
-2025-10-03 lantern -> 1_450.23 USD   // 999.00 wages + 451.23 card tips
-  taxes/federal           179.83 USD
-  taxes/payroll           110.94 USD
-  checking                ...
+2025-10-03 me <- lantern 1_450.23 USD   // 999.00 wages + 451.23 card tips
+  -> taxes/federal 179.83 USD
+  -> taxes/payroll 110.94 USD
+  -> checking      ...
 
 /// The rest of Cleo's share of the trip.
 2025-10-03 cleo -> checking 95.70 USD for #trip-2025-08
 2025-10-03 checking -> car 128 USD / progressive
-2025-10-05 income/tips -> wallet 251.61 USD
+2025-10-05 wallet <- income/tips 251.61 USD
 2025-10-05 cleo -> checking 1_050.00 USD for #rent-2025-10
 2025-10-06 wallet -> dining 17.64 USD
-2025-10-07 visa -> 96.30 USD #shared-2025-10 due 2025-11-21
-  groceries               32.10 USD
-  ben                     32.10 USD
-  cleo                    32.10 USD
+2025-10-07 visa   ->        96.30 USD #shared-2025-10 due 2025-11-21
+  -> groceries 32.10 USD
+  -> ben       32.10 USD
+  -> cleo      32.10 USD
 2025-10-08 visa -> phone 45 USD / mint-mobile
 2025-10-09 checking -> 69.99 USD / fiberco #shared-2025-10 due 2025-11-23
   utilities               23.33 USD
@@ -25,52 +25,52 @@
   cleo                    23.33 USD
 
 /// Cleo's Costco run, 203.90 USD, for all three of us: my third is what I owe her.
-2025-10-11 owed-to-cleo -> groceries 67.97 USD #costco-2025-10 due 2025-11-10   // costco
-2025-10-12 income/tips -> wallet 186.33 USD
-2025-10-12 owed-to-ben -> utilities 24.93 USD #power-2025-10 due 2025-11-11   // my third of 74.80, from power-co
+2025-10-11 owed-to-cleo -> groceries   67.97 USD  #costco-2025-10 due 2025-11-10  // costco
+2025-10-12 wallet       <- income/tips 186.33 USD
+2025-10-12 owed-to-ben  -> utilities   24.93 USD  #power-2025-10 due 2025-11-11   // my third of 74.80, from power-co
 2025-10-12 checking -> car 330.50 USD / carmax-finance
 2025-10-13 wallet -> dining 20.22 USD
-2025-10-14 visa -> dining 25.58 USD
+2025-10-14 visa   -> dining 25.58 USD
 2025-10-15 checking -> health 189.40 USD / marketplace-plan
-2025-10-16 income/donations -> collective-checking 40 USD
-2025-10-17 lantern -> 1_527.93 USD   // 1_073.00 wages + 454.93 card tips
-  taxes/federal           189.46 USD
-  taxes/payroll           116.89 USD
-  checking                ...
+2025-10-16 collective-checking <- income/donations 40 USD
+2025-10-17 me                  <- lantern          1_527.93 USD  // 1_073.00 wages + 454.93 card tips
+  -> taxes/federal 189.46 USD
+  -> taxes/payroll 116.89 USD
+  -> checking      ...
 2025-10-17 visa -> groceries 83.33 USD / farmers-market
-2025-10-18 wallet -> transport 4.85 USD
-2025-10-19 income/tips -> wallet 256.86 USD
-2025-10-19 visa -> entertainment 82.91 USD
+2025-10-18 wallet -> transport     4.85 USD
+2025-10-19 wallet <- income/tips   256.86 USD
+2025-10-19 visa   -> entertainment 82.91 USD
 
 /// Fall compost.
 2025-10-20 collective-checking -> soil 250.00 USD / bayview-soil
 2025-10-21 visa -> 62.08 USD #shared-2025-10 due 2025-12-05
-  groceries               20.70 USD
-  ben                     20.69 USD
-  cleo                    20.69 USD
-2025-10-22 checking -> visa 342.18 USD
-2025-10-24 wallet -> checking 750 USD
-2025-10-26 income/tips -> wallet 152.64 USD
-2025-10-26 visa -> clothing 31.99 USD
-2025-10-27 wallet -> dining 18.37 USD
+  -> groceries 20.70 USD
+  -> ben       20.69 USD
+  -> cleo      20.69 USD
+2025-10-22 checking -> visa        342.18 USD
+2025-10-24 wallet   -> checking    750 USD
+2025-10-26 wallet   <- income/tips 152.64 USD
+2025-10-26 visa     -> clothing    31.99 USD
+2025-10-27 wallet   -> dining      18.37 USD
 
 /// The deadline is October 31. What is left of the grant, 57.25 USD, goes back to the foundation, as its agreement says.
 2025-10-28 collective-checking -> riverfront 57.25 USD
-2025-10-28 checking -> savings 700 USD
-2025-10-31 lantern -> 1_346.80 USD   // 999.00 wages + 347.80 card tips
-  taxes/federal           167.00 USD
-  taxes/payroll           103.03 USD
-  checking                ...
+2025-10-28 checking            -> savings    700 USD
+2025-10-31 me                  <- lantern    1_346.80 USD  // 999.00 wages + 347.80 card tips
+  -> taxes/federal 167.00 USD
+  -> taxes/payroll 103.03 USD
+  -> checking      ...
 2025-10-31 ben -> checking 76.12 USD for #shared-2025-10
 2025-10-31 cleo -> checking 76.12 USD for #shared-2025-10
 2025-10-31 checking -> owed-to-ben 24.93 USD for #power-2025-10
 2025-10-31 checking -> owed-to-cleo 67.97 USD for #costco-2025-10
-2025-10-31 by-ben = 0.00 USD
-2025-10-31 by-cleo = 0.00 USD
-2025-10-31 owed-to-ben = 0.00 USD
-2025-10-31 owed-to-cleo = 0.00 USD
-2025-10-31 visa = 427.19 USD
-2025-10-31 checking = 8_678.94 USD
-2025-10-31 savings = 8_700.00 USD
+2025-10-31 by-ben              = 0.00 USD
+2025-10-31 by-cleo             = 0.00 USD
+2025-10-31 owed-to-ben         = 0.00 USD
+2025-10-31 owed-to-cleo        = 0.00 USD
+2025-10-31 visa                = 427.19 USD
+2025-10-31 checking            = 8_678.94 USD
+2025-10-31 savings             = 8_700.00 USD
 2025-10-31 collective-checking = 2_584.61 USD
-2025-10-31 wallet = 306.60 USD
+2025-10-31 wallet              = 306.60 USD

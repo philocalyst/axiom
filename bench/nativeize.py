@@ -304,7 +304,7 @@ def _native_line(line, places, parties, leaves, payees, account_names):
         tokens = body.split()
         if tokens:
             tokens[0] = _endpoint(tokens[0], places, parties, leaves, payees)
-            return indent + " ".join(tokens)
+            return indent + ("-> " if indent else "") + " ".join(tokens)
         return line
 
     before, after = body.split(" -> ", 1)
@@ -335,22 +335,6 @@ def _native_line(line, places, parties, leaves, payees, account_names):
     target_name = _endpoint(old_target, places, parties, leaves, payees) if has_target else None
     if has_target:
         right[0] = target_name
-
-    # Native exchange lines state the cash leg explicitly as well as the
-    # number of units. The simulation already computed that exact cash amount
-    # when it produced quantity and price; reconstruct it in decimal
-    # arithmetic. The retained daily quote series carries market prices.
-    if "@" in right:
-        try:
-            at = right.index("@")
-            quantity = Decimal(right[1].replace("_", ""))
-            price = Decimal(right[at + 1].replace("_", ""))
-            cash = (quantity * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            left.append(f"{cash:.2f}")
-            left.append(right[-1])
-            right = right[:at]
-        except (IndexError, ArithmeticError, ValueError):
-            raise ValueError(f"cannot derive native price cash leg from: {line}")
 
     # Legacy `/ party` tails selected the real merchant in the v3 chart. The
     # v4 party is the endpoint and its typed purpose remains explicit.
@@ -390,10 +374,41 @@ def _native_line(line, places, parties, leaves, payees, account_names):
         if left_unit:
             add_purpose = f"sale of {left_unit}"
 
-    converted = " ".join(left) + " -> " + " ".join(right)
-    if add_purpose:
-        converted += f" #{add_purpose}"
-    return indent + converted
+    return indent + _written(left, right, add_purpose, has_target, frozenset(parties.values()))
+
+
+def _written(left, right, purpose, has_target, party_names):
+    """`[DATE, SOURCE, AMOUNT?]` and `[TARGET, AMOUNT?, TAIL...]` as a v5 line: the book's own end first, a payment that
+    arrives written `<-`, a paystub passing a party's money through its owner, an exchange stating one amount and its
+    price."""
+    tail = f" #{purpose}" if purpose else ""
+    date, source, given = left[0], left[1], left[2:]
+    party = source in party_names
+    if not has_target:
+        # `acme -> 4_000.00 USD`, the legs below it being where it goes: the owner passes it on
+        if party and not given:
+            owner = source.split("-", 1)[1] if "-" in source else source
+            return f"{date} {owner} <- {source} " + " ".join(right) + tail
+        return " ".join(left) + " -> " + " ".join(right) + tail
+    target, amount = right[0], right[1:3]
+    if given and len(amount) == 2 and "@" not in right:
+        return " ".join([_exchange(date, source, given, target, amount), *right[3:]]) + tail
+    if party:
+        return f"{date} {target} <- {source} " + " ".join(right[1:]) + tail
+    return " ".join(left) + " -> " + " ".join(right) + tail
+
+
+def _exchange(date, source, given, target, amount):
+    """Two amounts and no price, as one amount and the price that relates them: a sale keeps its quantity before the
+    arrow, and a trade of money for money states what the arriving unit costs."""
+    gave, got = Decimal(given[0].replace("_", "")), Decimal(amount[0].replace("_", ""))
+    sale = given[1] in _COMMODITY_NAMES
+    price = (got / gave if sale else gave / got).quantize(Decimal("0.01"))
+    if price * (gave if sale else got) != (got if sale else gave):
+        raise ValueError(f"no two-place price relates {given} and {amount}")
+    if sale:
+        return f"{date} {source} {' '.join(given)} -> {target} @ {price} {amount[1]}"
+    return f"{date} {source} -> {target} {' '.join(amount)} @ {price} {given[1]}"
 
 
 def _native_prices(root):

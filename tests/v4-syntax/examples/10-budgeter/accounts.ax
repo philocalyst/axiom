@@ -1,0 +1,177 @@
+// Where money is, what each envelope may take, and who is paid.
+//
+// A budget is a property of an account: `budget 350 USD monthly`. It covers the
+// account and everything under it, and only warns. There is no rollover: each month
+// starts at zero, which is why the things that are not monthly have funds.
+
+// ─── Money ──────────────────────────────────────────────────────────────────
+
+account assets/bank/checking : bank
+
+/// A plain wallet: what I take from the ATM, and small things paid with cash.
+account assets/cash/wallet : cash
+
+/// One card for everything, paid in full on the 22nd.
+account liabilities/visa : credit-card
+
+// The funds are money set aside for a bill that comes later. They live in one savings
+// account, each deposit tied to the envelope it is for (`for car-fund`): the money is not
+// available to spend, spending it is a payment straight out of the envelope
+// (`car-fund -> car-repair`), and `axiom available` lists what is held for each.
+
+/// Everything set aside: the emergency fund and the funds for the car, the insurance and the trip.
+account assets/bank/savings : bank
+
+/// The emergency fund. Untouched.
+entity emergency-fund : envelope
+  via assets/bank/savings
+
+/// 100.00 USD a month, then spent on the car.
+entity car-fund : envelope
+  via assets/bank/savings
+
+/// 100.00 USD a month toward the yearly premium.
+entity insurance-fund : envelope
+  via assets/bank/savings
+
+/// 250.00 USD a month toward the June trip.
+entity trip-fund : envelope
+  via assets/bank/savings
+
+
+// ─── Income and equity ──────────────────────────────────────────────────────
+
+account income/salary    : wages
+account income/freelance
+
+
+// ─── Envelopes ──────────────────────────────────────────────────────────────
+//
+// Monthly envelopes: what I mean to spend in a month, per kind of thing.
+
+account expenses/groceries
+  budget 350 USD monthly
+
+account expenses/dining
+  budget 150 USD monthly
+
+account expenses/transport
+  budget 120 USD monthly
+
+/// The gym, concerts, the movies.
+account expenses/fun
+  budget 120 USD monthly
+
+account expenses/subscriptions
+  budget 90 USD monthly
+
+account expenses/clothing
+  budget 80 USD monthly
+
+account expenses/personal-care
+  budget 40 USD monthly
+
+account expenses/utilities
+  budget 100 USD monthly
+
+// Yearly envelopes: things I only pay a few times a year.
+
+account expenses/gifts
+  budget 500 USD yearly
+
+account expenses/insurance
+  budget 1_200 USD yearly
+
+account expenses/medical
+  budget 400 USD yearly
+
+// Things with no envelope.
+
+account expenses/rent
+account expenses/phone
+account expenses/car
+account expenses/car-repair
+account expenses/student-loan
+/// The health premium comes out of pay before tax (a cafeteria plan): a place of kind `pretax-benefit` takes it out of income.
+account expenses/health : pretax-benefit
+account expenses/fees
+
+/// The June trip. No envelope of its own: the trip fund pays for it.
+account expenses/travel
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/payroll
+
+
+// ─── People and merchants ───────────────────────────────────────────────────
+
+entity studio : employer
+  via income/salary
+
+entity airline : org
+  via expenses/travel
+entity hotel : org
+  via expenses/travel
+
+entity landlord : org
+  via expenses/rent
+entity metro : org
+  via expenses/transport
+entity gym : org
+  via expenses/fun
+entity power-co : org
+  via expenses/utilities
+entity mint-mobile : org
+  via expenses/phone
+entity netflix : org
+  via expenses/subscriptions
+entity spotify : org
+  via expenses/subscriptions
+entity apple : org
+  via expenses/subscriptions
+entity adobe : org
+  via expenses/subscriptions
+entity hulu : org
+  via expenses/subscriptions
+entity amazon-prime : org
+  via expenses/subscriptions
+entity aldi : org
+  via expenses/groceries
+entity kroger : org
+  via expenses/groceries
+entity trader-joes : org
+  via expenses/groceries
+entity urgent-care : org
+  via expenses/medical
+entity cvs : org
+  via expenses/medical
+entity rideshare : org
+  via expenses/transport
+entity carmax-finance : org
+  via expenses/car
+entity mohela : org
+  via expenses/student-loan
+entity barber : org
+  via expenses/personal-care
+entity kwik-brakes : org
+  via expenses/car-repair
+entity progressive : org
+  via expenses/insurance
+entity jo : org
+  via expenses/fun
+entity food-bank : org
+  via expenses/gifts
+entity corner-cafe : org
+  via income/freelance
+entity first-bank : org
+  via expenses/fees
+
+
+// ─── Codes ──────────────────────────────────────────────────────────────────
+
+/// A check number ties a written check to the day it clears, or never does.
+code check-*
+  on bank
+
+/// A deposit number ties a deposit to the day it bounces.
+code deposit-*
+  on bank

@@ -13,6 +13,6 @@ account expenses/taxes/federal : federal-tax
 entity acme : employer
   via income/salary
 
-2025-01-15 acme -> 8_000 USD
-  taxes/federal  880 USD
-  checking       ...
+2025-01-15 me <- acme 8_000 USD
+  -> taxes/federal 880 USD
+  -> checking      ...

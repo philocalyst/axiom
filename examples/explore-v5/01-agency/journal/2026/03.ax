@@ -3,25 +3,25 @@
 01 studio-rent                                                  // ▸ 3,800.00 #rent
 01 insurance                                                    // ▸ 4,860.00 #insurance, recognized over 12 months from 03-01
 01 google                                                       // ▸ 84.00 from card-me
-03 sable-hotels owes loomfield due 30d ^inv-2026-0009
+03 sable-hotels owes loomfield ^inv-2026-0009 due 30d
   3_750.00 USD #design "lobby signage"
-  388.12 USD #sales-tax-collected for wa-dor "10.35% of 3,750.00"
-03 slack                                                        // ▸ 87.50 from card-theo
-03 figma                                                        // ▸ 45.00 from card-maya
-05 card-me -> printworks 1_840.00 USD for halcyon ^pt-0305      // ▸ paid for halcyon: it owes 1,840.00 · not the agency's spending
-05 ravi-monthly                                                 // ▸ 2,400.00 #contract-labor
-07 kestrel-retainer                                             // ▸ 1,200.00 #retainer
-08 northwind-retainer                                           // ▸ 4,500.00 #retainer
-08 card-theo -> uber 42.65 USD
-09 pinecrest-retainer                                           // ▸ 3,089.80: 2,800.00 #retainer · 289.80 sales tax for wa-dor
-09 halcyon owes loomfield due 30d ^inv-2026-0010
-  1_840.00 USD #reimbursed-costs ^pt-0305 "spring catalog print run, at cost"      // ✗ 01a10: halcyon now owes it twice
-  276.00 USD #print-production "handling, 15%"
-  219.01 USD #sales-tax-collected for wa-dor "10.35% of 2,116.00"
+    388.12 USD #sales-tax-collected "10.35% of 3,750.00" for wa-dor
+03 slack                                                                 // ▸ 87.50 from card-theo
+03 figma                                                                 // ▸ 45.00 from card-maya
+05 card-me            ->   printworks 1_840.00 USD ^pt-0305 for halcyon  // ▸ paid for halcyon: it owes 1,840.00 · not the agency's spending
+05 ravi-monthly                                                          // ▸ 2,400.00 #contract-labor
+07 kestrel-retainer                                                      // ▸ 1,200.00 #retainer
+08 northwind-retainer                                                    // ▸ 4,500.00 #retainer
+08 card-theo          ->   uber       42.65 USD
+09 pinecrest-retainer                                                    // ▸ 3,089.80: 2,800.00 #retainer · 289.80 sales tax for wa-dor
+09 halcyon            owes loomfield               ^inv-2026-0010 due 30d
+  1_840.00 USD #reimbursed-costs "spring catalog print run, at cost" ^pt-0305      // ✗ 01a10: halcyon now owes it twice
+    276.00 USD #print-production "handling, 15%"
+    219.01 USD #sales-tax-collected "10.35% of 2,116.00" for wa-dor
 09 notion                                                       // ▸ 48.00 from card-maya
 10 vantage-retainer                                             // ▸ 1,986.30: 1,800.00 #retainer · 186.30 sales tax for wa-dor
 11 brightwell-retainer                                          // ▸ 1,655.25: 1,500.00 #retainer · 155.25 sales tax for wa-dor
-11 card-me -> delta 318.40 USD "Seattle to Portland, Northwind kickoff"
+11 card-me             ->   delta     318.40 USD "Seattle to Portland, Northwind kickoff"
 12 summit-retainer                                              // ▸ 2,758.75: 2,500.00 #retainer · 258.75 sales tax for wa-dor
 12 adobe                                                        // ▸ 359.97 from card-me
 14 halcyon-retainer                                             // ▸ 3,531.20: 3,200.00 #retainer · 331.20 sales tax for wa-dor
@@ -29,47 +29,47 @@
 15 orchard-retainer                                             // ▸ 1,000.00 #retainer · exempt
 15 eftps                                                        // ▸ settles ^eftps-2026-02: 3,936.50 to irs
 16 harbor-retainer                                              // ▸ 2,427.70: 2,200.00 #retainer · 227.70 sales tax for wa-dor
-16 ironbark owes loomfield due 30d ^inv-2026-0011
+16 ironbark            owes loomfield            ^inv-2026-0011 due 30d
   4_100.00 USD #design "web build"
   2_800.00 USD #design "illustration set"
-  714.15 USD #sales-tax-collected for wa-dor "10.35% of 6,900.00"
-16 card-maya -> lyft 19.40 USD
+    714.15 USD #sales-tax-collected "10.35% of 6,900.00" for wa-dor
+16 card-maya        ->   lyft          19.40 USD
 19 lattice-retainer                                             // ▸ 2,207.00: 2,000.00 #retainer · 207.00 sales tax for wa-dor
-19 card-theo -> lunchbox-cafe 77.10 USD #meals
-20 granite-peak owes loomfield due 30d ^inv-2026-0012
+19 card-theo        ->   lunchbox-cafe 77.10 USD #meals
+20 granite-peak     owes loomfield               ^inv-2026-0012 due 30d
   4_500.00 USD #design "campaign rollout"
-  465.75 USD #sales-tax-collected for wa-dor "10.35% of 4,500.00"
+    465.75 USD #sales-tax-collected "10.35% of 4,500.00" for wa-dor
 20 cpa                                                          // ▸ 650.00 #accounting
 20 github                                                       // ▸ 84.00 from card-theo
 22 quickbooks                                                   // ▸ 90.00 from card-me
-24 hollis-foods owes loomfield due 30d ^inv-2026-0013
+24 hollis-foods owes loomfield ^inv-2026-0013 due 30d
   3_400.00 USD #design "label redesign"
-  351.90 USD #sales-tax-collected for wa-dor "10.35% of 3,400.00"
+    351.90 USD #sales-tax-collected "10.35% of 3,400.00" for wa-dor
 25 wa-excise 4_482.40 USD                                       // ▸ February, for 2026-02      // ✗ 01a8: `for last month`
   3_819.15 USD #sales-tax-collected "collected in February"
-  663.25 USD #b-and-o "1.75% of 37,900.00"
-25 card-me -> amazon 73.82 USD #office
-25 operating -> card-me 901.27 USD
-25 operating -> card-theo 253.80 USD
-25 operating -> card-maya 189.30 USD
-26 reserve-fill 3_000.00 USD                                    // ▸ operating -> reserve
-28 draw-me                                                      // ▸ 8,400.00 to my-checking · #distribution
-28 draw-theo                                                    // ▸ 5,600.00 to theo-checking · #distribution
-30 meridian-law -> operating 5_000.00 USD ^inv-2026-0008        // ▸ partial: 3,276.25 left
-31 payroll-maya                                                 // ▸ 5,228.15 net of 6,500.00 gross
-31 payroll-daniel                                               // ▸ 6,264.80 net of 8,000.00 gross
-31 loomfield owes irs 3_936.50 USD due 04-15 ^eftps-2026-03
-  694.00 USD #wages of maya "income tax withheld"
+    663.25 USD #b-and-o "1.75% of 37,900.00"
+25 card-me        ->   amazon       73.82 USD    #office
+25 operating      ->   card-me      901.27 USD
+25 operating      ->   card-theo    253.80 USD
+25 operating      ->   card-maya    189.30 USD
+26 reserve-fill   3_000.00 USD                                   // ▸ operating -> reserve
+28 draw-me                                                       // ▸ 8,400.00 to my-checking · #distribution
+28 draw-theo                                                     // ▸ 5,600.00 to theo-checking · #distribution
+30 operating      <-   meridian-law 5_000.00 USD ^inv-2026-0008  // ▸ partial: 3,276.25 left
+31 payroll-maya                                                  // ▸ 5,228.15 net of 6,500.00 gross
+31 payroll-daniel                                                // ▸ 6,264.80 net of 8,000.00 gross
+31 loomfield      owes irs          3_936.50 USD ^eftps-2026-03 due 04-15
+  694.00 USD   #wages of maya "income tax withheld"
   1_024.00 USD #wages of daniel "income tax withheld"
-  497.25 USD #wages of maya "employee FICA"
-  612.00 USD #wages of daniel "employee FICA"
+  497.25 USD   #wages of maya "employee FICA"
+  612.00 USD   #wages of daniel "employee FICA"
   1_109.25 USD #payroll-tax "employer FICA"
-31 loomfield owes wa-esd 353.80 USD due 04-30 ^esd-2026-03
-  80.60 USD #wages of maya "WA Cares and PFML withheld"
-  99.20 USD #wages of daniel "WA Cares and PFML withheld"
+31 loomfield owes wa-esd 353.80 USD ^esd-2026-03 due 04-30
+  80.60 USD  #wages of maya "WA Cares and PFML withheld"
+  99.20 USD  #wages of daniel "WA Cares and PFML withheld"
   174.00 USD #payroll-tax "SUTA, 1.2% of 14,500.00"
 
-31 operating        = 60_843.47 USD
-31 card-me          = 2_806.14 USD        // owed, as the statement shows it
-31 card-theo        = 291.25 USD          // owed, as the statement shows it
-31 card-maya        = 112.40 USD          // owed, as the statement shows it
+31 operating = 60_843.47 USD
+31 card-me   = 2_806.14 USD               // owed, as the statement shows it
+31 card-theo = 291.25 USD                 // owed, as the statement shows it
+31 card-maya = 112.40 USD                 // owed, as the statement shows it

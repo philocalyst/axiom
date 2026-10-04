@@ -1,0 +1,16 @@
+warning[missed-occurrence]: `gym` was due 3 times since 2026-04-01 and no occurrence was written (the last on 2026-06-01)
+   ╭─[129-missed-occurrence-a-run.ax:12:1]
+   │
+12 │ contract gym with gym-co
+   │ ────────────┬───────────
+   │             ╰── last due 29 days ago, on 2026-06-01
+   │
+   = note: not kept: 2026-04-01, 2026-05-01, 2026-06-01
+   = help: write what happened: `2026-06-01 gym`, with its own amount if it was another
+   = help: or say it was not owed: `2026-06-01 gym waived`
+   = help: or end it where its payments stopped: `until 2026-03-01`
+13 +   until 2026-03-01
+
+1 warning
+✓ 1 flow · 8 places · 1 law enforced · net worth 9,880.00 USD
+[exit status 0]

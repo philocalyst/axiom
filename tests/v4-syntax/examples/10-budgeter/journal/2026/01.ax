@@ -1,0 +1,55 @@
+2026-01-01 checking -> rent 1_150 USD / landlord
+2026-01-01 checking -> transport 48 USD / metro
+2026-01-01 checking -> fun 29 USD / gym
+2026-01-03 checking -> utilities 61.84 USD / power-co
+2026-01-04 visa -> dining 20.72 USD
+2026-01-05 visa -> groceries 48.27 USD / kroger
+2026-01-06 checking -> savings 100 USD for car-fund
+2026-01-06 checking -> savings 100 USD for insurance-fund
+2026-01-06 checking -> savings 250 USD for trip-fund
+2026-01-06 checking -> savings 100 USD for emergency-fund
+2026-01-08 visa -> phone 40 USD / mint-mobile
+2026-01-08 checking = 4_765.03 USD
+2026-01-09 studio -> 2_307.69 USD
+  taxes/federal         226.00 USD
+  taxes/payroll         176.54 USD
+  health                60.00 USD
+  checking              ...
+2026-01-09 visa -> transport 14.15 USD / rideshare
+2026-01-09 checking -> wallet ? USD
+2026-01-10 checking -> car 285.40 USD / carmax-finance
+2026-01-10 visa -> dining 21.85 USD
+2026-01-10 checking = 6_244.78 USD
+2026-01-11 visa -> subscriptions 15.49 USD / netflix
+2026-01-12 visa -> groceries 67.05 USD / aldi
+2026-01-13 wallet -> dining 5.95 USD
+2026-01-14 visa -> subscriptions 11.99 USD / spotify
+2026-01-15 checking -> student-loan 190 USD / mohela
+2026-01-15 visa -> fun 35.96 USD
+
+/// New brake pads and rotors, 486.25 USD, paid from the car fund: what I saved 100.00 USD a month for.
+/// The envelope is the source, so the payment takes the parcels tied to it.
+2026-01-15 car-fund -> car-repair 486.25 USD / kwik-brakes
+2026-01-16 visa -> dining 28.16 USD
+2026-01-19 visa -> groceries 58.55 USD / trader-joes
+2026-01-20 #check-1029 void
+2026-01-20 visa -> subscriptions 2.99 USD / apple
+
+/// The new term's policy fee, 12.00 USD, on the card.
+2026-01-20 visa -> insurance 12 USD / progressive
+2026-01-21 visa -> transport 23.90 USD / rideshare
+2026-01-22 checking -> visa 1_023.83 USD
+2026-01-23 studio -> 2_307.69 USD
+  taxes/federal         226.00 USD
+  taxes/payroll         176.54 USD
+  health                60.00 USD
+  checking              ...
+2026-01-23 visa -> dining 25.78 USD
+2026-01-24 visa -> fun 38.13 USD
+2026-01-24 wallet -> dining 8.50 USD
+2026-01-26 visa -> subscriptions 22.99 USD / adobe
+2026-01-27 visa -> groceries 54.65 USD / trader-joes
+2026-01-28 visa -> dining 19.23 USD
+2026-01-31 visa = 561.86 USD
+2026-01-31 checking = 6_876.10 USD
+2026-01-31 savings = 4_263.75 USD
