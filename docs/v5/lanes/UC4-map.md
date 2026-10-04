@@ -267,7 +267,7 @@ called: `acquisition_search_uses_owner_unit_window_and_deterministic_nearest_tie
 `calc.rs`).
 
 Mutants (`docs/v5/measure/session/mutate.py`): `u/relief_mutants.py`, rewritten against the ranking, 25 mutants, **all
-killed** (22 at U19; at U20 two rewritten and three added for the merge; rerun on the final tree, 24 of the 25 killed and none surviving when this was written, the last, `ranges-select-the-rest`, still running); `u/parts_mutants.py` (new: adjust,
+killed** (22 at U19; at U20 two rewritten and three added for the merge; rerun on the final tree, 25 of 25 killed); `u/parts_mutants.py` (new: adjust,
 carry, the part table, realize) **17 of 17 killed**, four of them only after the tests above were added (a fall shared by
 quantity, an adjustment written into another commodity, carries split front to back, a sale's gain recorded from the
 flow's place). `claims.py`'s own mutants of K3c's and K3d's code: eleven were written against the functions C4 replaced
@@ -276,7 +276,7 @@ the code that now does what it broke (the rank's `exact` key, `whole_claims`, `o
 parcel). `claims.py mutate` itself cannot run on the v5 head: its first step requires the unmutated tree to pass the
 new-rule verdict, and `d52032c` fails it on some projects (p0008, p0010, p0013, p0022, p0026, …: what a flow says it
 counted toward a purpose), a reference that drifted from the model before C4 and is the same for both builds. So the eleven
-were run with `mutate.py` against the tests of `engine` and `report`: 10 of the 11 killed and none surviving when this was written (the last, `a payment that is returned lands the bill positive`, still running). (One more, `a loan is a bill` in
+were run with `mutate.py` against the tests of `engine` and `report`: 11 of 11 killed. (One more, `a loan is a bill` in
 `model`, stopped applying before C4, when `lower/contracts.rs` changed; it is not C4's.)
 
 ### Measured (`check`, release; base `d52032c` and this branch, both built here)
@@ -346,7 +346,7 @@ instructions move by a few tenths of a percent, so the wall times' −5 to −9%
 
 ### Left undone, and found on the way
 
-- U23 (above). The relief and part mutants were run at the commits that changed what they test; on the final tree the relief mutants and the ported claims mutants were still finishing their last one each when this record was written (above).
+- U23 (above). The relief and part mutants were run at the commits that changed what they test; on the final tree the relief mutants (25) and the ported claims mutants (11) are all killed (above).
 - `Slot::tidy` does not recount `ties` when it drops a tied parcel of no quantity that was inserted; no path inserts one
   today, so nothing reads a wrong count, but the count can only be trusted while that holds.
 - `splits.py`'s `quiet()` takes v4 syntax out of the new side's output only, so the tool reports 222 projects differing
