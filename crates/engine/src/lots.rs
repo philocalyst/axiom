@@ -1397,6 +1397,8 @@ impl Holdings {
 
 #[cfg(test)]
 mod tests {
+    mod relief_model;
+
     use axiom_core::{Day, Days};
 
     use super::*;
