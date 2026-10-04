@@ -1840,8 +1840,9 @@ unit): a bug for lane D or for U4, whose `Want::Commodity` reads units.
 
 ## 11. C1, delivered (2026-10-04)
 
-From the v5 head `bce9735` (57,109) to `e65eb8a` (56,146): **−963**, of which the entries **−1,019** and two additions
-(the Book dump's `Debug` derives +21, the `purpose-of-its-own` hint +26) and phase 1a's `core` (+10).
+From the v5 head `bce9735` (57,109) to the end of C1 (56,143): **−966**, of which the entries **−1,022** (U4 to U1, and −3 for
+a named type clippy asked for) and two additions (the Book dump's `Debug` derives +21, the `purpose-of-its-own` hint +26) and
+phase 1a's `core` (+10).
 
 | entry | planned (with L-d) | delivered | why it differs |
 |---|---:|---:|---|
@@ -1867,7 +1868,7 @@ three goldens/mistakes (the hint). Every other output is byte-identical to `bce9
 an entry touches as the lines it deletes; what unifies needs its own lines for the cases it still tells apart. Applied to what
 is left: C2 about −800 (of −1,450; U7's signature savings are taken), C3 −650 (of −1,190), C4 −900 (of −1,295; U21 removes a
 store and its guards, the likeliest to hold), C5 −1,000 (of −1,755), C6 −1,100 (of −1,925), C7 perhaps −700: the tree lands
-at about **51,000**, not 46,050. The distance to 27,000 is **29,146** today and about 24,000 then.
+at about **51,000**, not 46,050. The distance to 27,000 is **29,143** today and about 24,000 then.
 
 `bench/` (C2's baseline): `check` at 1m 5.01 s against 4.95 s on `bce9735` (median of five interleaved runs), 672 MB both; the
 rest within the machine's noise. Found on the way, for their owners: the bench books exit 1 on both binaries (1,022 errors at
