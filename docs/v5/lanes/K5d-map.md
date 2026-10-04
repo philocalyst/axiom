@@ -326,3 +326,123 @@ Measured on the baseline (`scratchpad/k5d/base-out/`) and to be measured again a
   monitor,promising,reconcile}.rs and explain.rs:782-846; report/{contracts,register,why/contract}.rs.
 * §0.1, §0.4 on the baseline binary: `scratchpad/k5d/p1/{a,b,c}`; §0.1's 07-landlord from `tests/golden/07-landlord-check.txt`; §2 and §3 in Python integers (`scratchpad/k5d/py`).
 * The baseline: `cargo build --release` at `17da806`, copied to `scratchpad/k5d/baseline-axiom`; `loc.py`, `hist.py` and `fnlen.py` of the same tree.
+
+## 13. What was built, what the map got wrong, and what moved
+
+Written last, from the tree and the runs. Commits, in order: the map, the oracle before any code, the code (model, engine, report in one: they do not build apart),
+the goldens of `07-landlord` with every moved line explained, the mistake books, LANGUAGE §7, the oracle's harness and the K5b walk, and three small ones after the sweep found two
+cases no test named.
+
+### 13.1 What the code is
+
+* `model/promise/annuity.rs`: `Annuity` (what a loan is), `State` (40 bytes: `open`, `rate`, `payment`, `remaining`), `Event` (`Pay`, `Prepay(Qty)`, `Reset(Ratio)`, `Rate(Ratio)`), `Paid`,
+  and `Annuity::step(State, Event) -> (State, Paid)`: pure, total (the boundary is checked once in `Annuity::new`), allocation-free. Its four rounding sites are named in the module's doc and each has a test.
+* `model/promise/amortization.rs`: the schedule. One walk (`walk`) over every event the book states, in the order of day and rank (reset, rate, payment, prepayment), into a flat pool of 32-byte `Entry`
+  (`Promises.entries`); `Amortization` is the reader (`paid_on`, `open_on`, `payments`). It is walked when the promises compile and never again.
+* `model/promise/causes.rs`: `Promises::reconcile`: the statement against the schedule, and the cause named only when exactly one candidate explains the gap to the quantum.
+* `model/promise/residual.rs` is the 12-byte cursor it was, minus `began` and `open`; it asks the schedule whether a payment is owed at its ordinal.
+* `model/book.rs` `Contract.rates` and `lower/statements.rs` `DATE LOAN now at 6.25%`; `split.rs` and `solve.rs` `Quantity::Interest` (`Env::interest`); `lower/contracts.rs` `split_loan_payment`.
+* `engine/occurrence.rs` reads the schedule for the payment and its interest; `engine/loan_balance.rs` is the diagnostic; `engine/reconcile.rs` asks it. `report/contracts.rs` and `report/why/contract.rs` show it.
+* `std.ax` gains `purpose principal : transfer` **at the end of the file** (a line anywhere else moves every golden that quotes std). It is now a **built-in name**: a book that declares its own
+  `principal` purpose collides with it, as `claim` did for kinds.
+
+### 13.2 Where the code differs from this map
+
+* §4 said `State` lives in `Residual`; it does not. The schedule is a table (§5, approved) and the `Residual` stays a cursor. `Event` carries no day (the arithmetic is day-free), and `step` is a method of
+  `Annuity`, which holds the terms it needs, not a free function of three arguments.
+* **§7 said the legs add up to the old payment "on every payment, the last one included". That is wrong for the last payment of an unprepaid loan.** The old engine paid the level payment again
+  and left a few cents of rounding on the debt; the new last payment is what is left (`open + interest`), as ACTUS has it and as §2 item 5 already said. The legs add up to the old payment on every
+  other payment, and `crates/session/tests/loans.rs` asserts it on every payment but the last of the 12 loans of the examples (2,286 payments, before any reset or rate a book says). The last payments differ by:
+  `05-family` mortgage -3.23 USD (2053), car -0.02 (2028); `11-sam` and `v4-sketch` mortgage +0.80 (2054); `explore-v5/02-family` mortgage-2 +0.71, car-loan -0.31; `03-triplex` +0.60.
+  No output of any example reaches those dates. Stopped and reported, as the brief says.
+* §8's candidates are four and a tie: `Cause::{Missed, Short, Extra, Prepaid}`, plus `Several` (two explain it alike) and `Unknown` (none does). `Short` was a candidate the map did not list: a line that
+  states less than its payment leaves principal unpaid in the book that the schedule paid.
+* A line that states **more** than its payment is a prepayment of the difference in the schedule (the map's "excess"), for a literal amount in the loan's commodity; a computed or pending amount is not read.
+
+### 13.3 What changed in the outputs, and why
+
+Goldens: only `tests/golden/07-landlord-{check,balance,available,limits,claims,tax}.txt`; the commit message of that commit lists every line. No other golden moved. No mistake book moved (seven are new).
+
+| example (day) | before | after | why |
+|---|---|---|---|
+| `07-landlord` check (2026-04-16) | 18 errors, 3 warnings | 7 errors, 2 warnings | the 11 statements of `home-loan` that said `lender holds 279,000.00 USD, not ...` agree with the schedule to the cent (all of 2025: 278,759.79 ... 276,282.05); the `home-loan` warning (`due 3 times ... last on 2026-03-01`) is gone, the loan having been paid off on 2025-12-29 |
+| `07-landlord` balance | liabilities 16,917.95; net worth 152,248.65 | liabilities 14,200.00; net worth 154,966.60 | the debt tab falls by the principal of each payment and not by nothing; the interest is an expense |
+| `07-landlord` tax 2025 | rental-expenses 11,495.08 (21 sources), rental-net 13,229.92, total-income 87,305.92, total-tax 16,315.89, owed 1,735.89 | 28,682.62 (32), -3,957.62, 70,118.38, 12,534.62, -2,045.38 (a refund) | the loan is `for house`, so each payment's interest is `#interest of house`, which `rental.ax`'s `rental-expenses` law already counted; it was never posted. 17,187.54 USD over the 11 scheduled payments: the figure `examples/07-landlord/README.md`'s independent verifier gives |
+| `05-family` | check and balance identical (46,463.25 net worth; liabilities 425,770.63) | | no payment is kept before 2026-04-16 |
+| `05-family` `contracts` | blank loan balance | 404,691.86 (mortgage), 14,831.43 (car); the terms read "the loan's payment; split ... the loan's interest" | the schedule's balance on the day |
+| `05-family` `forecast` | | every month's balances move (the interest leaves, the principal pays the debt) | the split |
+| `11-sam`, `v4-sketch` | liabilities 760.71 / 634.19 | -334.42 / -460.94 | **the loan has no origination and no opening**: the debt tab starts at zero and the principal legs take it below. See 13.5 |
+| `explore-v5/03-triplex` | 69 errors | 73 | four `loan-balance` errors: the contract says `first payment 2022-10-01` in a comment and has no `from`, so the schedule's first payment is 2022-09-01 and every statement is one payment's principal off (511.39 on 2026-01-31). With `from 2022-10-01` added the four statements agree to the cent with the author's own hand arithmetic and the book has 66 errors. Not edited (it is not mine); the one-line fix is verified |
+| `explore-v5/02-family`, `05-budgeter`, `06-family-addresses` | | check and balance identical | |
+
+Not goldens, not compared: the forecast view and the `why contract` page of every loan (a "Loan schedule" section is new).
+
+### 13.4 Numbers
+
+| what | result |
+|---|---|
+| non-test Rust lines (`briefs/loc.py`) | 54,377 to 55,102: **+725**, not the +350 the plan said. `engine` 12,024 to 12,233 (+209), `model` 19,081 to 19,549 (+468), `report` 7,029 to 7,077 (+48), the others unchanged |
+| where the 725 are | `engine/loan_balance.rs` +191 (the diagnostic: six causes, each said in the book's words with its edit), `model/promise/amortization.rs` +187, `annuity.rs` +115 (rewritten: 91 to 206), `causes.rs` +75, `report/why/contract.rs` +47 (the "Loan schedule" section, which the plan listed and the brief did not), `lower/statements.rs` +37 (`now at`), `promise.rs` +34, small edits +40 |
+| what it deleted | **13 lines** (`Residual`'s `began`/`open`). The old payment path was one `Annuity` of 91 lines and a cursor; there was no second implementation of the loan to remove, and the lump's flow became the split's header. The lane added a mechanism where there was a constant |
+| function lengths (`hist.py`) | 1-10 lines 2,066 to 2,111 functions; 11-20: 723 to 731; 21-40: 514 to 523; 41-80: 128 to 128; 81-160: 8 to 8; over 320: 1 to 1. No function over 40 lines was added or lengthened (`cause` of the diagnostic was 60 and is six functions; `schedule_section` 47 and is 30; `lower_terms` 48 and is 45) |
+| the oracle (`loans.py`) | an independent ACTUS annuity in Python integers; seeded books of one loan over eight cadences (monthly, quarterly, every 6m, every 12m, twice monthly, every 2w, every 45d, every 10d), prepayments in both modes, rate changes, resets with cap and life, lines that state more or less than their payment, missed payments, loans paid off early, statements of every cause. **4,500 projects (1,500 of seed 7 and 3,000 of seed 11), 0 disagreements**. The 1,500 of seed 7 ask 105,356 payments' interest, principal and balance, 3,642 prepayments, 54,175 month-end balances, 28,017 posted splits, 13,568 forecast splits, 3,805 missed days, 1,345 `assertion` and 1,704 `loan-balance` diagnostics, each cause asked (`extra` 265, `missed` 315, `short` 45, `prepayment` 363, `none` 716) |
+| the K5b promise oracle | ported to read the schedule (`promises/walk.rs`); 800 projects, 0 failures |
+| `fuzz.py diff`, books with no loan | 5,000 mutants of the examples without a loan (two seeds): 0 differ between the baseline binary and this one, 0 panics. 3,000 mutants of all the examples: 0 panics |
+| `splits.py run` | 1,000 projects, 27,691 commands: 74 projects differ, **all 74 have a loan** (79 projects have one; 5 are unmoved: no payment kept, no view shows it) |
+| `claims.py` | 600 projects dumped by the baseline build and this one (the CLI's reports and the dump's account of every parcel, gain, part and diagnostic): all 600 byte-identical, the one with a loan (paid in kind) included. (The harness's "should differ and do not" column compares a build before K3c with one after it, and both of these are after.) |
+| `axiom check`, three runs, the fastest | `bench/` generated at 100k (100,030 flows) and 1m, no loan in either; the baseline binary and this one interleaved, three runs each, fastest: **100k 0.358 s and 0.362 s; 1m 3.811 s and 3.912 s** (peak RSS 665 MB both). Nine more interleaved runs on 1m: fastest 3.906 s baseline, 3.827 s new; median 4.245 s and 4.107 s. Load average 2.2 to 2.8 (another lane was building); the runs differ by their noise (3%) and not by a direction. No slowdown |
+| tests | `cargo test --workspace --release`: only the two known failures (`a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot`, `a_context_forecast_keeps_historical_and_same_day_obligations_once`); `native_loan_forecast_stops_after_the_typed_principal_is_repaid` passes; `tests/mistakes/` and `tests/golden.sh` regenerate to the committed files |
+
+### 13.5 The mutation sweep, and what was not killed
+
+`loans.py mutate` copies the tree, changes one line of it by one text at a time, builds the dump of the mutant, and asks the oracle (the engine's lines against the reference's, on the first 300 books) and, if the oracle does
+not see it, the tests of the model and the engine (an unoptimized build; the four tests that fail unoptimized with no mutant at all are left out: an overflow in the solver property test's reference at `solve.rs`, the two known failures and a kind-totals test, none of them this lane's). 80 mutants are written (a 81st was dropped with the code it changed, below) and every text is checked to occur once.
+The sweep was stopped, as agreed, after **the step's (38: the payment, the four rounding sites, a prepayment in both modes, a rate, a reset, the terms) and the schedule's (24: the order of the events of a day, the walk, what a line that
+states an amount adds, the table's readers, the first payment and the payments owed)**: 62 mutants.
+
+| outcome | mutants |
+|---|---|
+| killed by the oracle | 39 |
+| killed by a unit test that names it | 14 (`a_payment_that_does_not_cover_the_interest_pays_no_principal_and_owes_no_more`, `a_prepayment_is_held_to_what_is_owed_and_paying_it_all_ends_the_loan`, `a_rate_refigures_the_payment_over_what_is_left_and_is_held_between_nothing_and_everything`, `how_many_payments_follows_the_cadence`, `the_factor_is_fixed_point_at_eighteen_places_rounded_at_every_step`, and others) |
+| survived both | 9, of which 7 are now killed by a test written for each (below), 1 is equivalent, 1 was code that does nothing |
+
+The 7: `the_factor_rounds_the_rate_and_every_step_of_its_loop_and_truncates_neither` (the loop's and the rate's truncation: the oracle cannot see a rounding at the 18th place that changes no cent in a
+million payments), `a_rate_said_on_the_day_of_a_reset_is_the_one_the_payment_of_that_day_is_at`, `a_rate_said_on_the_day_the_loan_was_made_is_the_rate_from_its_first_payment`,
+`a_reset_on_the_day_of_the_last_payment_is_the_rate_of_that_payment`, and `a_line_that_states_exactly_its_payment_or_another_commodity_prepays_nothing` (two mutants). Two more tests, for a payment that clears what is owed before
+the last and for the number of payments a balance needs, came from the first, interrupted run of the sweep and kill three mutants between them.
+
+**Not killed, and why.** (1) `if state.open == Qty::ZERO { continue }` for `break` in `walk`: **equivalent**; once nothing is owed the condition holds for every later event, so `continue` skips them all as `break` does (it
+is slower, by the events). (2) The filter `txn.occurrence.is_none()` in `Said::paid_into`: **no flow can fail it** (an occurrence's flows are made when it is posted and are in no book); the filter is deleted, and its mutant with it.
+
+**Not run**: the 19 of the causes (9), the occurrence's reading of the schedule (3), the split in the lowering (4), `reconcile` (1) and `loan_balance` (2). They are in `MUTANTS` and each text is checked against the tree. What stands behind
+that code instead is the oracle's diagnostics (5 causes asked 1,704 times) and the seven mistake books.
+
+The sweep's first copy of the tree kept the files' old times, and cargo built the second run of it with the first run's last mutant; `mutation.py` now copies with new times (found when the unmutated tree "failed its own oracle").
+
+### 13.6 What is not finished, and the decisions that are not mine
+
+* **Part B (`deposit`) stays at §10.** It needs K3f (a deposit the owner receives is a debt tab, whose settlement is the relief order) and a one-shot term. Nothing of it is built.
+* **Part C: the mortgage-interest deduction.** `#interest of ASSET` is posted (07-landlord's tax moved by it), and `rental.ax`'s `rental-expenses` already counted it. `us.ax`'s itemized
+  deduction reads `#mortgage-interest`, which no loan writes. The options, not chosen: (a) a loan `for` an asset of a home kind writes `#mortgage-interest` instead of `#interest`: the rental law would
+  then stop counting it unless `rental.ax` is changed too; (b) `purpose mortgage-interest : interest` in `us.ax`, so that one posting counts for both, and the loan says which it is; (c) the deduction reads
+  `#interest of ASSET` for an asset of a home kind, as the rental law does, and the shares of the asset (`03-triplex`: 64.06% rentals) decide how much of it is personal. The examples do not agree
+  with one another (`05-family`'s own journal books the house's interest as `#mortgage-interest` and the car's as `#interest`).
+* **A loan that predates the book has no opening balance.** LANGUAGE §5 says a loan's balance "comes from its terms and needs no opening line", and the schedule can now say it
+  (`11-sam`'s own comment says `312,441.12 owed to rocket, from its terms`; the schedule's balance after 22 payments is exactly that). Nothing opens the debt tab with it: a loan made before
+  the book began, with no `DATE loan` line, starts at zero, and its principal legs take the tab below it (`11-sam` -334.42, `v4-sketch` -460.94 liabilities). It is a design question (what is the
+  opening day of a loan?) and the code is in `ledger.rs`/`state.rs`, outside this lane's files.
+* **Statements that follow another convention.** `03-triplex` is four `loan-balance` errors by one missing `from` (13.3). The first payment of a loan is the first owed day after it was made (K5a's
+  rule); real mortgages skip a month, the language has `from` for it, and nothing warns when a comment says otherwise.
+* The causes and the fold's mutants (`causes.rs`, `occurrence.rs`, the split in `lower/contracts.rs`, `reconcile.rs`, `loan_balance.rs`: 18 mutants) are written and validated against the tree and were
+  **not run**: the sweep was stopped after the step's and the schedule's, as agreed. Their unit tests (the model's `loans.rs`, the engine's `loan_tests.rs`) and the seven mistake books name each cause.
+
+### 13.7 The three places I am least proud of
+
+1. **The debt tab of a loan that predates the book** (13.6): the lane makes `Liabilities` negative in two examples, which is correct arithmetic on an incomplete book and not a thing I should have left for the next lane to find. The schedule knows
+   the balance; nothing uses it to open the tab.
+2. **`engine/loan_balance.rs` and the dump that reads it.** 191 lines of prose in code, and the oracle learns the cause from the *words* of a note (`CAUSES` in `loans/main.rs`): a test of the wording is a
+   test of the oracle's phrases. `Run` should carry the structured disagreement and the report should word it. It is also the largest part of the +725 lines the plan did not expect.
+3. **A short payment is the book's and not the schedule's.** A line that states less than its payment changes nothing in the schedule (the loan is paid as the lender's terms say), while the debt tab holds
+   only the principal the line paid; the two disagree by the shortfall, and `Cause::Short` is how the diagnostic reconciles them. It is a defensible rule that makes the schedule a statement of the
+   terms rather than of what happened, which is also why `contracts` shows 404,691.86 for a mortgage with no payment kept. The cost of reading the book is also there: `Said::of` reads every transaction, once per loan at compile and once per
+   statement that disagrees.
