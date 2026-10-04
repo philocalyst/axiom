@@ -1600,7 +1600,8 @@ fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
                 codes: FlowCodes { header: empty, local: empty },
                 tied: None,
             },
-            false,
+            crate::lots::Held::Lots,
+            &axiom_core::Arena::new(),
         );
         assert_eq!(ledger.balance(place, unit), Qty(1), "matched metadata does not change the aggregate quantity");
         ledger.checkpoint().digest()
@@ -1615,7 +1616,7 @@ fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
 }
 
 #[test]
-fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
+fn a_failed_basis_change_leaves_both_canonical_stores_unchanged() {
     let mut f = Fixture::new();
     let (place, other_place, unit, owner, asset_name) = (f.checking, f.savings, f.usd, f.me, f.sym("indexed asset"));
     let mut book = f.book();
@@ -1646,30 +1647,31 @@ fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
         tied: None,
     };
     let second = Parcel { qty: Qty(1), basis: Qty::ZERO, ..first };
-    ledger.world.holdings.entry(place, unit).land(first, false);
-    ledger.world.holdings.index_part_slot(place, unit, part);
-    ledger.world.holdings.entry(other_place, unit).land(second, false);
-    ledger.world.holdings.index_part_slot(other_place, unit, part);
-    ledger
-        .world
-        .assets
-        .add_part(
-            asset,
-            crate::Part {
-                id: part,
-                flow: None,
-                kind: crate::PartKind::Acquisition,
-                recorded: crate::EventKey { day: Day(5), sequence: 0 },
-                day: Day(5),
-                cost: Qty(10),
-                basis: Qty(10),
-            },
-        )
-        .unwrap();
+    ledger.world.holdings.entry(place, unit).land(first, crate::lots::Held::Lots, &axiom_core::Arena::new());
+    ledger.world.holdings.entry(other_place, unit).land(second, crate::lots::Held::Lots, &axiom_core::Arena::new());
+    let acquisition = crate::Part {
+        id: part,
+        flow: None,
+        kind: crate::PartKind::Acquisition,
+        recorded: crate::EventKey { day: Day(5), sequence: 0 },
+        day: Day(5),
+        cost: Qty(10),
+        basis: Qty(10),
+    };
+    ledger.add_asset_part(asset, acquisition).unwrap();
 
-    assert_eq!(ledger.carry_asset_basis(part, Some((asset, part)), Qty(1)), Err(crate::AssetError::Overflow));
-    assert_eq!(ledger.world.assets.asset(asset).unwrap().basis(part), Ok(Qty(10)));
-    assert_eq!(ledger.world.holdings.part_basis(part), Ok(Qty(10)));
+    // An improvement's basis goes to the parcels of the acquisition by their quantity, which overflows: neither store moves.
+    let improvement = crate::Part {
+        id: crate::PartId { origin, ordinal: 1 },
+        kind: crate::PartKind::Improvement,
+        recorded: crate::EventKey { day: Day(5), sequence: 1 },
+        cost: Qty(1),
+        basis: Qty(1),
+        ..acquisition
+    };
+    assert_eq!(ledger.add_asset_part(asset, improvement), Err(crate::AssetError::Overflow));
+    assert_eq!(ledger.world.assets.asset(asset).unwrap().part_count(), 1);
+    assert_eq!(ledger.world.assets.part(part).map(|(_, part)| part.basis), Some(Qty(10)));
     let held_basis: i64 = ledger
         .world
         .holdings
@@ -1818,8 +1820,8 @@ fn value_is_conserved_over_random_journals() {
                 holding.lots.windows(2).all(|pair| pair[0].acquired <= pair[1].acquired),
                 "seed {seed}: lots out of order"
             );
-            let is_base = holding.unit == usd;
-            let alike = |a: &Parcel, b: &Parcel| crate::lots::identity(a, is_base) == crate::lots::identity(b, is_base);
+            let held = if holding.unit == usd { crate::lots::Held::Money } else { crate::lots::Held::Lots };
+            let alike = |a: &Parcel, b: &Parcel| a.is_like(b, held, &book.codes);
             for (at, lot) in holding.lots.iter().enumerate() {
                 assert!(
                     holding.lots[at + 1..].iter().all(|other| !alike(lot, other)),

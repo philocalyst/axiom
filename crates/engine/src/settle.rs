@@ -22,7 +22,7 @@ use axiom_core::{Day, Id, Qty};
 use axiom_model::{Class, Dir, Entity, Flow, Place, Role};
 
 use crate::ledger::{Ledger, solved};
-use crate::lots::{Origin, Request, Slice};
+use crate::lots::{Origin, Request};
 use crate::motion::{Course, Motion, Moves};
 use crate::recognition::{Dealing, Reaches, Settlement, claim_dir};
 use crate::{Cause, Parcel, PartId};
@@ -203,8 +203,7 @@ impl Ledger<'_, '_, '_> {
         let (book, unit) = (self.plan.book, m.out.unit);
         let named = self.name_claims(m, tab);
         let selectors = if named { &self.scratch.selectors[..] } else { m.select() };
-        let open =
-            self.world.holdings.get(tab, unit).map_or(Qty::ZERO, |slot| slot.admitted(false, selectors, &book.codes));
+        let open = self.world.holdings.get(tab, unit).map_or(Qty::ZERO, |slot| slot.admitted(selectors, &book.codes));
         let need = open.min(m.out.qty);
         if need <= Qty::ZERO {
             return None;
@@ -213,7 +212,7 @@ impl Ledger<'_, '_, '_> {
         let request =
             Request { selectors, exact: open.min(rest), ..Request::of(need, policy, &book.codes, (m.day, m.txn)) };
         self.world.holdings.relieve(tab, unit, &request, &mut self.scratch.relief);
-        let parcels = self.scratch.relief.slices.iter().map(Slice::parcel).collect();
+        let parcels = self.scratch.relief.slices.iter().map(|slice| slice.lot).collect();
         let dir = claim_dir(book.places[tab].class);
         Some(Claiming { settlement: Settlement { tab, unit, parcels, reaches }, dir })
     }
@@ -236,17 +235,7 @@ impl Ledger<'_, '_, '_> {
     /// made it, the line that did and the codes it carries.
     pub(crate) fn owe(&mut self, m: &Motion) {
         let part = Some(PartId { origin: m.txn, ordinal: m.flow_ordinal });
-        let bill = Parcel {
-            qty: m.out.qty,
-            basis: Qty::ZERO,
-            acquired: m.day,
-            held_since: m.day,
-            wash_matched: false,
-            txn: m.txn,
-            part,
-            codes: m.code_runs,
-            tied: None,
-        };
+        let bill = Parcel { part, codes: m.code_runs, ..Parcel::new(m.out.qty, Qty::ZERO, (m.day, m.txn)) };
         self.world.holdings.entry(m.from, m.out.unit).owe(bill, &self.plan.book.codes);
     }
 
@@ -254,7 +243,7 @@ impl Ledger<'_, '_, '_> {
     /// so no one is owed a debit for them, and they are not what the flow moved.
     pub(crate) fn relieved_claims(&mut self, m: &Motion) -> Option<Claiming> {
         let lots = self.scratch.relief.slices.iter().filter(|slice| slice.origin == Origin::Lot);
-        let parcels: Box<[_]> = lots.map(Slice::parcel).collect();
+        let parcels: Box<[_]> = lots.map(|slice| slice.lot).collect();
         if parcels.is_empty() {
             return None;
         }

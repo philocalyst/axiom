@@ -36,7 +36,6 @@
 #![forbid(unsafe_code)]
 
 mod assets;
-mod assets_runtime;
 mod budget;
 mod calc;
 mod checkpoint;
@@ -98,7 +97,7 @@ mod split_tests;
 #[cfg(test)]
 mod tests;
 
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
@@ -107,8 +106,7 @@ use axiom_model::{
 };
 
 pub use assets::{
-    AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId,
-    PartKind, PendingCarry,
+    AssetError, AssetState, Assets, Disposal, DisposalBoundary, EventKey, Part, PartId, PartKind, PendingCarry,
 };
 pub use axiom_model::Cause;
 pub use checkpoint::Checkpoint;
@@ -411,7 +409,7 @@ impl Holding {
 
 /// Value at rest, remembered: a quantity with its basis, when and how it was
 /// acquired, and the restricted source it is still tied to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Parcel {
     pub qty: Qty,
     /// Value already accounted for (cost, contributions, after-tax money), in
@@ -436,20 +434,12 @@ pub struct Parcel {
     pub tied: Option<Id<Entity>>,
 }
 
-impl Hash for Parcel {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.qty.hash(state);
-        self.basis.hash(state);
-        self.acquired.hash(state);
-        self.held_since.hash(state);
-        self.wash_matched.hash(state);
-        self.txn.hash(state);
-        self.part.hash(state);
-        self.codes.header.start().hash(state);
-        self.codes.header.len().hash(state);
-        self.codes.local.start().hash(state);
-        self.codes.local.len().hash(state);
-        self.tied.hash(state);
+impl Parcel {
+    /// `qty` with `basis`, acquired by `txn` on `acquired` and held since then, of no part, code or tie: a parcel that
+    /// has anything else to say says it in a struct update.
+    pub(crate) fn new(qty: Qty, basis: Qty, (acquired, txn): (Day, RuntimeTxn)) -> Parcel {
+        let (held_since, wash_matched, codes) = (acquired, false, FlowCodes::default());
+        Parcel { qty, basis, acquired, held_since, wash_matched, txn, part: None, codes, tied: None }
     }
 }
 

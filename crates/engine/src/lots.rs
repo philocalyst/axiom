@@ -7,18 +7,24 @@
 //! push; and cloning is two flat copies.
 //!
 //! A slot is the public [`Holding`] plus what keeps a sale from scanning it.
-//! Lots are kept oldest first, so FIFO takes from the front (past a cursor over
-//! the exhausted ones) and LIFO from the back, each in time proportional to the
-//! lots it uses. HIFO asks a heap ordered by basis per unit, built when first
-//! needed and kept up to date by every change to a lot. `exact` takes the lot
-//! of exactly the size asked, else the oldest, and settles a claim. Only
-//! `prorata`, selectors and ties have to look at every lot.
+//! Relief is one ranking and one way of taking: every policy orders what may
+//! leave by [`Candidate::rank`] (the tie's colour, what the policy takes first,
+//! then basis per unit and position) and takes in that order, all of one
+//! before the next, or pro rata across a colour. Sorting every lot for every
+//! sale is what that means, and on a position bought 100,000 times it is
+//! 150 times slower than not looking: so when nothing is tied and no selector
+//! narrows, the first candidates of FIFO, LIFO and HIFO come from where they
+//! already are. Lots are kept oldest first, so FIFO takes from the front (past
+//! a cursor over the exhausted ones) and LIFO from the back, and HIFO asks a
+//! heap in the ranking's order, built when first needed and told of every
+//! change to a lot. Everything else (`exact`, `prorata`, selectors, ties) is
+//! gathered and sorted.
 //!
 //! Exhausted lots are left in place while the fold runs and swept out when
 //! control returns to the caller, so the holdings a caller sees are always
 //! clean.
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::hash::{Hash, Hasher};
 use std::iter::successors;
@@ -35,11 +41,6 @@ const NONE: u32 = u32::MAX;
 /// half of them are exhausted.
 const SWEEP_AT: usize = 32;
 
-fn empty_codes() -> FlowCodes {
-    let empty = axiom_core::Run::new(Id::new(0), 0);
-    FlowCodes { header: empty, local: empty }
-}
-
 fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
     let in_left = |code: &Sym| pool[left.header].contains(code) || pool[left.local].contains(code);
     let in_right = |code: &Sym| pool[right.header].contains(code) || pool[right.local].contains(code);
@@ -47,86 +48,44 @@ fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
         && pool[right.header].iter().chain(&pool[right.local]).all(in_left)
 }
 
-/// What makes two parcels interchangeable. Parcels merge exactly when their
-/// identities are equal, and relief between candidates with equal identities is
-/// never ambiguous: taking any of them is the same as taking any other.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Identity {
-    /// Plain value has no acquisition transaction and must not borrow a fake
-    /// journal key merely to participate in ambiguity checks.
-    Plain { basis: Qty, qty: Qty },
-    /// Money: what matters is who it is tied to and how much of each unit is
-    /// already accounted for. Where and when it arrived does not matter, so a
-    /// 401k's hundreds of zero-basis deferrals are one lot.
-    Money { tied: Option<Id<Entity>>, basis: Qty, qty: Qty, part: Option<PartId>, wash_matched: bool },
-    /// Anything else: each purchase is its own lot, for selectors and for how
-    /// long it has been held.
-    Lot {
-        acquired: Day,
-        held_since: Day,
-        wash_matched: bool,
-        txn: RuntimeTxn,
-        tied: Option<Id<Entity>>,
-        part: Option<PartId>,
-    },
+/// What a holding holds, which says what its plain value is worth and when two of its parcels are one: money (base
+/// currency outside a claim place) is at its face and told apart by its basis per unit, wherever and whenever it came
+/// from; anything else is told apart by the purchase that made it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Held {
+    Money,
+    Lots,
 }
 
-impl PartialEq for Identity {
-    fn eq(&self, other: &Identity) -> bool {
-        match (*self, *other) {
-            (Identity::Plain { basis: ab, qty: aq }, Identity::Plain { basis: bb, qty: bq }) => (ab, aq) == (bb, bq),
-            (
-                Identity::Money { tied: a, basis: ab, qty: aq, part: ap, wash_matched: aw },
-                Identity::Money { tied: b, basis: bb, qty: bq, part: bp, wash_matched: bw },
-            ) => {
-                // Basis per unit, compared exactly: ab/aq == bb/bq.
-                a == b && ap == bp && aw == bw && ab.0 as i128 * bq.0 as i128 == bb.0 as i128 * aq.0 as i128
-            }
-            (
-                Identity::Lot { acquired: a, held_since: ah, wash_matched: aw, txn: at, tied: ap, part: apart },
-                Identity::Lot { acquired: b, held_since: bh, wash_matched: bw, txn: bt, tied: bp, part: bpart },
-            ) => (a, ah, aw, at, ap, apart) == (b, bh, bw, bt, bp, bpart),
-            _ => false,
+impl Held {
+    /// The basis of `qty` of plain value: its face, if it is money; nothing else has basis outside its lots.
+    fn plain_basis(self, qty: Qty) -> Qty {
+        match self {
+            Held::Money => qty,
+            Held::Lots => Qty::ZERO,
         }
     }
 }
 
-/// `money`: base-currency parcels outside claim places, which are told apart by
-/// their basis per unit; every other parcel by the purchase that made it.
-pub(crate) fn identity(parcel: &Parcel, money: bool) -> Identity {
-    if money {
-        Identity::Money {
-            tied: parcel.tied,
-            basis: parcel.basis,
-            qty: parcel.qty,
-            part: parcel.part,
-            wash_matched: parcel.wash_matched,
-        }
-    } else {
-        Identity::Lot {
-            acquired: parcel.acquired,
-            held_since: parcel.held_since,
-            wash_matched: parcel.wash_matched,
-            txn: parcel.txn,
-            tied: parcel.tied,
-            part: parcel.part,
-        }
+impl Parcel {
+    /// Whether `other` cannot be told from this parcel, so that landing it merges the two: the same tie, part and wash-sale
+    /// mark and the same codes, and then, for money, the same basis per unit (a 401k's hundreds of zero-basis deferrals
+    /// are one lot), for anything else the same purchase. The fields that differ most often are compared first.
+    pub(crate) fn is_like(&self, other: &Parcel, held: Held, pool: &Arena<Sym>) -> bool {
+        let made = match held {
+            Held::Money => self.basis.0 as i128 * other.qty.0 as i128 == other.basis.0 as i128 * self.qty.0 as i128,
+            Held::Lots => (self.txn, self.acquired, self.held_since) == (other.txn, other.acquired, other.held_since),
+        };
+        made && (self.tied, self.part, self.wash_matched) == (other.tied, other.part, other.wash_matched)
+            && same_codes(self.codes, other.codes, pool)
     }
 }
 
-/// Part of the value in flight: what left a place, and what it carries on.
+/// Part of the value in flight: the parcel that left a place (with the basis relieved with it), where it came from, and what
+/// the flow decides of it on the way.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Slice {
-    pub qty: Qty,
-    /// Basis relieved with it at the source.
-    pub basis: Qty,
-    pub acquired: Day,
-    pub held_since: Day,
-    pub wash_matched: bool,
-    pub txn: RuntimeTxn,
-    pub part: Option<PartId>,
-    pub codes: FlowCodes,
-    pub tied: Option<Id<Entity>>,
+    pub lot: Parcel,
     pub origin: Origin,
     /// What it fetched, in base-currency quanta: what a sale realizes against.
     pub worth: Qty,
@@ -147,42 +106,21 @@ pub(crate) enum Origin {
 }
 
 impl Slice {
-    fn new(qty: Qty, basis: Qty, origin: Origin, (acquired, txn): (Day, RuntimeTxn)) -> Slice {
-        Slice {
-            qty,
-            basis,
-            acquired,
-            held_since: acquired,
-            wash_matched: false,
-            txn,
-            part: None,
-            codes: empty_codes(),
-            tied: None,
-            origin,
-            worth: Qty::ZERO,
-            carried: Qty::ZERO,
-        }
+    fn of(lot: Parcel, origin: Origin) -> Slice {
+        Slice { lot, origin, worth: Qty::ZERO, carried: Qty::ZERO }
     }
 
-    /// The parcel this slice was before it left: what a return puts back.
-    pub fn parcel(&self) -> Parcel {
-        Parcel {
-            qty: self.qty,
-            basis: self.basis,
-            acquired: self.acquired,
-            held_since: self.held_since,
-            wash_matched: self.wash_matched,
-            txn: self.txn,
-            part: self.part,
-            codes: self.codes,
-            tied: self.tied,
-        }
+    /// Value that nothing gave up, of the codes `codes`: base currency is at its face, anything else has no basis of its own.
+    pub fn fresh(qty: Qty, is_base: bool, now: (Day, RuntimeTxn), codes: FlowCodes) -> Slice {
+        Slice::of(Parcel { codes, ..Parcel::new(qty, if is_base { qty } else { Qty::ZERO }, now) }, Origin::Fresh)
     }
+}
 
-    /// Value that nothing gave up: base currency is at its face, anything else
-    /// has no basis of its own.
-    pub fn fresh(qty: Qty, is_base: bool, now: (Day, RuntimeTxn)) -> Slice {
-        Slice::new(qty, if is_base { qty } else { Qty::ZERO }, Origin::Fresh, now)
+/// A slice is read as the parcel it carries.
+impl Deref for Slice {
+    type Target = Parcel;
+    fn deref(&self) -> &Parcel {
+        &self.lot
     }
 }
 
@@ -204,9 +142,30 @@ pub(crate) struct Candidate {
     /// The transaction that made it; plain money has none.
     pub txn: Option<RuntimeTxn>,
     pub tied: Option<Id<Entity>>,
-    /// What the claim it belongs to holds: its own quantity, until `Exact` adds up the lines of one transaction.
+    /// What the claim it belongs to holds: its own quantity, until `exact` adds up the lines of one transaction.
     claim: Qty,
-    identity: Identity,
+}
+
+impl Candidate {
+    /// Where the candidate stands in the order relief takes, which is one order for every policy: its colour, then what
+    /// the policy takes first (for `exact` the claims of the size asked; for HIFO outside money, plain value), then the
+    /// heap's order ([`Ranked`]): dearest per unit, then oldest. A policy that does not weigh basis ranks every candidate
+    /// the same per unit, so position decides, and LIFO counts positions from the newest.
+    fn rank(&self, policy: Option<Policy>, req: &Request) -> (Colour, bool, Reverse<Ranked>) {
+        let (plain, at) = match self.source {
+            Source::Plain => (true, -1),
+            Source::Lot(at) => (false, at as i64),
+        };
+        let (first, ranked) = match policy {
+            Some(Policy::Hifo) => {
+                (plain && req.held == Held::Lots, Ranked { basis: self.basis.0, qty: self.qty.0, at })
+            }
+            Some(Policy::Lifo) => (false, Ranked { at: -at, ..Ranked::SAME }),
+            Some(Policy::Exact) => (!plain && self.claim == req.exact, Ranked { at, ..Ranked::SAME }),
+            _ => (false, Ranked { at, ..Ranked::SAME }),
+        };
+        (req.colour(self.tied), !first, Reverse(ranked))
+    }
 }
 
 /// What relief is asked for.
@@ -214,9 +173,8 @@ pub(crate) struct Request<'a> {
     pub need: Qty,
     /// The size of the claim `exact` looks for: `need`, unless the flow is one of several that make one payment.
     pub exact: Qty,
-    /// Base currency outside claim places: plain money has basis at its face,
-    /// and acquisition dates do not tell parcels apart.
-    pub money: bool,
+    /// What the place holds of the commodity: money, or lots.
+    pub held: Held,
     pub selectors: &'a [Select],
     /// The place's policy; a policy selector on the flow overrides it.
     pub policy: Option<Policy>,
@@ -240,7 +198,7 @@ impl<'a> Request<'a> {
         Request {
             need,
             exact: need,
-            money: false,
+            held: Held::Lots,
             selectors: &[],
             policy,
             codes,
@@ -268,10 +226,6 @@ enum Colour {
     Refused,
 }
 
-impl Colour {
-    const ALL: [Colour; 4] = [Colour::Own, Colour::Permitted, Colour::Free, Colour::Refused];
-}
-
 impl Request<'_> {
     fn colour(&self, tied: Option<Id<Entity>>) -> Colour {
         match tied {
@@ -285,19 +239,6 @@ impl Request<'_> {
     /// Whether parcels of `colour` may leave for this request at all.
     fn allows(&self, colour: Colour) -> bool {
         colour != Colour::Refused || self.spender.is_none()
-    }
-
-    /// Whether a holding can have parcels of `colour` that may leave, given
-    /// whether any of its parcels is tied at all: the colours nobody asked
-    /// about are skipped.
-    fn possible(&self, colour: Colour, tied: bool) -> bool {
-        self.allows(colour)
-            && match colour {
-                Colour::Free => true,
-                Colour::Own => tied && self.spender.is_some(),
-                Colour::Permitted => tied && self.permits.iter().any(|&(_, permit)| permit),
-                Colour::Refused => tied,
-            }
     }
 }
 
@@ -344,17 +285,21 @@ impl Deref for Slot {
     }
 }
 
-/// A lot as HIFO ranks it: dearest per unit first, then oldest.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// A candidate as the ranking orders it, greatest first: dearest per unit, then the earliest position. It is the heap's
+/// order, and the last key of every policy's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Ranked {
     basis: i64,
     qty: i64,
-    at: u32,
+    at: i64,
 }
 
 impl Ranked {
+    /// What a policy that does not weigh basis gives every candidate: one basis per unit.
+    const SAME: Ranked = Ranked { basis: 0, qty: 1, at: 0 };
+
     fn of(at: usize, lot: &Parcel) -> Ranked {
-        Ranked { basis: lot.basis.0, qty: lot.qty.0, at: at as u32 }
+        Ranked { basis: lot.basis.0, qty: lot.qty.0, at: at as i64 }
     }
 }
 
@@ -403,36 +348,23 @@ impl Slot {
         self.qty += qty;
     }
 
-    /// Receives a parcel. Money at its face, tied to nothing, is plain; anything
-    /// else joins the lots, merging into the interchangeable lot if there is one
-    /// (its basis adds; it keeps its own acquisition day) and otherwise taking
-    /// its place among the lots, oldest first.
-    pub fn land(&mut self, parcel: Parcel, money: bool) {
-        self.land_with_codes(parcel, money, &Arena::new());
-    }
-
-    /// Lands a parcel and merges only when its pooled code sets are equivalent.
-    /// Range positions are handles, so two distinct ranges can name the same
-    /// marks; compare their symbols before coalescing their selector identity.
-    pub fn land_with_codes(&mut self, parcel: Parcel, money: bool, codes: &Arena<Sym>) {
-        if money && parcel.tied.is_none() && parcel.basis == parcel.qty {
+    /// Receives a parcel. Money at its face, tied to nothing, is plain; anything else joins the lots, merging into the
+    /// one it is like if there is one (its basis adds; the lot keeps its own acquisition day) and otherwise taking its
+    /// place among the lots, oldest first. Outside money only a lot acquired the same day can be like it.
+    pub fn land(&mut self, parcel: Parcel, held: Held, codes: &Arena<Sym>) {
+        if held == Held::Money && parcel.tied.is_none() && parcel.basis == parcel.qty {
             return self.credit(parcel.qty);
         }
         self.qty += parcel.qty;
-
-        let (kind, lots) = (identity(&parcel, money), &mut self.holding.lots);
-        // Outside money only a lot acquired on the same day can match.
-        let (start, end) = if money {
-            (self.first, lots.len())
-        } else {
-            (
+        let lots = &mut self.holding.lots;
+        let (start, end) = match held {
+            Held::Money => (self.first, lots.len()),
+            Held::Lots => (
                 lots.partition_point(|lot| lot.acquired < parcel.acquired),
                 lots.partition_point(|lot| lot.acquired <= parcel.acquired),
-            )
+            ),
         };
-        let same = lots[start..end].iter().position(|lot| {
-            !lot.qty.is_zero() && identity(lot, money) == kind && same_codes(lot.codes, parcel.codes, codes)
-        });
+        let same = lots[start..end].iter().position(|lot| !lot.qty.is_zero() && lot.is_like(&parcel, held, codes));
         if let Some(found) = same {
             let at = start + found;
             lots[at].qty += parcel.qty;
@@ -459,11 +391,26 @@ impl Slot {
         self.ranked = None;
     }
 
-    /// Tells the heap that lot `at` has a new quantity and basis. It ranks untied lots only.
+    /// Takes `matched` (shares a loss was carried into, which held `basis`) out of lot `at`: the lot becomes them if they are
+    /// all of it, and otherwise they land after the lots of their day. The slot's quantity does not change.
+    fn split(&mut self, at: usize, matched: Parcel, basis: Qty) {
+        self.ranked = None;
+        let lot = &mut self.holding.lots[at];
+        if matched.qty == lot.qty {
+            return *lot = matched;
+        }
+        (lot.qty, lot.basis) = (lot.qty - matched.qty, lot.basis - basis);
+        let to = self.holding.lots.partition_point(|lot| lot.acquired <= matched.acquired);
+        self.holding.lots.insert(to, matched);
+        self.first = self.first.min(to);
+        self.ties += u32::from(matched.tied.is_some());
+    }
+
+    /// Tells the heap, if there is one, that lot `at` has a new quantity and basis. A tied lot it is told of is never its
+    /// top while it is live: the heap is read only when nothing is tied.
     fn revalue(&mut self, at: usize) {
-        let lot = &self.holding.lots[at];
-        if let Some(ranked) = self.ranked.as_mut().filter(|_| lot.tied.is_none()) {
-            ranked.push(Ranked::of(at, lot));
+        if let Some(ranked) = self.ranked.as_mut() {
+            ranked.push(Ranked::of(at, &self.holding.lots[at]));
         }
     }
 
@@ -472,8 +419,7 @@ impl Slot {
         let slice = match source {
             Source::Plain => {
                 self.holding.plain -= qty;
-                // Outside the base currency plain value has no basis of its own.
-                Slice::new(qty, if req.money { qty } else { Qty::ZERO }, Origin::Plain, req.now)
+                Slice::of(Parcel::new(qty, req.held.plain_basis(qty), req.now), Origin::Plain)
             }
             Source::Lot(at) => {
                 let lot = &mut self.holding.lots[at];
@@ -482,14 +428,7 @@ impl Slot {
                 } else {
                     lot.basis.share(qty, lot.qty).expect("a part of a basis fits")
                 };
-                let slice = Slice {
-                    tied: lot.tied,
-                    part: lot.part,
-                    codes: lot.codes,
-                    held_since: lot.held_since,
-                    wash_matched: lot.wash_matched,
-                    ..Slice::new(qty, basis, Origin::Lot, (lot.acquired, lot.txn))
-                };
+                let slice = Slice::of(Parcel { qty, basis, ..*lot }, Origin::Lot);
                 lot.qty -= qty;
                 lot.basis -= basis;
                 if lot.qty.is_zero() {
@@ -507,14 +446,14 @@ impl Slot {
     /// What is owed, held as the liability it is: a negative parcel, as a place holds what flowed into it less what flowed out.
     pub fn owe(&mut self, owed: Parcel, codes: &Arena<Sym>) {
         self.owes = true;
-        self.land_with_codes(Parcel { qty: -owed.qty, basis: -owed.basis, ..owed }, false, codes);
+        self.land(Parcel { qty: -owed.qty, basis: -owed.basis, ..owed }, Held::Lots, codes);
     }
 
     /// Puts back a parcel that relief took: a debt's, as it was owed.
     pub fn restore(&mut self, parcel: Parcel, codes: &Arena<Sym>) {
         match self.owes {
             true => self.owe(parcel, codes),
-            false => self.land_with_codes(parcel, false, codes),
+            false => self.land(parcel, Held::Lots, codes),
         }
     }
 
@@ -559,209 +498,127 @@ impl Slot {
         }
         let policy = selection.policy().or(req.policy);
         let in_order = !selection.constrains()
+            && !self.is_tied()
             && match policy {
-                None => !self.is_tied(),
-                Some(Policy::Hifo) => !req.money,
-                Some(policy) => policy != Policy::Prorata,
+                Some(Policy::Hifo) => req.held == Held::Lots,
+                Some(Policy::Exact | Policy::Prorata) => false,
+                None | Some(Policy::Fifo | Policy::Lifo) => true,
             };
-        if in_order {
-            self.relieve_in_order(req, policy, out);
-        } else {
-            self.relieve_scanning(req, &selection, policy, out);
-        }
+        out.shortfall = match in_order {
+            true => self.take_in_order(req, policy, out),
+            false => self.take_ranked(req, &selection, policy, out),
+        };
         self.holding.plain -= out.shortfall;
         self.qty -= req.need;
         self.sweep_ends();
     }
 
-    /// FIFO, LIFO and HIFO (and no policy at all): from the end of the holding
-    /// that the policy names, touching only the lots it uses. Ties are colours:
-    /// the spender's own lots go first, then lots tied to an entity whose laws
-    /// permit the flow, untied ones next, and the rest last.
-    fn relieve_in_order(&mut self, req: &Request, policy: Option<Policy>, out: &mut Relief) {
+    /// FIFO, LIFO, HIFO outside money and no policy, from a holding where nothing is tied and no selector narrows what may
+    /// leave: the first candidates in the order of the ranking are plain value and then the oldest lot past the cursor, the
+    /// newest from the back (plain value last), or the dearest per unit from the heap, so only what leaves is looked at. Says
+    /// what was not covered.
+    fn take_in_order(&mut self, req: &Request, policy: Option<Policy>, out: &mut Relief) -> Qty {
         let takeable = self.qty - self.holding.plain.min(Qty::ZERO);
         let candidates = usize::from(self.holding.plain > Qty::ZERO) + self.live();
         out.ambiguous = policy.is_none() && candidates > 1 && req.need < takeable;
         if out.ambiguous && (req.explain)() {
-            self.gather(req.money, &Selection { selectors: &[], codes: req.codes }, &mut out.candidates);
+            self.gather(req.held, &Selection { selectors: &[], codes: req.codes }, &mut out.candidates);
         }
-        let mut left = req.need;
-        let (lifo, tied) = (policy == Some(Policy::Lifo), self.is_tied());
-        for colour in Colour::ALL {
-            if left.is_zero() || !req.possible(colour, tied) {
-                continue;
-            }
-            let of_colour = |lot: &Parcel| !tied || req.colour(lot.tied) == colour;
-            let plain_here = colour == Colour::Free;
-            if policy == Some(Policy::Exact) {
-                self.take_exact(&mut left, of_colour, req, out);
-            }
-            if plain_here && !lifo {
-                self.take_plain(&mut left, req, out);
-            }
-            match (policy, colour) {
-                (Some(Policy::Hifo), Colour::Free) => self.take_dearest(&mut left, req, out),
-                (Some(Policy::Hifo), _) => self.take_priciest(&mut left, of_colour, req, out),
-                _ => self.take_run(&mut left, lifo, of_colour, req, out),
-            }
-            if plain_here && lifo {
-                self.take_plain(&mut left, req, out);
-            }
-        }
-        out.shortfall = left;
-    }
-
-    fn take_plain(&mut self, left: &mut Qty, req: &Request, out: &mut Relief) {
-        let qty = self.holding.plain.min(*left);
-        if qty > Qty::ZERO {
-            self.take(Source::Plain, qty, req, out);
-            *left -= qty;
-        }
-    }
-
-    /// The oldest claim `keep` admits that holds exactly what was asked, as far as `left` goes: the claim a payment is the
-    /// size of, which is settled before an older one that is not. A claim is the lots of one transaction, which land
-    /// together (an invoice's lines), so it is a run of lots.
-    fn take_exact(&mut self, left: &mut Qty, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
-        let mut at = self.first;
-        while at < self.holding.lots.len() {
-            let lots = &self.holding.lots[at..];
-            let end = at + lots.iter().take_while(|lot| lot.txn == lots[0].txn).count();
-            let held: Qty = self.holding.lots[at..end].iter().filter(|&lot| keep(lot)).map(|lot| lot.qty).sum();
-            if held == req.exact {
-                for line in at..end {
-                    let lot = &self.holding.lots[line];
-                    let qty = lot.qty.min(*left);
-                    if keep(lot) && !qty.is_zero() {
-                        self.take(Source::Lot(line), qty, req, out);
-                        *left -= qty;
-                    }
-                }
-                return;
-            }
-            at = end;
-        }
-    }
-
-    /// The lots `keep` admits, from the front or from the back, until `left` is covered.
-    fn take_run(
-        &mut self,
-        left: &mut Qty,
-        lifo: bool,
-        keep: impl Fn(&Parcel) -> bool,
-        req: &Request,
-        out: &mut Relief,
-    ) {
-        let live = |lot: &Parcel| !lot.qty.is_zero() && keep(lot);
-        let mut at = if lifo { self.holding.lots.len() } else { self.first };
+        let lifo = policy == Some(Policy::Lifo);
+        let mut left = if lifo { req.need } else { self.take_plain(req.need, req, out) };
         while !left.is_zero() {
-            let lots = &self.holding.lots;
-            let found = if lifo {
-                lots[..at].iter().rposition(live)
-            } else {
-                lots[at..].iter().position(live).map(|found| at + found)
-            };
-            let Some(found) = found else { return };
-            let qty = self.holding.lots[found].qty.min(*left);
-            self.take(Source::Lot(found), qty, req, out);
-            *left -= qty;
-            at = if lifo { found } else { found + 1 };
-        }
-    }
-
-    /// The dearest lots `keep` admits, found by looking at every lot: only for the few tied ones.
-    fn take_priciest(&mut self, left: &mut Qty, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
-        while !left.is_zero() {
-            let live = self.holding.lots.iter().enumerate().filter(|(_, lot)| !lot.qty.is_zero() && keep(lot));
-            let dearest = live.max_by(|(a, x), (b, y)| Ranked::of(*a, x).cmp(&Ranked::of(*b, y)));
-            let Some((at, lot)) = dearest else { return };
-            let qty = lot.qty.min(*left);
+            let Some(at) = self.next(policy) else { break };
+            let qty = self.holding.lots[at].qty.min(left);
             self.take(Source::Lot(at), qty, req, out);
-            *left -= qty;
+            left -= qty;
         }
+        if lifo { self.take_plain(left, req, out) } else { left }
     }
 
-    /// Untied lots dearest per unit first: whatever the heap says is on top and still true.
-    fn take_dearest(&mut self, left: &mut Qty, req: &Request, out: &mut Relief) {
-        while !left.is_zero() {
-            let lots = &self.holding.lots;
-            let ranked = self.ranked.get_or_insert_with(|| {
-                let untied = lots.iter().enumerate().filter(|(_, lot)| !lot.qty.is_zero() && lot.tied.is_none());
-                Box::new(untied.map(|(at, lot)| Ranked::of(at, lot)).collect())
-            });
-            let Some(&top) = ranked.peek() else { return };
-            ranked.pop();
-            let current = lots.get(top.at as usize).is_some_and(|lot| lot.qty.0 == top.qty && lot.basis.0 == top.basis);
-            if current {
-                let qty = Qty(top.qty).min(*left);
-                self.take(Source::Lot(top.at as usize), qty, req, out);
-                *left -= qty;
+    /// Takes what plain value holds of `left`, and says what is still wanted.
+    fn take_plain(&mut self, left: Qty, req: &Request, out: &mut Relief) -> Qty {
+        let qty = self.holding.plain.min(left);
+        if qty <= Qty::ZERO {
+            return left;
+        }
+        self.take(Source::Plain, qty, req, out);
+        left - qty
+    }
+
+    /// The lot the policy takes next: the dearest per unit, the newest live one, or the oldest past the cursor.
+    fn next(&mut self, policy: Option<Policy>) -> Option<usize> {
+        let lots = &self.holding.lots;
+        match policy {
+            Some(Policy::Hifo) => self.dearest(),
+            Some(Policy::Lifo) => lots.iter().rposition(|lot| !lot.qty.is_zero()),
+            _ => {
+                self.first += lots[self.first..].iter().take_while(|lot| lot.qty.is_zero()).count();
+                (self.first < lots.len()).then_some(self.first)
             }
         }
     }
 
-    /// Everything else: look at every lot, weigh ties, then the policy.
-    fn relieve_scanning(&mut self, req: &Request, selection: &Selection, policy: Option<Policy>, out: &mut Relief) {
-        let mut candidates = std::mem::take(&mut out.gathered);
-        candidates.clear();
-        self.gather(req.money, selection, &mut candidates);
-        let colour = |c: &Candidate| req.colour(c.tied);
-        candidates.retain(|c| req.allows(colour(c)));
-        if policy == Some(Policy::Exact) {
-            whole_claims(&mut candidates, colour);
-        }
-        candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, req.exact, a, b)));
+    /// The lot of the highest basis per unit, the oldest of those: the heap's top, once the entries its lots outgrew are
+    /// discarded. The heap is built when first asked, and every change to a lot pushes the lot as it is now.
+    fn dearest(&mut self) -> Option<usize> {
+        let lots = &self.holding.lots;
+        let ranked = self.ranked.get_or_insert_with(|| {
+            let live = lots.iter().enumerate().filter(|(_, lot)| !lot.qty.is_zero());
+            Box::new(live.map(|(at, lot)| Ranked::of(at, lot)).collect())
+        });
+        let current = |top: &Ranked| {
+            lots.get(top.at as usize).is_some_and(|lot| (lot.basis.0, lot.qty.0) == (top.basis, top.qty))
+        };
+        std::iter::from_fn(|| ranked.pop()).find(current).map(|top| top.at as usize)
+    }
 
+    /// Every other relief (a selector, a tie, `exact`, pro rata, HIFO of money): the candidates the selectors admit, in the
+    /// order of the ranking, taken a colour at a time and each colour [`share`]d. Says what was not covered.
+    fn take_ranked(&mut self, req: &Request, selection: &Selection, policy: Option<Policy>, out: &mut Relief) -> Qty {
+        let mut ranked = std::mem::take(&mut out.gathered);
+        ranked.clear();
+        self.gather(req.held, selection, &mut ranked);
+        ranked.retain(|c| req.allows(req.colour(c.tied)));
+        if policy == Some(Policy::Exact) {
+            whole_claims(&mut ranked, |c| req.colour(c.tied));
+        }
+        ranked.sort_unstable_by_key(|c| c.rank(policy, req));
         let mut plan = std::mem::take(&mut out.plan);
         plan.clear();
-        let mut rest = candidates.as_slice();
         let mut left = req.need;
-        while left > Qty::ZERO && !rest.is_empty() {
-            let first = colour(&rest[0]);
-            let (group, tail) = rest.split_at(rest.iter().take_while(|c| colour(c) == first).count());
-            rest = tail;
+        for group in ranked.chunk_by(|a, b| req.colour(a.tied) == req.colour(b.tied)) {
+            if left.is_zero() {
+                break;
+            }
             let total: Qty = group.iter().map(|c| c.qty).sum();
             let take = left.min(total);
-            if take < total && policy.is_none() && !interchangeable(group) {
+            if take < total && policy.is_none() && group.len() > 1 {
                 out.ambiguous = true;
                 if (req.explain)() {
                     out.candidates.extend_from_slice(group);
                 }
             }
-            allocate(group, take, policy == Some(Policy::Prorata), &mut plan);
+            share(group, take, policy, &mut plan);
             left -= take;
         }
-        out.shortfall = left;
         for &(source, qty) in &plan {
             self.take(source, qty, req, out);
         }
-        (out.plan, out.gathered) = (plan, candidates);
+        (out.plan, out.gathered) = (plan, ranked);
+        left
     }
 
     /// The parcels the selection admits, plain money first.
-    fn gather(&self, money: bool, selection: &Selection, out: &mut Vec<Candidate>) {
+    fn gather(&self, held: Held, selection: &Selection, out: &mut Vec<Candidate>) {
         let plain = self.holding.plain;
         if plain > Qty::ZERO && !selection.constrains() {
             // Plain money has no transaction or acquisition day of its own.
-            let basis = if money { plain } else { Qty::ZERO };
-            out.push(Candidate {
-                source: Source::Plain,
-                qty: plain,
-                basis,
-                acquired: Day::MIN,
-                txn: None,
-                tied: None,
-                claim: plain,
-                identity: if money {
-                    Identity::Money { tied: None, basis, qty: plain, part: None, wash_matched: false }
-                } else {
-                    Identity::Plain { basis, qty: plain }
-                },
-            });
+            let (basis, acquired, txn, tied) = (held.plain_basis(plain), Day::MIN, None, None);
+            out.push(Candidate { source: Source::Plain, qty: plain, basis, acquired, txn, tied, claim: plain });
         }
         let lots = self.holding.lots.iter().enumerate();
         let admitted = lots.filter(|(_, lot)| !lot.qty.is_zero() && selection.admits(lot));
-        out.extend(admitted.map(|(at, lot)| Candidate::new(Source::Lot(at), lot, money)));
+        out.extend(admitted.map(|(at, lot)| Candidate::new(Source::Lot(at), lot)));
     }
 
     /// Whether a lot still held carries `code`: a code a flow writes names a claim here only if one does.
@@ -770,7 +627,7 @@ impl Slot {
     }
 
     /// How much of the holding the selectors admit: what `all` means. Of a debt, how much of what is owed they reach.
-    pub fn admitted(&self, money: bool, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
+    pub fn admitted(&self, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
         let selection = Selection { selectors, codes };
         if !selection.constrains() {
             return match self.owes {
@@ -778,9 +635,8 @@ impl Slot {
                 false => self.qty - self.holding.plain.min(Qty::ZERO),
             };
         }
-        let mut found = Vec::new();
-        self.gather(money, &selection, &mut found);
-        let admitted: Qty = found.iter().map(|c| c.qty).sum();
+        // A selector excludes plain value, which has no day or code to be selected by.
+        let admitted: Qty = self.holding.lots.iter().filter(|lot| selection.admits(lot)).map(|lot| lot.qty).sum();
         if self.owes { -admitted } else { admitted }
     }
 
@@ -788,22 +644,12 @@ impl Slot {
     /// their quantity. Quantities do not change. Plain money takes a share too,
     /// and stops being plain when it does. `false` if there is nothing to carry
     /// it: no admitted parcel.
-    pub fn rebase(&mut self, delta: Qty, selection: &Selection, money: bool, now: (Day, RuntimeTxn)) -> bool {
+    pub fn rebase(&mut self, delta: Qty, selection: &Selection, held: Held, now: (Day, RuntimeTxn)) -> bool {
         let plain = self.holding.plain;
         if plain > Qty::ZERO && !selection.constrains() {
-            let basis = if money { plain } else { Qty::ZERO };
+            let basis = held.plain_basis(plain);
             self.holding.plain = Qty::ZERO;
-            self.insert(Parcel {
-                qty: plain,
-                basis,
-                acquired: now.0,
-                held_since: now.0,
-                wash_matched: false,
-                txn: now.1,
-                part: None,
-                codes: empty_codes(),
-                tied: None,
-            });
+            self.insert(Parcel::new(plain, basis, now));
         }
         let lots = &mut self.holding.lots[self.first..];
         let whole: Qty = lots.iter().filter(|lot| selection.admits(lot)).map(|lot| lot.qty).sum();
@@ -833,9 +679,8 @@ impl Slot {
 
     /// The basis of everything held, in base-currency quanta: plain money is at
     /// face, and nothing else has basis outside its lots.
-    pub fn basis(&self, money: bool) -> Qty {
-        let plain = if money { self.holding.plain } else { Qty::ZERO };
-        plain + self.holding.lots.iter().map(|lot| lot.basis).sum()
+    pub fn basis(&self, held: Held) -> Qty {
+        held.plain_basis(self.holding.plain) + self.holding.lots.iter().map(|lot| lot.basis).sum()
     }
 
     /// Moves the cursors past exhausted lots at either end.
@@ -926,10 +771,10 @@ fn carries(lot: &Parcel, code: Sym, pool: &Arena<Sym>) -> bool {
 }
 
 impl Candidate {
-    fn new(source: Source, parcel: &Parcel, money: bool) -> Candidate {
-        let (qty, basis, acquired, tied) = (parcel.qty, parcel.basis, parcel.acquired, parcel.tied);
-        let txn = Some(parcel.txn);
-        Candidate { source, qty, basis, acquired, txn, tied, claim: qty, identity: identity(parcel, money) }
+    fn new(source: Source, parcel: &Parcel) -> Candidate {
+        let (qty, basis, acquired, tied, txn) =
+            (parcel.qty, parcel.basis, parcel.acquired, parcel.tied, Some(parcel.txn));
+        Candidate { source, qty, basis, acquired, txn, tied, claim: qty }
     }
 }
 
@@ -945,34 +790,12 @@ fn whole_claims(candidates: &mut [Candidate], colour: impl Fn(&Candidate) -> Col
     }
 }
 
-/// Candidates in the order the policy consumes them. Storage order is oldest
-/// first, so FIFO is the identity, and it also orders "no policy", pro-rata
-/// (whose order does not matter) and ties in the others. `Exact` puts the
-/// candidates of a claim that holds exactly `exact` first, oldest of them first.
-fn by_policy(policy: Option<Policy>, exact: Qty, a: &Candidate, b: &Candidate) -> Ordering {
-    match policy {
-        Some(Policy::Lifo) => b.source.cmp(&a.source),
-        Some(Policy::Hifo) => basis_per_unit(b, a).then(a.source.cmp(&b.source)),
-        Some(Policy::Exact) => (b.claim == exact).cmp(&(a.claim == exact)).then(a.source.cmp(&b.source)),
-        _ => a.source.cmp(&b.source),
-    }
-}
-
-/// Compares `a.basis / a.qty` with `b.basis / b.qty` without dividing.
-fn basis_per_unit(a: &Candidate, b: &Candidate) -> Ordering {
-    (a.basis.0 as i128 * b.qty.0 as i128).cmp(&(b.basis.0 as i128 * a.qty.0 as i128))
-}
-
-/// Whether taking any part of the group is the same as taking any other.
-fn interchangeable(group: &[Candidate]) -> bool {
-    group.iter().all(|c| c.identity == group[0].identity)
-}
-
-fn allocate(group: &[Candidate], take: Qty, prorata: bool, plan: &mut Vec<(Source, Qty)>) {
-    if prorata {
+/// Plans what leaves a group of one colour, `take` of it in all, in the order of the ranking: all of each before the next,
+/// or, pro rata, a share of each by its quantity, the shares adding up to `take` exactly.
+fn share(group: &[Candidate], take: Qty, policy: Option<Policy>, plan: &mut Vec<(Source, Qty)>) {
+    if policy == Some(Policy::Prorata) {
         let mut shares = Shares::new(take, group.iter().map(|c| c.qty).sum());
-        plan.extend(group.iter().map(|c| (c.source, shares.take(c.qty))));
-        return;
+        return plan.extend(group.iter().map(|c| (c.source, shares.take(c.qty))));
     }
     let mut left = take;
     for c in group {
@@ -1000,11 +823,6 @@ pub(crate) struct Holdings {
     /// The first slot of each place's chain.
     heads: Vec<u32>,
     slots: Vec<Slot>,
-    /// Derived locator for asset parcels. Entries are append-only slot ids;
-    /// relief can leave a stale slot entry, which lookup verifies against the
-    /// live parcels. This avoids searching unrelated holdings for every part
-    /// basis query or adjustment.
-    part_slots: axiom_core::Map<PartId, Vec<u32>>,
     /// A lot was exhausted since the last sweep.
     untidy: bool,
     /// The slots handed out to change, or scaled, since the fold last wrote the balances that moved into the histories.
@@ -1012,11 +830,13 @@ pub(crate) struct Holdings {
     touched: Vec<u32>,
 }
 
-pub(crate) struct PartBasisAdjustment<'a> {
-    holdings: &'a mut Holdings,
-    part: PartId,
-    delta: Qty,
-    whole: Qty,
+/// Shares of lot `at` of slot `slot` that addition `order` of a carry matched, and the basis they held before it.
+struct Carried {
+    slot: usize,
+    at: usize,
+    order: usize,
+    shares: Parcel,
+    basis: Qty,
 }
 
 /// A wash-sale allocation to a bounded quantity of one actual acquisition.
@@ -1029,101 +849,9 @@ pub(crate) struct CarryLotAddition {
     pub amount: Qty,
 }
 
-struct ParcelCarryChange {
-    order: usize,
-    slot: usize,
-    parcel: usize,
-    quantity: Qty,
-    basis: Qty,
-    new_basis: Qty,
-    held_since: Day,
-}
-
-/// A preflighted partial lot carry. Matched slices are split from untouched
-/// shares so basis and holding-period tacking apply to exactly the allocated
-/// quantity.
-pub(crate) struct CarryLotBatchAdjustment<'a> {
-    holdings: &'a mut Holdings,
-    changes: Vec<ParcelCarryChange>,
-}
-
-impl CarryLotBatchAdjustment<'_> {
-    pub(crate) fn apply(self) {
-        let mut changes = self.changes;
-        changes.sort_by(|left, right| {
-            right
-                .slot
-                .cmp(&left.slot)
-                .then_with(|| right.parcel.cmp(&left.parcel))
-                .then_with(|| left.order.cmp(&right.order))
-        });
-        for change in changes {
-            let slot = &mut self.holdings.slots[change.slot];
-            let source = slot.holding.lots[change.parcel];
-            let old_piece_basis = change.basis;
-            let mut carried = source;
-            carried.qty = change.quantity;
-            carried.basis = change.new_basis;
-            carried.held_since = change.held_since;
-            carried.wash_matched = true;
-            if change.quantity == source.qty {
-                slot.holding.lots[change.parcel] = carried;
-            } else {
-                slot.holding.lots[change.parcel].qty -= change.quantity;
-                slot.holding.lots[change.parcel].basis -= old_piece_basis;
-                let at = slot.holding.lots.partition_point(|lot| lot.acquired <= carried.acquired);
-                slot.holding.lots.insert(at, carried);
-                slot.first = slot.first.min(at);
-                slot.ties += u32::from(carried.tied.is_some());
-            }
-            // The aggregate slot quantity is unchanged by splitting a parcel.
-            // Any cached HIFO order points at stale lot positions.
-            slot.ranked = None;
-        }
-    }
-}
-
-impl PartBasisAdjustment<'_> {
-    /// Applies the prepared basis update while retaining an exclusive borrow
-    /// of the indexed holdings store from validation through commit.
-    pub(crate) fn apply(self) {
-        if self.delta.is_zero() {
-            return;
-        }
-        let magnitude = if self.delta.is_negative() {
-            Qty(self.delta.0.checked_neg().expect("prepared magnitude"))
-        } else {
-            self.delta
-        };
-        let slots = self.holdings.part_slots.get(&self.part).expect("prepared part index");
-        let mut shares = Shares::new(magnitude, self.whole);
-        for &slot_id in slots {
-            let Some(slot) = self.holdings.slots.get_mut(slot_id as usize) else { continue };
-            let mut changed = false;
-            for parcel in &mut slot.holding.lots {
-                if parcel.part != Some(self.part) || parcel.qty <= Qty::ZERO {
-                    continue;
-                }
-                let weight = if self.delta.is_negative() { parcel.basis } else { parcel.qty };
-                let share = shares.take(weight);
-                if self.delta.is_negative() {
-                    parcel.basis -= share;
-                } else {
-                    parcel.basis += share;
-                }
-                changed = true;
-            }
-            if changed {
-                slot.ranked = None;
-            }
-        }
-    }
-}
-
 impl Holdings {
     pub fn new(places: usize) -> Holdings {
-        let part_slots = axiom_core::Map::default();
-        Holdings { heads: vec![NONE; places], slots: Vec::new(), part_slots, untidy: false, touched: Vec::new() }
+        Holdings { heads: vec![NONE; places], slots: Vec::new(), untidy: false, touched: Vec::new() }
     }
 
     fn chain(&self, head: u32) -> impl Iterator<Item = &Slot> {
@@ -1170,32 +898,6 @@ impl Holdings {
         self.slots.iter().map(at).collect()
     }
 
-    /// Records that a live asset part can be held in this stable slot. The
-    /// slot ids never move when lot vectors are sorted, split or swept.
-    pub(crate) fn index_part_slot(&mut self, place: Id<Place>, unit: Id<Commodity>, part: PartId) {
-        let slot = self.slot_index(place, unit).unwrap_or_else(|| {
-            self.entry(place, unit);
-            self.slot_index(place, unit).expect("entry creates the slot")
-        });
-        let slots = self.part_slots.entry(part).or_default();
-        if !slots.contains(&(slot as u32)) {
-            slots.push(slot as u32);
-        }
-    }
-
-    fn slot_index(&self, place: Id<Place>, unit: Id<Commodity>) -> Option<usize> {
-        let mut at = self.heads[place.index()];
-        while at != NONE {
-            let slot = &self.slots[at as usize];
-            match slot.unit.cmp(&unit) {
-                std::cmp::Ordering::Less => at = slot.next,
-                std::cmp::Ordering::Equal => return Some(at as usize),
-                std::cmp::Ordering::Greater => return None,
-            }
-        }
-        None
-    }
-
     /// What `place` alone holds of `unit`, in quanta.
     pub fn qty(&self, place: Id<Place>, unit: Id<Commodity>) -> Qty {
         self.get(place, unit).map_or(Qty::ZERO, |slot| slot.qty)
@@ -1216,176 +918,98 @@ impl Holdings {
         self.within(0..self.heads.len())
     }
 
-    /// The total basis carried by every live slice of one canonical part.
-    pub(crate) fn part_basis(&self, part: PartId) -> Result<Qty, AssetError> {
-        let mut found = false;
-        self.part_slots
-            .get(&part)
-            .into_iter()
-            .flatten()
-            .filter_map(|&slot| self.slots.get(slot as usize))
-            .flat_map(|slot| slot.holding.lots.iter())
-            .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
-            .try_fold(Qty::ZERO, |basis, parcel| {
-                found = true;
-                basis.0.checked_add(parcel.basis.0).map(Qty).ok_or(AssetError::Overflow)
-            })
-            .and_then(|basis| if found { Ok(basis) } else { Err(AssetError::UnknownPart) })
+    /// Changes the basis of the live parcels of `part` by `delta` in all, wherever they are (a part's parcels are all of its
+    /// commodity, `unit`): shared by their basis when it falls (depreciation) and by their quantity when it rises (an
+    /// improvement), so that the shares add up to it exactly. Checks before it writes: some parcel holds the part, it does
+    /// not lose more basis than they hold, and no basis overflows.
+    pub fn adjust(&mut self, unit: Id<Commodity>, part: PartId, delta: Qty) -> Result<(), AssetError> {
+        if delta.is_zero() {
+            return Ok(());
+        }
+        let falls = delta.is_negative();
+        let magnitude = delta.0.checked_abs().map(Qty).ok_or(AssetError::Overflow)?;
+        let of_part = |lot: &&Parcel| lot.part == Some(part) && lot.qty > Qty::ZERO;
+        let weight = |lot: &Parcel| if falls { lot.basis } else { lot.qty };
+        let held = self.slots.iter().filter(|slot| slot.unit == unit).flat_map(|slot| slot.holding.lots.iter());
+        let sums = held.filter(of_part).try_fold((0, Qty::ZERO, Qty::ZERO), |(found, basis, whole), lot| {
+            Some((found + 1, basis.0.checked_add(lot.basis.0).map(Qty)?, whole.0.checked_add(weight(lot).0).map(Qty)?))
+        });
+        match sums.ok_or(AssetError::Overflow)? {
+            (0, ..) => Err(AssetError::UnknownPart),
+            (_, basis, _) if falls && magnitude > basis => Err(AssetError::ParcelBasisMismatch),
+            (_, basis, _) if basis.0.checked_add(magnitude.0).is_none() => Err(AssetError::Overflow),
+            (_, _, whole) => {
+                let mut shares = Shares::new(magnitude, whole);
+                for slot in self.slots.iter_mut().filter(|slot| slot.unit == unit) {
+                    for lot in slot.holding.lots.iter_mut().filter(|lot| lot.part == Some(part) && lot.qty > Qty::ZERO)
+                    {
+                        let share = shares.take(weight(lot));
+                        lot.basis = if falls { lot.basis - share } else { lot.basis + share };
+                        slot.ranked = None;
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 
-    /// Applies a basis change to all live slices of a part in proportion to
-    /// their current basis (consumption) or quantity (capital carry). Shares
-    /// are rounded once across the whole part, so their sum stays exact.
-    pub(crate) fn adjust_part_basis(&mut self, part: PartId, delta: Qty) -> Result<(), AssetError> {
-        self.prepare_part_basis_adjustment(part, delta)?.apply();
+    /// A wash sale's loss, carried into the shares that replaced the sold ones: each addition gives `quantity` of the live
+    /// parcels of its part bought on its day that no loss was carried into yet, wherever they are, shared by quantity,
+    /// `amount` more basis (shared by quantity too) and the sold shares' holding period, and marks them. A parcel matched in
+    /// part is split, the matched shares landing after the parcels of their day. Every addition is checked against what
+    /// the ones before it took before anything is written.
+    pub fn carry(&mut self, unit: Id<Commodity>, additions: &[CarryLotAddition]) -> Result<(), AssetError> {
+        let mut carried: Vec<Carried> = Vec::new();
+        for (order, add) in additions.iter().enumerate() {
+            if add.quantity <= Qty::ZERO || add.amount.is_negative() {
+                return Err(AssetError::NegativeAmount);
+            }
+            let unmatched = self.unmatched(unit, add, &carried);
+            let whole: Qty = unmatched.iter().map(|(.., lot)| lot.qty).sum();
+            if whole < add.quantity {
+                return Err(AssetError::ParcelBasisMismatch);
+            }
+            let (mut quantities, mut amounts) =
+                (Shares::new(add.quantity, whole), Shares::new(add.amount, add.quantity));
+            for (slot, at, lot) in unmatched {
+                let qty = quantities.take(lot.qty);
+                if qty.is_zero() {
+                    continue;
+                }
+                let basis = if qty == lot.qty {
+                    lot.basis
+                } else {
+                    lot.basis.share(qty, lot.qty).ok_or(AssetError::Overflow)?
+                };
+                let added = basis.0.checked_add(amounts.take(qty).0).map(Qty).ok_or(AssetError::Overflow)?;
+                let held_since = add.held_since.min(lot.held_since);
+                let shares = Parcel { qty, basis: added, held_since, wash_matched: true, ..lot };
+                carried.push(Carried { slot, at, order, shares, basis });
+            }
+        }
+        // Splitting from the last lot back keeps the positions of the ones still to split.
+        carried.sort_by_key(|c| (Reverse(c.slot), Reverse(c.at), c.order));
+        carried.into_iter().for_each(|c| self.slots[c.slot].split(c.at, c.shares, c.basis));
         Ok(())
     }
 
-    /// Preflights every parcel-level share before either the holdings or the
-    /// asset-part table is mutated. The returned guard keeps an exclusive
-    /// borrow of this store until its infallible `apply` consumes it.
-    pub(crate) fn prepare_part_basis_adjustment(
-        &mut self,
-        part: PartId,
-        delta: Qty,
-    ) -> Result<PartBasisAdjustment<'_>, AssetError> {
-        if delta.is_zero() {
-            return Ok(PartBasisAdjustment { holdings: self, part, delta, whole: Qty::ZERO });
-        }
-        let basis = self.part_basis(part)?;
-        let magnitude =
-            if delta.is_negative() { delta.0.checked_neg().map(Qty).ok_or(AssetError::Overflow)? } else { delta };
-        let slots = self.part_slots.get(&part).ok_or(AssetError::UnknownPart)?;
-        let weights = if delta.is_negative() {
-            if magnitude > basis {
-                return Err(AssetError::ParcelBasisMismatch);
-            }
-            basis
-        } else {
-            slots
-                .iter()
-                .filter_map(|&slot| self.slots.get(slot as usize))
-                .flat_map(|slot| slot.holding.lots.iter())
-                .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
-                .try_fold(Qty::ZERO, |qty, parcel| {
-                    qty.0.checked_add(parcel.qty.0).map(Qty).ok_or(AssetError::Overflow)
-                })?
+    /// The live parcels a carry `add` can go into, wherever they are, each as the carries before it (`carried`) left it.
+    fn unmatched(
+        &self,
+        unit: Id<Commodity>,
+        add: &CarryLotAddition,
+        carried: &[Carried],
+    ) -> Vec<(usize, usize, Parcel)> {
+        let bought = |lot: &Parcel| lot.part == Some(add.part) && lot.acquired == add.acquired && !lot.wash_matched;
+        let left = |(slot, at, lot): (usize, usize, &Parcel)| {
+            let taken = carried.iter().filter(|c| (c.slot, c.at) == (slot, at));
+            let (qty, basis) =
+                taken.fold((lot.qty, lot.basis), |(qty, basis), c| (qty - c.shares.qty, basis - c.basis));
+            (slot, at, Parcel { qty, basis, ..*lot })
         };
-        if weights.is_zero() {
-            return Err(AssetError::UnknownPart);
-        }
-        if !delta.is_negative() {
-            basis.0.checked_add(magnitude.0).ok_or(AssetError::Overflow)?;
-        }
-        let mut shares = Shares::new(magnitude, weights);
-        for &slot_id in slots {
-            let Some(slot) = self.slots.get(slot_id as usize) else { continue };
-            for parcel in &slot.holding.lots {
-                if parcel.part != Some(part) || parcel.qty <= Qty::ZERO {
-                    continue;
-                }
-                let weight = if delta.is_negative() { parcel.basis } else { parcel.qty };
-                let share = shares.take(weight);
-                if delta.is_negative() {
-                    parcel.basis.0.checked_sub(share.0).ok_or(AssetError::Overflow)?;
-                } else {
-                    parcel.basis.0.checked_add(share.0).ok_or(AssetError::Overflow)?;
-                }
-            }
-        }
-        Ok(PartBasisAdjustment { holdings: self, part, delta, whole: weights })
-    }
-
-    /// Preflights quantity-scoped carry updates by actual acquisition day.
-    /// The guard reserves exact parcel indices and keeps this holdings store
-    /// exclusively borrowed until the split, basis adjustment, and holding
-    /// period tacking are committed together.
-    pub(crate) fn prepare_part_carry_additions(
-        &mut self,
-        additions: &[CarryLotAddition],
-    ) -> Result<CarryLotBatchAdjustment<'_>, AssetError> {
-        let mut plans = Vec::new();
-        for (addition_index, addition) in additions.iter().enumerate() {
-            if addition.quantity <= Qty::ZERO || addition.amount.is_negative() {
-                return Err(AssetError::NegativeAmount);
-            }
-            let slots = self.part_slots.get(&addition.part).ok_or(AssetError::UnknownPart)?;
-            let mut whole = Qty::ZERO;
-            for &slot_id in slots {
-                let slot_index = slot_id as usize;
-                let Some(slot) = self.slots.get(slot_index) else { continue };
-                for (parcel_index, parcel) in slot.holding.lots.iter().enumerate() {
-                    if parcel.part != Some(addition.part)
-                        || parcel.acquired != addition.acquired
-                        || parcel.wash_matched
-                        || parcel.qty <= Qty::ZERO
-                    {
-                        continue;
-                    }
-                    let used = plans
-                        .iter()
-                        .filter(|plan: &&ParcelCarryChange| plan.slot == slot_index && plan.parcel == parcel_index)
-                        .try_fold(Qty::ZERO, |sum, plan| {
-                            sum.0.checked_add(plan.quantity.0).map(Qty).ok_or(AssetError::Overflow)
-                        })?;
-                    let available = parcel.qty.0.checked_sub(used.0).ok_or(AssetError::Overflow)?;
-                    whole.0 = whole.0.checked_add(available).ok_or(AssetError::Overflow)?;
-                }
-            }
-            if whole < addition.quantity {
-                return Err(AssetError::ParcelBasisMismatch);
-            }
-            let mut quantities = Shares::new(addition.quantity, whole);
-            let mut basis_additions = Shares::new(addition.amount, addition.quantity);
-            for &slot_id in slots {
-                let slot_index = slot_id as usize;
-                let Some(slot) = self.slots.get(slot_index) else { continue };
-                for (parcel_index, parcel) in slot.holding.lots.iter().enumerate() {
-                    if parcel.part != Some(addition.part)
-                        || parcel.acquired != addition.acquired
-                        || parcel.wash_matched
-                        || parcel.qty <= Qty::ZERO
-                    {
-                        continue;
-                    }
-                    let used_qty = plans
-                        .iter()
-                        .filter(|plan: &&ParcelCarryChange| plan.slot == slot_index && plan.parcel == parcel_index)
-                        .try_fold(Qty::ZERO, |sum, plan| {
-                            sum.0.checked_add(plan.quantity.0).map(Qty).ok_or(AssetError::Overflow)
-                        })?;
-                    let used_basis = plans
-                        .iter()
-                        .filter(|plan: &&ParcelCarryChange| plan.slot == slot_index && plan.parcel == parcel_index)
-                        .try_fold(Qty::ZERO, |sum, plan| {
-                            sum.0.checked_add(plan.basis.0).map(Qty).ok_or(AssetError::Overflow)
-                        })?;
-                    let available = Qty(parcel.qty.0.checked_sub(used_qty.0).ok_or(AssetError::Overflow)?);
-                    let available_basis = Qty(parcel.basis.0.checked_sub(used_basis.0).ok_or(AssetError::Overflow)?);
-                    let quantity = quantities.take(available);
-                    if quantity.is_zero() {
-                        continue;
-                    }
-                    let basis = if quantity == available {
-                        available_basis
-                    } else {
-                        available_basis.share(quantity, available).ok_or(AssetError::Overflow)?
-                    };
-                    let amount = basis_additions.take(quantity);
-                    let new_basis = Qty(basis.0.checked_add(amount.0).ok_or(AssetError::Overflow)?);
-                    plans.push(ParcelCarryChange {
-                        order: addition_index,
-                        slot: slot_index,
-                        parcel: parcel_index,
-                        quantity,
-                        basis,
-                        new_basis,
-                        held_since: addition.held_since.min(parcel.held_since),
-                    });
-                }
-            }
-        }
-        Ok(CarryLotBatchAdjustment { holdings: self, changes: plans })
+        let slots = self.slots.iter().enumerate().filter(|(_, slot)| slot.unit == unit);
+        let lots = slots.flat_map(|(s, slot)| slot.holding.lots.iter().enumerate().map(move |(at, lot)| (s, at, lot)));
+        lots.filter(|(.., lot)| bought(lot) && lot.qty > Qty::ZERO).map(left).collect()
     }
 
     /// The slots of the places whose ids lie in `places`: a subtree.
@@ -1398,27 +1022,6 @@ impl Holdings {
         let slot = self.entry(place, unit);
         slot.relieve(req, out);
         self.untidy |= slot.dead > 0;
-    }
-
-    /// Spreads `delta` of basis over the parcels one holding of `place` can
-    /// carry (the first that has any the selection admits). `false` if none can.
-    pub fn rebase(
-        &mut self,
-        place: Id<Place>,
-        delta: Qty,
-        selection: &Selection,
-        money: impl Fn(Id<Commodity>) -> bool,
-        now: (Day, RuntimeTxn),
-    ) -> bool {
-        let mut at = self.heads[place.index()];
-        while at != NONE {
-            let slot = &mut self.slots[at as usize];
-            if slot.rebase(delta, selection, money(slot.unit), now) {
-                return true;
-            }
-            at = slot.next;
-        }
-        false
     }
 
     /// A split: every holding of `unit`, in every place, is multiplied by `ratio`.
@@ -1464,43 +1067,33 @@ mod tests {
     }
 
     fn lot(qty: i64, basis: i64, acquired: i32) -> Parcel {
-        Parcel {
-            qty: Qty(qty),
-            basis: Qty(basis),
-            acquired: Day(acquired),
-            held_since: Day(acquired),
-            wash_matched: false,
-            txn: journal(acquired as u32),
-            part: None,
-            codes: empty_codes(),
-            tied: None,
-        }
+        Parcel::new(Qty(qty), Qty(basis), (Day(acquired), journal(acquired as u32)))
     }
 
-    fn slot_of(unit: u32, plain: i64, lots: &[Parcel], money: bool) -> Slot {
+    fn slot_of(unit: u32, plain: i64, lots: &[Parcel], held: Held) -> Slot {
         let mut slot = Slot::new(Id::new(0), Id::new(unit), NONE);
         slot.credit(Qty(plain));
-        lots.iter().for_each(|&lot| slot.land(lot, money));
+        lots.iter().for_each(|&lot| slot.land(lot, held, &Arena::new()));
         slot
     }
 
     struct Ask<'a> {
-        money: bool,
+        held: Held,
         policy: Option<Policy>,
         selectors: &'a [Select],
         permits: &'a [(Id<Entity>, bool)],
         spender: Option<Id<Entity>>,
     }
 
-    const PLAIN: Ask = Ask { money: false, policy: None, selectors: &[], permits: &[], spender: None };
+    const PLAIN: Ask = Ask { held: Held::Lots, policy: None, selectors: &[], permits: &[], spender: None };
 
     fn relieve(slot: &mut Slot, need: i64, ask: &Ask) -> Relief {
         let mut relief = Relief::default();
         let codes = Arena::new();
-        let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
+        let (held, policy, selectors, permits) = (ask.held, ask.policy, ask.selectors, ask.permits);
         let (spender, now) = (ask.spender, (Day(1_000), journal(0)));
         let request = Request {
-            money,
+            held,
             selectors,
             permits,
             spender,
@@ -1521,7 +1114,7 @@ mod tests {
 
     #[test]
     fn a_lot_that_arrives_empty_is_swept_like_any_exhausted_one() {
-        let mut slot = slot_of(3, 0, &[lot(10, 10, 5), lot(0, 0, 7)], false);
+        let mut slot = slot_of(3, 0, &[lot(10, 10, 5), lot(0, 0, 7)], Held::Lots);
         let relief = relieve(&mut slot, 10, &Ask { policy: Some(Policy::Lifo), ..PLAIN });
         assert_eq!(taken(&relief), [(10, 10)]);
         assert!(slot.holding.lots.is_empty() && slot.dead == 0, "both ends swept, and the count agrees");
@@ -1532,10 +1125,10 @@ mod tests {
         let mut held = Holdings::new(2);
         let (place, unit) = (Id::new(1), Id::new(3));
         let slot = held.entry(place, unit);
-        slot.land(lot(5, 50, 20), false);
-        slot.land(lot(2, 10, 10), false);
-        slot.land(lot(3, 30, 20), false);
-        slot.land(Parcel { txn: journal(9), ..lot(1, 10, 20) }, false);
+        slot.land(lot(5, 50, 20), Held::Lots, &Arena::new());
+        slot.land(lot(2, 10, 10), Held::Lots, &Arena::new());
+        slot.land(lot(3, 30, 20), Held::Lots, &Arena::new());
+        slot.land(Parcel { txn: journal(9), ..lot(1, 10, 20) }, Held::Lots, &Arena::new());
         let lots: Vec<_> = slot.holding.lots.iter().map(|l| (l.acquired.0, l.qty.0, l.basis.0)).collect();
         assert_eq!(lots, [(10, 2, 10), (20, 8, 80), (20, 1, 10)]);
         assert_eq!(held.qty(place, unit), Qty(11));
@@ -1554,7 +1147,7 @@ mod tests {
             (30, 30, 8, Some(entity)),
             (5, 5, 9, Some(entity)),
         ] {
-            slot.land(Parcel { tied, ..lot(qty, basis, acquired) }, true);
+            slot.land(Parcel { tied, ..lot(qty, basis, acquired) }, Held::Money, &Arena::new());
         }
         let lots: Vec<_> =
             slot.holding.lots.iter().map(|l| (l.qty.0, l.basis.0, l.acquired.0, l.tied.is_some())).collect();
@@ -1568,7 +1161,7 @@ mod tests {
         held.entry(Id::new(2), Id::new(1)).credit(Qty(7));
         held.entry(Id::new(0), Id::new(5)).credit(Qty(1));
         held.entry(Id::new(0), Id::new(2)).credit(Qty(1));
-        held.entry(Id::new(0), Id::new(2)).land(lot(4, 4, 0), true);
+        held.entry(Id::new(0), Id::new(2)).land(lot(4, 4, 0), Held::Money, &Arena::new());
         let order: Vec<_> =
             held.iter().map(|s| (s.place.index(), s.unit.index(), s.plain.0, s.lots.capacity())).collect();
         assert_eq!(order, [(0, 2, 5, 0), (0, 5, 1, 0), (2, 1, 7, 0)]);
@@ -1576,7 +1169,7 @@ mod tests {
 
     #[test]
     fn prorata_parts_sum_exactly() {
-        let mut held = slot_of(1, 0, &[lot(7, 100, 1), lot(11, 250, 2), lot(13, 333, 3)], false);
+        let mut held = slot_of(1, 0, &[lot(7, 100, 1), lot(11, 250, 2), lot(13, 333, 3)], Held::Lots);
         let policy = Some(Policy::Prorata);
         let ten = relieve(&mut held.clone(), 10, &Ask { policy, ..PLAIN });
         assert_eq!(ten.slices.iter().map(|p| p.qty.0).sum::<i64>(), 10);
@@ -1596,7 +1189,7 @@ mod tests {
 
     #[test]
     fn every_policy_takes_from_its_own_end() {
-        let base = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 3_000, 2), lot(10, 2_000, 3)], false);
+        let base = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 3_000, 2), lot(10, 2_000, 3)], Held::Lots);
         for (policy, want) in [
             (Policy::Hifo, vec![(10, 3_000), (5, 1_000)]),
             (Policy::Fifo, vec![(10, 1_000), (5, 1_500)]),
@@ -1611,7 +1204,7 @@ mod tests {
 
     #[test]
     fn exact_takes_the_lot_of_exactly_the_size_asked_and_otherwise_the_oldest() {
-        let base = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2), lot(300, 300, 3)], false);
+        let base = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2), lot(300, 300, 3)], Held::Lots);
         let exact = Ask { policy: Some(Policy::Exact), ..PLAIN };
         let mut held = base.clone();
         let relief = relieve(&mut held, 200, &exact);
@@ -1633,7 +1226,7 @@ mod tests {
     fn exact_takes_a_claim_whose_lines_add_up_to_the_size_asked() {
         // An invoice of two lines, 150 and 250, made by one transaction beside two claims of 300.
         let line = |qty, ordinal| Parcel { part: Some(PartId { origin: journal(2), ordinal }), ..lot(qty, qty, 2) };
-        let base = slot_of(1, 0, &[lot(300, 300, 1), line(150, 0), line(250, 1), lot(300, 300, 3)], false);
+        let base = slot_of(1, 0, &[lot(300, 300, 1), line(150, 0), line(250, 1), lot(300, 300, 3)], Held::Lots);
         assert_eq!(base.holding.lots.len(), 4, "the lines stay lots of their own");
         let exact = Ask { policy: Some(Policy::Exact), ..PLAIN };
         let mut held = base.clone();
@@ -1659,11 +1252,11 @@ mod tests {
     fn exact_among_the_lots_a_selector_admits_and_among_the_colours_of_a_tie() {
         let entity = Id::new(3);
         let tied = |qty, acquired| Parcel { tied: Some(entity), ..lot(qty, qty, acquired) };
-        let mut held = slot_of(1, 0, &[lot(200, 200, 1), tied(200, 2), lot(300, 300, 3)], false);
+        let mut held = slot_of(1, 0, &[lot(200, 200, 1), tied(200, 2), lot(300, 300, 3)], Held::Lots);
         let exact = Ask { policy: Some(Policy::Exact), spender: Some(entity), ..PLAIN };
         assert_eq!(taken(&relieve(&mut held, 200, &exact)), [(200, 200)]);
         assert_eq!(lots(&held), [(200, 200), (300, 300)], "the spender's own lot of 200 goes before the untied one");
-        let mut held = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2)], false);
+        let mut held = slot_of(1, 0, &[lot(300, 300, 1), lot(200, 200, 2)], Held::Lots);
         let admit_all = [Select::Range(Days::ALWAYS)];
         let scanning = Ask { policy: Some(Policy::Exact), selectors: &admit_all, ..PLAIN };
         assert_eq!(taken(&relieve(&mut held, 200, &scanning)), [(200, 200)]);
@@ -1671,15 +1264,15 @@ mod tests {
 
     #[test]
     fn hifo_follows_a_lot_whose_basis_changed_and_lots_that_arrive() {
-        let mut held = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 2_000, 2)], false);
+        let mut held = slot_of(1, 0, &[lot(10, 1_000, 1), lot(10, 2_000, 2)], Held::Lots);
         let hifo = Ask { policy: Some(Policy::Hifo), ..PLAIN };
         assert_eq!(taken(&relieve(&mut held, 4, &hifo)), [(4, 800)]);
-        held.land(lot(5, 5_000, 3), false);
+        held.land(lot(5, 5_000, 3), Held::Lots, &Arena::new());
         assert_eq!(taken(&relieve(&mut held, 6, &hifo)), [(5, 5_000), (1, 200)]);
         assert!(held.rebase(
             Qty(9_000),
             &Selection { selectors: &[], codes: &Arena::new() },
-            false,
+            Held::Lots,
             (Day(9), journal(0))
         ));
         assert_eq!(
@@ -1691,13 +1284,13 @@ mod tests {
 
     #[test]
     fn exhausted_lots_leave_the_front_and_the_back_without_a_sweep() {
-        let mut held = slot_of(1, 0, &[lot(1, 10, 1), lot(1, 10, 2), lot(1, 10, 3), lot(1, 10, 4)], false);
+        let mut held = slot_of(1, 0, &[lot(1, 10, 1), lot(1, 10, 2), lot(1, 10, 3), lot(1, 10, 4)], Held::Lots);
         let (fifo, lifo) = (Ask { policy: Some(Policy::Fifo), ..PLAIN }, Ask { policy: Some(Policy::Lifo), ..PLAIN });
         relieve(&mut held, 2, &fifo);
         relieve(&mut held, 1, &lifo);
         assert_eq!(lots(&held), [(1, 10)]);
         assert_eq!(held.holding.lots.len(), 3, "the back was trimmed; the front is a cursor, not a removal");
-        held.land(lot(2, 20, 0), false);
+        held.land(lot(2, 20, 0), Held::Lots, &Arena::new());
         assert_eq!(
             taken(&relieve(&mut held, 3, &fifo)),
             [(2, 20), (1, 10)],
@@ -1707,39 +1300,56 @@ mod tests {
 
     #[test]
     fn only_lots_that_differ_are_ambiguous_without_a_policy() {
-        let mut same = slot_of(1, 0, &[lot(10, 1_000, 5)], false);
+        let mut same = slot_of(1, 0, &[lot(10, 1_000, 5)], Held::Lots);
         assert!(!relieve(&mut same, 6, &PLAIN).ambiguous);
         let purchase = |txn| Parcel { txn: journal(txn), ..lot(10, 1_500, 5) };
-        let differ = slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99)], false);
+        let differ = slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99)], Held::Lots);
         let relief = relieve(&mut differ.clone(), 6, &PLAIN);
         assert!(relief.ambiguous);
         assert_eq!(relief.candidates.len(), 2);
         assert_eq!(taken(&relief), [(6, 600)], "FIFO carries on");
         assert!(!relieve(&mut differ.clone(), 6, &Ask { policy: Some(Policy::Fifo), ..PLAIN }).ambiguous);
         assert!(!relieve(&mut differ.clone(), 20, &PLAIN).ambiguous, "taking everything leaves no choice");
-        let days = slot_of(1, 0, &[lot(10, 1_000, 5), lot(10, 1_000, 6)], false);
+        let days = slot_of(1, 0, &[lot(10, 1_000, 5), lot(10, 1_000, 6)], Held::Lots);
         assert!(relieve(&mut days.clone(), 6, &PLAIN).ambiguous, "each purchase is its own lot outside the base");
+        // The same when every candidate is looked at: a selector, or a tie.
+        let (all, only_first) = ([Select::Range(Days::ALWAYS)], [Select::Range(span(5, 5))]);
+        assert!(relieve(&mut days.clone(), 6, &Ask { selectors: &all, ..PLAIN }).ambiguous);
+        assert!(!relieve(&mut days.clone(), 6, &Ask { selectors: &only_first, ..PLAIN }).ambiguous, "one admitted");
+        assert!(!relieve(&mut days.clone(), 20, &Ask { selectors: &all, ..PLAIN }).ambiguous, "all of them");
+        let tied = slot_of(1, 0, &[lot(10, 1_000, 5), Parcel { tied: Some(Id::new(2)), ..purchase(99) }], Held::Lots);
+        let permits = [(Id::new(2), true)];
+        let relief = relieve(&mut tied.clone(), 6, &Ask { permits: &permits, ..PLAIN });
+        assert!(!relief.ambiguous, "each colour holds one lot, and the permitted one goes first");
+        assert_eq!(taken(&relief), [(6, 900)]);
+        let untied_too = slot_of(
+            1,
+            0,
+            &[lot(10, 1_000, 5), purchase(99), Parcel { tied: Some(Id::new(2)), ..lot(1, 1, 7) }],
+            Held::Lots,
+        );
+        assert!(relieve(&mut untied_too.clone(), 6, &PLAIN).ambiguous, "two untied lots differ, beside a tied one");
     }
 
     #[test]
     fn plain_money_and_a_zero_basis_lot_differ_but_deferrals_do_not() {
-        let money = Ask { money: true, ..PLAIN };
-        let mixed = slot_of(1, 700, &[lot(300, 0, 1)], true);
+        let money = Ask { held: Held::Money, ..PLAIN };
+        let mixed = slot_of(1, 700, &[lot(300, 0, 1)], Held::Money);
         assert!(relieve(&mut mixed.clone(), 100, &money).ambiguous, "after-tax and pre-tax money differ");
-        let deferrals = slot_of(1, 0, &[lot(100, 0, 1), lot(50, 0, 30)], true);
+        let deferrals = slot_of(1, 0, &[lot(100, 0, 1), lot(50, 0, 30)], Held::Money);
         assert!(!relieve(&mut deferrals.clone(), 20, &money).ambiguous, "zero-basis deferrals from any day are alike");
     }
 
     #[test]
     fn prorata_over_plain_and_a_zero_basis_lot_splits_the_withdrawal() {
-        let mut held = slot_of(1, 6_300_00, &[lot(2_200_00, 0, 3)], true);
-        let relief = relieve(&mut held, 1_500_00, &Ask { money: true, policy: Some(Policy::Prorata), ..PLAIN });
+        let mut held = slot_of(1, 6_300_00, &[lot(2_200_00, 0, 3)], Held::Money);
+        let relief = relieve(&mut held, 1_500_00, &Ask { held: Held::Money, policy: Some(Policy::Prorata), ..PLAIN });
         assert_eq!(taken(&relief), [(1_111_76, 1_111_76), (388_24, 0)]);
     }
 
     #[test]
     fn a_sale_beyond_what_is_held_reports_the_shortfall_and_goes_negative() {
-        let mut held = slot_of(1, 0, &[lot(7, 700, 1)], false);
+        let mut held = slot_of(1, 0, &[lot(7, 700, 1)], Held::Lots);
         let relief = relieve(&mut held, 10, &PLAIN);
         assert_eq!((relief.shortfall, taken(&relief)), (Qty(3), vec![(7, 700)]));
         assert_eq!((held.qty, held.holding.plain), (Qty(-3), Qty(-3)));
@@ -1749,10 +1359,10 @@ mod tests {
     fn tied_parcels_go_first_only_when_their_laws_permit() {
         let grant = Id::new(4);
         let tied = Parcel { tied: Some(grant), ..lot(5, 5, 9) };
-        let held = slot_of(1, 0, &[lot(10, 10, 1), tied], true);
+        let held = slot_of(1, 0, &[lot(10, 10, 1), tied], Held::Money);
         let first = |permit: bool| {
             let permits = [(grant, permit)];
-            relieve(&mut held.clone(), 4, &Ask { money: true, permits: &permits, ..PLAIN }).slices[0].tied
+            relieve(&mut held.clone(), 4, &Ask { held: Held::Money, permits: &permits, ..PLAIN }).slices[0].tied
         };
         assert_eq!(first(true), Some(grant));
         assert_eq!(first(false), None);
@@ -1762,9 +1372,9 @@ mod tests {
     fn a_spender_takes_its_own_parcels_then_untied_ones_and_nobody_elses() {
         let (car, trip) = (Id::new(4), Id::new(5));
         let tied = |entity, acquired| Parcel { tied: Some(entity), ..lot(5, 5, acquired) };
-        let held = slot_of(1, 0, &[tied(trip, 1), tied(car, 2), lot(10, 10, 3)], true);
+        let held = slot_of(1, 0, &[tied(trip, 1), tied(car, 2), lot(10, 10, 3)], Held::Money);
         let order = |spender, permits: &[(Id<Entity>, bool)], need| {
-            let ask = Ask { money: true, policy: Some(Policy::Fifo), spender, permits, ..PLAIN };
+            let ask = Ask { held: Held::Money, policy: Some(Policy::Fifo), spender, permits, ..PLAIN };
             let relief = relieve(&mut held.clone(), need, &ask);
             (relief.slices.iter().map(|s| s.tied).collect::<Vec<_>>(), relief.shortfall.0)
         };
@@ -1785,9 +1395,9 @@ mod tests {
 
     #[test]
     fn selectors_intersect_by_kind_and_union_within_one() {
-        let held = slot_of(1, 0, &[lot(1, 1, 10), lot(2, 2, 20), lot(4, 4, 30)], false);
+        let held = slot_of(1, 0, &[lot(1, 1, 10), lot(2, 2, 20), lot(4, 4, 30)], Held::Lots);
         let codes = Arena::new();
-        let pick = |selectors: &[Select]| held.admitted(false, selectors, &codes).0;
+        let pick = |selectors: &[Select]| held.admitted(selectors, &codes).0;
         assert_eq!(pick(&[]), 7);
         assert_eq!(pick(&[Select::Range(span(10, 20))]), 3);
         assert_eq!(pick(&[Select::Range(span(10, 10)), Select::Range(span(30, 30))]), 5);
@@ -1795,17 +1405,20 @@ mod tests {
     }
 
     #[test]
-    fn plain_identity_is_reflexive_without_a_fabricated_transaction_key() {
-        let mut slot = slot_of(1, 0, &[], false);
+    fn plain_value_is_one_candidate_without_a_fabricated_transaction_key() {
+        let mut slot = slot_of(1, 0, &[], Held::Lots);
         slot.credit(Qty(5));
         let candidates = {
             let mut out = Vec::new();
-            slot.gather(false, &Selection { selectors: &[], codes: &Arena::new() }, &mut out);
+            slot.gather(Held::Lots, &Selection { selectors: &[], codes: &Arena::new() }, &mut out);
             out
         };
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].txn, None);
-        assert_eq!(candidates[0].identity, candidates[0].identity);
+        let relief = relieve(&mut slot.clone(), 2, &PLAIN);
+        assert!(!relief.ambiguous, "part of plain value alone is no choice");
+        let tied = Ask { permits: &[(Id::new(4), true)], ..PLAIN };
+        assert!(!relieve(&mut slot, 2, &Ask { selectors: &[Select::Policy(Policy::Prorata)], ..tied }).ambiguous);
     }
 
     #[test]
@@ -1825,11 +1438,11 @@ mod tests {
         };
         parcel.codes = marks;
         let mut held = Slot::new(Id::new(0), Id::new(0), NONE);
-        held.land_with_codes(parcel, false, &pool);
+        held.land(parcel, Held::Lots, &pool);
 
-        assert_eq!(held.admitted(false, &[Select::Code(header)], &pool), Qty(5));
-        assert_eq!(held.admitted(false, &[Select::Code(local)], &pool), Qty(5));
-        assert_eq!(held.admitted(false, &[Select::Code(other)], &pool), Qty::ZERO);
+        assert_eq!(held.admitted(&[Select::Code(header)], &pool), Qty(5));
+        assert_eq!(held.admitted(&[Select::Code(local)], &pool), Qty(5));
+        assert_eq!(held.admitted(&[Select::Code(other)], &pool), Qty::ZERO);
     }
 
     #[test]
@@ -1838,31 +1451,20 @@ mod tests {
         let original = names.intern("original-purchase");
         let mut pool = Arena::new();
         let first = pool.push(original);
-        let codes = FlowCodes { header: axiom_core::Run::new(first, 1), local: empty_codes().local };
+        let codes = FlowCodes { header: axiom_core::Run::new(first, 1), local: FlowCodes::default().local };
         let mut parcel = lot(7, 700, 10);
         parcel.codes = codes;
         let mut source = Slot::new(Id::new(0), Id::new(0), NONE);
-        source.land_with_codes(parcel, false, &pool);
+        source.land(parcel, Held::Lots, &pool);
 
         let mut relief = Relief::default();
         let request = Request::of(Qty(3), Some(Policy::Fifo), &pool, (Day(20), journal(20)));
         source.relieve(&request, &mut relief);
-        let slice = relief.slices[0];
-        let moved = Parcel {
-            qty: slice.qty,
-            basis: slice.basis,
-            acquired: slice.acquired,
-            held_since: slice.held_since,
-            wash_matched: slice.wash_matched,
-            txn: slice.txn,
-            part: slice.part,
-            codes: slice.codes,
-            tied: slice.tied,
-        };
+        let moved = relief.slices[0].lot;
         let mut target = Slot::new(Id::new(1), Id::new(0), NONE);
-        target.land_with_codes(moved, false, &pool);
+        target.land(moved, Held::Lots, &pool);
 
-        assert_eq!(target.admitted(false, &[Select::Code(original)], &pool), Qty(3));
+        assert_eq!(target.admitted(&[Select::Code(original)], &pool), Qty(3));
     }
 
     #[test]
@@ -1874,9 +1476,9 @@ mod tests {
         let first = pool.push(mark);
         let second = pool.push(mark);
         let other = pool.push(different);
-        let one = FlowCodes { header: axiom_core::Run::new(first, 1), local: empty_codes().local };
-        let equal = FlowCodes { header: axiom_core::Run::new(second, 1), local: empty_codes().local };
-        let distinct = FlowCodes { header: axiom_core::Run::new(other, 1), local: empty_codes().local };
+        let one = FlowCodes { header: axiom_core::Run::new(first, 1), local: FlowCodes::default().local };
+        let equal = FlowCodes { header: axiom_core::Run::new(second, 1), local: FlowCodes::default().local };
+        let distinct = FlowCodes { header: axiom_core::Run::new(other, 1), local: FlowCodes::default().local };
         let mut slot = Slot::new(Id::new(0), Id::new(0), NONE);
         let mut first_parcel = lot(2, 2, 10);
         first_parcel.codes = one;
@@ -1884,9 +1486,9 @@ mod tests {
         equivalent_parcel.codes = equal;
         let mut distinct_parcel = lot(1, 1, 10);
         distinct_parcel.codes = distinct;
-        slot.land_with_codes(first_parcel, false, &pool);
-        slot.land_with_codes(equivalent_parcel, false, &pool);
-        slot.land_with_codes(distinct_parcel, false, &pool);
+        slot.land(first_parcel, Held::Lots, &pool);
+        slot.land(equivalent_parcel, Held::Lots, &pool);
+        slot.land(distinct_parcel, Held::Lots, &pool);
 
         assert_eq!(slot.holding.lots.len(), 2);
         assert_eq!(slot.holding.lots[0].qty, Qty(5));
@@ -1901,7 +1503,7 @@ mod tests {
         a.part = Some(first);
         let mut b = a;
         b.part = Some(second);
-        let mut slot = slot_of(1, 0, &[a, b], false);
+        let mut slot = slot_of(1, 0, &[a, b], Held::Lots);
 
         assert_eq!(slot.holding.lots.len(), 2, "distinct cost-basis parts remain addressable");
         let mut relief = Relief::default();
@@ -1911,18 +1513,14 @@ mod tests {
         assert_eq!(relief.slices[0].part, Some(first));
 
         let slice = relief.slices[0];
-        let moved = Parcel {
-            qty: slice.qty,
-            basis: slice.carried,
-            acquired: slice.acquired,
-            held_since: slice.held_since,
-            wash_matched: slice.wash_matched,
-            txn: slice.txn,
-            part: slice.part,
-            codes: slice.codes,
-            tied: slice.tied,
-        };
+        let moved = Parcel { basis: slice.carried, ..slice.lot };
         assert_eq!(moved.part, Some(first), "ordinary transfer carries the part key");
+    }
+
+    /// What the live parcels of `part` hold of basis, wherever they are.
+    fn basis_of(holdings: &Holdings, part: PartId) -> i64 {
+        let lots = holdings.iter().flat_map(|slot| slot.holding.lots.iter());
+        lots.filter(|lot| lot.part == Some(part) && lot.qty > Qty::ZERO).map(|lot| lot.basis.0).sum()
     }
 
     #[test]
@@ -1936,20 +1534,50 @@ mod tests {
         second.part = Some(part);
         let mut independent = lot(1, 80, 10);
         independent.part = Some(other);
-        holdings.entry(Id::new(0), Id::new(0)).land(first, false);
-        holdings.index_part_slot(Id::new(0), Id::new(0), part);
-        holdings.entry(Id::new(1), Id::new(0)).land(second, false);
-        holdings.index_part_slot(Id::new(1), Id::new(0), part);
-        holdings.entry(Id::new(1), Id::new(0)).land(independent, false);
-        holdings.index_part_slot(Id::new(1), Id::new(0), other);
+        holdings.entry(Id::new(0), Id::new(0)).land(first, Held::Lots, &Arena::new());
+        holdings.entry(Id::new(1), Id::new(0)).land(second, Held::Lots, &Arena::new());
+        holdings.entry(Id::new(1), Id::new(0)).land(independent, Held::Lots, &Arena::new());
 
-        assert_eq!(holdings.part_basis(part), Ok(Qty(100)));
-        holdings.adjust_part_basis(part, Qty(-25)).unwrap();
-        assert_eq!(holdings.part_basis(part), Ok(Qty(75)));
-        assert_eq!(holdings.part_basis(other), Ok(Qty(80)));
-        holdings.adjust_part_basis(part, Qty(20)).unwrap();
-        assert_eq!(holdings.part_basis(part), Ok(Qty(95)));
-        assert_eq!(holdings.part_basis(other), Ok(Qty(80)));
+        // The same part bought in another commodity is not this one's (a part's parcels are all of its commodity).
+        let mut foreign = lot(1, 50, 10);
+        foreign.part = Some(part);
+        holdings.entry(Id::new(1), Id::new(1)).land(foreign, Held::Lots, &Arena::new());
+
+        assert_eq!(basis_of(&holdings, part), 150);
+        holdings.adjust(Id::new(0), part, Qty(-25)).unwrap();
+        assert_eq!((basis_of(&holdings, part), basis_of(&holdings, other)), (125, 80));
+        assert_eq!(holdings.get(Id::new(1), Id::new(1)).unwrap().holding.lots[0].basis, Qty(50), "another commodity's");
+        holdings.adjust(Id::new(0), part, Qty(20)).unwrap();
+        assert_eq!((basis_of(&holdings, part), basis_of(&holdings, other)), (145, 80));
+        assert_eq!(
+            holdings.adjust(Id::new(0), part, Qty(-96)),
+            Err(AssetError::ParcelBasisMismatch),
+            "no more than held"
+        );
+        assert_eq!(
+            holdings.adjust(Id::new(2), part, Qty(5)),
+            Err(AssetError::UnknownPart),
+            "a commodity it has none of"
+        );
+        assert_eq!(basis_of(&holdings, part), 145);
+    }
+
+    #[test]
+    fn a_fall_in_basis_is_shared_by_basis_and_a_rise_by_quantity() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(1), day: Day(10) };
+        let part = PartId { origin, ordinal: 0 };
+        let mut holdings = Holdings::new(2);
+        for (place, qty, basis) in [(0, 1, 300), (1, 3, 100)] {
+            let parcel = Parcel { part: Some(part), ..lot(qty, basis, 10) };
+            holdings.entry(Id::new(place), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
+        }
+        let bases = |holdings: &Holdings| {
+            holdings.iter().flat_map(|slot| &slot.holding.lots).map(|lot| lot.basis.0).collect::<Vec<_>>()
+        };
+        holdings.adjust(Id::new(0), part, Qty(-100)).unwrap();
+        assert_eq!(bases(&holdings), [225, 75], "three quarters of the basis gives three quarters of the fall");
+        holdings.adjust(Id::new(0), part, Qty(100)).unwrap();
+        assert_eq!(bases(&holdings), [250, 150], "one share in four gets a quarter of the rise");
     }
 
     #[test]
@@ -1961,21 +1589,22 @@ mod tests {
         first.part = Some(part);
         let mut second = lot(1, 0, 10);
         second.part = Some(part);
-        holdings.entry(Id::new(0), Id::new(0)).land(first, false);
-        holdings.index_part_slot(Id::new(0), Id::new(0), part);
-        holdings.entry(Id::new(1), Id::new(0)).land(second, false);
-        holdings.index_part_slot(Id::new(1), Id::new(0), part);
+        holdings.entry(Id::new(0), Id::new(0)).land(first, Held::Lots, &Arena::new());
+        holdings.entry(Id::new(1), Id::new(0)).land(second, Held::Lots, &Arena::new());
 
-        assert_eq!(holdings.part_basis(part), Ok(Qty(10)));
-        assert_eq!(holdings.prepare_part_basis_adjustment(part, Qty(1)).err(), Some(AssetError::Overflow));
-        assert_eq!(holdings.adjust_part_basis(part, Qty(1)), Err(AssetError::Overflow));
+        assert_eq!(basis_of(&holdings, part), 10);
+        assert_eq!(holdings.adjust(Id::new(0), part, Qty(1)), Err(AssetError::Overflow), "the quantities overflow");
         let parcels: Vec<_> = holdings
             .iter()
             .flat_map(|slot| slot.holding.lots.iter())
             .map(|parcel| (parcel.qty, parcel.basis))
             .collect();
         assert_eq!(parcels, [(Qty(i64::MAX), Qty(10)), (Qty(1), Qty::ZERO)]);
-        assert_eq!(holdings.part_basis(part), Ok(Qty(10)));
+        assert_eq!(basis_of(&holdings, part), 10);
+    }
+
+    fn addition(part: PartId, quantity: i64, amount: i64) -> CarryLotAddition {
+        CarryLotAddition { part, acquired: Day(20), held_since: Day(1), quantity: Qty(quantity), amount: Qty(amount) }
     }
 
     #[test]
@@ -1985,19 +1614,9 @@ mod tests {
         let mut parcel = lot(5_000, 25_000, 20);
         parcel.part = Some(part);
         let mut holdings = Holdings::new(1);
-        holdings.entry(Id::new(0), Id::new(0)).land(parcel, false);
-        holdings.index_part_slot(Id::new(0), Id::new(0), part);
+        holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
 
-        holdings
-            .prepare_part_carry_additions(&[CarryLotAddition {
-                part,
-                acquired: Day(20),
-                held_since: Day(1),
-                quantity: Qty(2_500),
-                amount: Qty(1_000),
-            }])
-            .unwrap()
-            .apply();
+        holdings.carry(Id::new(0), &[addition(part, 2_500, 1_000)]).unwrap();
 
         let slot = holdings.get(Id::new(0), Id::new(0)).unwrap();
         let mut lots: Vec<_> = slot
@@ -2009,7 +1628,42 @@ mod tests {
         lots.sort_unstable();
         assert_eq!(lots, [(2_500, 12_500, 20, 20), (2_500, 13_500, 20, 1)]);
         assert_eq!(slot.qty, Qty(5_000), "a basis carry does not change physical quantity");
-        assert_eq!(holdings.part_basis(part), Ok(Qty(26_000)));
+        assert_eq!(basis_of(&holdings, part), 26_000);
+    }
+
+    #[test]
+    fn carries_into_one_lot_split_it_in_turn_and_the_last_takes_the_rest() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(0), day: Day(20) };
+        let part = PartId { origin, ordinal: 0 };
+        let parcel = Parcel { part: Some(part), ..lot(10, 1_000, 20) };
+        let mut holdings = Holdings::new(1);
+        holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
+        holdings.carry(Id::new(0), &[addition(part, 4, 40), addition(part, 6, 60)]).unwrap();
+        let slot = holdings.get(Id::new(0), Id::new(0)).unwrap();
+        let lots: Vec<_> = slot.holding.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.wash_matched)).collect();
+        assert_eq!(lots, [(6, 660, true), (4, 440, true)], "the second takes what the first left, in the lot's place");
+        assert_eq!(
+            holdings.carry(Id::new(0), &[addition(part, 1, 1)]),
+            Err(AssetError::ParcelBasisMismatch),
+            "nothing unmatched is left"
+        );
+    }
+
+    #[test]
+    fn carries_into_lots_of_two_days_split_each_in_its_place() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(0), day: Day(20) };
+        let part = PartId { origin, ordinal: 0 };
+        let mut holdings = Holdings::new(1);
+        for day in [20, 30] {
+            let parcel = Parcel { part: Some(part), ..lot(10, 1_000, day) };
+            holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
+        }
+        let on = |acquired, quantity| CarryLotAddition { acquired: Day(acquired), ..addition(part, quantity, 10) };
+        holdings.carry(Id::new(0), &[on(20, 4), on(30, 5)]).unwrap();
+        let slot = holdings.get(Id::new(0), Id::new(0)).unwrap();
+        let lots: Vec<_> =
+            slot.holding.lots.iter().map(|lot| (lot.acquired.0, lot.qty.0, lot.basis.0, lot.wash_matched)).collect();
+        assert_eq!(lots, [(20, 6, 600, false), (20, 4, 410, true), (30, 5, 500, false), (30, 5, 510, true)]);
     }
 
     #[test]
@@ -2019,29 +1673,18 @@ mod tests {
         let mut parcel = lot(5_000, 25_000, 20);
         parcel.part = Some(part);
         let mut holdings = Holdings::new(1);
-        holdings.entry(Id::new(0), Id::new(0)).land(parcel, false);
-        holdings.index_part_slot(Id::new(0), Id::new(0), part);
+        holdings.entry(Id::new(0), Id::new(0)).land(parcel, Held::Lots, &Arena::new());
 
-        assert_eq!(
-            holdings
-                .prepare_part_carry_additions(&[CarryLotAddition {
-                    part,
-                    acquired: Day(20),
-                    held_since: Day(1),
-                    quantity: Qty(5_001),
-                    amount: Qty(1_000),
-                }])
-                .err(),
-            Some(AssetError::ParcelBasisMismatch)
-        );
+        let too_much = [addition(part, 3_000, 500), addition(part, 2_001, 500)];
+        assert_eq!(holdings.carry(Id::new(0), &too_much), Err(AssetError::ParcelBasisMismatch));
         let slot = holdings.get(Id::new(0), Id::new(0)).unwrap();
-        assert_eq!(slot.holding.lots, [parcel]);
-        assert_eq!(holdings.part_basis(part), Ok(Qty(25_000)));
+        assert_eq!(slot.holding.lots, [parcel], "the first addition, which fits, wrote nothing either");
+        assert_eq!(basis_of(&holdings, part), 25_000);
     }
 
     #[test]
     fn a_split_scales_quantity_and_keeps_basis() {
-        let mut held = slot_of(1, 0, &[lot(3, 30, 1), lot(5, 50, 2)], false);
+        let mut held = slot_of(1, 0, &[lot(3, 30, 1), lot(5, 50, 2)], Held::Lots);
         held.scale(Ratio::new(1, 2).unwrap());
         assert_eq!(lots(&held), [(2, 30), (2, 50)], "1.5 rounds to 2 and 2.5 to 2: half to even");
         assert_eq!(held.qty, Qty(4));
@@ -2068,8 +1711,8 @@ mod tests {
                     // Lots of one day are the lines of one transaction, unless a part id tells them apart.
                     let part = Some(PartId { origin: journal(day as u32), ordinal: roll(3) as u32 });
                     let parcel = Parcel { tied, part, ..lot(qty, qty * (50 + roll(100) as i64), day) };
-                    fast.land(parcel, false);
-                    slow.land(parcel, false);
+                    fast.land(parcel, Held::Lots, &Arena::new());
+                    slow.land(parcel, Held::Lots, &Arena::new());
                 } else {
                     let need = 1 + roll(14) as i64;
                     let (yes, no) = ([(Id::new(3), true)], [(Id::new(3), false)]);

@@ -13,6 +13,7 @@
 use axiom_core::Id;
 use axiom_model::{Book, Class, Entity, Place, Subject};
 
+use crate::lots::Held;
 use crate::motion::{Motion, Moves};
 use crate::plan::Plan;
 
@@ -42,11 +43,12 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
     }
 }
 
-/// Whether `unit` in `place` is money: base currency that is not a claim.
-/// Money is told apart by its basis per unit; everything else by the purchase
-/// that made it.
-pub(crate) fn is_money(plan: &Plan, place: Id<Place>, unit: Id<axiom_model::Commodity>) -> bool {
-    unit == plan.book.base && !plan.traits.place(place).claim
+/// What `place` holds of `unit`: money if it is base currency that is not a claim, else lots.
+pub(crate) fn holds(plan: &Plan, place: Id<Place>, unit: Id<axiom_model::Commodity>) -> Held {
+    match unit == plan.book.base && !plan.traits.place(place).claim {
+        true => Held::Money,
+        false => Held::Lots,
+    }
 }
 
 /// Whether the flow leaves value with one owner's asset places: a transfer

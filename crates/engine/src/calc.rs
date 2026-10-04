@@ -316,24 +316,12 @@ pub(crate) fn progressive(brackets: &[Bracket], income: Qty) -> Option<Qty> {
     Some(tax)
 }
 
-/// The share of a straight-line life in one requested period. The schedule is
-/// rounded only at its actual calendar boundaries, so splitting a period into
-/// smaller windows cannot create or lose a cent. Mid-month lives have a
-/// half-month at each end and one extra calendar month to preserve the stated
-/// life.
-pub(crate) fn straight_line(
-    cost: Qty,
-    life: Span,
-    from: Day,
-    over: Days,
-    period: Window,
-    mid_month: bool,
-) -> Option<Qty> {
-    straight_line_with_terminal(cost, life, from, over, period, mid_month, false)
-}
-
 /// The share of a straight-line life in one requested period, optionally
 /// taking only half of its terminal month under a mid-month disposition rule.
+/// The schedule is rounded only at its actual calendar boundaries, so splitting
+/// a period into smaller windows cannot create or lose a cent. Mid-month lives
+/// have a half-month at each end and one extra calendar month to preserve the
+/// stated life.
 pub(crate) fn straight_line_with_terminal(
     cost: Qty,
     life: Span,
@@ -426,7 +414,16 @@ mod tests {
         let part = |year, month| {
             let first = day(year, month, 1);
             let last = day(year, month, days_in_month(year, month));
-            straight_line(cost, life, day(2024, 3, 1), Days::new(first, last).unwrap(), Window::Month, true).unwrap()
+            straight_line_with_terminal(
+                cost,
+                life,
+                day(2024, 3, 1),
+                Days::new(first, last).unwrap(),
+                Window::Month,
+                true,
+                false,
+            )
+            .unwrap()
         };
 
         let before_2026: Qty =
@@ -438,13 +435,14 @@ mod tests {
 
         let first_day_2026 = day(2026, 1, 1);
         let march_end = day(2026, 3, 31);
-        let whole_quarter = straight_line(
+        let whole_quarter = straight_line_with_terminal(
             cost,
             life,
             day(2024, 3, 1),
             Days::new(first_day_2026, march_end).unwrap(),
             Window::Year,
             true,
+            false,
         )
         .unwrap();
         assert_eq!(whole_quarter, first_quarter);
@@ -456,7 +454,8 @@ mod tests {
         let cost = Qty(28_200_000);
         let life = Span::months(330);
         let february = Days::new(day(2026, 2, 1), day(2026, 2, 15)).unwrap();
-        let ordinary = straight_line(cost, life, day(2024, 3, 1), february, Window::Month, true).unwrap();
+        let ordinary =
+            straight_line_with_terminal(cost, life, day(2024, 3, 1), february, Window::Month, true, false).unwrap();
         let terminal =
             straight_line_with_terminal(cost, life, day(2024, 3, 1), february, Window::Month, true, true).unwrap();
         assert_eq!(ordinary, Qty(85_455));
@@ -471,8 +470,34 @@ mod tests {
         let month = |m| {
             let first = day(2026, m, 1);
             let last = day(2026, m, days_in_month(2026, m));
-            straight_line(cost, life, day(2026, 2, 2), Days::new(first, last).unwrap(), Window::Month, true).unwrap()
+            straight_line_with_terminal(
+                cost,
+                life,
+                day(2026, 2, 2),
+                Days::new(first, last).unwrap(),
+                Window::Month,
+                true,
+                false,
+            )
+            .unwrap()
         };
         assert_eq!(month(2) + month(3), Qty(673));
+    }
+
+    /// What a depreciation law gives each part of an asset: the acquisition its cost less the land from the asset's
+    /// in-service day, an improvement its own cost from its own day (moved here from `assets_runtime::part_straight_line`,
+    /// a copy of this composition that nothing called).
+    #[test]
+    fn acquisition_land_and_improvement_service_are_independent() {
+        let day = |y, m, d| Day::from_ymd(y, m, d).unwrap();
+        let month = |year, month| Days::new(day(year, month, 1), day(year, month, days_in_month(year, month))).unwrap();
+        let (life, land) = (Span::months(330), Qty(93_000_00));
+        let part =
+            |cost: Qty, from, over| straight_line_with_terminal(cost, life, from, over, Window::Month, true, false);
+        let acquisition = part(Qty(376_850_00) - land, day(2024, 12, 18), month(2024, 12)).unwrap();
+        let improvement = |over| part(Qty(14_200_00), day(2025, 9, 15), over).unwrap();
+        assert!(acquisition > Qty::ZERO);
+        assert_eq!((improvement(month(2025, 8)), improvement(month(2025, 9)) > Qty::ZERO), (Qty::ZERO, true));
+        assert_eq!(acquisition, part(Qty(283_850_00), day(2024, 12, 18), month(2024, 12)).unwrap(), "land is excluded");
     }
 }

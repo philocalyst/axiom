@@ -27,7 +27,6 @@ use crate::monitor;
 use crate::motion::{Amounts, Course, Motion};
 use crate::plan::Plan;
 use crate::promising::Promising;
-use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::statement::{exchange_costs_of, exchange_of};
 use crate::timeline::{Fact, Moment, SourceFact, Timeline};
@@ -614,9 +613,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let book = self.plan.book;
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
         let qty = if book.places[flow.from].class == Class::Asset {
-            let money = is_money(self.plan, flow.from, flow.out.unit);
             let view = book.flow_view(flow);
-            slot.map_or(Qty::ZERO, |slot| slot.admitted(money, view.select(), &book.codes))
+            slot.map_or(Qty::ZERO, |slot| slot.admitted(view.select(), &book.codes))
         } else {
             slot.map_or(Qty::ZERO, |slot| slot.plain.max(Qty::ZERO))
         };

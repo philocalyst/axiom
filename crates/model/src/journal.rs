@@ -88,7 +88,7 @@ impl Flow {
 
 /// Two ranges in the book-wide code arena: transaction header first, then the
 /// originating flow's own codes. Copying this value never copies code text.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub struct FlowCodes {
     pub header: Run<Sym>,
     pub local: Run<Sym>,

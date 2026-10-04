@@ -13,7 +13,7 @@
 //! commodity was asserted, or a flow is missing, and puts the likeliest in a
 //! note before it offers to accept the gap.
 
-use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Map, Qty, Severity, Sym, calendar};
+use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Budget, ClaimChange, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow,
     Law, NodeId, Op, Param, Place, Program, Purpose, RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive,
@@ -29,7 +29,8 @@ use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::recognition::{Counting, Counts, KEEPS_FLOW_DAYS, Piece, Share};
 use crate::show;
-use crate::{Cause, Effect, Owed, Parcel, Posted, Settlement, Waiver};
+use crate::state::Record;
+use crate::{Cause, Owed, Parcel, Posted, Waiver};
 
 /// The most flows an assertion's explanation draws.
 const SHOWN: usize = 8;
@@ -43,10 +44,9 @@ pub(crate) struct Frame<'a, 'b, 's> {
     pub ctx: &'a Context<'a>,
     /// Every node's value from the run that just ended.
     pub values: &'a [Value],
-    /// What laws recorded so far: which flows counted into a tally.
-    pub effects: &'a [Effect],
-    /// The claims the flows from a party settled, as they stand: which flows count as the claims' purposes.
-    pub settled: &'a Map<Id<Flow>, Settlement>,
+    /// What the fold recorded so far: which flows counted into a tally (`effects`), and the claims the flows from a party
+    /// settled, as they stand (`settled`), which say which flows count as the claims' purposes.
+    pub record: &'a Record,
 }
 
 impl<'a, 'b, 's> Frame<'a, 'b, 's> {
@@ -188,7 +188,7 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
     /// The latest flows that a tally of the owner's counted in the window, other than the current one.
     fn tally_contributors(&self, name: Sym, window: Days, current: Option<Id<Flow>>) -> Vec<Id<Flow>> {
         let ctx = self.ctx;
-        let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
+        let of_name = self.record.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
         let counted = of_name.filter(|e| window.contains(e.day)).filter_map(|e| match e.cause {
             Cause::Flow(id) if Some(id) != current => Some(id),
             _ => None,
@@ -282,7 +282,7 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
         // Most flows are of other days, or of other purposes and settle nothing, and are not worth building the pieces of.
         let of_other_days = KEEPS_FLOW_DAYS && !flow.recognized.overlaps(read_days);
         let of_scopes = || flow.purpose.is_some_and(|purposed| self.in_scopes(purposed.purpose, scopes));
-        if !before || of_other_days || !(of_scopes() || self.settled.contains_key(&id)) {
+        if !before || of_other_days || !(of_scopes() || self.record.settled.contains_key(&id)) {
             return false;
         }
         let state = self.plan.events.state(id, flow);
@@ -295,7 +295,7 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
             arrive: amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive),
             state,
         };
-        Counting::posted(self.plan, flow, &posted, self.settled.get(&id)).pieces(self.book(), pieces);
+        Counting::posted(self.plan, flow, &posted, self.record.settled.get(&id)).pieces(self.book(), pieces);
         let counted =
             |piece: &Piece| piece.recognized.overlaps(read_days) && self.piece_counts(flow, &posted, piece, scopes);
         pieces.iter().any(counted)
@@ -938,28 +938,6 @@ pub(crate) fn shortfall(book: &Book, m: &Motion, held: Qty, admitted: Qty, short
         d = d.note(format!("the selectors match {} of it", money(admitted)));
     }
     d.help("record the purchase before this flow, or check the quantity; the missing amount is left as a negative balance so the rest of the ledger stays consistent")
-}
-
-/// A flow into or out of `PLACE.basis` that the place cannot carry: it holds
-/// no parcel to take the basis (`carried` is false), or less basis than the
-/// flow takes off.
-pub(crate) fn basis_shortfall(
-    book: &Book,
-    m: &Motion,
-    place: Id<Place>,
-    held: Qty,
-    amount: Qty,
-    carried: bool,
-) -> Diagnostic {
-    let (name, base) = (show::place(book, place), |qty: Qty| book.show(Amount::new(qty, book.base)).to_string());
-    let what = if carried {
-        format!("{name} has {} of basis, and this flow takes {} off", base(held), base(amount))
-    } else {
-        format!("{name} holds nothing to carry a change of basis")
-    };
-    Diagnostic::error("no-basis", what)
-        .label(m.loc, "a basis flow changes the basis of the parcels a place holds, and moves no quantity")
-        .help("record what the place holds first, or check the amount and the selectors")
 }
 
 /// A claim still open past its day: who owes what, and for how long.

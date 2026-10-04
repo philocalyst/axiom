@@ -13,14 +13,15 @@
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Span, Sym};
 use axiom_model::{
-    Amount, Cap, CapTarget, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind, Subject, Trigger, Watch,
-    Window,
+    Amount, Cap, CapTarget, Commodity, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind, Subject,
+    Trigger, Watch, Window,
 };
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
 use crate::explain::{self, Frame};
 use crate::facts::{Reads, Shortcut};
 use crate::ledger::Ledger;
+use crate::lots::{CarryLotAddition, Shares};
 use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::scope::owner_of;
@@ -37,6 +38,31 @@ fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
     rule.days.overlaps(on.span) && !internal
 }
 
+/// How a wash sale's loss, `amount` for `sold` shares, goes into the shares `bought` (the latest first): each takes its share
+/// of the loss for what it holds, as far as the shares sold go. Says the additions, how many shares they matched, and how much
+/// of the loss they took.
+fn allot(
+    bought: Vec<(Day, PartId, Qty)>,
+    sold: Qty,
+    amount: Qty,
+    held_since: Day,
+) -> Option<(Vec<CarryLotAddition>, Qty, Qty)> {
+    let held = bought.iter().try_fold(Qty::ZERO, |sum, &(.., qty)| sum.0.checked_add(qty.0).map(Qty))?;
+    let (matched, mut shares) = (held.min(sold), Shares::new(amount, sold));
+    let (mut left, mut carried, mut additions) = (matched, Qty::ZERO, Vec::new());
+    for (acquired, part, held) in bought {
+        if left.is_zero() {
+            break;
+        }
+        let quantity = held.min(left);
+        let addition = CarryLotAddition { part, acquired, held_since, quantity, amount: shares.take(quantity) };
+        carried = carried.0.checked_add(addition.amount.0).map(Qty)?;
+        additions.push(addition);
+        left -= quantity;
+    }
+    Some((additions, matched, carried))
+}
+
 fn law_consumes(book: &axiom_model::Book<'_>, law: Id<Law>) -> bool {
     book.laws[law].steps.iter().any(|step| match &step.kind {
         StepKind::Effect(LawEffect::Consume { .. }) => true,
@@ -47,7 +73,7 @@ fn law_consumes(book: &axiom_model::Book<'_>, law: Id<Law>) -> bool {
     })
 }
 
-impl Ledger<'_, '_, '_> {
+impl<'b, 's> Ledger<'_, 'b, 's> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
         self.fire_as(rules, on, None);
@@ -119,17 +145,8 @@ impl Ledger<'_, '_, '_> {
     pub(crate) fn deadline(&mut self, rule: usize, day: Day, period: Days) {
         let rule = self.plan.book.rules.timed()[rule];
         if let Subject::Asset(asset) = rule.subject {
-            let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
             let on = Occasion::time(day, period);
-            for index in 0..count {
-                let Some(part) = self.world.assets.asset(asset).and_then(|state| state.parts().get(index)).copied()
-                else {
-                    continue;
-                };
-                if self.asset_part_held(asset, part.id, day) {
-                    self.fire_asset_part(rule, &on, part.id);
-                }
-            }
+            self.held_parts(asset, day).into_iter().for_each(|part| self.fire_asset_part(rule, &on, part));
         } else {
             self.fire(std::slice::from_ref(&rule), &Occasion::time(day, period));
         }
@@ -140,10 +157,6 @@ impl Ledger<'_, '_, '_> {
     /// so this closes only the partial sale period and ordinary deadlines
     /// later that day see the disposal boundary and skip the asset.
     pub(crate) fn pre_disposal(&mut self, asset: axiom_core::Id<axiom_model::Asset>, day: Day) {
-        let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
-        if count == 0 {
-            return;
-        }
         let mut rules = Vec::new();
         for rule in self.plan.book.rules.timed().iter().copied() {
             if rule.subject != Subject::Asset(asset) || !law_consumes(self.plan.book, rule.law) {
@@ -167,30 +180,18 @@ impl Ledger<'_, '_, '_> {
         if rules.is_empty() {
             return;
         }
-        for index in 0..count {
-            let Some(part) = self.world.assets.asset(asset).and_then(|state| state.parts().get(index)).copied() else {
-                continue;
-            };
-            if !self.asset_part_held(asset, part.id, day) {
-                continue;
-            }
-            for (rule, partial) in rules.iter().copied() {
-                let on = Occasion::partial_terminal(day, partial);
-                if applies(self.plan, &rule, &on) {
-                    self.fire_asset_part(rule, &on, part.id);
-                }
+        for part in self.held_parts(asset, day) {
+            for &(rule, partial) in &rules {
+                self.fire_asset_part(rule, &Occasion::partial_terminal(day, partial), part);
             }
         }
     }
 
-    fn asset_part_held(&self, asset: axiom_core::Id<axiom_model::Asset>, part: PartId, day: Day) -> bool {
-        let Some(state) = self.world.assets.asset(asset) else {
-            return false;
-        };
-        let Some((owner, record)) = self.world.assets.part(part) else {
-            return false;
-        };
-        owner == asset && record.recorded.day <= day && state.held_at(EventKey { day, sequence: u64::MAX })
+    /// The parts of `asset` recorded by `day`, if it is still held at the end of it: what a law about it runs for.
+    fn held_parts(&self, asset: axiom_core::Id<axiom_model::Asset>, day: Day) -> Vec<PartId> {
+        let held = self.world.assets.asset(asset).filter(|state| state.held_at(EventKey { day, sequence: u64::MAX }));
+        let parts = held.into_iter().flat_map(|state| state.parts()).filter(|part| part.recorded.day <= day);
+        parts.map(|part| part.id).collect()
     }
 
     fn fire_asset_part(&mut self, rule: Rule, on: &Occasion<'_>, part: PartId) {
@@ -334,11 +335,13 @@ impl Ledger<'_, '_, '_> {
             return;
         };
         match self.consume_asset_part(asset, part, amount.qty) {
-            Ok(consumption) => {
-                if !consumption.applied.is_zero() {
+            Ok(applied) => {
+                if !applied.is_zero() {
                     self.sample_temporal(ctx.day);
+                    let kind = AdjustmentKind::Consumed { asset, part };
+                    self.record.adjustments.push(Adjustment { day: ctx.day, law: rule.law, kind, amount: applied });
                 }
-                if !consumption.excess.is_zero() {
+                if applied < amount.qty {
                     self.record.report(
                         Diagnostic::error(
                             "asset-consume-excess",
@@ -346,14 +349,6 @@ impl Ledger<'_, '_, '_> {
                         )
                         .label(book.laws[rule.law].loc, "consumption is limited to remaining basis"),
                     );
-                }
-                if !consumption.applied.is_zero() {
-                    self.record.adjustments.push(Adjustment {
-                        day: ctx.day,
-                        law: rule.law,
-                        kind: AdjustmentKind::Consumed { asset, part },
-                        amount: consumption.applied,
-                    });
                 }
             }
             Err(error) => {
@@ -365,157 +360,94 @@ impl Ledger<'_, '_, '_> {
         }
     }
 
-    fn carry(
+    /// A `carry`: a wash sale, which the law says of a loss a sale realized, whose program is checked here.
+    fn carry(&mut self, rule: &Rule, ctx: &Context, step: u32, amount: Amount, unit: Id<Commodity>, within: Span) {
+        match self.carry_loss(rule.law, ctx, amount, unit, within) {
+            Ok(()) => self.sample_temporal(ctx.day),
+            Err(fault) => self.fault(rule, ctx, step as usize, fault),
+        }
+    }
+
+    /// Carries `amount` of the loss the sale of `ctx` realized into the shares of `unit` its owner bought within `within`
+    /// of the sale (the latest first, as far as the quantity sold goes), and puts what finds none in the queue of carries
+    /// that wait for a purchase. Each part of the loss is an adjustment the law made.
+    fn carry_loss(
         &mut self,
-        rule: &Rule,
+        law: Id<Law>,
         ctx: &Context,
-        step: u32,
         amount: Amount,
-        unit: axiom_core::Id<axiom_model::Commodity>,
+        unit: Id<Commodity>,
         within: Span,
-    ) {
-        let Some(realized) = ctx.realized else {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        };
-        let Some(from) = realized.part else {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        };
+    ) -> Result<(), Fault> {
+        let invalid = Fault::InvalidProgram;
+        let realized = ctx.realized.ok_or(invalid)?;
+        let from = realized.part.ok_or(invalid)?;
         if realized.gain >= Qty::ZERO || amount.qty <= Qty::ZERO || within.months < 0 || within.days < 0 {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
+            return Err(invalid);
         }
         let book = self.plan.book;
-        let Some(amount) = book.convert(amount, book.base, ctx.day) else {
-            self.fault(rule, ctx, step as usize, Fault::NoPrice { unit: amount.unit, quote: book.base });
-            return;
-        };
-        let Some(loss) = realized.gain.0.checked_neg().map(Qty) else {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        };
-        if amount.qty > loss {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        }
-        let Some(sold) = ctx.amount.filter(|amount| amount.unit == unit).and_then(|_| {
-            ctx.realized.filter(|realized| realized.quantity > Qty::ZERO).map(|realized| realized.quantity)
-        }) else {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        };
-
-        // Search only this owner's asset places and the matching commodity.
-        // The held parcels are the canonical acquisition and quantity data.
-        let mut candidates: Vec<(Day, PartId, Qty)> = Vec::new();
-        let mut overflow = false;
-        for &place in self.plan.places_of(ctx.owner) {
-            let Some(slot) = self.world.holdings.get(place, unit) else { continue };
-            for parcel in &slot.holding.lots {
-                let Some(part) = parcel.part else { continue };
-                if part == from
-                    || parcel.qty <= Qty::ZERO
-                    || parcel.wash_matched
-                    || parcel.acquired > ctx.day
-                    || !crate::Assets::within_carry_window(parcel.acquired, ctx.day, within)
-                {
-                    continue;
-                }
-                if let Some((_, _, quantity)) = candidates
-                    .iter_mut()
-                    .find(|(seen_day, seen_part, _)| *seen_day == parcel.acquired && *seen_part == part)
-                {
-                    if let Some(sum) = quantity.0.checked_add(parcel.qty.0) {
-                        quantity.0 = sum;
-                    } else {
-                        overflow = true;
-                        break;
-                    }
-                } else {
-                    candidates.push((parcel.acquired, part, parcel.qty));
-                }
-            }
-            if overflow {
-                break;
-            }
-        }
-        if overflow {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        }
-        candidates.sort_by_key(|(day, _, _)| std::cmp::Reverse(*day));
-        let Some(available) =
-            candidates.iter().try_fold(Qty::ZERO, |sum, (_, _, qty)| sum.0.checked_add(qty.0).map(Qty))
-        else {
-            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-            return;
-        };
-        let matched_qty = available.min(sold);
-        let mut quantity_left = matched_qty;
-        let mut shares = crate::lots::Shares::new(amount.qty, sold);
-        let mut additions = Vec::new();
-        let mut matched_amount = Qty::ZERO;
-        for (acquired, part, available) in candidates {
-            if quantity_left.is_zero() {
-                break;
-            }
-            let quantity = available.min(quantity_left);
-            let basis = shares.take(quantity);
-            if !basis.is_zero() || !quantity.is_zero() {
-                additions.push(crate::lots::CarryLotAddition {
-                    part,
-                    acquired,
-                    held_since: realized.held_since,
-                    quantity,
-                    amount: basis,
-                });
-            }
-            let Some(sum) = matched_amount.0.checked_add(basis.0).map(Qty) else {
-                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-                return;
-            };
-            matched_amount = sum;
-            quantity_left -= quantity;
-        }
+        let amount =
+            book.convert(amount, book.base, ctx.day).ok_or(Fault::NoPrice { unit: amount.unit, quote: book.base })?.qty;
+        let loss = realized.gain.0.checked_neg().map(Qty).ok_or(invalid)?;
+        let sold =
+            ctx.amount.filter(|sold| sold.unit == unit).map(|_| realized.quantity).filter(|&qty| qty > Qty::ZERO);
+        let sold = sold.filter(|_| amount <= loss).ok_or(invalid)?;
+        let bought = self.bought_within(ctx, unit, from, within)?;
+        let (additions, matched, carried) = allot(bought, sold, amount, realized.held_since).ok_or(invalid)?;
         if !additions.is_empty() {
-            if self.carry_basis_to_parts(&additions).is_err() {
-                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-                return;
-            }
+            self.carry_basis_to_parts(unit, &additions).map_err(|_| invalid)?;
             self.sample_temporal(ctx.day);
             for addition in &additions {
-                self.record.adjustments.push(Adjustment {
-                    day: ctx.day,
-                    law: rule.law,
-                    kind: AdjustmentKind::Carried { from, to: Some(addition.part) },
-                    amount: addition.amount,
-                });
+                let kind = AdjustmentKind::Carried { from, to: Some(addition.part) };
+                self.record.adjustments.push(Adjustment { day: ctx.day, law, kind, amount: addition.amount });
             }
         }
-        let unmatched_qty = sold - matched_qty;
-        if !unmatched_qty.is_zero() {
-            let unmatched_amount = amount.qty - matched_amount;
-            if !unmatched_amount.is_zero() {
-                let carry = crate::PendingCarry {
-                    law: rule.law,
-                    from,
-                    cause: ctx.cause,
-                    owner: ctx.owner,
-                    unit,
-                    sold: ctx.day,
-                    held_since: realized.held_since,
-                    within,
-                    quantity: unmatched_qty,
-                    amount: unmatched_amount,
-                    codes: realized.codes,
-                };
-                if self.world.assets.enqueue_carry(carry).is_err() {
-                    self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-                }
+        if sold == matched || amount == carried {
+            return Ok(());
+        }
+        let (quantity, amount) = (sold - matched, amount - carried);
+        let (cause, owner, held_since, codes) = (ctx.cause, ctx.owner, realized.held_since, realized.codes);
+        let carry = crate::PendingCarry {
+            law,
+            from,
+            cause,
+            owner,
+            unit,
+            sold: ctx.day,
+            held_since,
+            within,
+            quantity,
+            amount,
+            codes,
+        };
+        self.world.assets.enqueue_carry(carry).map_err(|_| invalid)
+    }
+
+    /// The shares of `unit` the owner of `ctx` bought within `within` of its day and holds, that no loss was carried into
+    /// yet and that are not the sold ones (`from`): what a wash sale's loss goes into, by the day and part they were bought,
+    /// the latest first.
+    fn bought_within(
+        &self,
+        ctx: &Context,
+        unit: Id<Commodity>,
+        from: PartId,
+        within: Span,
+    ) -> Result<Vec<(Day, PartId, Qty)>, Fault> {
+        let mut bought: Vec<(Day, PartId, Qty)> = Vec::new();
+        let slots = self.plan.places_of(ctx.owner).iter().filter_map(|&place| self.world.holdings.get(place, unit));
+        let lots = slots.flat_map(|slot| &slot.holding.lots);
+        for lot in lots.filter(|lot| lot.qty > Qty::ZERO && !lot.wash_matched && lot.acquired <= ctx.day) {
+            let Some(part) = lot.part.filter(|&part| part != from) else { continue };
+            if !crate::Assets::within_carry_window(lot.acquired, ctx.day, within) {
+                continue;
+            }
+            match bought.iter_mut().find(|(day, seen, _)| (*day, *seen) == (lot.acquired, part)) {
+                Some((_, _, qty)) => *qty = qty.0.checked_add(lot.qty.0).map(Qty).ok_or(Fault::InvalidProgram)?,
+                None => bought.push((lot.acquired, part, lot.qty)),
             }
         }
-        self.sample_temporal(ctx.day);
+        bought.sort_by_key(|&(day, ..)| std::cmp::Reverse(day));
+        Ok(bought)
     }
 
     /// Reads a floor of nothing (`balance >= empty`) straight off the holdings
@@ -680,16 +612,7 @@ impl Ledger<'_, '_, '_> {
         if !fresh {
             return;
         }
-        let frame = Frame {
-            plan: self.plan,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-            settled: &self.record.settled,
-        };
-        let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
+        let diagnostic = explain::broken(&self.frame(rule, ctx), step as usize, warn, waiver);
         let verdict = match (waiver, warn) {
             (Some(waiver), _) => Verdict::Waived(waiver),
             (None, true) => Verdict::Warns,
@@ -708,22 +631,11 @@ impl Ledger<'_, '_, '_> {
     /// A `require … else owe …` that does not hold costs what the law says,
     /// unless a `!` waives it.
     fn charge(&mut self, rule: &Rule, ctx: &Context, step: u32, (name, amount, owed): (Sym, Amount, Owed)) {
-        let law = &self.plan.book.laws[rule.law];
         let waive = ctx.motion.and_then(|m| m.waive);
         if let Some(waive) = waive {
             self.record.waivers.insert(waive.loc, true);
         }
-        let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame {
-            plan: self.plan,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-            settled: &self.record.settled,
-        };
-        let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
+        let diagnostic = explain::priced(&self.frame(rule, ctx), step as usize, (name, amount, owed), waive);
         self.violation(rule, ctx, diagnostic, Verdict::Priced { waived: waive.is_some() });
         if waive.is_none() {
             let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Penalty(owed));
@@ -735,17 +647,7 @@ impl Ledger<'_, '_, '_> {
     /// price, a property of one thing, a param's rows), however many laws,
     /// steps and flows run into it.
     pub(crate) fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
-        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
-        let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame {
-            plan: self.plan,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-            settled: &self.record.settled,
-        };
+        let (book, frame) = (self.plan.book, self.frame(rule, ctx));
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
         let missing = match fault {
@@ -758,9 +660,50 @@ impl Ledger<'_, '_, '_> {
             Fault::MissingInput(_) => Missing::Arithmetic(rule.law, step as u32),
             Fault::DivideByZero | Fault::Overflow => Missing::Arithmetic(rule.law, step as u32),
         };
-        if self.record.missing.insert(missing) {
-            let diagnostic = explain::faulted(&frame, fault, origin, holder);
+        let unsaid = !self.record.missing.contains(&missing);
+        if let Some(diagnostic) = unsaid.then(|| explain::faulted(&frame, fault, origin, holder)) {
+            self.record.missing.insert(missing);
             self.record.report(diagnostic);
         }
+    }
+
+    /// A law's evaluation as it stands, for saying what went wrong in it.
+    fn frame<'a>(&'a self, rule: &Rule, ctx: &'a Context) -> Frame<'a, 'b, 's> {
+        let (law, facts) = (&self.plan.book.laws[rule.law], &self.plan.laws[rule.law.index()]);
+        Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, record: &self.record }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allot;
+    use crate::PartId;
+    use axiom_core::{Day, Id, Qty};
+    use axiom_model::RuntimeTxn;
+
+    fn part(ordinal: u32) -> PartId {
+        PartId { origin: RuntimeTxn::Adjustment { place: Id::new(1), day: Day(1) }, ordinal }
+    }
+
+    #[test]
+    fn a_loss_goes_into_no_more_shares_than_were_sold_or_bought_and_no_more_than_the_loss() {
+        let bought = || vec![(Day(30), part(0), Qty(4)), (Day(20), part(1), Qty(5))];
+        // Sold 6 of a loss of 100: the latest 4 take 4/6 of it, the next 2 the rest, and the loss is carried whole.
+        let (additions, matched, carried) = allot(bought(), Qty(6), Qty(100), Day(5)).unwrap();
+        let taken: Vec<_> = additions.iter().map(|a| (a.acquired, a.quantity, a.amount, a.held_since)).collect();
+        assert_eq!(taken, [(Day(30), Qty(4), Qty(67), Day(5)), (Day(20), Qty(2), Qty(33), Day(5))]);
+        assert_eq!((matched, carried), (Qty(6), Qty(100)));
+        // Sold 12 but bought 9: only 9 are matched and only their share of the loss goes in.
+        let (additions, matched, carried) = allot(bought(), Qty(12), Qty(120), Day(5)).unwrap();
+        assert_eq!(additions.iter().map(|a| a.quantity).collect::<Vec<_>>(), [Qty(4), Qty(5)]);
+        assert_eq!((matched, carried), (Qty(9), Qty(90)));
+        // Nothing bought, nothing carried; a holding that does not add up is no allotment at all.
+        assert_eq!(
+            allot(Vec::new(), Qty(6), Qty(100), Day(5)).map(|(a, m, c)| (a.len(), m, c)),
+            Some((0, Qty(0), Qty(0)))
+        );
+        assert!(
+            allot(vec![(Day(2), part(0), Qty(i64::MAX)), (Day(1), part(1), Qty(1))], Qty(1), Qty(1), Day(1)).is_none()
+        );
     }
 }
