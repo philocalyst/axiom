@@ -225,7 +225,7 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 
 C2, one lowering of a line that moves value: **55,938**, −205 from the v5 head `9590f36` (56,143); model 18,908 (−212), core
 3,502 (+8), session 501 (−1). Planned against delivered: the `Diagnostic` behind one `Box` (first, the coordinator's) +9,
-clippy 277 to 59 warnings; U7 −1,130/**−198** (`Recording`, the context of a dated record, with its skeleton and its steps as
+clippy 277 to 58 warnings; U7 −1,130/**−198** (`Recording`, the context of a dated record, with its skeleton and its steps as
 methods; the journal, the occurrence and the loan's origination on it; the contract's template and the law's `also` line keep
 their own lowering); U8 −110/**0** and U9 −110/**0** (the resolvers and openings are as short as a table of them); U10
 −100/**−16**: **−214 of −1,450** (14%). Byte-identical to `9590f36` in `diff/`, all 577 Books, goldens, mistakes and the
