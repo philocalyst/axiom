@@ -5,7 +5,7 @@ use axiom_core::{Day, Days, Dec, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run,
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Quantity, Subject};
 
-use super::flow::{Codes, Ends, Recording, ResolvedEnd, Shape, empty_codes, push_flow_expressions, push_tail_roots};
+use super::flow::{Codes, Ends, Recording, ResolvedEnd, Shape, empty_codes, push_tail_roots};
 use super::record::CodeIndex;
 use super::tail::{Line, Tail, read_tail};
 use crate::args::Args;
@@ -635,8 +635,7 @@ pub(super) fn lower_basis<'s>(at: &mut Stated<'_, '_, 's>, written: ast::Amount<
         return;
     };
     let waive = flow.waive;
-    rec.staged.book.flows.push(flow);
-    push_flow_expressions(&mut rec.flow_roots, 0, None, None, basis_root);
+    rec.push(flow, None, None, basis_root);
     if rec.failed() {
         return;
     }

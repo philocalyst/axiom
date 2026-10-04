@@ -46,6 +46,9 @@ pub(super) struct ResolvedQuantity {
     pub part: Part,
 }
 
+/// The nodes a flow's amount out, amount in and basis are computed by, where they are.
+pub(super) type Computed = (Option<NodeId>, Option<NodeId>, Option<NodeId>);
+
 /// A dated record of the journal being lowered, and all its lowering needs: the book, staged so that nothing the record
 /// writes stays unless it is kept; where the record is written and its day; the transaction its flows belong to; what
 /// its expressions compiled to; the codes the journal has so far; and what its flows compute. A transaction, an
@@ -339,9 +342,9 @@ impl<'w, 'a, 's> Recording<'w, 'a, 's> {
         })
     }
 
-    /// The flow a header with both its ends named makes: what it says moves, checked and priced, and the expressions
-    /// its amounts and basis are computed by.
-    pub fn header_flow(&mut self, header: TxnHeader<'_, 's>, ends: Ends) -> Option<(Flow, Option<FlowExpressions>)> {
+    /// The flow a header with both its ends named makes: what it says moves, checked and priced, and the nodes its
+    /// amounts out and in and its basis are computed by.
+    pub fn header_flow(&mut self, header: TxnHeader<'_, 's>, ends: Ends) -> Option<(Flow, Computed)> {
         let TxnHeader { flow: written, mut tail, codes: header_codes } = header;
         let (loc, base) = (self.loc, self.staged.book.base);
         let out = written.from.amount.and_then(|quantity| self.quantity(quantity, base, FlowSide::Out));
@@ -359,13 +362,17 @@ impl<'w, 'a, 's> Recording<'w, 'a, 's> {
         let codes = Codes { header: header_codes, local: empty_codes(&self.staged) };
         let shape = Shape { ends, out: out_amount, arrive: arrive_amount, infer, mode };
         let flow = self.flow(shape, codes, tail, loc)?;
-        let expressions = (roots.0.is_some() || roots.1.is_some() || basis_root.is_some()).then_some(FlowExpressions {
-            flow: 0,
-            out: roots.0,
-            arrive: roots.1,
-            basis: basis_root,
-        });
-        Some((flow, expressions))
+        Some((flow, (roots.0, roots.1, basis_root)))
+    }
+
+    /// Writes a flow of the record, with the nodes that compute its amounts and basis; where it went.
+    pub fn push(&mut self, flow: Flow, out: Option<NodeId>, arrive: Option<NodeId>, basis: Option<NodeId>) -> u32 {
+        let at = self.staged.flows().len();
+        self.staged.book.flows.push(flow);
+        if out.is_some() || arrive.is_some() || basis.is_some() {
+            self.flow_roots.push(FlowExpressions { flow: at, out, arrive, basis });
+        }
+        at
     }
 
     /// The items under a flow: each is lowered to its place in the transaction's groups, and to a flow of its own
@@ -410,12 +417,7 @@ impl<'w, 'a, 's> Recording<'w, 'a, 's> {
                     mode: parent.mode,
                 };
                 let codes = Codes { header: parent.header_codes, local: local_codes };
-                self.flow(shape, codes, tail, item.loc).map(|flow| {
-                    let offset = self.staged.flows().len();
-                    self.staged.book.flows.push(flow);
-                    push_flow_expressions(&mut self.flow_roots, offset, None, None, basis_root);
-                    offset
-                })
+                self.flow(shape, codes, tail, item.loc).map(|flow| self.push(flow, None, None, basis_root))
             } else {
                 None
             };
@@ -612,18 +614,6 @@ fn apply_price(
         (None, Some(arrive), Some(out)) => Some((out, arrive.amount)),
         (Some(out), Some(arrive), None) => Some((out.amount, arrive.amount)),
         _ => None,
-    }
-}
-
-pub(super) fn push_flow_expressions(
-    roots: &mut Vec<FlowExpressions>,
-    flow: u32,
-    out: Option<NodeId>,
-    arrive: Option<NodeId>,
-    basis: Option<NodeId>,
-) {
-    if out.is_some() || arrive.is_some() || basis.is_some() {
-        roots.push(FlowExpressions { flow, out, arrive, basis });
     }
 }
 

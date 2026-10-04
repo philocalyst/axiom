@@ -7,7 +7,7 @@ use axiom_syntax::Subject;
 
 use super::flow::{
     Codes, Ends, Parent, Recording, ResolvedEnd, ResolvedQuantity, Shape, TxnHeader, empty_codes, endpoint, flow_roots,
-    priced, push_flow_expressions, push_item_root, push_quantity_root, push_tail_roots,
+    priced, push_item_root, push_quantity_root, push_tail_roots,
 };
 use super::loan_opening::{Insertion, Unopened};
 use super::push_amount_root;
@@ -20,9 +20,7 @@ use crate::book::{Amount, Contract, Place, ScheduleKind, Terms};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{
-    Action, Detail, Flow, FlowExpressions, Infer, Mode, OccurrenceTail, Origin, Txn, TxnKind, WrittenOccurrence,
-};
+use crate::journal::{Action, Detail, Flow, Infer, Mode, OccurrenceTail, Origin, Txn, TxnKind, WrittenOccurrence};
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
 use crate::promise::{Keep, Promises};
@@ -258,6 +256,22 @@ impl Built {
             Err(problem) => self.reject(problem, diags),
         }
     }
+
+    /// The items under a header that has no legs, lowered and kept as the group they are with it, which adds up to
+    /// `total`.
+    fn items<'s>(
+        &mut self,
+        rec: &mut Recording<'_, '_, 's>,
+        (header, total): (Heading, Total),
+        items: ast::Many<ast::LineItem<'s>>,
+        parent: Parent<'_>,
+    ) {
+        let items = rec.items(items, parent);
+        let group = Made { header, side: FlowSide::Out, legs: Box::default(), items };
+        let flows = rec.staged.flows();
+        let settled = balance::settle(&mut rec.staged.book, &group, flows, total, rec.loc);
+        self.keep(group, settled, &mut rec.staged.diags);
+    }
 }
 
 fn lower_txn<'a, 's>(world: &mut World<'s>, record: Written<'a, 's, ast::Txn<'s>>, code_index: &CodeIndex) {
@@ -353,28 +367,17 @@ fn party_subject<'s>(
 /// A header that names both its ends is one flow, with the items under it as a group of their own.
 fn lower_named_flow<'s>(rec: &mut Recording<'_, '_, 's>, header: TxnHeader<'_, 's>, ends: Ends, built: &mut Built) {
     let (written, codes) = (header.flow, header.codes);
-    let flow_at = rec.staged.flows().len();
-    let Some((flow, exprs)) = rec.header_flow(header, ends) else {
+    let Some((flow, (out, arrive, basis))) = rec.header_flow(header, ends) else {
         built.successful = false;
         return;
     };
-    let says_amount =
-        flow.infer == Infer::Known && exprs.is_none_or(|exprs| exprs.out.is_none() && exprs.arrive.is_none());
-    let total = Remaining { out: flow.out, arrive: flow.arrive };
-    rec.staged.book.flows.push(flow);
-    if let Some(exprs) = exprs {
-        rec.flow_roots.push(FlowExpressions { flow: flow_at, ..exprs });
+    let says = flow.infer == Infer::Known && out.is_none() && arrive.is_none();
+    let total = if says { Total::Is(Remaining { out: flow.out, arrive: flow.arrive }) } else { Total::Later };
+    let flow_at = rec.push(flow, out, arrive, basis);
+    if !rec.file[written.body.items].is_empty() {
+        let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
+        built.items(rec, (Heading::Flow(flow_at), total), written.body.items, parent);
     }
-    if rec.file[written.body.items].is_empty() {
-        return;
-    }
-    let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
-    let items = rec.items(written.body.items, parent);
-    let group = Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items };
-    let total = if says_amount { Total::Is(total) } else { Total::Later };
-    let flows = rec.staged.flows();
-    let settled = balance::settle(&mut rec.staged.book, &group, flows, total, rec.loc);
-    built.keep(group, settled, &mut rec.staged.diags);
 }
 
 /// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
@@ -464,7 +467,6 @@ impl<'s> Split<'_, 's> {
         let tail = self.header.tail.clone().merge(leg_tail);
         let unit = self.total.map_or(rec.staged.book.base, |total| total.amount.unit);
         let quantity = rec.quantity(leg.amount, unit, side.other())?;
-        let at = rec.staged.flows().len();
         let basis = tail.basis_root;
         // A leg written in another commodity than the total is the exchange of what the others leave: it keeps the
         // amount it says on its own side, and the source's side is the solver's to say.
@@ -477,10 +479,8 @@ impl<'s> Split<'_, 's> {
         let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
         let codes = Codes { header: self.header.codes, local: leg_codes };
         let flow = rec.flow(shape, codes, tail, leg.loc)?;
-        rec.staged.book.flows.push(flow);
         let (out, arrive) = if source_is_from { (None, quantity.root()) } else { (quantity.root(), None) };
-        push_flow_expressions(&mut rec.flow_roots, at, out, arrive, basis);
-        Some(Leg { flow: at, part: quantity.part })
+        Some(Leg { flow: rec.push(flow, out, arrive, basis), part: quantity.part })
     }
 
     /// The items under the header: between the source and the remainder leg's end, or the first leg's when none is the
@@ -540,9 +540,7 @@ fn lower_opening_balances<'a, 's>(
         let Some((flow, basis_root)) = lower_opening_leg(&mut rec, opening_place, leg) else {
             continue;
         };
-        let flow_at = rec.staged.flows().len();
-        rec.staged.book.flows.push(flow);
-        push_flow_expressions(&mut rec.flow_roots, flow_at, None, None, basis_root);
+        rec.push(flow, None, None, basis_root);
     }
     if rec.failed() {
         return rec.reject(item);
@@ -995,13 +993,11 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         flow.codes = local_codes;
         flow.select = from.select;
         flow.detail = merge_detail_pool(&mut rec.staged, base_flow.detail, flow.detail);
-        let offset = rec.staged.flows().len();
-        rec.staged.book.flows.push(flow);
         let (out_root, arrive_root) = match side {
             FlowSide::Out => (quantity.root(), None),
             FlowSide::Arrive => (None, quantity.root()),
         };
-        push_flow_expressions(&mut rec.flow_roots, offset, out_root, arrive_root, tail.basis_root);
+        let offset = rec.push(flow, out_root, arrive_root, tail.basis_root);
         if written_groups[template_at].is_none() {
             let side = template_side(&rec.staged, template);
             written_groups[template_at] = Some(occurrence_group_draft(template, side));
@@ -1193,8 +1189,7 @@ fn lower_loan_origin<'s>(
     flow.owner = owner;
     flow.payee = Some(party);
     flow.origin = Origin::Occurrence(contract_id);
-    rec.staged.book.flows.push(flow);
-    push_flow_expressions(&mut rec.flow_roots, 0, None, None, basis_root);
+    rec.push(flow, None, None, basis_root);
     let program = rec.keep_program(None);
     let doc = rec.doc(doc);
     let txn =
@@ -1317,29 +1312,20 @@ fn lower_owes<'s>(
         let codes = Codes { header: header_codes, local: empty_codes(&rec.staged) };
         if let Some(mut flow) = rec.flow(shape, codes, header_tail.clone(), loc) {
             flow.owner = owner;
-            rec.staged.book.flows.push(flow);
-            push_flow_expressions(&mut rec.flow_roots, 0, root, root, header_tail.basis_root);
+            let flow_at = rec.push(flow, root, root, header_tail.basis_root);
             if !statement.body.items.is_empty() {
                 let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
-                let items = rec.items(statement.body.items, parent);
-                let made = Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items };
                 let total = match expr {
                     Expr::Literal(_) => Total::Is(Remaining { out: amount, arrive: amount }),
                     Expr::Computed(_) => Total::Later,
                 };
-                let flows = rec.staged.flows();
-                let settled = balance::settle(&mut rec.staged.book, &made, flows, total, loc);
-                built.keep(made, settled, &mut rec.staged.diags);
+                built.items(&mut rec, (Heading::Flow(flow_at), total), statement.body.items, parent);
             }
         }
     } else {
         let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
-        let items = rec.items(statement.body.items, parent);
         let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
-        let made = Made { header, side: FlowSide::Out, legs: Box::default(), items };
-        let flows = rec.staged.flows();
-        let settled = balance::settle(&mut rec.staged.book, &made, flows, Total::Nothing, loc);
-        built.keep(made, settled, &mut rec.staged.diags);
+        built.items(&mut rec, (header, Total::Nothing), statement.body.items, parent);
     }
     if rec.failed() {
         return;
