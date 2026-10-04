@@ -5,7 +5,11 @@
     loans.py gen DIR N [SEED]               write N projects (DIR/pNNNN/main.ax and expect.txt), and DIR/forms.json
     loans.py build TREE OUT                 build the dump (loans/) against the crates of TREE into OUT/
     loans.py check BINARY DIR [JOBS]        what BINARY says of every project, against what the reference says
-    loans.py mutate TREE WORK DIR [N,M..]   the mutants of the loan's arithmetic and its walk: each must be caught
+    loans.py cover DIR                      what the corpus holds: its forms, and the lines the reference expects of it
+    loans.py mutate TREE WORK DIR [all|N,M..] [SAMPLE]
+                                            the mutants of the loan's arithmetic, walk, causes and fold: each is built and
+                                            must be caught by the oracle on the first SAMPLE projects (default 300) or by a
+                                            test that fails only with it
 
 What it is for. K5a built the arithmetic of a level payment and held it to the engine's. K5d makes a loan the fold of four
 events (a payment falls due, a prepayment, a reset of the rate by an index, a rate a statement says) over a state, writes

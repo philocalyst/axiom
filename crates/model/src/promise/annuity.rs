@@ -507,6 +507,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_payment_that_clears_what_is_owed_before_the_last_ends_the_loan() {
+        let annuity = annuity(1_000_00, 12, 5);
+        let state = State { open: Qty(100), payment: Qty(5_000), remaining: 3, ..annuity.start() };
+        let (next, paid) = annuity.step(state, Event::Pay);
+        assert_eq!((paid.principal, paid.open, next.remaining), (Qty(100), Qty::ZERO, 0));
+    }
+
+    #[test]
+    fn a_balance_needs_the_payments_the_recurrence_takes_and_never_more_than_were_left() {
+        let tenth = Ratio::new(1, 10).unwrap();
+        assert_eq!(
+            payments_to_clear(Qty(1_000), tenth, Qty(200), 20),
+            8,
+            "interest is paid before principal at every step"
+        );
+        assert_eq!(payments_to_clear(Qty(1_000), tenth, Qty(200), 5), 5, "and never more than were left");
+        let hundredth = Ratio::new(1, 100).unwrap();
+        assert_eq!(
+            payments_to_clear(Qty(100), hundredth, Qty(500), 5),
+            1,
+            "a payment that covers it is one payment, not none"
+        );
+        assert_eq!(payments_to_clear(Qty(100), hundredth, Qty(101), 5), 1, "covering what is owed exactly is enough");
+    }
+
     // The four events.
 
     #[test]
