@@ -99,6 +99,7 @@ mod rules_tests {
             (Watch::Out(Id::new(0)), rule(2)),
             (Watch::Gain(Id::new(1)), rule(3)),
             (Watch::About(Id::new(2)), rule(4)),
+            (Watch::Touching(Id::new(1)), rule(10)),
             (Watch::Spend(Id::new(1)), rule(5)),
             (Watch::Purpose(Id::new(0)), rule(6)),
             (Watch::Contract(Id::new(1)), rule(7)),
@@ -111,6 +112,9 @@ mod rules_tests {
         }
         assert_eq!(rules.at(Watch::Out(Id::new(0))), [rule(1), rule(2)], "a row keeps its order");
         assert!(rules.at(Watch::Always(Id::new(2))).is_empty());
+        assert!(
+            rules.at(Watch::Touching(Id::new(0))).is_empty() && rules.at(Watch::Touching(Id::new(1))) == [rule(10)]
+        );
         assert!(rules.at(Watch::In(Id::new(0))).is_empty(), "the row before it is not its row");
         assert!(rules.at(Watch::Contract(Id::new(0))).is_empty());
         assert!(
@@ -120,8 +124,8 @@ mod rules_tests {
         assert_eq!(rules.table(Table::Out), [rule(1), rule(2)]);
         assert_eq!(rules.table(Table::Always), []);
         assert_eq!(rules.timed(), [rule(8)]);
-        assert_eq!(rules.all().len(), 10);
-        assert_eq!(rules.lists().count(), 3 * 5 + 2 + 2 + 2 + 2 + 1);
+        assert_eq!(rules.all().len(), 11);
+        assert_eq!(rules.lists().count(), 3 * 6 + 2 + 2 + 2 + 2 + 1);
     }
 
     #[test]
@@ -676,6 +680,9 @@ pub enum Table {
     Always,
     /// A flow whose purpose is `of` an asset, at the asset's place: the asset kind's and its own `on flow` laws.
     About,
+    /// A flow with this place at either end: the `on flow` laws of the place and its ancestors, of its kind, and of the
+    /// entity that stands at it and its kind.
+    Touching,
     /// Money held for a restricted entity leaves its owner.
     Spend,
     /// A flow of a purpose or of one beneath it, ancestors' laws included.
@@ -696,13 +703,14 @@ impl Table {
         Table::Gain,
         Table::Always,
         Table::About,
+        Table::Touching,
         Table::Spend,
         Table::Purpose,
         Table::Contract,
         Table::Occurrence,
         Table::Timed,
     ];
-    const COUNT: usize = 10;
+    const COUNT: usize = 11;
     /// The tables that watch a place for what happens to it, in the order a flow fires them.
     pub const PLACE: [Table; 4] = [Table::In, Table::Out, Table::Gain, Table::Always];
 }
@@ -715,6 +723,7 @@ pub enum Watch {
     Gain(Id<Place>),
     Always(Id<Place>),
     About(Id<Place>),
+    Touching(Id<Place>),
     Spend(Id<Entity>),
     Purpose(Id<Purpose>),
     Contract(Id<Contract>),
@@ -731,6 +740,7 @@ impl Watch {
             Watch::Gain(_) => Table::Gain,
             Watch::Always(_) => Table::Always,
             Watch::About(_) => Table::About,
+            Watch::Touching(_) => Table::Touching,
             Watch::Spend(_) => Table::Spend,
             Watch::Purpose(_) => Table::Purpose,
             Watch::Contract(_) => Table::Contract,
@@ -747,6 +757,7 @@ impl Watch {
             Table::Gain => Watch::Gain(Id::new(key)),
             Table::Always => Watch::Always(Id::new(key)),
             Table::About => Watch::About(Id::new(key)),
+            Table::Touching => Watch::Touching(Id::new(key)),
             Table::Spend => Watch::Spend(Id::new(key)),
             Table::Purpose => Watch::Purpose(Id::new(key)),
             Table::Contract => Watch::Contract(Id::new(key)),
@@ -758,7 +769,12 @@ impl Watch {
     /// The thing watched, as its dense index in the key space of its table.
     fn key(self) -> usize {
         match self {
-            Watch::In(at) | Watch::Out(at) | Watch::Gain(at) | Watch::Always(at) | Watch::About(at) => at.index(),
+            Watch::In(at)
+            | Watch::Out(at)
+            | Watch::Gain(at)
+            | Watch::Always(at)
+            | Watch::About(at)
+            | Watch::Touching(at) => at.index(),
             Watch::Spend(at) => at.index(),
             Watch::Purpose(at) => at.index(),
             Watch::Contract(at) | Watch::Occurrence(at) => at.index(),
@@ -789,7 +805,7 @@ impl Keys {
     /// How many rows `table` has.
     fn rows(self, table: Table) -> usize {
         match table {
-            Table::In | Table::Out | Table::Gain | Table::Always | Table::About => self.places,
+            Table::In | Table::Out | Table::Gain | Table::Always | Table::About | Table::Touching => self.places,
             Table::Spend => self.entities,
             Table::Purpose => self.purposes,
             Table::Contract | Table::Occurrence => self.contracts,

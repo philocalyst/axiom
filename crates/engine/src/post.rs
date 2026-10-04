@@ -176,7 +176,7 @@ impl Ledger<'_, '_, '_> {
         match m.txn {
             RuntimeTxn::Journal(txn) => book.txns.get(txn.id()).and_then(|txn| txn.contract),
             RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
-            RuntimeTxn::Adjustment { .. } => None,
+            RuntimeTxn::Adjustment { .. } | RuntimeTxn::Derived(_) => None,
         }
         .filter(|&contract| book.contracts.get(contract).is_some())
     }
@@ -787,7 +787,7 @@ impl Ledger<'_, '_, '_> {
     fn source_flow(&self, m: &Motion) -> Option<Id<axiom_model::Flow>> {
         match m.cause {
             Cause::Flow(flow) => Some(flow),
-            Cause::Transaction(_) | Cause::Applied(_) | Cause::Time => None,
+            Cause::Transaction(_) | Cause::Applied(_) | Cause::Time | Cause::Derived(_) => None,
         }
     }
 
@@ -804,6 +804,8 @@ impl Ledger<'_, '_, '_> {
                 .and_then(|prefix| prefix.checked_add(u64::from(m.flow_ordinal)))
                 .unwrap_or(u64::MAX),
             Cause::Applied(ordinal) => u64::from(ordinal),
+            // After every flow the journal and the fold number, in the order they derived.
+            Cause::Derived(offspring) => (1 << 62) + offspring.index() as u64,
             Cause::Time => 0,
         };
         EventKey { day: m.day, sequence }

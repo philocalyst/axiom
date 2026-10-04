@@ -258,5 +258,6 @@ pub fn cause_cell<'s>(book: &'s Book<'_>, cause: Cause) -> Cell<'s> {
         Cause::Transaction(txn) => Cell::Source(book.txns[txn].loc),
         Cause::Applied(_) => Cell::text("hypothetical flow"),
         Cause::Time => Cell::text("period end"),
+        Cause::Derived(_) => Cell::text("derived flow"),
     }
 }

@@ -14,7 +14,7 @@ use axiom_core::{Days, Diagnostic, Id, Loc, Run, Sym};
 use axiom_syntax as ast;
 use axiom_syntax::ClauseKind;
 
-use crate::book::{Place, Shape, Text};
+use crate::book::{Place, Shape, Stand, Text};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
@@ -176,9 +176,13 @@ pub(crate) fn flow_ends<'s>(
 ) -> Option<(Option<Id<Place>>, Option<Id<Place>>)> {
     let ast::AlsoLine::Flow(flow) = line else { return None };
     let mut unsaid = Vec::new();
+    let place = |stand| match stand {
+        Stand::At(place) => Some(place),
+        Stand::Flow | Stand::Subject => None,
+    };
     let from = implied_end(world, home, file, flow.from.end, positions, &mut unsaid)?;
     let to = implied_end(world, home, file, flow.to.end, positions, &mut unsaid)?;
-    Some((from, to))
+    Some((place(from), place(to)))
 }
 
 /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow that implies it.
@@ -247,8 +251,9 @@ fn implied_flow<'s>(
     Some(Said { shape: Shape::Flow { from, to }, amount, clauses: flow.tail, selectors })
 }
 
-/// The place an end of an implied flow names: none for `self` or no end, the place a role stands at, and nothing at
-/// all, after it is said, for a name that is none.
+/// Where an end of an implied flow stands: with the flow that fires the law where none is written, at what the law
+/// governs for `self`, at the place a role stands at or the one a name says, and nowhere at all, after it is said,
+/// for a name that is none.
 fn implied_end<'s>(
     world: &World<'s>,
     home: Home,
@@ -256,16 +261,19 @@ fn implied_end<'s>(
     end: Option<ast::End<'s>>,
     positions: Positions<'_>,
     diags: &mut Vec<Diagnostic>,
-) -> Option<Option<Id<Place>>> {
-    let Some(end) = end.filter(|end| end.name.0 != "self") else { return Some(None) };
+) -> Option<Stand> {
+    let Some(end) = end else { return Some(Stand::Flow) };
+    if end.name.0 == "self" {
+        return Some(Stand::Subject);
+    }
     let word = Word::of(file, end.name.0);
     match positions.of(world.book.names.get(word.text)) {
-        Standing::Stands(place) => Some(Some(place)),
+        Standing::Stands(place) => Some(Stand::At(place)),
         Standing::Empty => {
             diags.push(empty_role(world, word, positions));
             None
         }
-        Standing::NoRole => world.end(home, word).map(|end| Some(end.place)).or_report(diags),
+        Standing::NoRole => world.end(home, word).map(|end| Stand::At(end.place)).or_report(diags),
     }
 }
 

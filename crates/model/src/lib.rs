@@ -119,6 +119,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     // What watches a place is worked out when the last claim tab has been made: a claim makes its tab while the
     // journal is lowered.
     rules::govern(&mut world.book, &order);
+    rules::unreached(&world.book, &mut diags);
     // `end` statements say more of places, once the rest is lowered.
     world.freeze_facts();
     // What the contracts promise is known when the last waiver and ending has been lowered.

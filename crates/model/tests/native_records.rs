@@ -1,5 +1,5 @@
 use axiom_core::{Day, FileId, Id};
-use axiom_model::{BinOp, Effect, Law, NodeId, Op, Owner, Shape, Source, StepKind, Trigger, Value, Var, build};
+use axiom_model::{BinOp, Effect, Law, NodeId, Op, Owner, Shape, Source, Stand, StepKind, Trigger, Value, Var, build};
 use axiom_syntax::{Folder, parse};
 
 #[test]
@@ -767,7 +767,7 @@ contract c with p
     assert!(law.derives());
     let (template, amount) = derive_of(law);
     let derived = &book.derived[template];
-    assert_eq!(derived.shape, Shape::Flow { from: None, to: Some(book.place("assets/savings").unwrap()) });
+    assert_eq!(derived.shape, Shape::Flow { from: Stand::Flow, to: Stand::At(book.place("assets/savings").unwrap()) });
     assert_eq!(book.name(book.codes[derived.codes.start()]), "match");
     assert!(law.nodes.len() > amount.index(), "the amount is a node of the law");
 }

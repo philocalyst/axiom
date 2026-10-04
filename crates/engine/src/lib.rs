@@ -100,6 +100,7 @@ pub use assets::{
     AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId,
     PartKind, PendingCarry,
 };
+pub use axiom_model::Cause;
 pub use checkpoint::Checkpoint;
 pub use histories::{Extremes, Histories, Position, Steps};
 pub use ledger::Ledger;
@@ -437,20 +438,6 @@ impl Hash for Parcel {
         self.codes.local.len().hash(state);
         self.tied.hash(state);
     }
-}
-
-/// Which flow caused something: one in the journal, or one handed to
-/// [`Ledger::apply`] (numbered in the order applied).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Cause {
-    Flow(Id<Flow>),
-    /// A source transaction whose grouped contract occurrence was materialized
-    /// by the engine. This keeps occurrence provenance distinct from a
-    /// hypothetical `Applied` flow and from template metadata flow IDs.
-    Transaction(Id<Txn>),
-    Applied(u32),
-    /// A period ending or a deadline passing.
-    Time,
 }
 
 /// Parcels leaving a place and realizing a gain.

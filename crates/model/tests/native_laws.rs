@@ -128,8 +128,10 @@ fn invalid_initial_budget_terms_do_not_leave_a_zero_budget_law() {
     );
 }
 
+/// A declaration's `also` was once not read, and said so (`also-inert`). It is the law it abbreviates, so its lines are checked
+/// as any law's lines are: the three of these say what is wrong with each.
 #[test]
-fn a_declarations_also_is_not_read_and_the_book_is_told_so() {
+fn a_declarations_also_is_checked_as_the_law_it_abbreviates() {
     let std = source("std.ax", "system std\ncommodity USD\n  precision 2\nkind bank : asset\n", true, 0);
     let project = source(
         "axiom.ax",
@@ -139,18 +141,10 @@ fn a_declarations_also_is_not_read_and_the_book_is_told_so() {
     );
     let (book, diagnostics) = build(&[std, project]);
     let codes: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_ref()).collect();
-    assert_eq!(
-        codes,
-        ["also-inert", "also-inert", "also-inert"],
-        "a line nothing reads is not checked either: {diagnostics:?}"
-    );
-    assert!(
-        diagnostics.iter().all(|diagnostic| diagnostic.severity == axiom_core::Severity::Warning),
-        "it is a warning: the book is otherwise sound"
-    );
+    assert_eq!(codes, ["unknown-purpose", "also-relative-due", "unknown-purpose"], "{diagnostics:?}");
     assert!(
         book.laws.iter().all(|(_, law)| law.owner != Owner::Kind(book.kind("boss").unwrap())),
-        "and it made no law"
+        "and a line that is wrong makes no law, as a law that is wrong makes none"
     );
 }
 

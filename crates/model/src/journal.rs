@@ -168,6 +168,8 @@ pub enum RuntimeTxn {
     /// A balance-closing or other runtime adjustment with no journal source.
     /// It is local to a place and day, so it cannot masquerade as a Book ID.
     Adjustment { place: Id<Place>, day: Day },
+    /// A flow a law derived from one that had posted: a transaction of its own, whose parcels and parts are its.
+    Derived(Id<Offspring>),
 }
 
 impl RuntimeTxn {
@@ -191,7 +193,7 @@ impl RuntimeTxn {
         match self {
             RuntimeTxn::Journal(txn) => Some(txn.id()),
             RuntimeTxn::ContractOccurrence { source, .. } => source.map(JournalTxn::id),
-            RuntimeTxn::Adjustment { .. } => None,
+            RuntimeTxn::Adjustment { .. } | RuntimeTxn::Derived(_) => None,
         }
     }
 }
@@ -207,6 +209,7 @@ impl PartialEq for RuntimeTxn {
             (RuntimeTxn::Adjustment { place: ap, day: ad }, RuntimeTxn::Adjustment { place: bp, day: bd }) => {
                 (ap, ad) == (bp, bd)
             }
+            (RuntimeTxn::Derived(a), RuntimeTxn::Derived(b)) => a == b,
             _ => false,
         }
     }
@@ -232,6 +235,10 @@ impl Hash for RuntimeTxn {
                 2u8.hash(state);
                 place.hash(state);
                 day.hash(state);
+            }
+            RuntimeTxn::Derived(offspring) => {
+                3u8.hash(state);
+                offspring.hash(state);
             }
         }
     }
@@ -436,6 +443,47 @@ impl Provenance {
             Provenance::Derived => 6,
         }
     }
+}
+
+/// Which flow caused something: one in the journal, one a contract's occurrence made, one handed to the fold that the
+/// journal does not hold, the passing of time, or one a law derived from another.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Cause {
+    Flow(Id<Flow>),
+    /// A source transaction whose grouped contract occurrence was materialized
+    /// by the engine. This keeps occurrence provenance distinct from a
+    /// hypothetical `Applied` flow and from template metadata flow IDs.
+    Transaction(Id<Txn>),
+    /// A flow handed to the fold that the journal does not hold, numbered in the order applied.
+    Applied(u32),
+    /// A period ending or a deadline passing.
+    Time,
+    /// A flow a law derived from one that had posted: the edge from a consequence to the offspring that caused it.
+    Derived(Id<Offspring>),
+}
+
+impl Cause {
+    /// The journal flow that caused it, if one did directly.
+    pub fn flow(self) -> Option<Id<Flow>> {
+        match self {
+            Cause::Flow(flow) => Some(flow),
+            Cause::Transaction(_) | Cause::Applied(_) | Cause::Time | Cause::Derived(_) => None,
+        }
+    }
+}
+
+/// A flow a law derived from one that had posted (LANGUAGE §10): a card's cash back, a processor's fee. It is made by the
+/// fold and is no line of the journal, so it has the identity of its own that [`RuntimeTxn::Derived`] says, and it says where
+/// it came from: the flow that fired the law, which may be another offspring, and the law.
+///
+/// The fold numbers offspring in the order it makes them, over its whole life and through every checkpoint and fork, so a
+/// number is never two flows': the parcels of a checkpoint are named by it long after the list that recorded it is gone.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Offspring {
+    pub flow: Flow,
+    /// What fired the law: the flow it was derived from.
+    pub parent: Cause,
+    pub law: Id<Law>,
 }
 
 /// How a flow came to be.

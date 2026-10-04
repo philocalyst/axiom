@@ -79,7 +79,8 @@ struct Governed {
 }
 
 /// The laws and `also` lines written under a declaration. A declaration's laws are compiled once, however many
-/// sources spell it.
+/// sources spell it, and an `also` is the law it abbreviates (`on flow`, `derive LINE`): read as a flow posts that is
+/// for what the declaration governs.
 fn declare_in<'s>(
     world: &mut World<'s>,
     site: &Site<'_, 's>,
@@ -96,8 +97,10 @@ fn declare_in<'s>(
         for law in &file[decl.laws] {
             compile_native(world, diags, &placement, law);
         }
+        for also in &file[decl.alsos] {
+            compile_also(world, diags, &placement, also, Positions::NONE);
+        }
     }
-    declare_alsos(diags, file, decl);
 }
 
 /// What a declaration's laws govern, or None after saying why they govern nothing.
@@ -253,23 +256,8 @@ fn set_specificity(world: &mut World<'_>) {
     }
 }
 
-/// What a declaration's `also` lines come to today: nothing. Only a contract's `also` derives (it is a law the
-/// contract writes, made with each occurrence), so the line of a kind, an entity, a purpose or an account is not read,
-/// and the book is told so rather than left to think it is enforced.
-fn declare_alsos(diags: &mut Vec<Diagnostic>, file: &ast::File, decl: &ast::Decl) {
-    let what = format!("{:?}", decl.what).to_lowercase();
-    for also in &file[decl.alsos] {
-        diags.push(
-            Diagnostic::warning("also-inert", "this `also` is not read: only a contract's `also` derives a flow")
-                .label(also.loc, format!("a {what}'s `also` makes nothing yet"))
-                .note("a contract's `also` is made with each occurrence the contract promises, before it posts; a flow that has posted cannot be added to")
-                .help("write it under the contract whose occurrences should carry it, or write the flow it implies"),
-        );
-    }
-}
-
-/// A contract's `also` as the law it abbreviates, in the book. The roles of a contract's kind, if it has one, stand
-/// where `positions` says.
+/// An `also` as the law it abbreviates, in the book. The roles of a contract's kind, if it has one, stand where
+/// `positions` says.
 pub(crate) fn compile_also<'a, 's>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
@@ -339,7 +327,14 @@ fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
             matches!(owner, Owner::Place(_) | Owner::System(_) | Owner::Book) || place_kind
         }
         Written::Spend => matches!(owner, Owner::Entity(_)) || entity_kind,
-        Written::Flow => matches!(owner, Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_)) || thing_kind,
+        Written::Flow => {
+            matches!(
+                owner,
+                Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_) | Owner::Place(_) | Owner::Entity(_)
+            ) || place_kind
+                || thing_kind
+                || entity_kind
+        }
         Written::Each(_) | Written::Closing { .. } | Written::By(_) => {
             !matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Commodity)
         }
@@ -374,8 +369,9 @@ fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
             "write this law inside an entity or a restricted entity kind",
         ),
         Written::Flow => (
-            "`on flow` laws govern purposes, assets, contracts, and asset kinds".to_owned(),
-            "write this law inside a purpose, asset, contract, or asset kind",
+            "`on flow` laws govern what a flow is for, or where it is: purposes, assets, contracts, accounts, entities, and kinds"
+                .to_owned(),
+            "write this law inside a purpose, asset, contract, account, entity, or kind",
         ),
         Written::Always => (
             "`always` laws govern account balances and assets".to_owned(),

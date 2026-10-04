@@ -1,7 +1,7 @@
 //! What a `derive` step compiles to, where its law is kept, and what is refused.
 
 use axiom_core::FileId;
-use axiom_model::{Book, Effect, Shape, Sign, Source, StepKind, Watch, build};
+use axiom_model::{Book, Effect, Shape, Sign, Source, Stand, StepKind, Watch, build};
 use axiom_syntax::{Folder, parse};
 
 const PRELUDE: &str = "\
@@ -49,7 +49,7 @@ fn a_flow_of_its_own_and_an_item_are_templates_beside_a_node_of_the_law() {
         })
         .collect();
     let escrow = book.place("escrow").unwrap();
-    assert_eq!(templates[0].shape, Shape::Flow { from: None, to: Some(escrow) });
+    assert_eq!(templates[0].shape, Shape::Flow { from: Stand::Flow, to: Stand::At(escrow) });
     assert_eq!(templates[0].purpose.unwrap().purpose, book.purpose("match").unwrap());
     assert_eq!(templates[1].shape, Shape::Item(Sign::Add));
     assert_eq!(templates[2].shape, Shape::Item(Sign::Less), "a `-` item is taken off the header");
@@ -73,13 +73,29 @@ fn a_law_that_judges_is_read_as_a_flow_posts_and_one_that_derives_as_an_occurren
 
 #[test]
 fn a_derive_that_cannot_be_made_is_said_where_it_is_written() {
-    let owner = format!("{PRELUDE}purpose gifts : spending\n  law gives\n    on flow\n    derive -> escrow 5 USD\n");
-    assert_eq!(lowered(&owner).1, ["derive-owner"], "only a contract's occurrence is made before it posts");
+    let under = |step: &str| format!("{PRELUDE}purpose gifts : spending\n  law gives\n    on flow\n    {step}\n");
+    assert!(
+        lowered(&under("derive -> escrow 5 USD")).1.is_empty(),
+        "a law that is not a contract's derives from a flow that has posted"
+    );
+    for carved in ["derive 5% of amount #fee", "derive - 1 USD", "derive + 2% of amount"] {
+        assert_eq!(
+            lowered(&under(carved)).1,
+            ["derive-posted"],
+            "a flow that has moved cannot give a part of itself away: {carved}"
+        );
+    }
     let timed = contract_with("monthly\n    each month\n    derive -> escrow 5 USD #match\n");
     assert_eq!(lowered(&timed).1, ["derive-trigger"]);
     let both =
         contract_with("both\n    on flow\n    warn value(amount, USD) <= 5 USD\n    derive -> escrow 5 USD #match\n");
     assert_eq!(lowered(&both).1, ["derive-and-judge"]);
+}
+
+#[test]
+fn a_contracts_law_may_carve_an_item_out_of_the_occurrence_it_is_made_with() {
+    let text = contract_with("share\n    on flow\n    derive 5% of amount #fee\n");
+    assert!(lowered(&text).1.is_empty(), "an occurrence is made before it posts, so a part of it can be given away");
 }
 
 #[test]

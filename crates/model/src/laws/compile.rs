@@ -116,6 +116,14 @@ fn function_spec(name: &str) -> Option<&'static FunctionSpec> {
     FUNCTION_SPECS.iter().find(|spec| spec.name == name)
 }
 
+/// A selector in a law that is not read with an occurrence's flows.
+fn no_occurrence_to_select_from(at: Loc) -> Diagnostic {
+    Diagnostic::error("selector-owner", "a selector reads the flows of one occurrence")
+        .label(at, "this law has no occurrence to select from")
+        .note("only a contract's law is read with the flows of an occurrence; a law that fires on a posted flow has that one flow, and its `amount`")
+        .help("write the law inside a contract, or narrow what it derives with `when`")
+}
+
 fn function_names() -> Vec<&'static str> {
     FUNCTION_SPECS.iter().map(|spec| spec.name).collect()
 }
@@ -796,10 +804,19 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
         Err(self.unknown_field(ty, field, receiver).into())
     }
 
+    /// Whether the law is read with the flows of one occurrence to select from: a contract's is, and so are the
+    /// expressions of a contract's template, which have no owner of their own.
+    fn reads_an_occurrence(&self) -> bool {
+        self.owner.is_none_or(|owner| matches!(owner, Owner::Contract(_)))
+    }
+
     /// Compiles the selector on an expression such as `50% of [retirement]`.
     /// The ids and keys are fixed now; the engine applies them to the borrowed,
     /// materialized occurrence groups when the template runs.
     fn select(&mut self, keys: &[ExprId]) -> Check<(Op, Ty)> {
+        if let Some(&first) = keys.first().filter(|_| !self.reads_an_occurrence()) {
+            return Err(no_occurrence_to_select_from(self.file.exprs[first].loc).into());
+        }
         let mut resolved = Vec::with_capacity(keys.len());
         for &key in keys {
             let expr = &self.file.exprs[key];
