@@ -20,7 +20,8 @@
 //! which is a holding once something is owned by it.
 //!
 //! The rule is `core::placement`'s: a word is placed only where every way of placing all the words puts it. The slots a
-//! word may take are `owner`, which takes any entity, and each slot of the kind that takes entities of the word's kind.
+//! word may take are `owner`, which takes any entity unless its account's kind says which kinds of entity may own it
+//! (`owner taxpayer`), and each slot of the kind that takes entities of the word's kind.
 //! `with` is not one of them, for any entity could be a custodian and no owner would be placed; `at` says it.
 
 use axiom_core::placement::{self, Placed, Unplaceable};
@@ -28,7 +29,7 @@ use axiom_core::tagless::Datum;
 use axiom_core::{Days, Diagnostic, Id, Interner, Loc, Set, SlotId, Tree};
 use axiom_syntax::{Decl, DeclKind};
 
-use crate::book::{Book, Class, Entity, Place, Role};
+use crate::book::{Book, Class, Entity, Kind, Place, Role};
 use crate::collect::{Collected, Written};
 use crate::declare::World;
 use crate::errors::Word;
@@ -37,7 +38,7 @@ use crate::holders::Holder;
 use crate::names::{Found, Scoped};
 use crate::problem::{self, Placing, Role as Way};
 use crate::scope::Scope;
-use crate::slots::{Range, Slot};
+use crate::slots::{Range, Slot, View};
 
 /// A word before the name of a spelled path, and the entity it is.
 #[derive(Clone, Copy)]
@@ -78,8 +79,8 @@ impl Book<'_> {
 /// A slot that a word before the name may be placed in.
 #[derive(Clone, Copy)]
 enum Free {
-    /// The owner, which takes any entity.
-    Owner,
+    /// The owner, which takes any entity, or those of the kinds its account's kind says may own it.
+    Owner(Id<Kind>),
     /// A slot the kind declares that takes entities.
     Slot { number: SlotId, slot: Slot },
 }
@@ -87,28 +88,31 @@ enum Free {
 impl Free {
     fn name<'b>(self, book: &'b Book) -> &'b str {
         match self {
-            Free::Owner => "owner",
+            Free::Owner(_) => "owner",
             Free::Slot { slot, .. } => book.name(slot.name),
         }
     }
 
     fn takes(self, book: &Book) -> String {
         match self {
-            Free::Owner => "any entity".to_string(),
+            Free::Owner(kind) => match book.owners_of(kind) {
+                [] => "any entity".to_string(),
+                kinds => View::Kinds(kinds).describe(book),
+            },
             Free::Slot { slot, .. } => book.schema.view(slot.range).describe(book),
         }
     }
 
     fn takes_one(self) -> bool {
         match self {
-            Free::Owner => true,
+            Free::Owner(_) => true,
             Free::Slot { slot, .. } => holds_one(slot.mult),
         }
     }
 
     fn fits(self, book: &Book, entity: Id<Entity>) -> bool {
         match self {
-            Free::Owner => true,
+            Free::Owner(kind) => book.may_own(kind, entity),
             Free::Slot { slot: Slot { range: Range::Kinds(run), .. }, .. } => {
                 let kind = book.entities[entity].kind;
                 book.schema.kinds_of(run).iter().any(|&of| book.is_a(kind, of))
@@ -279,7 +283,7 @@ fn free_slots(world: &World<'_>, written: &Written<'_, '_, Decl<'_>>, place: Id<
     let (file, decl) = (written.file(), written.node);
     let holder = Holder::Place(place);
     let kind = book.places[place].kind;
-    let owner = (!file[decl.props].iter().any(|line| line.name.0 == "owner")).then_some(Free::Owner);
+    let owner = (!file[decl.props].iter().any(|line| line.name.0 == "owner")).then_some(Free::Owner(kind));
     let is_filled = |number| {
         filled.contains(&(holder, number))
             || book.kinds.lineage(kind).any(|above| filled.contains(&(Holder::Kind(above), number)))
@@ -299,7 +303,7 @@ fn fill_slot<'s>(
     let holder = Holder::Place(spelling.place);
     let entities: Vec<Id<Entity>> = words.iter().map(|&word| spelling.words[word].entity).collect();
     match free {
-        Free::Owner => own(&mut world.book, spelling.place, entities[0]),
+        Free::Owner(_) => own(&mut world.book, spelling.place, entities[0]),
         Free::Slot { number, slot } => {
             match holds_one(slot.mult) {
                 true => world.paint(holder, number, Days::ALWAYS, Datum::of(entities[0])),

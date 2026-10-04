@@ -348,6 +348,8 @@ pub struct Kind {
     pub slots: Run<Slot>,
     /// Only this kind's own laws; ancestors' laws are found through the tree.
     pub laws: Box<[Id<Law>]>,
+    /// The kinds of entity that may own what this kind of account classifies (`owner taxpayer`); none says nothing of it.
+    pub owners: Box<[Id<Kind>]>,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
@@ -1305,6 +1307,21 @@ impl<'s> Book<'s> {
     /// Whether `kind` is `ancestor` or inherits from it.
     pub fn is_a(&self, kind: Id<Kind>, ancestor: Id<Kind>) -> bool {
         self.kinds.covers(ancestor, kind)
+    }
+
+    /// The kinds of entity that may own things of `kind`, as the nearest kind above it that says (`owner taxpayer`) says;
+    /// none says any entity may.
+    pub fn owners_of(&self, kind: Id<Kind>) -> &[Id<Kind>] {
+        let says = self.kinds.lineage(kind).map(|above| &*self.kinds[above].owners).find(|owners| !owners.is_empty());
+        says.unwrap_or_default()
+    }
+
+    /// Whether `entity` may own things of `kind`: `me` always may, being whom everything belongs to that says nothing.
+    pub fn may_own(&self, kind: Id<Kind>, entity: Id<Entity>) -> bool {
+        let owners = self.owners_of(kind);
+        entity == self.roots.me
+            || owners.is_empty()
+            || owners.iter().any(|&of| self.is_a(self.entities[entity].kind, of))
     }
 
     /// `amount` in `unit` at the latest prices on or before `day`, rounded to

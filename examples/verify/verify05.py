@@ -86,7 +86,7 @@ federal = total(lambda f: tagged(f, "federal-tax"))
 state = total(lambda f: tagged(f, "state-tax") or tagged(f, "prior-year-state-tax"))
 sdi = total(lambda f: tagged(f, "state-disability"))
 interest = total(lambda f: tagged(f, "interest-income"))
-mortgage_interest = total(lambda f: tagged(f, "mortgage-interest"))
+mortgage_interest = total(lambda f: tagged(f, "interest") and "house" in f["tail"].split())
 property_tax = total(lambda f: tagged(f, "property-tax"))
 charity = total(lambda f: tagged(f, "charity"))
 

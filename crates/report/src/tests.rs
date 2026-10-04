@@ -279,6 +279,7 @@ fn kind(name: Sym) -> Kind {
         system: None,
         slots: axiom_core::Run::default(),
         laws: Box::default(),
+        owners: Box::default(),
         doc: None,
         loc: None,
     }

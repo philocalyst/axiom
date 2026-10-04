@@ -26,7 +26,7 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::hash::{Hash, Hasher};
 
-use axiom_core::{Day, Diagnostic, Id, Map, Qty};
+use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty};
 use axiom_model::promise::{Promises, Residual};
 use axiom_model::{Book, Contract, ScheduleKind};
 
@@ -166,37 +166,82 @@ impl Monitor {
 /// The days up to which a warning lists every due day it is about.
 const LISTED: usize = 5;
 
-/// One warning for each contract that has due days nothing kept, with the day of the last, and how to write it down. What
-/// became a claim is not said here: the claim is what is said of it, as every claim past its due day is.
+/// One warning for each run of a contract's due days that nothing kept (no kept occurrence between them), with how many, since
+/// when, the day of the last, and how to write it down. What became a claim is not said here: the claim is what is said of it,
+/// as every claim past its due day is. The record of each due day is the promise's own, and stays one for each.
 pub(crate) fn missed(book: &Book, promises: &[Promise], horizon: Day) -> Vec<Diagnostic> {
-    let mut by_contract: Map<Id<Contract>, Vec<Day>> = Map::default();
-    for promise in promises.iter().filter(|promise| promise.kept.is_none() && !promise.claimed) {
-        by_contract.entry(promise.contract).or_default().push(promise.due);
+    let mut by_contract: Map<Id<Contract>, Vec<(Day, Option<Day>)>> = Map::default();
+    for promise in promises.iter().filter(|promise| !promise.claimed) {
+        by_contract.entry(promise.contract).or_default().push((promise.due, promise.kept.map(|(day, _)| day)));
     }
     let mut contracts: Vec<_> = by_contract.into_iter().collect();
     contracts.sort_unstable_by_key(|(contract, _)| *contract);
-    contracts.into_iter().map(|(contract, days)| missed_by(book, &book.contracts[contract], days, horizon)).collect()
+    let runs = contracts.into_iter().flat_map(|(contract, days)| runs_missed(&book.contracts[contract], days));
+    runs.map(|run| missed_by(book, run, horizon)).collect()
 }
 
-fn missed_by(book: &Book, contract: &Contract, mut days: Vec<Day>, horizon: Day) -> Diagnostic {
-    days.sort_unstable();
-    days.dedup();
-    let (name, last) = (book.name(contract.name), days[days.len() - 1]);
+/// Due days of one contract that nothing kept, one after another with none kept between them.
+struct Run<'c> {
+    contract: &'c Contract,
+    days: Vec<Day>,
+    /// Where `until` would end the contract so that these stop: the day its last kept occurrence was paid. Said of a run of
+    /// several days that is the last of a contract with no end, which is what a contract that outlived its subject looks like.
+    ends: Option<Day>,
+}
+
+/// The runs of unkept days among a contract's due days, each as it was due, and, if a line kept it, the day of the line.
+fn runs_missed(contract: &Contract, mut days: Vec<(Day, Option<Day>)>) -> Vec<Run<'_>> {
+    days.sort_unstable_by_key(|&(due, kept)| (due, kept.is_none()));
+    days.dedup_by_key(|&mut (due, _)| due);
+    let stretches: Vec<_> = days.chunk_by(|a, b| a.1.is_some() == b.1.is_some()).collect();
+    let (mut runs, mut paid_to) = (Vec::new(), None);
+    for (at, stretch) in stretches.iter().enumerate() {
+        if stretch[0].1.is_some() {
+            paid_to = stretch.iter().filter_map(|&(due, kept)| kept.map(|kept| due.max(kept))).max();
+            continue;
+        }
+        let last = at + 1 == stretches.len();
+        let ends = paid_to.filter(|_| last && stretch.len() > 1 && endless(contract));
+        runs.push(Run { contract, days: stretch.iter().map(|&(due, _)| due).collect(), ends });
+    }
+    runs
+}
+
+/// Whether a contract has no end that `until` could move: no `until` or `ends` of its own, and no loan, whose payments stop
+/// when its debt is paid and not when a line says.
+fn endless(contract: &Contract) -> bool {
+    contract.days.last() == Day::MAX && contract.loan.is_none()
+}
+
+fn missed_by(book: &Book, Run { contract, days, ends }: Run<'_>, horizon: Day) -> Diagnostic {
+    let (name, first, last) = (book.name(contract.name), days[0], days[days.len() - 1]);
     let headline = match days.as_slice() {
         [only] => format!("`{name}` was due on {only} and no occurrence was written"),
-        many => format!("`{name}` was due {} times and no occurrence was written (the last on {last})", many.len()),
+        many => format!(
+            "`{name}` was due {} times since {first} and no occurrence was written (the last on {last})",
+            many.len()
+        ),
     };
     let listed = if days.len() <= LISTED {
         days.iter().map(Day::to_string).collect::<Vec<_>>().join(", ")
     } else {
-        let (first, recent) = (days[0], &days[days.len() - 2..]);
+        let recent = &days[days.len() - 2..];
         format!("{first}, … {}, {} (all {})", recent[0], recent[1], days.len())
     };
-    Diagnostic::warning("missed-occurrence", headline)
+    let diagnostic = Diagnostic::warning("missed-occurrence", headline)
         .label(contract.loc, format!("last due {} days ago, on {last}", horizon.0 - last.0))
         .note(format!("not kept: {listed}"))
         .help(format!("write what happened: `{last} {name}`, with its own amount if it was another"))
-        .help(format!("or say it was not owed: `{last} {name} waived`"))
+        .help(format!("or say it was not owed: `{last} {name} waived`"));
+    let end_of_line = Loc::new(contract.loc.file, contract.loc.end, contract.loc.end);
+    match ends {
+        Some(until) => diagnostic.fix(
+            format!("or end it where its payments stopped: `until {until}`"),
+            end_of_line,
+            format!("\n  until {until}"),
+        ),
+        None => diagnostic,
+    }
 }
 
 /// What each claim place holds of what others owe, as one open claim a parcel.
@@ -399,11 +444,68 @@ opening 2026-01-01
             assert_eq!(warnings.len(), 1);
             assert_eq!(
                 warnings[0].message,
-                "`rent` was due 4 times and no occurrence was written (the last on 2026-04-01)"
+                "`rent` was due 4 times since 2026-01-01 and no occurrence was written (the last on 2026-04-01)"
             );
             assert_eq!(warnings[0].notes, ["not kept: 2026-01-01, 2026-02-01, 2026-03-01, 2026-04-01"]);
             assert_eq!(warnings[0].anchor(), Some(book.contracts[book.contract("rent").unwrap()].loc));
         });
+    }
+
+    /// What the run warned of at `today`: each warning's headline, and the edits it offers, as the text they write.
+    fn warned(text: &str, today: axiom_core::Day) -> Vec<(String, Vec<String>)> {
+        with_run(text, today, |_, run| {
+            let missed = run.diagnostics.iter().filter(|found| found.code == "missed-occurrence");
+            let edits = |found: &axiom_core::Diagnostic| {
+                found.help.iter().filter_map(|help| help.edit.as_ref().map(|(_, text)| text.clone())).collect()
+            };
+            missed.map(|found| (found.message.clone(), edits(found))).collect()
+        })
+    }
+
+    #[test]
+    fn a_run_of_missed_days_is_one_warning_that_says_since_when_and_offers_the_end_of_the_contract() {
+        let text = rent("", "2026-01-01 rent\n2026-02-01 rent\n");
+        assert_eq!(
+            warned(&text, day(2026, 6, 30)),
+            [(
+                "`rent` was due 4 times since 2026-03-01 and no occurrence was written (the last on 2026-06-01)".into(),
+                vec!["\n  until 2026-02-01".into()]
+            )],
+            "the edit ends the contract on the day of the last line that kept a due day"
+        );
+    }
+
+    #[test]
+    fn two_runs_with_a_kept_day_between_are_two_warnings_and_only_the_last_can_be_ended() {
+        let text = rent("", "2026-01-01 rent\n2026-04-01 rent\n");
+        let said = warned(&text, day(2026, 6, 30));
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert_eq!(
+            said[0].0,
+            "`rent` was due 2 times since 2026-02-01 and no occurrence was written (the last on 2026-03-01)"
+        );
+        assert_eq!(
+            said[1].0,
+            "`rent` was due 2 times since 2026-05-01 and no occurrence was written (the last on 2026-06-01)"
+        );
+        assert_eq!((said[0].1.len(), said[1].1.as_slice()), (0, ["\n  until 2026-04-01".to_string()].as_slice()));
+    }
+
+    #[test]
+    fn a_missed_day_alone_or_in_a_contract_that_cannot_be_ended_by_until_offers_no_end() {
+        // One due day: a forgotten line is likelier than an ended contract, and it is worded as it always was.
+        let one = warned(&rent("", "2026-01-01 rent\n"), day(2026, 2, 20));
+        assert_eq!(one, [("`rent` was due on 2026-02-01 and no occurrence was written".to_string(), vec![])]);
+        // Nothing kept: there is no last kept day to end it after. An `until` of its own: nothing to add. A loan: its payments
+        // stop when its debt is paid.
+        let none = warned(&rent("", ""), day(2026, 6, 30));
+        let ended = warned(&rent("  until 2026-12-31\n", "2026-01-01 rent\n"), day(2026, 6, 30));
+        let loan = format!(
+            "{PRELUDE}contract car-loan with landlord\n  loan 3_000 USD on 2026-01-01 at 0% over 12m\n  monthly on 1 from checking\n2026-02-01 car-loan\n"
+        );
+        for said in [none, ended, warned(&loan, day(2026, 6, 30))] {
+            assert!(!said.is_empty() && said.iter().all(|(_, edits)| edits.is_empty()), "{said:?}");
+        }
     }
 
     #[test]

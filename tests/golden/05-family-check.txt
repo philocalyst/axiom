@@ -1,4 +1,4 @@
-warning[missed-occurrence]: `mortgage-payment` was due 3 times and no occurrence was written (the last on 2026-03-01)
+warning[missed-occurrence]: `mortgage-payment` was due 3 times since 2026-01-01 and no occurrence was written (the last on 2026-03-01)
   ╭─[contracts.ax:5:1]
   │
 5 │ contract mortgage-payment with lender
@@ -9,7 +9,7 @@ warning[missed-occurrence]: `mortgage-payment` was due 3 times and no occurrence
   = help: write what happened: `2026-03-01 mortgage-payment`, with its own amount if it was another
   = help: or say it was not owed: `2026-03-01 mortgage-payment waived`
 
-warning[missed-occurrence]: `car-payment` was due 3 times and no occurrence was written (the last on 2026-03-05)
+warning[missed-occurrence]: `car-payment` was due 3 times since 2026-01-05 and no occurrence was written (the last on 2026-03-05)
    ╭─[contracts.ax:12:1]
    │
 12 │ contract car-payment with honda-finance
@@ -20,7 +20,7 @@ warning[missed-occurrence]: `car-payment` was due 3 times and no occurrence was 
    = help: write what happened: `2026-03-05 car-payment`, with its own amount if it was another
    = help: or say it was not owed: `2026-03-05 car-payment waived`
 
-warning[missed-occurrence]: `alex-pay` was due 6 times and no occurrence was written (the last on 2026-03-31)
+warning[missed-occurrence]: `alex-pay` was due 6 times since 2026-01-15 and no occurrence was written (the last on 2026-03-31)
    ╭─[contracts.ax:38:1]
    │
 38 │ contract alex-pay with acme
@@ -31,7 +31,7 @@ warning[missed-occurrence]: `alex-pay` was due 6 times and no occurrence was wri
    = help: write what happened: `2026-03-31 alex-pay`, with its own amount if it was another
    = help: or say it was not owed: `2026-03-31 alex-pay waived`
 
-warning[missed-occurrence]: `jordan-pay` was due 7 times and no occurrence was written (the last on 2026-03-27)
+warning[missed-occurrence]: `jordan-pay` was due 7 times since 2026-01-02 and no occurrence was written (the last on 2026-03-27)
    ╭─[contracts.ax:52:1]
    │
 52 │ contract jordan-pay with bluefin
@@ -106,4 +106,4 @@ note[nonqualified-hsa-penalty]: waived: 124.00 USD would be owed to irs as nonqu
    = note: waived: reimburses 2025-05-09 dentist, receipt kept
 
 4 warnings · 2 priced · 1 waived
-✓ 864 flows · 67 places · 23 laws enforced · net worth 46,463.25 USD · 2 holdings unpriced
+✓ 864 flows · 67 places · 24 laws enforced · net worth 46,463.25 USD · 2 holdings unpriced

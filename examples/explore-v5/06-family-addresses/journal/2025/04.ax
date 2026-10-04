@@ -1,5 +1,5 @@
 2025-04-01 checking -> mortgage 472.15 USD ^mortgage-2025-04 // principal
-2025-04-01 checking -> lender 2_012.31 USD #mortgage-interest // interest
+2025-04-01 checking -> lender 2_012.31 USD #interest of house // interest
 2025-04-01 checking -> escrow 690.00 USD // taxes and insurance
 2025-04-02 card -> netflix 17.99 USD
 2025-04-03 card -> costco 213.73 USD

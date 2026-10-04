@@ -11,7 +11,7 @@ error[loan-balance]: `mortgage` owes 82,368.77 USD on 2026-01-31 by its schedule
            the payments that were short, or of an extra, and the statement does not say less is owed
    = help: if the lender changed the rate, write `2026-01-31 mortgage now at RATE`
 
-warning[missed-occurrence]: `mortgage` was due 5 times and no occurrence was written (the last on 2026-06-01)
+warning[missed-occurrence]: `mortgage` was due 5 times since 2026-02-01 and no occurrence was written (the last on 2026-06-01)
    ╭─[115-loan-before-the-book-lender-says-another-number.ax:12:1]
    │
 12 │ contract mortgage with bank

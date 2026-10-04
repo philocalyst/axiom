@@ -579,15 +579,42 @@ fn an_occurrence_that_cannot_be_made_is_warned_of_and_claims_nothing() {
     });
 }
 
-/// A claim the monitor made has no purpose: it recognizes nothing and no law that counts a purpose's flows counts it, as
-/// nothing reads `books cash|accrual` yet to say whether it should.
+/// A claim the monitor made carries the contract's purpose, so it is counted as every claim is: not when it is made, in cash
+/// books (the default), and by what pays it. A law that counts the purpose's flows counts nothing until then.
 #[test]
-fn a_claim_the_monitor_made_has_no_purpose_for_a_law_to_count() {
+fn a_claim_the_monitor_made_counts_nothing_when_made_in_cash_books() {
     let text = "purpose gigs : income\n  law per-flow\n    on flow\n    owe 1 USD to treasury by date(2026, 12, 31) as per-flow\nentity treasury\ncontract rent with ann\n  1_000 USD monthly on 1 into checking #gigs\n  from 2026-01-01\n  due 5d\n";
     with_run(text, |book, run| {
         assert_eq!(tab_parcels(book, run), 2, "January and February");
         assert!(run.effects.is_empty(), "no law counted a claim: {:?}", run.effects);
     });
+}
+
+/// What a law that counts `gigs` counted, by day and quantity, in a book whose owner keeps `books`.
+fn counted_gigs(books: &str, lines: &str) -> Vec<(String, i64)> {
+    let text = format!(
+        "purpose gigs : income\n  law counted\n    on flow\n    count amount as gigs\nentity me\n  books {books}\ncontract rent with ann\n  1_000 USD monthly on 1 into checking #gigs\n  from 2026-01-01\n  due 5d\n{lines}"
+    );
+    with_run(&text, |book, run| {
+        let counted = run.effects.iter().filter(|effect| book.name(effect.name) == "gigs");
+        counted.map(|effect| (effect.day.to_string(), effect.amount.qty.0)).collect()
+    })
+}
+
+/// In accrual books the claim counts when it is made, which is when the miss is found, and it counts as the occurrence it was
+/// (its header's own day: the rent due on 01-01 is January's, found on 01-17), once; in cash books it counts when it is paid,
+/// by the payment that settles it.
+#[test]
+fn a_claim_the_monitor_made_is_counted_when_found_in_accrual_books_and_when_paid_in_cash_books() {
+    let found = [("2026-01-01".to_string(), 1_000_00), ("2026-02-01".to_string(), 1_000_00)];
+    assert_eq!(counted_gigs("accrual", ""), found);
+    assert_eq!(
+        counted_gigs("accrual", "2026-02-20 ann -> checking 1_000 USD\n"),
+        found,
+        "and the payment counts nothing more"
+    );
+    assert_eq!(counted_gigs("cash", ""), []);
+    assert_eq!(counted_gigs("cash", "2026-02-20 ann -> checking 1_000 USD\n"), [("2026-02-20".to_string(), 1_000_00)]);
 }
 
 /// A header that is no amount owes nothing, so there is nothing to claim of it: it is warned of as missed.

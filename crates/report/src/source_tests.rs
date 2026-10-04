@@ -1113,6 +1113,11 @@ fn a_past_day_asked_of_a_later_run_is_what_a_run_that_stopped_there_says() {
     });
 }
 
+/// A forecast resumed from a context keeps what the run already owed (a fee from a flow before today, and one from the pad of
+/// today's own assertion) and takes the closing of the day it stands on once. The law closes the year it is in with `each year`:
+/// `each year closing 12-31` would close the 2026 year on 2027-12-31 (LANGUAGE §8), so no forecast to 2027-03-01 could include
+/// its tax; `each year` closes it on today's own closing, which the resumed ledger takes once, after the obligations the run
+/// already had before it.
 #[test]
 fn a_context_forecast_keeps_historical_and_same_day_obligations_once() {
     let system = "\
@@ -1126,7 +1131,7 @@ entity employer
 entity treasury : government
 
 law year-end-tax
-  each year closing 12-31
+  each year
   owe tally(pay) * 10% to treasury by date(year + 1, 1, 15) as year-end-tax
 ";
     let source = "\
@@ -1177,75 +1182,6 @@ law pad-fee
                     "2027-03-01 | pad-fee | treasury | 2.00 USD",
                 ],
                 "the prefix includes the old flow and pre-close pad, while the year-end close is resumed once"
-            );
-        },
-    );
-}
-
-/// What the test above means, in a book whose law closes the year it is in: `closing 12-31` closes the 2026 year on
-/// 2027-12-31 (LANGUAGE §8), so no forecast to 2027-03-01 can include its tax. `each year` closes it on today's own
-/// closing, which the resumed ledger takes once, after the obligations the run already had before it.
-#[test]
-fn a_context_forecast_takes_the_closing_of_the_day_it_stands_on_once() {
-    let system = "\
-system context-return
-use std
-
-entity me : person
-  filing single
-  lives context-return
-entity employer
-entity treasury : government
-
-law year-end-tax
-  each year
-  owe tally(pay) * 10% to treasury by date(year + 1, 1, 15) as year-end-tax
-";
-    let source = "\
-base USD
-use context-return
-entity reserve
-entity grocer
-purpose salary : income
-  law count-pay
-    on flow
-    count amount as pay
-account checking : bank
-
-law historical-fee
-  on out
-  when from is checking
-  require amount < empty else owe 5 USD to treasury by date(2027, 2, 15) as historical-fee
-
-law pad-fee
-  on in
-  when from is reserve
-  owe 2 USD to treasury by date(2027, 3, 1) as pad-fee
-
-2026-01-05 employer -> checking 100 USD #salary
-2026-02-01 checking -> grocer 10 USD #food
-2026-12-31 checking = 100 USD via reserve
-";
-    with_sources(
-        &[("systems/std.ax", STD), ("systems/context-return.ax", system), ("axiom.ax", source)],
-        day(2026, 12, 31),
-        |book, run| {
-            let context =
-                crate::tests::context(book, Options { today: run.today, relaxed: book.relaxed }, None).unwrap();
-            let query = Query::Forecast { until: Some(day(2027, 3, 1)), paths: 0 };
-            let shared = context.report(&query).unwrap();
-            let owed = shared
-                .sections
-                .iter()
-                .find(|section| crate::tests::heading(section) == Some("Obligations coming due"))
-                .unwrap();
-            assert_eq!(
-                lines(owed),
-                [
-                    "2027-01-15 | year-end-tax | treasury | 10.00 USD",
-                    "2027-02-15 | historical-fee | treasury | 5.00 USD",
-                    "2027-03-01 | pad-fee | treasury | 2.00 USD",
-                ]
             );
         },
     );

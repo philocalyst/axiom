@@ -104,7 +104,7 @@ error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 38 + 2025-12-31 rental-bank = 0.00 USD !
 
-warning[missed-occurrence]: `paycheck` was due 3 times and no occurrence was written (the last on 2026-03-28)
+warning[missed-occurrence]: `paycheck` was due 3 times since 2026-01-28 and no occurrence was written (the last on 2026-03-28)
   ╭─[contracts.ax:2:1]
   │
 2 │ contract paycheck with acme
@@ -114,6 +114,8 @@ warning[missed-occurrence]: `paycheck` was due 3 times and no occurrence was wri
   = note: not kept: 2026-01-28, 2026-02-28, 2026-03-28
   = help: write what happened: `2026-03-28 paycheck`, with its own amount if it was another
   = help: or say it was not owed: `2026-03-28 paycheck waived`
+  = help: or end it where its payments stopped: `until 2025-12-28`
+3 +   until 2025-12-28
 
 warning[missed-occurrence]: `manager-fee` was due on 2025-10-05 and no occurrence was written
    ╭─[contracts.ax:31:1]

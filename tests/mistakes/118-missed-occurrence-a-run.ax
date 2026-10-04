@@ -1,0 +1,18 @@
+// WARNING: a run of due days nothing kept. The gym was paid for three months and then not written: one warning for the run, which
+// says how many and since when, and offers the edit that ends the contract where the payments stopped.
+base USD
+use std
+
+entity gym-co
+account checking : bank
+
+opening 2026-01-01
+  checking 10_000 USD
+
+contract gym with gym-co
+  40 USD monthly on 1 from checking
+  from 2026-01-01
+
+2026-01-01 gym
+2026-02-01 gym
+2026-03-01 gym

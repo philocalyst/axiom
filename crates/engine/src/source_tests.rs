@@ -326,6 +326,49 @@ law to-is-counterparty
     });
 }
 
+/// What a tally of the `us` system counted in `text`, each count in whole cents: the owner's own home and a rental it lets.
+fn counted_in_us(text: &str, tally: &str) -> Vec<i64> {
+    let sources = [
+        ("std.ax", include_str!("../../systems/src/std.ax"), true),
+        ("us.ax", include_str!("../../systems/src/us.ax"), true),
+        ("us/rental.ax", include_str!("../../systems/src/us/rental.ax"), true),
+        ("axiom.ax", text, false),
+    ];
+    with_run_sources(&sources, day(2026, 4, 15), |book, run| {
+        let counted = run.effects.iter().filter(|effect| book.name(effect.name) == tally);
+        counted.map(|effect| effect.amount.qty.0).collect()
+    })
+}
+
+#[test]
+fn the_interest_of_a_home_is_itemized_once_whoever_wrote_it_and_a_rentals_is_a_rental_cost() {
+    let text = "\
+base USD
+use us/rental
+entity me : person
+  born 1988-02-10
+  lives us
+entity lender : lender
+account checking : bank
+asset house : home
+asset flat : rental-home
+  in-service 2024-01-01
+  land 10_000 USD
+contract mortgage with lender
+  loan 100_000 USD on 2025-01-01 at 6% over 10y for house
+  monthly on 1 from checking
+opening 2025-01-01
+  checking 50_000 USD
+2025-01-15 checking -> lender 1_000 USD #interest of house
+2025-01-20 checking -> lender 400 USD #interest of flat
+2025-02-01 mortgage
+";
+    // The loan's first payment has 500.00 of interest (6% of 100,000.00 for a month) and the line written by hand 1,000.00:
+    // each is counted once, as a deduction of the home, and the flat's 400.00 is a cost of renting it and no deduction.
+    assert_eq!(counted_in_us(text, "itemized"), [1_000_00, 500_00]);
+    assert_eq!(counted_in_us(text, "rental-expenses"), [400_00]);
+}
+
 #[test]
 fn hsa_basis_zero_contribution_and_against_medical_reimbursement() {
     let source = |withdrawal: &str| {
@@ -1140,6 +1183,60 @@ fn a_purchase_that_states_its_basis_keeps_it() {
     with_run(&text, day(2025, 12, 31), |book, run| {
         let lots = &holding(book, run, "broker", "VTI").unwrap().lots;
         assert_eq!(lots.last().unwrap().basis.0, 1_990_00);
+    });
+}
+
+/// Conversions with a fee paid beside them, written as a split, as `examples/08-expat` writes its Wise transfers.
+const WISE: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+purpose fees : spending
+entity wise
+account assets/us-checking
+account assets/girokonto
+opening 2025-06-01
+  us-checking 20_000 USD
+2025-06-27 EUR = 1.1660 USD
+2025-07-08 EUR = 1.1673 USD
+";
+
+/// 9,500.00 USD sent through Wise: a 55.10 USD fee leg, and the euros the rest bought.
+const SENT: &str = "2025-06-27 us-checking 9_500.00 USD ->\n  wise 55.10 USD #fees\n  girokonto 8_100.26 EUR\n";
+
+#[test]
+fn a_fee_leg_beside_the_exchange_leg_of_a_split_is_part_of_what_the_euros_cost() {
+    // The README of example 08: the fee is part of what the euros cost, so their basis is 9,500.00 USD and not 9,444.90.
+    with_run(&format!("{WISE}{SENT}"), day(2025, 12, 31), |book, run| {
+        let euros = &holding(book, run, "girokonto", "EUR").unwrap().lots;
+        assert_eq!(euros.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect::<Vec<_>>(), [(8_100_26, 9_500_00)]);
+        assert_eq!(
+            holding(book, run, "us-checking", "USD").unwrap().qty().0,
+            20_000_00 - 9_500_00,
+            "the fee is paid once"
+        );
+    });
+}
+
+#[test]
+fn a_fee_leg_beside_the_exchange_leg_of_a_sale_comes_off_what_it_fetched() {
+    // 900.00 EUR leave: 4.77 of them the fee (5.57 USD on the day) and 895.23 the exchange, which fetched 1,027.63 USD.
+    let sold = "2025-07-08 girokonto 900.00 EUR ->\n  wise 4.77 EUR #fees\n  us-checking 1_027.63 USD\n";
+    with_run(&format!("{WISE}{SENT}{sold}"), day(2025, 12, 31), |_, run| {
+        let sale = run.gains.iter().find(|gain| gain.qty.0 == 895_23).expect("the exchange is a disposal");
+        assert_eq!((sale.proceeds.0, sale.basis.0), (1_027_63 - 5_57, 1_049_93), "the sale's gain is less by the fee");
+    });
+}
+
+#[test]
+fn a_leg_that_arrives_beside_an_exchange_is_no_cost_of_it() {
+    // Where the split's source is paid, a leg is money coming in, not a fee the source pays.
+    let sold = "2025-07-08 -> us-checking 900.00 USD\n  wise 5.00 USD #fees\n  girokonto 800.00 EUR\n";
+    with_run(&format!("{WISE}{SENT}{sold}"), day(2025, 12, 31), |_, run| {
+        let sale = run.gains.iter().find(|gain| gain.qty.0 == 800_00).expect("the exchange is a disposal");
+        assert_eq!(sale.proceeds.0, 895_00);
     });
 }
 

@@ -6,7 +6,7 @@
 2025-08-01 checking -> edd 45.64 USD #state-disability // CA SDI
 2025-08-01 bluefin -> jordan/401k 114.09 USD #contribution
 2025-08-01 checking -> mortgage 481.46 USD ^mortgage-2025-08 // principal
-2025-08-01 checking -> lender 2_003.00 USD #mortgage-interest // interest
+2025-08-01 checking -> lender 2_003.00 USD #interest of house // interest
 2025-08-01 checking -> escrow 690.00 USD // taxes and insurance
 2025-08-02 card -> netflix 17.99 USD
 2025-08-03 card -> costco 254.99 USD

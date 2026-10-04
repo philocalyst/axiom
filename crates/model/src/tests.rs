@@ -708,6 +708,31 @@ entity jo : person
     assert_eq!((first.0.first(), first.1), (Day::from_ymd(2025, 1, 1).unwrap(), ca));
 }
 
+#[test]
+fn an_entitys_currency_is_written_as_the_unit_it_is_and_a_wrong_one_says_what_it_needs() {
+    let project = "\
+use std
+base USD
+commodity USD : currency
+commodity CAD : currency
+entity me : person
+entity jo : person
+  currency CAD
+";
+    let (book, diagnostics) = build_project(project);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(book.currency(book.entity("jo").unwrap()), book.commodity("CAD").unwrap());
+    assert_eq!(
+        book.currency(book.entity("me").unwrap()),
+        book.commodity("USD").unwrap(),
+        "the book's, where none is said"
+    );
+
+    let (_, diagnostics) = build_project(&project.replace("currency CAD", "currency 5%"));
+    let [wrong] = &diagnostics[..] else { panic!("{diagnostics:?}") };
+    assert_eq!((&*wrong.code, wrong.message.as_str()), ("property-type", "`currency` needs a commodity such as `USD`"));
+}
+
 fn build_rate_book<'s>(project: &'s str) -> (Book<'s>, Vec<Diagnostic>) {
     const US: &str = "system us\nuse std\ncurrency USD\nrates spot\n";
     const US_CA: &str = "system us/ca\nuse std\n";
