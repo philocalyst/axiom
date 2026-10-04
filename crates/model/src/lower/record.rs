@@ -6,30 +6,24 @@ use axiom_syntax as ast;
 use axiom_syntax::Subject;
 
 use super::flow::{
-    Codes, Ends, FlowCx, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, endpoint, flow_roots,
-    keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_item_root,
-    push_quantity_root, push_tail_roots, resolve_end, resolve_quantity, written_amount,
+    Codes, Ends, Parent, Recording, ResolvedEnd, ResolvedQuantity, Shape, TxnHeader, empty_codes, endpoint, flow_roots,
+    priced, push_item_root, push_quantity_root, push_tail_roots,
 };
 use super::loan_opening::{Insertion, Unopened};
 use super::push_amount_root;
-use super::staged::Staged;
 use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_rate_change, lower_split, lower_value, names_a_contract,
 };
 use crate::balance::{self, Settled, Total};
-use crate::book::{Amount, Contract, Place, ScheduleKind, Terms};
+use crate::book::{Amount, Book, Contract, Entity, Input, Loan, Place, ScheduleKind, Terms};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{
-    Action, Detail, Flow, FlowExpressions, Infer, Mode, OccurrenceTail, Origin, Program, Txn, TxnKind,
-    WrittenOccurrence,
-};
+use crate::journal::{Action, Detail, Flow, Infer, Mode, OccurrenceTail, Origin, Txn, TxnKind, WrittenOccurrence};
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
 use crate::promise::{Keep, Promises};
-use crate::scope::Home;
 use crate::solve::Remaining;
 use crate::split::{Endpoint, Expr, FlowSide, Heading, Item, Leg, Made, Part, Promised, Quantity};
 
@@ -240,9 +234,8 @@ fn index_flows(world: &mut World<'_>) {
     );
 }
 
-/// What the lowering of one transaction has made so far.
+/// What the lowering of one transaction has made so far, besides its flows.
 struct Built {
-    flow_roots: Vec<FlowExpressions>,
     /// The split, or the header with items, the transaction is: at most one, and whether the fold has it left to solve.
     group: Option<(Made, Settled)>,
     /// Whether anything said so far makes the transaction wrong.
@@ -263,80 +256,73 @@ impl Built {
             Err(problem) => self.reject(problem, diags),
         }
     }
+
+    /// The items under a header that has no legs, lowered and kept as the group they are with it, which adds up to
+    /// `total`.
+    fn items<'s>(
+        &mut self,
+        rec: &mut Recording<'_, '_, 's>,
+        (header, total): (Heading, Total),
+        items: ast::Many<ast::LineItem<'s>>,
+        parent: Parent<'_>,
+    ) {
+        let items = rec.items(items, parent);
+        let group = Made { header, side: FlowSide::Out, legs: Box::default(), items };
+        let flows = rec.staged.flows();
+        let settled = balance::settle(&mut rec.staged.book, &group, flows, total, rec.loc);
+        self.keep(group, settled, &mut rec.staged.diags);
+    }
 }
 
 fn lower_txn<'a, 's>(world: &mut World<'s>, record: Written<'a, 's, ast::Txn<'s>>, code_index: &CodeIndex) {
-    let (item, written, home) = (record.item, record.node, record.home());
-    let mut staged = Staged::open(world);
-    let txn = Id::new(staged.book.txns.len() as u32);
-    let diagnostic_start = staged.diags.len();
-    let Some((program, root_ids)) = compile_flow_roots(&mut staged, record.file(), home, &written.flow) else {
-        push_rejected_txn(&mut staged, item, written.date);
-        return;
-    };
-    let cx = FlowCx { file: record.file(), home, day: written.date, txn, loc: item.loc, roots: &root_ids, code_index };
-    let (codes, tail) = cx.lower_tail(&mut staged, written.flow.tail);
+    let (item, written) = (record.item, record.node);
+    let mut rec = Recording::open(world, record.site, written.date, item.loc, code_index);
+    // A line that computes nothing compiles nothing, and names no program.
+    let roots = flow_roots(rec.file, &written.flow);
+    if !roots.is_empty() && !rec.compile(Ty::Flow, &roots, &[]) {
+        return rec.reject(item);
+    }
+    let (codes, tail) = rec.tail(written.flow.tail);
     let (waive, valid) = (tail.waive, tail.valid);
-    let mut built = Built { flow_roots: Vec::new(), group: None, successful: valid };
-    lower_flows(&mut staged, TxnCx { cx, flow: &written.flow, tail, codes }, &mut built);
-
-    if staged.diags.len() != diagnostic_start || !built.successful {
-        push_rejected_txn(&mut staged, item, written.date);
-        return;
+    let mut built = Built { group: None, successful: valid };
+    lower_flows(&mut rec, TxnHeader { flow: &written.flow, tail, codes }, &mut built);
+    if rec.failed() || !built.successful {
+        return rec.reject(item);
     }
-    let program = keep_program(&mut staged, program, built.flow_roots, built.group);
-    let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
-    let record = Txn { program, codes, waive, doc, ..journal_txn(&staged, written.date, item.loc) };
-    staged.book.txns.push(record);
-    staged.commit();
-}
-
-/// The expressions a transaction's header, legs and items compute by, compiled as one program, and which node
-/// each came to.
-fn compile_flow_roots<'s>(
-    staged: &mut Staged<'_, 's>,
-    file: &ast::File<'s>,
-    home: Home,
-    flow: &ast::Flow<'s>,
-) -> Option<(Program, Map<ast::ExprId, NodeId>)> {
-    let roots = flow_roots(file, flow);
-    if roots.is_empty() {
-        return Some((Program::default(), Map::default()));
-    }
-    let name = staged.book.names.intern("journal");
-    let (program, nodes) = crate::laws::compile_template(staged, file, home, Ty::Flow, name, &[], &roots)?;
-    let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
-    Some((program, by_expr))
+    let program = rec.keep_program(built.group);
+    let doc = rec.doc(item.doc);
+    let txn = Txn { program, codes, waive, doc, ..rec.transaction() };
+    rec.keep(txn);
 }
 
 /// What a header's ends make of the transaction: one flow, a split from the one end it names, or a mistake in
 /// the shape, which is said.
-fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut Built) {
-    let (cx, flow) = (txn.cx, txn.flow);
-    let from = flow.from.end.map(|end| resolve_end(staged, &cx, end));
-    let to = flow.to.end.map(|end| resolve_end(staged, &cx, end));
+fn lower_flows<'s>(rec: &mut Recording<'_, '_, 's>, header: TxnHeader<'_, 's>, built: &mut Built) {
+    let flow = header.flow;
+    let from = flow.from.end.map(|end| rec.end(end));
+    let to = flow.to.end.map(|end| rec.end(end));
     built.successful &= from.is_none_or(|end| end.is_some()) && to.is_none_or(|end| end.is_some());
-    if let Some(problem) = party_subject(staged, &cx, flow, [from, to].map(Option::flatten)) {
-        return built.reject(problem, &mut staged.diags);
+    if let Some(problem) = party_subject(rec, flow, [from, to].map(Option::flatten)) {
+        return built.reject(problem, &mut rec.staged.diags);
     }
-    let has_legs = !cx.file[flow.body.legs].is_empty();
+    let has_legs = !rec.file[flow.body.legs].is_empty();
     match (from, to) {
         (Some(Some(from)), Some(Some(to))) => {
             assert!(!has_legs, "the parser rejects legs under a header that names both ends");
-            lower_named_flow(staged, txn, Ends { from, to }, built)
+            lower_named_flow(rec, header, Ends { from, to }, built)
         }
         _ if !has_legs => {
             let problem = Diagnostic::error("flow-shape", "a flow needs a named end and at least one leg")
-                .label(cx.loc, "no complete flow can be formed here")
+                .label(rec.loc, "no complete flow can be formed here")
                 .help("write both ends in the header, or write one end and indent the other legs");
-            built.reject(problem, &mut staged.diags);
+            built.reject(problem, &mut rec.staged.diags);
         }
-        (Some(Some(end)), None) => lower_split_flow(staged, &txn, SplitEnd { end, side: FlowSide::Out }, built),
-        (None, Some(Some(end))) => lower_split_flow(staged, &txn, SplitEnd { end, side: FlowSide::Arrive }, built),
+        (Some(Some(end)), None) => lower_split_flow(rec, &header, SplitEnd { end, side: FlowSide::Out }, built),
+        (None, Some(Some(end))) => lower_split_flow(rec, &header, SplitEnd { end, side: FlowSide::Arrive }, built),
         _ => {
             let problem = Diagnostic::error("flow-shape", "a split header names exactly one end")
-                .label(cx.loc, "the named end of the split is missing or ambiguous");
-            built.reject(problem, &mut staged.diags);
+                .label(rec.loc, "the named end of the split is missing or ambiguous");
+            built.reject(problem, &mut rec.staged.diags);
         }
     }
 }
@@ -344,18 +330,17 @@ fn lower_flows<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, built: &mut 
 /// A line written `<-`, as a purchase or a sale, or as a split through an owner is about its subject, whose book it is,
 /// so the subject is an owner's. A party reaches an owner's book by the other end: `checking -> acme 3_200 USD`.
 fn party_subject<'s>(
-    staged: &mut Staged<'_, 's>,
-    cx: &FlowCx<'_, 's>,
+    rec: &mut Recording<'_, '_, 's>,
     flow: &ast::Flow<'s>,
     [from, to]: [Option<ResolvedEnd>; 2],
 ) -> Option<Diagnostic> {
-    let named = flow.owner(cx.file)?;
+    let named = flow.owner(rec.file)?;
     let subject = match flow.course {
-        ast::Course::Through(..) => resolve_end(staged, cx, named),
+        ast::Course::Through(..) => rec.end(named),
         ast::Course::Direct(ast::Junction::In) => to,
         ast::Course::Direct(ast::Junction::Out) => from,
     }?;
-    let party = |end: ResolvedEnd| staged.book.places[end.place].class == crate::book::Class::Outside;
+    let party = |end: ResolvedEnd| rec.staged.book.places[end.place].class == crate::book::Class::Outside;
     if !party(subject) {
         return None;
     }
@@ -376,34 +361,23 @@ fn party_subject<'s>(
         "`{name}` is a party, and a `{}` line is written from one of your books",
         flow.course.junction().spelling()
     );
-    Some(Diagnostic::error("junction-subject", said).label(cx.file.arrow_after(named), label).help(help))
+    Some(Diagnostic::error("junction-subject", said).label(rec.file.arrow_after(named), label).help(help))
 }
 
 /// A header that names both its ends is one flow, with the items under it as a group of their own.
-fn lower_named_flow<'s>(staged: &mut Staged<'_, 's>, txn: TxnCx<'_, 's>, ends: Ends, built: &mut Built) {
-    let (cx, written, codes) = (txn.cx, txn.flow, txn.codes);
-    let flow_at = staged.flows().len();
-    let Some((flow, exprs)) = make_flow(staged, txn, ends) else {
+fn lower_named_flow<'s>(rec: &mut Recording<'_, '_, 's>, header: TxnHeader<'_, 's>, ends: Ends, built: &mut Built) {
+    let (written, codes) = (header.flow, header.codes);
+    let Some((flow, (out, arrive, basis))) = rec.header_flow(header, ends) else {
         built.successful = false;
         return;
     };
-    let says_amount =
-        flow.infer == Infer::Known && exprs.is_none_or(|exprs| exprs.out.is_none() && exprs.arrive.is_none());
-    let header = Remaining { out: flow.out, arrive: flow.arrive };
-    staged.book.flows.push(flow);
-    if let Some(exprs) = exprs {
-        built.flow_roots.push(FlowExpressions { flow: flow_at, ..exprs });
+    let says = flow.infer == Infer::Known && out.is_none() && arrive.is_none();
+    let total = if says { Total::Is(Remaining { out: flow.out, arrive: flow.arrive }) } else { Total::Later };
+    let flow_at = rec.push(flow, out, arrive, basis);
+    if !rec.file[written.body.items].is_empty() {
+        let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
+        built.items(rec, (Heading::Flow(flow_at), total), written.body.items, parent);
     }
-    if cx.file[written.body.items].is_empty() {
-        return;
-    }
-    let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
-    let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots);
-    let group = Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items };
-    let total = if says_amount { Total::Is(header) } else { Total::Later };
-    let flows = staged.flows();
-    let settled = balance::settle(&mut staged.book, &group, flows, total, cx.loc);
-    built.keep(group, settled, &mut staged.diags);
 }
 
 /// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
@@ -413,16 +387,11 @@ struct SplitEnd {
     side: FlowSide,
 }
 
-/// A split being lowered: the transaction it is in, its source, and the total its header states, if it does.
+/// A split being lowered: its header, its source, and the total its header states, if it does.
 struct Split<'c, 's> {
-    txn: &'c TxnCx<'c, 's>,
+    header: &'c TxnHeader<'c, 's>,
     source: SplitEnd,
     total: Option<ResolvedQuantity>,
-}
-
-/// The legs of a split so far: where each flow went, and what each said it moved.
-struct SplitLegs {
-    legs: Vec<Leg<u32>>,
 }
 
 /// What a split's header says it moves, if it says: the amount on the source's own side of the arrow, or else the one
@@ -449,61 +418,55 @@ fn total_of(total: Option<ResolvedQuantity>) -> Total {
 }
 
 /// A header that names one end is the source of its legs, which name the others, and of the items under it.
-fn lower_split_flow<'s>(staged: &mut Staged<'_, 's>, txn: &TxnCx<'_, 's>, source: SplitEnd, built: &mut Built) {
-    let (cx, written) = (&txn.cx, txn.flow);
-    let said = staged.diags.len();
+fn lower_split_flow<'s>(
+    rec: &mut Recording<'_, '_, 's>,
+    header: &TxnHeader<'_, 's>,
+    source: SplitEnd,
+    built: &mut Built,
+) {
+    let written = header.flow;
+    let said = rec.staged.diags.len();
     let stated = stated_total(source, written);
-    let base = staged.book.base;
-    let total = stated.and_then(|(quantity, side)| resolve_quantity(staged, cx, quantity, base, side));
+    let base = rec.staged.book.base;
+    let total = stated.and_then(|(quantity, side)| rec.quantity(quantity, base, side));
     if stated.is_some() && total.is_none() {
         built.successful = false;
     }
-    let split = Split { txn, source, total };
-    let mut made = SplitLegs { legs: Vec::new() };
-    for leg in &cx.file[written.body.legs] {
-        let Some(leg) = split.lower_leg(staged, leg) else {
+    let split = Split { header, source, total };
+    let mut legs = Vec::new();
+    for leg in &rec.file[written.body.legs] {
+        let Some(leg) = split.lower_leg(rec, leg) else {
             built.successful = false;
             continue;
         };
-        made.legs.push(Leg { flow: leg.at, part: leg.quantity });
-        push_flow_expressions(&mut built.flow_roots, leg.at, leg.out, leg.arrive, leg.basis);
+        legs.push(leg);
     }
-    let items = split.items(staged, &made, built);
-    if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && made.legs.is_empty() {
+    let items = split.items(rec, &legs);
+    if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && legs.is_empty() {
         built.successful = false;
     }
-    let header = Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) };
-    let group = Made { header, side: source.side, legs: made.legs.into_boxed_slice(), items };
-    let flows = staged.flows();
+    let heading = Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) };
+    let group = Made { header: heading, side: source.side, legs: legs.into_boxed_slice(), items };
+    let flows = rec.staged.flows();
     // A leg or a total that failed to lower is not there to add up, and what is missing would be what the split is
     // short of: the error already said is the one to read.
-    let total = if staged.diags.len() == said { total_of(total) } else { Total::Later };
-    let settled = balance::settle(&mut staged.book, &group, flows, total, cx.loc);
-    built.keep(group, settled, &mut staged.diags);
-}
-
-/// One leg of a split once its flow is made: where the flow is, what the leg said it moved, and the expressions
-/// that compute it.
-struct MadeLeg {
-    at: u32,
-    quantity: Part,
-    out: Option<NodeId>,
-    arrive: Option<NodeId>,
-    basis: Option<NodeId>,
+    let total = if rec.staged.diags.len() == said { total_of(total) } else { Total::Later };
+    let settled = balance::settle(&mut rec.staged.book, &group, flows, total, rec.loc);
+    built.keep(group, settled, &mut rec.staged.diags);
 }
 
 impl<'s> Split<'_, 's> {
-    /// One leg: a flow between the source and the end it names. None after the problem is said.
-    fn lower_leg(&self, staged: &mut Staged<'_, 's>, leg: &ast::Leg<'s>) -> Option<MadeLeg> {
-        let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
-        let other = resolve_end(staged, cx, leg.end)?;
+    /// One leg: a flow between the source and the end it names, and what it said it moved. None after the problem is
+    /// said.
+    fn lower_leg(&self, rec: &mut Recording<'_, '_, 's>, leg: &ast::Leg<'s>) -> Option<Leg<u32>> {
+        let SplitEnd { end: source, side } = self.source;
+        let other = rec.end(leg.end)?;
         let source_is_from = side == FlowSide::Out;
         let (from, to) = if source_is_from { (source, other) } else { (other, source) };
-        let (leg_codes, leg_tail) = cx.lower_tail(staged, leg.tail);
-        let tail = self.txn.tail.clone().merge(leg_tail);
-        let unit = self.total.map_or(staged.book.base, |total| total.amount.unit);
-        let quantity = resolve_quantity(staged, cx, leg.amount, unit, side.other())?;
-        let at = staged.flows().len();
+        let (leg_codes, leg_tail) = rec.tail(leg.tail);
+        let tail = self.header.tail.clone().merge(leg_tail);
+        let unit = self.total.map_or(rec.staged.book.base, |total| total.amount.unit);
+        let quantity = rec.quantity(leg.amount, unit, side.other())?;
         let basis = tail.basis_root;
         // A leg written in another commodity than the total is the exchange of what the others leave: it keeps the
         // amount it says on its own side, and the source's side is the solver's to say.
@@ -514,20 +477,19 @@ impl<'s> Split<'_, 's> {
             (true, false) => (quantity.amount, Amount::zero(unit)),
         };
         let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
-        let codes = Codes { header: self.txn.codes, local: leg_codes };
-        let flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc)?;
-        staged.book.flows.push(flow);
+        let codes = Codes { header: self.header.codes, local: leg_codes };
+        let flow = rec.flow(shape, codes, tail, leg.loc)?;
         let (out, arrive) = if source_is_from { (None, quantity.root()) } else { (quantity.root(), None) };
-        Some(MadeLeg { at, quantity: quantity.part, out, arrive, basis })
+        Some(Leg { flow: rec.push(flow, out, arrive, basis), part: quantity.part })
     }
 
     /// The items under the header: between the source and the remainder leg's end, or the first leg's when none is the
     /// remainder, which is what an item of the source's own flow is.
-    fn items(&self, staged: &mut Staged<'_, 's>, made: &SplitLegs, built: &mut Built) -> Box<[Item<Option<u32>>]> {
-        let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
-        let remainder = made.legs.iter().find(|leg| matches!(leg.part, Part::Rest));
-        let leg_end = remainder.or(made.legs.first()).map(|leg| {
-            let leg = staged.flow(leg.flow);
+    fn items(&self, rec: &mut Recording<'_, '_, 's>, legs: &[Leg<u32>]) -> Box<[Item<Option<u32>>]> {
+        let SplitEnd { end: source, side } = self.source;
+        let remainder = legs.iter().find(|leg| matches!(leg.part, Part::Rest));
+        let leg_end = remainder.or(legs.first()).map(|leg| {
+            let leg = rec.staged.flow(leg.flow);
             let place = if side == FlowSide::Out { leg.to } else { leg.from };
             ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) }
         });
@@ -536,8 +498,8 @@ impl<'s> Split<'_, 's> {
         let other = leg_end.unwrap_or(source);
         let ends =
             if side == FlowSide::Out { Ends { from: source, to: other } } else { Ends { from: other, to: source } };
-        let parent = Parent { ends, mode: Mode::Actual, header_codes: self.txn.codes, tail: None };
-        lower_items(staged, cx, self.txn.flow.body.items, parent, &mut built.flow_roots)
+        let parent = Parent { ends, mode: Mode::Actual, header_codes: self.header.codes, tail: None };
+        rec.items(self.header.flow.body.items, parent)
     }
 }
 
@@ -566,76 +528,66 @@ fn lower_opening_balances<'a, 's>(
     code_index: &CodeIndex,
 ) {
     let (file, item, opening) = (record.file(), record.item, record.node);
-    let mut staged = Staged::open(world);
-    let txn = Id::new(staged.book.txns.len() as u32);
-    let diagnostic_start = staged.diags.len();
+    let mut rec = Recording::open(world, record.site, opening.date, item.loc, code_index);
     let mut roots = Vec::new();
     for leg in &file[opening.lines] {
         push_tail_roots(file, leg.tail, &mut roots);
     }
-    let program_name = staged.book.names.intern("journal");
-    let compiled = super::compile_roots(&mut staged, file, record.home(), Ty::Flow, program_name, &[], &roots);
-    let Some((program, root_ids)) = compiled else {
-        push_rejected_txn(&mut staged, item, opening.date);
-        return;
-    };
-    let cx = FlowCx { file, home: record.home(), day: opening.date, txn, loc: item.loc, roots: &root_ids, code_index };
-    let mut flow_roots = Vec::new();
+    if !rec.compile(Ty::Flow, &roots, &[]) {
+        return rec.reject(item);
+    }
     for leg in &file[opening.lines] {
-        let Some((flow, basis_root)) = lower_opening_leg(&mut staged, &cx, opening_place, leg) else {
+        let Some((flow, basis_root)) = lower_opening_leg(&mut rec, opening_place, leg) else {
             continue;
         };
-        let flow_at = staged.flows().len();
-        staged.book.flows.push(flow);
-        push_flow_expressions(&mut flow_roots, flow_at, None, None, basis_root);
+        rec.push(flow, None, None, basis_root);
     }
-    if staged.diags.len() != diagnostic_start {
-        push_rejected_txn(&mut staged, item, opening.date);
-        return;
+    if rec.failed() {
+        return rec.reject(item);
     }
-    let program_id = keep_program(&mut staged, program, flow_roots, None);
-    let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
-    let record = Txn { program: program_id, doc, ..journal_txn(&staged, opening.date, item.loc) };
-    staged.book.txns.push(record);
-    staged.commit();
+    let program = rec.keep_program(None);
+    let doc = rec.doc(item.doc);
+    let txn = Txn { program, doc, ..rec.transaction() };
+    rec.keep(txn);
 }
 
 /// One line of an opening: a flow between the opening entity and the place or asset it names, and the node its
 /// basis is computed by, if it is. None after the problem is said.
 fn lower_opening_leg<'s>(
-    staged: &mut Staged<'_, 's>,
-    cx: &FlowCx<'_, 's>,
+    rec: &mut Recording<'_, '_, 's>,
     opening_place: Id<Place>,
     leg: &ast::Leg<'s>,
 ) -> Option<(Flow, Option<NodeId>)> {
     let whole = matches!(leg.amount, ast::Quantity::Whole);
-    let whole_asset = if whole { staged.book.asset(leg.end.name.0) } else { None };
+    let whole_asset = if whole { rec.staged.book.asset(leg.end.name.0) } else { None };
     let no_select = Run::new(Id::new(0), 0);
     let end = match whole_asset {
-        Some(asset) => Some(ResolvedEnd { place: staged.book.assets[asset].place, entity: None, select: no_select }),
-        None => resolve_end(staged, cx, leg.end),
+        Some(asset) => {
+            Some(ResolvedEnd { place: rec.staged.book.assets[asset].place, entity: None, select: no_select })
+        }
+        None => rec.end(leg.end),
     };
     let Some(end) = end else {
         if whole {
-            staged.diags.push(
+            rec.staged.diags.push(
                 Diagnostic::error("opening-whole", "a whole opening holding must name an asset")
                     .label(leg.loc, "write a unit amount for an account holding"),
             );
         }
         return None;
     };
-    let fallback = whole_asset.map_or(staged.book.base, |asset| staged.book.assets[asset].unit);
-    let quantity = resolve_quantity(staged, cx, leg.amount, fallback, FlowSide::Out)?;
+    let fallback = whole_asset.map_or(rec.staged.book.base, |asset| rec.staged.book.assets[asset].unit);
+    let quantity = rec.quantity(leg.amount, fallback, FlowSide::Out)?;
     if !matches!(leg.amount, ast::Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
-        staged.diags.push(
+        rec.staged.diags.push(
             Diagnostic::error("opening-amount", "an opening line needs a literal amount")
                 .label(leg.loc, "computed and inferred quantities cannot set an opening balance"),
         );
         return None;
     }
-    let tail = cx.lower_tail(staged, leg.tail).1;
+    let tail = rec.tail(leg.tail).1;
     if !end.select.is_empty() {
-        staged.diags.push(
+        rec.staged.diags.push(
             Diagnostic::error("opening-selector", "an opening line sets a whole place")
                 .label(leg.loc, "selectors do not apply to an opening balance"),
         );
@@ -643,12 +595,12 @@ fn lower_opening_leg<'s>(
     }
     let opening_end = ResolvedEnd { place: opening_place, entity: None, select: no_select };
     let named_end = ResolvedEnd { place: end.place, entity: None, select: no_select };
-    let (from, to) = match staged.book.places[end.place].class.display_sign() > 0 {
+    let (from, to) = match rec.staged.book.places[end.place].class.display_sign() > 0 {
         true => (opening_end, named_end),
         false => (named_end, opening_end),
     };
     let basis_root = tail.basis_root;
-    let codes = Codes { header: Run::new(staged.codes().start(), 0), local: empty_codes(staged) };
+    let codes = Codes { header: Run::new(rec.staged.codes().start(), 0), local: empty_codes(&rec.staged) };
     let shape = Shape {
         ends: Ends { from, to },
         out: quantity.amount,
@@ -656,8 +608,9 @@ fn lower_opening_leg<'s>(
         infer: Infer::Known,
         mode: Mode::Opening,
     };
-    let mut flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc)?;
-    flow.owner = whole_asset.map_or(staged.book.places[end.place].owner, |asset| staged.book.assets[asset].owner);
+    let mut flow = rec.flow(shape, codes, tail, leg.loc)?;
+    flow.owner =
+        whole_asset.map_or(rec.staged.book.places[end.place].owner, |asset| rec.staged.book.assets[asset].owner);
     Some((flow, basis_root))
 }
 
@@ -749,9 +702,8 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         );
         return;
     };
-    if at.world.book.contracts[contract_id].loan.is_some_and(|loan| loan.on == statement.date) {
-        lower_loan_origin(at, doc, amount, contract_id);
-        return;
+    if let Some(loan) = at.world.book.contracts[contract_id].loan.filter(|loan| loan.on == statement.date) {
+        return lower_loan_origin(at, doc, amount, (contract_id, loan));
     }
     let contract = &at.world.book.contracts[contract_id];
     let Some((schedule, due, terms)) = kept_by(contract, statement.date, loc, &mut at.world.diags) else { return };
@@ -759,8 +711,7 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
     let templates = terms.template.clone();
     let fallback = occurrence_amount_unit(contract, terms, at.world.book.base);
 
-    let mut staged = Staged::open(at.world);
-    let diagnostic_start = staged.diags.len();
+    let mut rec = Recording::open(at.world, site, statement.date, loc, code_index);
     let mut expressions = Vec::new();
     if let Some(amount) = amount {
         push_amount_root(amount, &mut expressions);
@@ -774,26 +725,18 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         push_item_root(file, item.amount, &mut expressions);
         push_tail_roots(file, item.tail, &mut expressions);
     }
-    let name = staged.book.names.intern("journal");
-    let compiled = if expressions.is_empty() {
-        Some((Program::default(), Box::<[NodeId]>::default()))
-    } else {
-        crate::laws::compile_template(&mut staged, file, site.home, Ty::Flow, name, &inputs, &expressions)
-    };
-    let Some((program, root_ids)) = compiled else { return };
-    let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
-    let txn_id = Id::new(staged.book.txns.len() as u32);
-    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
-    let occurrence_amount =
-        amount.and_then(|amount| written_amount(&staged, cx.file, cx.roots, amount, fallback).or_report(&mut staged));
+    if !rec.compile(Ty::Flow, &expressions, &inputs) {
+        return;
+    }
+    let occurrence_amount = amount.and_then(|amount| rec.amount(amount, fallback).or_report(&mut rec.staged));
     if amount.is_some() && occurrence_amount.is_none() {
         return;
     }
 
-    let (codes, header_tail) = cx.lower_tail(&mut staged, statement.tail);
+    let (codes, header_tail) = rec.tail(statement.tail);
     if !header_tail.valid || header_tail.price.is_some() {
         if header_tail.price.is_some() {
-            staged.diags.push(
+            rec.staged.diags.push(
                 Diagnostic::error("contract-occurrence-price", "write an occurrence price as part of its amount")
                     .label(loc, "a detached price cannot override a contract flow"),
             );
@@ -812,98 +755,33 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
     };
 
     let mut input_values: Vec<Option<Amount>> = vec![None; inputs.len()];
-    let mut bound = vec![false; inputs.len()];
     let mut replaced_legs = Vec::new();
     let mut added_ends: Vec<(Id<Place>, Loc)> = Vec::new();
     let mut written_groups: Vec<Option<OccurrenceGroupDraft>> = (0..templates.len()).map(|_| None).collect();
-    let mut flow_roots = Vec::new();
     for leg in &file[statement.body.legs] {
-        let input = inputs.iter().position(|input| staged.book.name(input.name) == leg.end.name.0);
+        let input = inputs.iter().position(|input| rec.staged.book.name(input.name) == leg.end.name.0);
         if let Some(input_at) = input {
-            if bound[input_at] {
+            if input_values[input_at].is_some() {
                 let first = inputs[input_at].loc;
-                staged.diags.push(problem::twice("input binding", leg.loc, first));
-                continue;
-            }
-            if !file[leg.tail].is_empty() {
-                staged.diags.push(
-                    Diagnostic::error("contract-input-tail", "a contract input binding cannot have flow clauses")
-                        .label(leg.loc, "put clauses on the occurrence's actual flow"),
-                );
-                continue;
-            }
-            let literal = match leg.amount {
-                ast::Quantity::Amount(ast::Amount::Literal(literal))
-                | ast::Quantity::Target(ast::Amount::Literal(literal)) => literal,
-                _ => {
-                    staged.diags.push(
-                        Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
-                            .label(leg.loc, "write `input-name = 155 USD`"),
-                    );
-                    continue;
-                }
-            };
-            let input_unit = inputs[input_at].unit;
-            let unit = match literal.unit() {
-                Some(unit) => match staged.commodity_of(Word::of(file, unit.0)) {
-                    Ok(unit) => unit,
-                    Err(problem) => {
-                        staged.diags.push(problem);
-                        continue;
-                    }
-                },
-                None => match input_unit {
-                    Some(unit) => unit,
-                    None => {
-                        staged.diags.push(
-                            Diagnostic::error("contract-input-unit", "this input has no declared unit to infer")
-                                .label(leg.loc, "state the amount's commodity"),
-                        );
-                        continue;
-                    }
-                },
-            };
-            if input_unit.is_some_and(|expected| expected != unit) {
-                staged.diags.push(
-                    Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
-                        .label(leg.loc, "use the unit declared by this input")
-                        .context(inputs[input_at].loc, "the input's expected unit is declared here"),
-                );
-                continue;
-            }
-            match staged.amount(literal.num(), unit, leg.loc) {
-                Ok(value) => {
-                    input_values[input_at] = Some(value);
-                    bound[input_at] = true;
-                }
-                Err(problem) => staged.diags.push(problem),
+                rec.staged.diags.push(problem::twice("input binding", leg.loc, first));
+            } else {
+                let value = bound_input(&rec.staged, file, &inputs[input_at], leg);
+                input_values[input_at] = value.or_report(&mut rec.staged);
             }
             continue;
         }
 
-        let Some(endpoint) = resolve_end(&mut staged, &cx, leg.end) else {
+        let Some(endpoint) = rec.end(leg.end) else {
             continue;
         };
-        let mut matching = None;
-        let mut ambiguous = None;
-        for (template_at, template) in templates.iter().enumerate() {
-            for (leg_at, template_leg) in template.legs.iter().enumerate() {
-                let named_end = template_leg.flow.to;
-                if named_end == endpoint.place {
-                    if matching.is_some() {
-                        ambiguous = Some((template_at, leg_at));
-                        break;
-                    }
-                    matching = Some((template_at, leg_at));
-                }
-            }
-            if ambiguous.is_some() {
-                break;
-            }
-        }
+        let mut matches = templates.iter().enumerate().flat_map(|(template_at, template)| {
+            let legs = template.legs.iter().enumerate().filter(|(_, leg)| leg.flow.to == endpoint.place);
+            legs.map(move |(leg_at, _)| (template_at, leg_at))
+        });
+        let (matching, ambiguous) = (matches.next(), matches.next());
         if let Some((template_at, leg_at)) = ambiguous {
             let other = templates[template_at].legs[leg_at].flow.loc;
-            staged.diags.push(
+            rec.staged.diags.push(
                 Diagnostic::error("contract-occurrence-leg-ambiguous", "this end matches more than one template leg")
                     .label(leg.loc, "write a more specific occurrence override")
                     .context(other, "a matching template leg is here"),
@@ -914,7 +792,7 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
             Some((template_at, leg_at)) => {
                 if replaced_legs.contains(&(template_at, leg_at)) {
                     let first = templates[template_at].legs[leg_at].flow.loc;
-                    staged.diags.push(problem::twice("occurrence leg", leg.loc, first));
+                    rec.staged.diags.push(problem::twice("occurrence leg", leg.loc, first));
                     continue;
                 }
                 replaced_legs.push((template_at, leg_at));
@@ -927,14 +805,14 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
                 // to the same group and subtracts it from the header's
                 // remainder.
                 if let Some((_, first_loc)) = added_ends.iter().find(|(place, _)| *place == endpoint.place) {
-                    staged.diags.push(problem::twice("occurrence leg", leg.loc, *first_loc));
+                    rec.staged.diags.push(problem::twice("occurrence leg", leg.loc, *first_loc));
                     continue;
                 }
                 added_ends.push((endpoint.place, leg.loc));
                 (0, None)
             }
             None => {
-                staged.diags.push(
+                rec.staged.diags.push(
                     Diagnostic::error(
                         "contract-occurrence-leg-group",
                         "this additional end does not identify one contract flow group",
@@ -945,10 +823,10 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
             }
         };
         let template = &templates[template_at];
-        let side = template_leg.map_or_else(|| template_side(&staged, template), |_| template.side);
+        let side = template_leg.map_or_else(|| template_side(&rec.staged, template), |_| template.side);
         let base_flow = template_leg.map_or_else(|| template.header.flow.clone(), |leg| leg.flow.clone());
-        if endpoint.select.len() != 0 {
-            staged.diags.push(
+        if !endpoint.select.is_empty() {
+            rec.staged.diags.push(
                 Diagnostic::error("selector-target", "selectors narrow the source endpoint of a flow")
                     .label(leg.loc, "a contract split end names the recipient"),
             );
@@ -958,35 +836,32 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
             FlowSide::Out => base_flow.out.unit,
             FlowSide::Arrive => base_flow.arrive.unit,
         };
-        let Some(quantity) = resolve_quantity(&mut staged, &cx, leg.amount, fallback, side) else {
+        let Some(quantity) = rec.quantity(leg.amount, fallback, side) else {
             continue;
         };
         if quantity.mode == Mode::Opening {
-            staged.diags.push(
+            rec.staged.diags.push(
                 Diagnostic::error("contract-occurrence-whole", "a written occurrence leg needs a quantity")
                     .label(leg.loc, "whole assets are only valid in an opening"),
             );
             continue;
         }
-        let (local_codes, written_tail) = cx.lower_tail(&mut staged, leg.tail);
+        let (local_codes, written_tail) = rec.tail(leg.tail);
         let mut tail = header_tail.clone().merge(written_tail);
         if !tail.valid {
             continue;
         }
 
-        let mut out = base_flow.out;
-        let mut arrive = base_flow.arrive;
-        match side {
-            FlowSide::Out => out = quantity.amount,
-            FlowSide::Arrive => arrive = quantity.amount,
-        }
+        let (mut out, mut arrive) = match side {
+            FlowSide::Out => (quantity.amount, base_flow.arrive),
+            FlowSide::Arrive => (base_flow.out, quantity.amount),
+        };
         if out.unit == arrive.unit {
-            out = quantity.amount;
-            arrive = quantity.amount;
+            (out, arrive) = (quantity.amount, quantity.amount);
         }
         if let Some((rate, quote, priced_at)) = tail.price {
             if quantity.root().is_some() {
-                staged.diags.push(
+                rec.staged.diags.push(
                     Diagnostic::error("price-shape", "a written price needs a literal occurrence quantity")
                         .label(priced_at, "computed quantities cannot be priced here"),
                 );
@@ -998,24 +873,18 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
             };
             let other = if chosen_unit == quote {
                 let Some(inverse) = rate.recip() else {
-                    staged.diags.push(
+                    rec.staged.diags.push(
                         Diagnostic::error("price-zero", "a price must be greater than zero")
                             .label(priced_at, "the reciprocal price is not representable"),
                     );
                     continue;
                 };
-                if other_unit == quote {
-                    staged.diags.push(
-                        Diagnostic::error("price-transfer", "a price cannot change a same-commodity transfer")
-                            .label(priced_at, "remove the price"),
-                    );
-                    continue;
-                }
-                priced(&mut staged, quantity.amount, other_unit, inverse, priced_at)
+                // A price whose unit is on both sides is a transfer's, which `priced` refuses.
+                priced(&mut rec.staged, quantity.amount, other_unit, inverse, priced_at)
             } else if other_unit == quote {
-                priced(&mut staged, quantity.amount, quote, rate, priced_at)
+                priced(&mut rec.staged, quantity.amount, quote, rate, priced_at)
             } else {
-                staged.diags.push(
+                rec.staged.diags.push(
                     Diagnostic::error("price-unit", "the stated price unit must match the other side")
                         .label(priced_at, "the quote unit appears on neither counterpart side"),
                 );
@@ -1031,14 +900,14 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
 
         let from = ResolvedEnd {
             place: base_flow.from,
-            entity: place_entity(&staged, base_flow.from),
+            entity: place_entity(&rec.staged, base_flow.from),
             select: base_flow.select,
         };
         let to = ResolvedEnd { place: endpoint.place, entity: endpoint.entity, select: endpoint.select };
         let local_codes = if local_codes.is_empty() { base_flow.codes } else { local_codes };
         let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
         let flow_codes = Codes { header: codes, local: local_codes };
-        let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, flow_codes, tail.clone(), leg.loc) else {
+        let Some(mut flow) = rec.flow(shape, flow_codes, tail.clone(), leg.loc) else {
             continue;
         };
         flow.owner = base_flow.owner;
@@ -1049,43 +918,33 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         flow.header_codes = base_flow.header_codes;
         flow.codes = local_codes;
         flow.select = from.select;
-        flow.detail = merge_detail_pool(&mut staged, base_flow.detail, flow.detail);
-        let offset = staged.flows().len();
-        staged.book.flows.push(flow);
+        flow.detail = merge_detail_pool(&mut rec.staged, base_flow.detail, flow.detail);
         let (out_root, arrive_root) = match side {
             FlowSide::Out => (quantity.root(), None),
             FlowSide::Arrive => (None, quantity.root()),
         };
-        push_flow_expressions(&mut flow_roots, offset, out_root, arrive_root, tail.basis_root);
-        if written_groups[template_at].is_none() {
-            let side = template_side(&staged, template);
-            written_groups[template_at] = Some(occurrence_group_draft(template, side));
-        }
-        let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
+        let offset = rec.push(flow, out_root, arrive_root, tail.basis_root);
+        let side = template_side(&rec.staged, template);
+        let draft = written_groups[template_at].get_or_insert_with(|| occurrence_group_draft(template, side));
         draft.legs.push(Leg { flow: offset, part: quantity.part });
     }
     if !file[statement.body.items].is_empty() {
         let Some(template) = templates.first() else {
-            staged.diags.push(
+            rec.staged.diags.push(
                 Diagnostic::error("contract-occurrence-items", "this contract schedule has no flow group for items")
                     .label(loc, "items need a scheduled flow to modify"),
             );
             return;
         };
-        let side = template_side(&staged, template);
-        let (from, to, common) = occurrence_item_ends(&staged, template, side);
+        let side = template_side(&rec.staged, template);
+        let (from, to, common) = occurrence_item_ends(&rec.staged, template, side);
         let parent =
             Parent { ends: Ends { from, to }, mode: Mode::Actual, header_codes: codes, tail: Some(&header_tail) };
-        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots);
-        let template_at = 0;
-        if written_groups[template_at].is_none() {
-            written_groups[template_at] = Some(occurrence_group_draft(template, side));
-        }
-        let draft = written_groups[template_at].as_mut().expect("inserted occurrence group");
-        draft.source = Endpoint { place: common, entity: None };
-        draft.items = items;
+        let items = rec.items(statement.body.items, parent);
+        let draft = written_groups[0].get_or_insert_with(|| occurrence_group_draft(template, side));
+        (draft.source, draft.items) = (Endpoint { place: common, entity: None }, items);
     }
-    if staged.diags.len() != diagnostic_start {
+    if rec.failed() {
         return;
     }
 
@@ -1102,8 +961,9 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         .collect();
     // The flows of an occurrence are never posted: the engine builds the occurrence's own from the groups and reads
     // the nodes, so what its flows compute (`flow_roots`) is not kept.
-    let program_id = keep_program(&mut staged, program, Vec::new(), None);
-    let occurrence_id = staged.book.written_occurrences.push(WrittenOccurrence {
+    rec.flow_roots.clear();
+    let program_id = rec.keep_program(None);
+    let occurrence_id = rec.staged.book.written_occurrences.push(WrittenOccurrence {
         due,
         schedule,
         amount: occurrence_amount,
@@ -1111,11 +971,11 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         groups,
         tail: occurrence_tail,
     });
-    let input_start = staged.book.input_values.len();
+    let input_start = rec.staged.book.input_values.len();
     for value in input_values {
-        staged.book.input_values.push(value);
+        rec.staged.book.input_values.push(value);
     }
-    let doc = doc.map(|doc| staged.book.names.intern(doc.0));
+    let doc = rec.doc(doc);
     let txn = Txn {
         inputs: Run::new(Id::new(input_start as u32), inputs.len() as u32),
         codes,
@@ -1124,23 +984,20 @@ fn lower_occurrence<'s>(at: &mut Stated<'_, '_, 's>, doc: Option<ast::Doc<'s>>, 
         contract_schedule: Some(schedule),
         occurrence: Some(occurrence_id),
         doc,
-        ..journal_txn(&staged, statement.date, loc)
+        ..rec.transaction()
     };
-    staged.book.txns.push(txn);
-    staged.commit();
+    rec.keep(txn);
 }
 
-/// Record the source loan's funding as one balanced debt-to-cash flow. It is
-/// deliberately separate from the first scheduled payment, which may begin
-/// months after the origination date.
+/// Record the source loan's funding as one balanced debt-to-cash flow. It is deliberately separate from the first
+/// scheduled payment, which may begin months after the origination date.
 fn lower_loan_origin<'s>(
     at: &mut Stated<'_, '_, 's>,
     doc: Option<ast::Doc<'s>>,
     amount: Option<ast::Amount<'s>>,
-    contract_id: Id<crate::book::Contract>,
+    (contract_id, loan): (Id<Contract>, Loan),
 ) {
-    let (site, loc, statement, code_index) = (at.site, at.loc, at.statement, at.code_index);
-    let file = &site.source.file;
+    let (file, statement, loc) = (at.file(), at.statement, at.loc);
     if amount.is_some() || !file[statement.body.legs].is_empty() || !file[statement.body.items].is_empty() {
         at.world.diags.push(
             Diagnostic::error(
@@ -1151,129 +1008,81 @@ fn lower_loan_origin<'s>(
         );
         return;
     }
-    let (loan, party, owner, funding) = {
-        let contract = &at.world.book.contracts[contract_id];
-        let Some(loan) = contract.loan else {
-            at.world.diags.push(
-                Diagnostic::error("loan-origination-contract", "this contract has no loan principal to originate")
-                    .label(loc, "only a declared loan can have an origination record"),
-            );
-            return;
-        };
-        let template = [&contract.terms, &contract.standing]
-            .into_iter()
-            .flatten()
-            .find(|terms| !terms.template.is_empty())
-            .and_then(|terms| terms.template.first());
-        let Some(template) = template else {
-            at.world.diags.push(
-                Diagnostic::error(
-                    "loan-origination-holding",
-                    "the loan schedule does not identify a cash holding for its principal",
-                )
-                .label(loc, "add a payment schedule from the account that receives the loan"),
-            );
-            return;
-        };
-        let mut candidates = [template.header.flow.from, template.header.flow.to].into_iter().filter(|&place| {
-            let place = &at.world.book.places[place];
-            place.owner == contract.owner
-                && place.class == crate::book::Class::Asset
-                && matches!(place.role, crate::book::Role::Account { .. } | crate::book::Role::Holding(_))
-        });
-        let Some(funding) = candidates.next() else {
-            at.world.diags.push(
-                Diagnostic::error(
-                    "loan-origination-holding",
-                    "the loan schedule does not identify an owner cash account",
-                )
-                .label(loc, "the origination needs the owner-side payment holding"),
-            );
-            return;
-        };
-        if candidates.next().is_some() {
-            at.world.diags.push(
-                Diagnostic::error("loan-origination-holding", "the loan schedule names more than one owner holding")
-                    .label(loc, "the principal destination is ambiguous"),
-            );
-            return;
-        }
-        (loan, contract.party, contract.owner, funding)
-    };
-    if at.world.book.entities[party].place.is_none() {
-        at.world.diags.push(
-            Diagnostic::error("loan-origination-party", "the lender has no flow endpoint")
-                .label(loc, "cannot identify the source of this principal"),
-        );
-        return;
-    }
-
-    let mut staged = Staged::open(at.world);
-    let diagnostic_start = staged.diags.len();
+    let funded = loan_funding(&at.world.book, &at.world.book.contracts[contract_id], loc);
+    let Some((party, owner, funding)) = funded.or_report(at.world) else { return };
+    let mut rec = Recording::open(at.world, at.site, statement.date, loc, at.code_index);
     let mut expressions = Vec::new();
     push_tail_roots(file, statement.tail, &mut expressions);
-    let name = staged.book.names.intern("journal");
-    let compiled = if expressions.is_empty() {
-        Some((Program::default(), Box::<[NodeId]>::default()))
-    } else {
-        crate::laws::compile_template(&mut staged, file, site.home, Ty::Flow, name, &[], &expressions)
-    };
-    let Some((program, root_ids)) = compiled else { return };
-    let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
-    let txn_id = Id::new(staged.book.txns.len() as u32);
-    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
-    let (codes, mut tail) = cx.lower_tail(&mut staged, statement.tail);
-    let basis_root = tail.basis_root;
-    let waive = tail.waive;
+    if !rec.compile(Ty::Flow, &expressions, &[]) {
+        return;
+    }
+    let (codes, mut tail) = rec.tail(statement.tail);
+    let (basis_root, waive) = (tail.basis_root, tail.waive);
     if tail.price.is_some() {
-        staged.diags.push(
+        rec.staged.diags.push(
             Diagnostic::error("loan-origination-price", "loan principal is transferred in the loan's declared unit")
                 .label(loc, "a loan origination cannot add a detached price"),
         );
         tail.valid = false;
     }
-    if !tail.valid || staged.diags.len() != diagnostic_start {
+    if !tail.valid || rec.failed() {
         return;
     }
-
-    // The debt tab's outflow records the owner's new liability; the same
-    // principal arrives in the account named by the payment schedule.
+    // The debt tab's outflow records the owner's new liability; the same principal arrives in the account named by the
+    // payment schedule.
     tail.payee = Some(party);
     let empty = Run::new(Id::new(0), 0);
     let from = ResolvedEnd { place: loan.debt, entity: None, select: empty };
     let to = ResolvedEnd { place: funding, entity: None, select: empty };
-    let shape = Shape {
-        ends: Ends { from, to },
-        out: loan.principal,
-        arrive: loan.principal,
-        infer: Infer::Known,
-        mode: Mode::Actual,
-    };
-    let flow_codes = Codes { header: codes, local: empty_codes(&staged) };
-    let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, flow_codes, tail, loc) else {
+    let (principal, mode) = (loan.principal, Mode::Actual);
+    let shape = Shape { ends: Ends { from, to }, out: principal, arrive: principal, infer: Infer::Known, mode };
+    let flow_codes = Codes { header: codes, local: empty_codes(&rec.staged) };
+    let Some(mut flow) = rec.flow(shape, flow_codes, tail, loc) else {
         return;
     };
-    flow.owner = owner;
-    flow.payee = Some(party);
-    flow.origin = Origin::Occurrence(contract_id);
-    staged.book.flows.push(flow);
-    let mut flow_roots = Vec::new();
-    if let Some(basis) = basis_root {
-        push_flow_expressions(&mut flow_roots, 0, None, None, Some(basis));
-    }
-    let program = keep_program(&mut staged, program, flow_roots, None);
-    let doc = doc.map(|doc| staged.book.names.intern(doc.0));
-    let txn = Txn {
-        program,
-        codes,
-        waive,
-        contract: Some(contract_id),
-        kind: TxnKind::LoanOrigin,
-        doc,
-        ..journal_txn(&staged, loan.on, loc)
+    (flow.owner, flow.payee, flow.origin) = (owner, Some(party), Origin::Occurrence(contract_id));
+    rec.push(flow, None, None, basis_root);
+    let program = rec.keep_program(None);
+    let doc = rec.doc(doc);
+    let txn =
+        Txn { program, codes, waive, contract: Some(contract_id), kind: TxnKind::LoanOrigin, doc, ..rec.transaction() };
+    rec.keep(txn);
+}
+
+/// Who lends a loan, whose debt it is, and the owner's account the principal arrives in.
+type Funding = (Id<Entity>, Id<Entity>, Id<Place>);
+
+/// What funds a loan: its lender, its owner, and the one owner cash account its payment schedule names.
+fn loan_funding(book: &Book<'_>, contract: &Contract, loc: Loc) -> Result<Funding, Diagnostic> {
+    let holding = |message: &str, label: &str| Diagnostic::error("loan-origination-holding", message).label(loc, label);
+    let template = [&contract.terms, &contract.standing]
+        .into_iter()
+        .flatten()
+        .find(|terms| !terms.template.is_empty())
+        .and_then(|terms| terms.template.first());
+    let Some(template) = template else {
+        let message = "the loan schedule does not identify a cash holding for its principal";
+        return Err(holding(message, "add a payment schedule from the account that receives the loan"));
     };
-    staged.book.txns.push(txn);
-    staged.commit();
+    let mut candidates = [template.header.flow.from, template.header.flow.to].into_iter().filter(|&place| {
+        let place = &book.places[place];
+        place.owner == contract.owner
+            && place.class == crate::book::Class::Asset
+            && matches!(place.role, crate::book::Role::Account { .. } | crate::book::Role::Holding(_))
+    });
+    let Some(funding) = candidates.next() else {
+        let message = "the loan schedule does not identify an owner cash account";
+        return Err(holding(message, "the origination needs the owner-side payment holding"));
+    };
+    if candidates.next().is_some() {
+        let message = "the loan schedule names more than one owner holding";
+        return Err(holding(message, "the principal destination is ambiguous"));
+    }
+    if book.entities[contract.party].place.is_none() {
+        return Err(Diagnostic::error("loan-origination-party", "the lender has no flow endpoint")
+            .label(loc, "cannot identify the source of this principal"));
+    }
+    Ok((contract.party, contract.owner, funding))
 }
 
 /// The ends of a claim and whose it is: the party it is with on one end, and on the other the tab the owners keep it in.
@@ -1335,32 +1144,27 @@ fn claim_ends<'s>(
     Some((Ends { from, to }, owner))
 }
 
-/// The expressions of a claim (its amount, its items' and its tail's), compiled; a claim says what is owed by one or the
-/// other. None after the problem is said.
-fn claim_program<'s>(
-    at: &mut Stated<'_, '_, 's>,
-    amount: Option<ast::Amount<'s>>,
-) -> Option<(Program, Map<ast::ExprId, NodeId>)> {
-    let (site, loc, statement) = (at.site, at.loc, at.statement);
-    let file = &site.source.file;
+/// The expressions of a claim: its amount, its items' and its tail's; a claim says what is owed by one or the other.
+/// None after the problem is said.
+fn claim_roots<'s>(at: &mut Stated<'_, '_, 's>, amount: Option<ast::Amount<'s>>) -> Option<Vec<(ast::ExprId, Ty)>> {
+    let (file, statement) = (at.file(), at.statement);
     if amount.is_none() && statement.body.items.is_empty() {
         at.world.diags.push(
             Diagnostic::error("claim-amount", "a claim needs an amount or line items")
-                .label(loc, "nothing states what is owed"),
+                .label(at.loc, "nothing states what is owed"),
         );
         return None;
     }
-    let mut exprs = Vec::new();
+    let mut roots = Vec::new();
     if let Some(amount) = amount {
-        push_amount_root(amount, &mut exprs);
+        push_amount_root(amount, &mut roots);
     }
     for item in &file[statement.body.items] {
-        push_item_root(file, item.amount, &mut exprs);
-        push_tail_roots(file, item.tail, &mut exprs);
+        push_item_root(file, item.amount, &mut roots);
+        push_tail_roots(file, item.tail, &mut roots);
     }
-    push_tail_roots(file, statement.tail, &mut exprs);
-    let name = at.world.book.names.intern("journal");
-    super::compile_roots(at.world, file, site.home, Ty::Flow, name, &[], &exprs)
+    push_tail_roots(file, statement.tail, &mut roots);
+    Some(roots)
 }
 
 fn lower_owes<'s>(
@@ -1370,69 +1174,87 @@ fn lower_owes<'s>(
     opening: bool,
 ) {
     let (site, loc, statement, code_index) = (at.site, at.loc, at.statement, at.code_index);
-    let file = &site.source.file;
     let Some((Ends { from, to }, owner)) = claim_ends(at, creditor_name) else {
         return;
     };
-    let Some((program, roots)) = claim_program(at, amount) else {
+    let Some(roots) = claim_roots(at, amount) else {
         return;
     };
-    let mut staged = Staged::open(at.world);
-    let txn_id = Id::new(staged.book.txns.len() as u32);
-    let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
-    let diagnostic_start = staged.diags.len();
-    let (header_codes, header_tail) = cx.lower_tail(&mut staged, statement.tail);
+    let mut rec = Recording::open(at.world, site, statement.date, loc, code_index);
+    if !rec.compile(Ty::Flow, &roots, &[]) {
+        return;
+    }
+    let (header_codes, header_tail) = rec.tail(statement.tail);
     if !header_tail.valid {
         return;
     }
     let mode = if opening { Mode::Opening } else { Mode::Actual };
-    let mut built = Built { flow_roots: Vec::new(), group: None, successful: true };
+    let mut built = Built { group: None, successful: true };
     if let Some(written) = amount {
-        let base = staged.book.base;
-        let Some(expr) = written_amount(&staged, cx.file, cx.roots, written, base).or_report(&mut staged) else {
+        let base = rec.staged.book.base;
+        let Some(expr) = rec.amount(written, base).or_report(&mut rec.staged) else {
             return;
         };
         let (amount, root) = (expr.stand_in(base), expr.root());
         let shape = Shape { ends: Ends { from, to }, out: amount, arrive: amount, infer: Infer::Known, mode };
-        let codes = Codes { header: header_codes, local: empty_codes(&staged) };
-        if let Some(mut flow) = make_resolved_flow(&mut staged, &cx, shape, codes, header_tail.clone(), loc) {
+        let codes = Codes { header: header_codes, local: empty_codes(&rec.staged) };
+        if let Some(mut flow) = rec.flow(shape, codes, header_tail.clone(), loc) {
             flow.owner = owner;
-            staged.book.flows.push(flow);
-            push_flow_expressions(&mut built.flow_roots, 0, root, root, header_tail.basis_root);
+            let flow_at = rec.push(flow, root, root, header_tail.basis_root);
             if !statement.body.items.is_empty() {
                 let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
-                let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut built.flow_roots);
-                let made = Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items };
                 let total = match expr {
                     Expr::Literal(_) => Total::Is(Remaining { out: amount, arrive: amount }),
                     Expr::Computed(_) => Total::Later,
                 };
-                let flows = staged.flows();
-                let settled = balance::settle(&mut staged.book, &made, flows, total, loc);
-                built.keep(made, settled, &mut staged.diags);
+                built.items(&mut rec, (Heading::Flow(flow_at), total), statement.body.items, parent);
             }
         }
     } else {
         let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
-        let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut built.flow_roots);
         let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
-        let made = Made { header, side: FlowSide::Out, legs: Box::default(), items };
-        let flows = staged.flows();
-        let settled = balance::settle(&mut staged.book, &made, flows, Total::Nothing, loc);
-        built.keep(made, settled, &mut staged.diags);
+        built.items(&mut rec, (header, Total::Nothing), statement.body.items, parent);
     }
-    if staged.diags.len() != diagnostic_start {
+    if rec.failed() {
         return;
     }
-    let program_id = keep_program(&mut staged, program, built.flow_roots, built.group);
-    let txn = Txn {
-        program: program_id,
-        codes: header_codes,
-        waive: header_tail.waive,
-        ..journal_txn(&staged, statement.date, loc)
+    let program_id = rec.keep_program(built.group);
+    let txn = Txn { program: program_id, codes: header_codes, waive: header_tail.waive, ..rec.transaction() };
+    rec.keep(txn);
+}
+
+/// What a line of an occurrence that names one of its contract's inputs says the input is: a literal amount, in the
+/// unit the input declares.
+fn bound_input<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    input: &Input,
+    leg: &ast::Leg<'s>,
+) -> Result<Amount, Diagnostic> {
+    if !file[leg.tail].is_empty() {
+        return Err(Diagnostic::error("contract-input-tail", "a contract input binding cannot have flow clauses")
+            .label(leg.loc, "put clauses on the occurrence's actual flow"));
+    }
+    let (ast::Quantity::Amount(ast::Amount::Literal(literal)) | ast::Quantity::Target(ast::Amount::Literal(literal))) =
+        leg.amount
+    else {
+        return Err(Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
+            .label(leg.loc, "write `input-name = 155 USD`"));
     };
-    staged.book.txns.push(txn);
-    staged.commit();
+    let unit = match (literal.unit(), input.unit) {
+        (Some(unit), _) => world.commodity_of(Word::of(file, unit.0))?,
+        (None, Some(unit)) => unit,
+        (None, None) => {
+            return Err(Diagnostic::error("contract-input-unit", "this input has no declared unit to infer")
+                .label(leg.loc, "state the amount's commodity"));
+        }
+    };
+    if input.unit.is_some_and(|expected| expected != unit) {
+        return Err(Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
+            .label(leg.loc, "use the unit declared by this input")
+            .context(input.loc, "the input's expected unit is declared here"));
+    }
+    world.amount(literal.num(), unit, leg.loc)
 }
 
 fn occurrence_amount_unit(
@@ -1546,35 +1368,4 @@ fn merge_detail_pool(
     } else {
         Some(world.book.details.push(merged))
     }
-}
-
-/// The transaction of a record of the journal itself: it owns the flows and codes staged so far, and has
-/// no program, contract or inputs. The record fills in what it has.
-pub(super) fn journal_txn(staged: &Staged<'_, '_>, day: Day, loc: Loc) -> Txn {
-    Txn {
-        day,
-        flows: staged.flows(),
-        inputs: Run::new(Id::new(staged.book.input_values.len() as u32), 0),
-        program: None,
-        codes: staged.codes(),
-        waive: None,
-        contract: None,
-        contract_schedule: None,
-        occurrence: None,
-        kind: TxnKind::Journal,
-        doc: None,
-        loc,
-    }
-}
-
-/// What a rejected record leaves in place of its transaction, so that every dated record still owns one.
-fn push_rejected_txn<'s>(staged: &mut Staged<'_, 's>, item: &ast::Item<'s>, day: Day) {
-    let doc = item.doc.map(|doc| staged.book.names.intern(doc.0));
-    let txn = Txn {
-        flows: Run::new(staged.flows().start(), 0),
-        codes: Run::new(staged.codes().start(), 0),
-        doc,
-        ..journal_txn(staged, day, item.loc)
-    };
-    staged.book.txns.push(txn);
 }

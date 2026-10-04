@@ -33,6 +33,7 @@ use crate::split::{Cut, FlowSide, Header, Item, Leg, Part, Promised, Quantity, S
 #[derive(Clone, Copy)]
 struct WrittenContract<'a, 's> {
     site: &'a Site<'a, 's>,
+    item: &'a ast::Item<'s>,
     node: &'a ast::Contract<'s>,
     id: Id<Contract>,
     name: Sym,
@@ -64,7 +65,7 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
         }
         let id = world.book.contracts.push(empty_contract(name, loc, world.book.roots.me));
         world.book.lookup.contracts.insert(name, id);
-        written.push(WrittenContract { site, node, id, name, loc });
+        written.push(WrittenContract { site, item: contract.item, node, id, name, loc });
     }
     for written in written.iter().copied() {
         if let Some(end) = loan_endpoint(world, written) {
@@ -140,10 +141,9 @@ fn contract_party<'s>(world: &mut World<'s>, written: WrittenContract<'_, 's>) -
 
 /// The owner of a contract: whoever owns the place its schedule is paid from or into, else the book's owner.
 fn contract_owner<'s>(world: &mut World<'s>, written: WrittenContract<'_, 's>) -> Option<Id<Entity>> {
-    match written.node.schedule.or(written.node.standing) {
-        Some(schedule) => schedule_owner(world, written.home(), written.file(), Some(schedule)),
-        None => Some(world.book.roots.me),
-    }
+    let Some(schedule) = written.node.schedule.or(written.node.standing) else { return Some(world.book.roots.me) };
+    let holding = resolve_endpoint(world, written.home(), written.file(), schedule.terms.holding?.name)?;
+    Some(world.book.places[holding].owner)
 }
 
 /// The debt tab a loan contract's name stands for, asked for before any template is lowered: a template may name a loan
@@ -189,28 +189,29 @@ fn lower_contract<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's
         .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at)));
     let deposit = lines::deposit(world, written, Keeping { owner, default_holding }).or_report(world)?;
     let loan = contract_loan(world, written, party, owner)?;
-    let relation = relator::relation(world, written);
-    let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
-    if let Some((kind, fillers)) = relation {
-        (contract.kind, contract.fillers) = (Some(kind), fillers);
-    }
-    contract.party = party;
-    contract.owner = owner;
-    contract.days = days;
-    contract.purpose = purpose;
-    contract.description = description;
-    contract.area = area;
-    if let Some((amount, holding)) = deposit {
-        contract.deposit = Some(amount);
-        contract.deposit_holding = Some(holding);
-    }
-    contract.loan = loan.map(|(loan, _)| loan);
-    contract.doc = node_doc(world, written.site, written.loc);
-    contract.loc = written.loc;
-    contract.buys = node.standing.and_then(|schedule| match schedule.terms.payment {
-        Some(ast::Payment::Buy { unit, .. }) => resolve_commodity(world, file, unit),
+    let (kind, fillers) =
+        relator::relation(world, written).map_or((None, Box::default()), |(kind, fillers)| (Some(kind), fillers));
+    let (deposit, deposit_holding) = deposit.unzip();
+    let doc = written.item.doc.map(|doc| world.book.names.intern(doc.0));
+    let buys = node.standing.and_then(|schedule| match schedule.terms.payment {
+        Some(ast::Payment::Buy { unit, .. }) => world.commodity_of(Word::of(file, unit.0)).or_report(world),
         _ => None,
     });
+    let mut contract = Contract {
+        kind,
+        fillers,
+        party,
+        days,
+        purpose,
+        description,
+        area,
+        deposit,
+        deposit_holding,
+        loan: loan.map(|(loan, _)| loan),
+        doc,
+        buys,
+        ..empty_contract(written.name, written.loc, owner)
+    };
 
     let cx = TermsCx { written, file, inputs: &contract_inputs, anchor, party, purpose, description, area, loan };
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
@@ -447,7 +448,7 @@ fn schedule_amount<'s>(
             (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), None)
         }
         Some(ast::Payment::Buy { unit, spend }) => {
-            let buy_unit = resolve_commodity(world, file, unit)?;
+            let buy_unit = world.commodity_of(Word::of(file, unit.0)).or_report(world)?;
             let expr = written_amount(world, file, roots, spend, world.book.base).or_report(world)?;
             (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), Some(buy_unit))
         }
@@ -538,28 +539,8 @@ fn lower_header_item<'s>(
     Some(Item { sign: item.sign, amount: Cut::Of(amount), loc: item.loc, flow })
 }
 
-fn resolve_commodity<'s>(world: &mut World<'s>, file: &ast::File<'s>, name: Name<'s>) -> Option<Id<Commodity>> {
-    world.commodity_of(Word::of(file, name.0)).or_report(world)
-}
-
 fn resolve_endpoint<'s>(world: &mut World<'s>, home: Home, file: &ast::File<'s>, name: Name<'s>) -> Option<Id<Place>> {
     world.end(home, Word::of(file, name.0)).or_report(world).map(|end| end.place)
-}
-
-fn schedule_owner<'s>(
-    world: &mut World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    schedule: Option<ast::Schedule<'s>>,
-) -> Option<Id<Entity>> {
-    let holding = schedule?.terms.holding?;
-    let place = resolve_endpoint(world, home, file, holding.name)?;
-    Some(world.book.places[place].owner)
-}
-
-fn node_doc<'s>(world: &mut World<'s>, site: &Site<'_, 's>, loc: Loc) -> Option<Sym> {
-    let item = site.source.file.items.iter().find(|item| item.loc == loc)?;
-    item.doc.map(|doc| world.book.names.intern(doc.0))
 }
 
 fn has_property(file: &ast::File<'_>, props: axiom_syntax::Many<ast::Prop<'_>>, name: &str) -> bool {
