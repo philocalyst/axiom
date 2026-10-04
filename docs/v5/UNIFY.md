@@ -2023,3 +2023,52 @@ rest (C4 −1,295 in lane U-E, C5 −1,755, C6 −1,925: −4,975), about −1,4
 survive section 13 (the report's views as queries, −600 at most, and a site instead of `home` and `file`, −25) the tree lands
 near **53,500** at best and **54,000** without the report's. The distance to 27,000 is **28,770** today. Section 13's
 conclusion stands and is firmer: unification ends in the 53,000s; under 40,000 is a choice of features.
+
+## 15. State at the end of the pass (2026-10-04)
+
+**Merged into v5** (`d52032c`): phase 1a (the instruments) and C1, C2, C3 of lane U. The tree went from 57,109 lines (the v5
+head `bce9735`) to **55,770**: −1,339 by `quality.py`, of which C1 −966, C2 −205 and C3 −168. Every checkpoint was
+byte-identical to its baseline (the `diff/` harness, the Book dump of every project, goldens, mistakes, the declared-lines
+corpus), except the C1 changes listed in section 11. The release suite passed and clippy fell from 277 to 58 warnings.
+
+**Not merged at `d52032c`, running in their own lanes** (read from their branches; their maps hold their counts):
+
+- **U-E, C4** (`…-v5-unify-c4`): U19, U20, U21, U22, and U33's engine part, committed.
+- **U-C6, C6's outer crates** (`…-v5-unify-c6`): U35 (K7c-1 to K7c-6) committed, U37 to U48 mapped.
+
+**What the ledger has left**, each with the realized ratio lane U has seen (28% of plan over C1 to C3; whole-module
+deletions such as U33 hold closer to 100%):
+
+| checkpoint | entries | planned | at the realized ratio | where |
+|---|---|---:|---:|---|
+| C4 | U19 −220, U20 −40, U21 −910, U22 −65, U23 −60 | −1,295 | about −500 (U21 removes a store and its guards, the likeliest to hold) | U-E, in progress |
+| C5 | U24 to U34 (the biggest: U33 −335, U29 −200, U30 −200, U32 −190) | −1,755 | about −650 (U33 near whole, the rest at 28%) | not started; U29 and U30 are the evaluator's only reductions (section 14) |
+| C6 | U35 −320, U36 −280, U37 to U48, U49 −120 | −1,925 | about −450 | U-C6 has U35 and U37 to U48; U36 is lane U's or C7's; U49 is not to start (below) |
+| L2/L3 | the language (`lanes/L2L3-map.md`) | −285 | about −270 (whole items); −720 if `fmt --upgrade` is retired | designed, not built; ten decisions wait for the user |
+| **left** | | **−5,260** | **about −1,870** (−2,320 with the upgrade retired) | |
+
+**Dropped, and why:**
+
+- **C1:** U5 and U6, because on reading neither pays (section 11).
+- **C2:** U8 and U9, because the five resolvers and the verbs' openings are as short as a table of them (section 12).
+- **C3:** U11, U12, U17 and U18 by their map counts (section 14). U16 because diagnostics as rows grew their family by 35
+  lines when prototyped, and with it U49, which rests on the same row type.
+- **Section 13's structural rows:**
+  - "diagnostics as rows" (−500) is withdrawn by the prototype;
+  - "one evaluator" (−400) is withdrawn because it is already one walk;
+  - "a site instead of `home` and `file`" (−25) stays;
+  - "report views as queries" (−600 at most) stays, unverified, and is the U-C6 lane's ground.
+
+**The honest landing.** 55,770 now. What is left lands the tree **near 53,900** (53,450 if `fmt --upgrade` is retired),
+and a C7 second round might take it to about 53,400. That is a little over 4% below the v5 head, and in line with what the
+K lanes and C1 to C3 delivered against their plans. Unification ends in the 53,000s, as section 13 said. The distance to
+27,000 is **28,770** today. What closes it is a choice of features (section 13's table: sync, why and explain, the forecast,
+the v3/v4 readers, relators and addresses, user-written laws, contracts and loans, lots and basis), not a further pass of
+this kind.
+
+A later session starts from here:
+
+- merge U-E's C4 and U-C6's C6 when the coordinator has reviewed them;
+- C5, with U29 and U30 against a benchmark;
+- L2/L3 from its map, once the user has answered its section 10;
+- U36 (the habit forecast as a source of flows) and C7.
