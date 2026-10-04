@@ -32,6 +32,9 @@ purpose utilities : spending
   law running
     on flow
     count total(ever) as bill-running
+  law owed
+    on flow
+    count open(^b1) as b1-owed
 account checking
 account owed-to-ben : payable
 entity me
@@ -336,6 +339,12 @@ fn a_credit_note_into_a_declared_place_settles_the_bill_and_is_its_spending_refu
         assert_eq!(counted(book, run, "bill-running"), [], "300.00 of spending, and 300.00 refunded");
         assert_eq!(everything(book, run), 0);
     });
+}
+
+/// A law reads what is open of a bill as what is owed, in the sign a bill is written in, as it reads what is open of a claim.
+#[test]
+fn a_law_reads_what_is_open_of_a_bill_as_what_is_owed() {
+    with("accrual", BILL, |book, run| assert_eq!(counted(book, run, "b1-owed"), [on("2026-01-02", 300_00)]));
 }
 
 #[test]
