@@ -227,14 +227,9 @@ pub(crate) struct Placement<'a, 's> {
     pub subject: Ty,
 }
 
-pub(crate) fn compile<'s>(
-    world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
-    site: &Placement<'_, 's>,
-    law: &ast::Law<'s>,
-) -> Option<Law> {
+pub(crate) fn compile<'s>(world: &mut World<'s>, site: &Placement<'_, 's>, law: &ast::Law<'s>) -> Option<Law> {
     let law_name = world.book.names.intern(law.name.0);
-    Compiler::placed(world, diags, site, law_name, When::of(&law.trigger)).law(site, law)
+    Compiler::placed(world, site, law_name, When::of(&law.trigger)).law(site, law)
 }
 
 /// Compiles the expressions used by a contract term's flow templates into one
@@ -242,7 +237,6 @@ pub(crate) fn compile<'s>(
 /// their stable index in `inputs`.
 pub(crate) fn compile_template<'s>(
     world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
     file: &File<'s>,
     home: Home,
     subject: Ty,
@@ -252,7 +246,6 @@ pub(crate) fn compile_template<'s>(
 ) -> Option<(Program, Box<[NodeId]>)> {
     let mut compiler = Compiler {
         world,
-        diags,
         file,
         home,
         owner: None,
@@ -280,7 +273,6 @@ pub(crate) fn compile_template<'s>(
 /// from and to are unavailable while its formula is read.
 pub(crate) fn compile_budget_limit<'s>(
     world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
     file: &File<'s>,
     home: Home,
     purpose: axiom_core::Id<crate::book::Purpose>,
@@ -289,7 +281,6 @@ pub(crate) fn compile_budget_limit<'s>(
     let name = world.book.purposes[purpose].name;
     let mut compiler = Compiler {
         world,
-        diags,
         file,
         home,
         owner: Some(Owner::Purpose(purpose)),
@@ -314,7 +305,6 @@ pub(crate) fn compile_budget_limit<'s>(
 
 struct Compiler<'w, 'a, 's> {
     world: &'w mut World<'s>,
-    diags: &'w mut Vec<Diagnostic>,
     file: &'a File<'s>,
     home: Home,
     owner: Option<Owner>,
@@ -338,16 +328,9 @@ struct Compiler<'w, 'a, 's> {
 
 impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
     /// A compiler for the expressions of a law written at `site`.
-    fn placed(
-        world: &'w mut World<'s>,
-        diags: &'w mut Vec<Diagnostic>,
-        site: &Placement<'a, 's>,
-        law_name: Sym,
-        when: When,
-    ) -> Self {
+    fn placed(world: &'w mut World<'s>, site: &Placement<'a, 's>, law_name: Sym, when: When) -> Self {
         Compiler {
             world,
-            diags,
             file: site.file,
             home: site.home,
             owner: Some(site.owner),
@@ -478,7 +461,7 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
 
     fn report(&mut self, diagnostic: Diagnostic) {
         self.failed = true;
-        self.diags.push(diagnostic);
+        self.world.diags.push(diagnostic);
     }
 
     // ─── Nodes ──────────────────────────────────────────────────────────────

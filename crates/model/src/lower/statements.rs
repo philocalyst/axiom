@@ -38,12 +38,11 @@ pub(super) enum Within {
     Opening,
 }
 
-/// A dated statement being lowered, and all its lowering needs: the book it goes into, where it is written, what it
-/// says, the codes the journal has so far, and where what is wrong with it is said. It is the context of that one
-/// pass, made for the statement and dropped with it, so every function of the pass takes it first.
+/// A dated statement being lowered, and all its lowering needs: the book it goes into (which says what is wrong),
+/// where it is written, what it says and the codes the journal has so far. It is the context of that one pass, made
+/// for the statement and dropped with it, so every function of the pass takes it first.
 pub(super) struct Stated<'c, 'a, 's> {
     pub world: &'c mut World<'s>,
-    pub diags: &'c mut Vec<Diagnostic>,
     pub site: &'c Site<'a, 's>,
     pub statement: &'c ast::Statement<'s>,
     pub loc: Loc,
@@ -63,7 +62,7 @@ impl<'a, 's> Stated<'_, 'a, 's> {
     /// A statement the Book has no lowering for, said.
     pub fn unsupported(&mut self, message: &str) {
         let said = Diagnostic::error("statement-lowering", message);
-        self.diags.push(said.label(self.loc, "this record is not included in the Book yet"));
+        self.world.diags.push(said.label(self.loc, "this record is not included in the Book yet"));
     }
 
     /// Whether lines are indented under the statement.
@@ -89,7 +88,7 @@ pub(super) fn lower_split(at: &mut Stated<'_, '_, '_>, numerator: Dec, denominat
         at.unsupported("a split needs a commodity subject");
         return;
     };
-    let Some(unit) = at.world.commodity_of(Word::of(at.file(), unit.0)).or_report(at.diags) else {
+    let Some(unit) = at.world.commodity_of(Word::of(at.file(), unit.0)).or_report(at.world) else {
         return;
     };
     let Some(ratio) = numerator
@@ -98,7 +97,7 @@ pub(super) fn lower_split(at: &mut Stated<'_, '_, '_>, numerator: Dec, denominat
         .and_then(|(numerator, denominator)| numerator.checked_div(denominator))
         .filter(|ratio| *ratio > Ratio::ZERO)
     else {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("split-ratio", "a split ratio must be greater than zero")
                 .label(at.loc, "the written ratio cannot be represented"),
         );
@@ -114,26 +113,26 @@ pub(super) fn lower_filed(at: &mut Stated<'_, '_, '_>, year: i32) {
         at.unsupported("a return needs a system subject");
         return;
     };
-    let Some(system) = at.world.system(Word::of(file, system_name.0)).or_report(at.diags) else {
+    let Some(system) = at.world.system(Word::of(file, system_name.0)).or_report(at.world) else {
         return;
     };
     let fallback = at.world.book.systems[system].currency.unwrap_or(at.world.book.base);
-    let start = at.diags.len();
+    let start = at.world.diags.len();
     let mut lines = Vec::with_capacity(statement.body.legs.len());
     for line in &file[statement.body.legs] {
         let Quantity::Amount(ast::Amount::Literal(literal)) = line.amount else {
-            at.diags.push(
+            at.world.diags.push(
                 Diagnostic::error("filed-amount", "a filed tally needs a literal amount")
                     .label(line.loc, "write the amount as reported"),
             );
             continue;
         };
-        let Some(amount) = at.world.literal_amount(file, literal, Some(fallback)).or_report(at.diags) else {
+        let Some(amount) = at.world.literal_amount(file, literal, Some(fallback)).or_report(at.world) else {
             continue;
         };
         lines.push((at.world.book.names.intern(line.end.name.0), amount, line.loc));
     }
-    if at.diags.len() != start || lines.len() != statement.body.legs.len() {
+    if at.world.diags.len() != start || lines.len() != statement.body.legs.len() {
         return;
     }
     let filed = Filed {
@@ -163,25 +162,19 @@ enum StatementTarget {
 fn statement_target(at: &mut Stated<'_, '_, '_>) -> Option<StatementTarget> {
     let (home, file) = (at.home(), at.file());
     match at.statement.subject {
-        Subject::Name(name) => named_target(at.world, home, Word::of(file, name.0), at.statement.date, at.diags),
+        Subject::Name(name) => named_target(at.world, home, Word::of(file, name.0), at.statement.date),
         Subject::Code(code) => Some(StatementTarget::Code(at.world.book.names.intern(code.name()))),
         Subject::Purpose(name) => {
-            at.world.purpose(home, Word::of(file, name.0)).map(|_| StatementTarget::Purpose).or_report(at.diags)
+            at.world.purpose(home, Word::of(file, name.0)).map(|_| StatementTarget::Purpose).or_report(at.world)
         }
         Subject::Unit(name) => {
-            at.world.commodity_of(Word::of(file, name.0)).map(StatementTarget::Unit).or_report(at.diags)
+            at.world.commodity_of(Word::of(file, name.0)).map(StatementTarget::Unit).or_report(at.world)
         }
     }
 }
 
 /// What a plain name is: an asset, a loan's debt, a party, or a place.
-fn named_target(
-    world: &World<'_>,
-    home: Home,
-    word: Word<'_>,
-    day: Day,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<StatementTarget> {
+fn named_target(world: &mut World<'_>, home: Home, word: Word<'_>, day: Day) -> Option<StatementTarget> {
     if let Some(asset) = world.book.asset(word.text) {
         return Some(StatementTarget::Asset(asset));
     }
@@ -192,7 +185,7 @@ fn named_target(
         // resolves as its ordinary flow endpoint.
         return Some(StatementTarget::Place(loan.debt));
     }
-    let end = world.end_on(home, word, Some(day)).or_report(diags)?;
+    let end = world.end_on(home, word, Some(day)).or_report(world)?;
     Some(match (end.entity, world.book.places[end.place].role) {
         (Some(entity), _) => StatementTarget::Entity(entity),
         (None, Role::Asset(asset)) => StatementTarget::Asset(asset),
@@ -250,10 +243,10 @@ fn assert_value<'s>(at: &mut Stated<'_, '_, 's>, value: ast::Amount<'s>, asserte
 /// `^code = 12 USD`: a reading of a named measure.
 fn lower_reading<'s>(at: &mut Stated<'_, '_, 's>, value: ast::Amount<'s>, code: Sym) {
     let ast::Amount::Literal(literal) = value else {
-        unsupported_computed_value(at.loc, "a named measure reading", at.diags);
+        unsupported_computed_value(at.loc, "a named measure reading", &mut at.world.diags);
         return;
     };
-    let Some(amount) = at.world.literal_amount(at.file(), literal, Some(at.world.book.base)).or_report(at.diags) else {
+    let Some(amount) = at.world.literal_amount(at.file(), literal, Some(at.world.book.base)).or_report(at.world) else {
         return;
     };
     at.world.book.readings.push(Reading { day: at.statement.date, code, amount, loc: at.loc });
@@ -262,21 +255,21 @@ fn lower_reading<'s>(at: &mut Stated<'_, '_, 's>, value: ast::Amount<'s>, code: 
 /// `VTI = 285.70 USD`: what one of a commodity was worth in another.
 fn lower_quote<'s>(at: &mut Stated<'_, '_, 's>, value: ast::Amount<'s>, unit: Id<Commodity>) {
     let ast::Amount::Literal(literal) = value else {
-        unsupported_computed_value(at.loc, "a price quote", at.diags);
+        unsupported_computed_value(at.loc, "a price quote", &mut at.world.diags);
         return;
     };
     let Some(quote_name) = literal.unit() else {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("price-unit", "a price needs a quoted commodity")
                 .label(at.loc, "write `VTI = 285.70 USD`"),
         );
         return;
     };
-    let Some(quote) = at.world.commodity_of(Word::of(at.file(), quote_name.0)).or_report(at.diags) else {
+    let Some(quote) = at.world.commodity_of(Word::of(at.file(), quote_name.0)).or_report(at.world) else {
         return;
     };
     let Some(rate) = literal.num().to_ratio().filter(|rate| *rate > Ratio::ZERO) else {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("price-zero", "a price must be greater than zero")
                 .label(at.file().loc(literal.0), "this price is not positive"),
         );
@@ -298,20 +291,12 @@ fn assertion_amount<'s>(
     let (home, file) = (at.home(), at.file());
     match value {
         ast::Amount::Literal(literal) => {
-            at.world.literal_amount(file, literal, Some(fallback)).or_report(at.diags).map(|amount| (amount, None))
+            at.world.literal_amount(file, literal, Some(fallback)).or_report(at.world).map(|amount| (amount, None))
         }
         ast::Amount::Computed(root) => {
             let name = at.world.book.names.intern("assertion");
-            let (program, roots) = crate::laws::compile_template(
-                at.world,
-                at.diags,
-                file,
-                home,
-                subject,
-                name,
-                &[],
-                &[(root, Ty::AMOUNT)],
-            )?;
+            let (program, roots) =
+                crate::laws::compile_template(at.world, file, home, subject, name, &[], &[(root, Ty::AMOUNT)])?;
             let [root] = roots.as_ref() else {
                 return None;
             };
@@ -340,7 +325,7 @@ fn assertion_gap(at: &mut Stated<'_, '_, '_>) -> Option<Gap> {
     for clause in &file[at.statement.tail] {
         match clause.kind {
             ClauseKind::Via(name) => {
-                let end = at.world.end_on(home, Word::of(file, name.0), Some(at.statement.date)).or_report(at.diags)?;
+                let end = at.world.end_on(home, Word::of(file, name.0), Some(at.statement.date)).or_report(at.world)?;
                 gap = Gap::Via { place: end.place, loc: clause.at };
             }
             ClauseKind::Waive(waive) => {
@@ -370,13 +355,12 @@ pub(super) fn lower_measure<'s>(at: &mut Stated<'_, '_, 's>, literal: ast::Liter
             return;
         }
     };
-    let Some(quantity) = at.world.literal_amount(at.file(), literal, None).or_report(at.diags) else {
+    let Some(quantity) = at.world.literal_amount(at.file(), literal, None).or_report(at.world) else {
         return;
     };
-    let diagnostic_start = at.diags.len();
-    let (codes, tail) =
-        read_tail(at.world, at.home(), at.file(), Line::Measure(at.code_index), at.statement.tail, at.diags);
-    if at.diags.len() != diagnostic_start {
+    let diagnostic_start = at.world.diags.len();
+    let (codes, tail) = read_tail(at.world, at.home(), at.file(), Line::Measure(at.code_index), at.statement.tail);
+    if at.world.diags.len() != diagnostic_start {
         return;
     }
     at.world.book.measures.push(Measure {
@@ -429,11 +413,11 @@ pub(super) fn lower_claim_change<'s>(at: &mut Stated<'_, '_, 's>, code: ast::Cod
 /// The transaction a write-off is of, when it made a claim and is older than the write-off.
 fn claim_target<'s>(at: &mut Stated<'_, '_, 's>, code: ast::Code<'s>) -> Option<Id<Txn>> {
     let reference_loc = at.file().loc(code.name());
-    let target = at.code_index.resolve(at.world, code, reference_loc, CodeUse::ClaimWaiver, at.diags)?;
+    let target = at.code_index.resolve(at.world, code, reference_loc, CodeUse::ClaimWaiver)?;
     let (book, source) = (&at.world.book, &at.world.book.txns[target]);
     let flows = || source.flows.ids().map(|flow| &book.flows[flow]);
     if !flows().any(|flow| book.makes_claim(flow)) {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("claim-writeoff-target", "this transaction did not create an open claim")
                 .label(reference_loc, "the referenced transaction has no claim flow")
                 .context(source.loc, "the transaction identified by this code is here")
@@ -442,7 +426,7 @@ fn claim_target<'s>(at: &mut Stated<'_, '_, 's>, code: ast::Code<'s>) -> Option<
         return None;
     }
     if at.statement.date < source.day {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("claim-writeoff-date", "a claim cannot be waived before it exists")
                 .label(at.loc, "this date precedes the claim transaction"),
         );
@@ -478,7 +462,7 @@ pub(super) fn lower_contract_change(at: &mut Stated<'_, '_, '_>) {
         return;
     };
     let Some(days) = Days::new(statement.date, tail.last) else {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("waiver-span", "a waiver ends before it begins")
                 .label(loc, "the `until` day must be on or after this day"),
         );
@@ -487,7 +471,7 @@ pub(super) fn lower_contract_change(at: &mut Stated<'_, '_, '_>) {
     let code = tail.code.map(|code| at.world.book.names.intern(code.name()));
     let change = BookChange { days, description: tail.description, code, loc };
     if !waive_contract(&mut at.world.book.contracts[contract_id], change) {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("waiver-without-schedule", "this contract has no schedule to waive")
                 .label(loc, "there is no regular or standing occurrence here"),
         );
@@ -506,7 +490,7 @@ pub(super) fn lower_rate_change<'s>(at: &mut Stated<'_, '_, 's>, line: &ast::Pro
     let Subject::Name(name) = at.statement.subject else { return };
     let Some(contract_id) = at.world.book.contract(name.0) else { return };
     if at.world.book.contracts[contract_id].loan.is_none() {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("contract-rate-change", format!("`{}` is no loan, so it has no rate to change", name.0))
                 .label(at.loc, "only a contract with a `loan` line has a rate")
                 .help("write the rate on the loan: `loan AMOUNT on DATE at 6.25% over SPAN`"),
@@ -514,7 +498,9 @@ pub(super) fn lower_rate_change<'s>(at: &mut Stated<'_, '_, 's>, line: &ast::Pro
         return;
     }
     let mut args = Args::shaped(at.file(), line, "contract-loan-rate", "now at PERCENT");
-    let Some(rate) = args.rate().and_then(|rate| args.done().map(|()| rate)).or_report(at.diags) else { return };
+    let Some(rate) = args.rate().and_then(|rate| args.done().map(|()| rate)).or_report(at.world) else {
+        return;
+    };
     at.world.book.contracts[contract_id].rates.push(RateChange { day: at.statement.date, rate, loc: at.loc });
 }
 
@@ -528,7 +514,7 @@ fn waiver_tail<'s>(at: &mut Stated<'_, '_, 's>) -> Option<WaiverTail<'s>> {
             ClauseKind::Until(until) => tail.last = until,
             ClauseKind::Code(written) => {
                 if let Some(first) = first_code {
-                    at.diags.push(problem::twice("waiver code", clause.at, first));
+                    at.world.diags.push(problem::twice("waiver code", clause.at, first));
                     return None;
                 }
                 (tail.code, first_code) = (Some(written), Some(clause.at));
@@ -567,7 +553,7 @@ pub(super) fn lower_end(at: &mut Stated<'_, '_, '_>) {
     let Some(target) = end_target(at, name) else {
         return;
     };
-    let (codes, tail) = read_tail(at.world, at.home(), at.file(), Line::Ending, statement.tail, at.diags);
+    let (codes, tail) = read_tail(at.world, at.home(), at.file(), Line::Ending, statement.tail);
     let event = EndEvent { day: statement.date, target, codes, description: tail.description, loc };
     close(at.world, target, statement.date, loc);
     at.world.book.endings.push(event);
@@ -577,7 +563,7 @@ fn end_target<'s>(at: &mut Stated<'_, '_, 's>, name: ast::Name<'s>) -> Option<En
     let sym = at.world.book.names.intern(name.0);
     if let Some(contract_id) = at.world.book.lookup.contracts.get(&sym).copied() {
         if at.statement.date < at.world.book.contracts[contract_id].days.first() {
-            at.diags.push(
+            at.world.diags.push(
                 Diagnostic::error("end-before-contract", "a contract cannot end before it begins")
                     .label(at.loc, "this date precedes the contract's first day"),
             );
@@ -588,7 +574,7 @@ fn end_target<'s>(at: &mut Stated<'_, '_, 's>, name: ast::Name<'s>) -> Option<En
     if let Some(asset) = at.world.book.asset(name.0) {
         return Some(EndTarget::Asset(asset));
     }
-    let end = at.world.end_on(at.home(), Word::of(at.file(), name.0), Some(at.statement.date)).or_report(at.diags)?;
+    let end = at.world.end_on(at.home(), Word::of(at.file(), name.0), Some(at.statement.date)).or_report(at.world)?;
     Some(match at.world.book.places[end.place].role {
         Role::Asset(asset) => EndTarget::Asset(asset),
         _ => EndTarget::Place(end.place),
@@ -633,7 +619,7 @@ pub(super) fn lower_basis<'s>(at: &mut Stated<'_, '_, 's>, written: ast::Amount<
     }
     push_tail_roots(file, statement.tail, &mut exprs);
     let name = at.world.book.names.intern("journal");
-    let compiled = super::compile_roots(at.world, file, at.home(), Ty::Asset, name, &[], &exprs, at.diags);
+    let compiled = super::compile_roots(at.world, file, at.home(), Ty::Asset, name, &[], &exprs);
     let Some((program, roots)) = compiled else {
         return;
     };
@@ -641,10 +627,10 @@ pub(super) fn lower_basis<'s>(at: &mut Stated<'_, '_, 's>, written: ast::Amount<
     let txn = Id::new(staged.book.txns.len() as u32);
     let cx =
         FlowCx { file, home: at.site.home, day: statement.date, txn, loc, roots: &roots, code_index: at.code_index };
-    let diagnostic_start = at.diags.len();
-    let (header_codes, mut tail) = cx.lower_tail(&mut staged, statement.tail, at.diags);
+    let diagnostic_start = staged.diags.len();
+    let (header_codes, mut tail) = cx.lower_tail(&mut staged, statement.tail);
     tail.detail.since = since.or(tail.detail.since);
-    let basis_root = match basis_cost(&staged, file, written, (&program, &roots), at.diags) {
+    let basis_root = match basis_cost(&mut staged, file, written, (&program, &roots)) {
         None => return,
         Some(Cost::Stated(qty)) => {
             tail.detail.basis = Some(qty);
@@ -655,14 +641,14 @@ pub(super) fn lower_basis<'s>(at: &mut Stated<'_, '_, 's>, written: ast::Amount<
     if !tail.valid {
         return;
     }
-    let Some(flow) = arrival_flow(&mut staged, &cx, asset, header_codes, tail, at.diags) else {
+    let Some(flow) = arrival_flow(&mut staged, &cx, asset, header_codes, tail) else {
         return;
     };
     let waive = flow.waive;
     staged.book.flows.push(flow);
     let mut flow_roots = Vec::new();
     push_flow_expressions(&mut flow_roots, 0, None, None, basis_root);
-    if at.diags.len() != diagnostic_start {
+    if staged.diags.len() != diagnostic_start {
         return;
     }
     let program_id = keep_program(&mut staged, program, flow_roots, None);
@@ -683,7 +669,7 @@ fn basis_asset(at: &mut Stated<'_, '_, '_>) -> Option<Id<Asset>> {
         return None;
     };
     let Some(asset) = at.world.book.asset(name.0) else {
-        at.diags.push(
+        at.world.diags.push(
             Diagnostic::error("basis-asset", "a basis statement must name an asset")
                 .label(at.file().loc(name.0), "this name is not a declared asset"),
         );
@@ -698,17 +684,16 @@ fn basis_asset(at: &mut Stated<'_, '_, '_>) -> Option<Id<Asset>> {
 
 /// What the basis amount is: stated, or computed by one of the program's roots. It must be in the base currency.
 fn basis_cost<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     file: &ast::File<'s>,
     written: ast::Amount<'s>,
     (program, roots): (&Program, &Map<ast::ExprId, NodeId>),
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Cost> {
     match written {
         ast::Amount::Literal(literal) => {
-            let amount = world.literal_amount(file, literal, None).or_report(diags)?;
+            let amount = world.literal_amount(file, literal, None).or_report(world)?;
             if amount.unit != world.book.base {
-                diags.push(
+                world.diags.push(
                     Diagnostic::error("basis-unit", "asset basis must be in the base currency")
                         .label(file.loc(literal.0), "convert this amount to the book's base unit"),
                 );
@@ -718,7 +703,7 @@ fn basis_cost<'s>(
         }
         ast::Amount::Computed(expr) => {
             let Some(&root) = roots.get(&expr) else {
-                diags.push(
+                world.diags.push(
                     Diagnostic::error("basis-expression", "the basis expression was not compiled")
                         .label(file.exprs[expr].loc, "the expression is not available here"),
                 );
@@ -727,7 +712,7 @@ fn basis_cost<'s>(
             if let Some(Ty::Amount(Dim::Of(unit))) = program.nodes[root].typed_ty()
                 && unit != world.book.base
             {
-                diags.push(
+                world.diags.push(
                     Diagnostic::error("basis-unit", "asset basis must be in the base currency")
                         .label(file.exprs[expr].loc, "this expression has another unit"),
                 );
@@ -745,13 +730,12 @@ fn arrival_flow<'s>(
     asset: Id<Asset>,
     header_codes: Run<Sym>,
     tail: Tail,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Flow> {
     let asset = &staged.book.assets[asset];
     let (place, owner, unit) = (asset.place, asset.owner, asset.unit);
     let unknown = staged.book.roots.unknown;
     let Some(unknown_place) = staged.book.entities[unknown].place else {
-        diags.push(
+        staged.diags.push(
             Diagnostic::error("basis-source", "the unknown party has no flow endpoint")
                 .label(cx.loc, "cannot record this asset's arrival"),
         );
@@ -764,7 +748,7 @@ fn arrival_flow<'s>(
     let shape =
         Shape { ends: Ends { from, to }, out: quantity, arrive: quantity, infer: Infer::Known, mode: Mode::Actual };
     let codes = Codes { header: header_codes, local: empty_codes(staged) };
-    let mut flow = make_resolved_flow(staged, cx, shape, codes, tail, cx.loc, diags)?;
+    let mut flow = make_resolved_flow(staged, cx, shape, codes, tail, cx.loc)?;
     flow.owner = owner;
     Some(flow)
 }

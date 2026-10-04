@@ -203,12 +203,7 @@ impl<'s> Spelling<'_, '_, 's> {
 /// Places the words before the name of every spelled account into the slots they fill, and says them as a role line
 /// would. `filled` is every slot a line has said so far, and is told every slot a word fills, so that none is called
 /// missing for it.
-pub(crate) fn place_words<'a, 's>(
-    world: &mut World<'s>,
-    collected: &Collected<'a, 's>,
-    filled: &mut Filled,
-    diags: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn place_words<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, filled: &mut Filled) {
     let mut done = Set::default();
     for written in collected.decls_of(DeclKind::Account) {
         let path = written.node.name.0;
@@ -220,44 +215,33 @@ pub(crate) fn place_words<'a, 's>(
         let scope = world.scopes.of(written.home());
         let Some(words) = leading(&book.lookup.entities, &book.entities, &book.names, scope, path) else { continue };
         let free = free_slots(world, written, place, filled);
-        place_one(world, &Spelling { written, place, words, free }, filled, diags);
+        place_one(world, &Spelling { written, place, words, free }, filled);
     }
 }
 
-fn place_one<'s>(
-    world: &mut World<'s>,
-    spelling: &Spelling<'_, '_, 's>,
-    filled: &mut Filled,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn place_one<'s>(world: &mut World<'s>, spelling: &Spelling<'_, '_, 's>, filled: &mut Filled) {
     let (candidates, single) = spelling.candidates(&world.book);
     match placement::place(&candidates, single) {
-        Ok(placement) => fill_placed(world, spelling, placement.as_slice(), filled, diags),
+        Ok(placement) => fill_placed(world, spelling, placement.as_slice(), filled),
         Err(Unplaceable::NoCandidate(word)) => {
-            diags.push(spelling.fits_no_slot(&world.book, usize::from(word)));
+            world.diags.push(spelling.fits_no_slot(&world.book, usize::from(word)));
             attempt(filled, spelling, u16::MAX);
         }
         Err(Unplaceable::NoPlacement) => {
-            diags.push(spelling.too_many_words(&world.book));
+            world.diags.push(spelling.too_many_words(&world.book));
             attempt(filled, spelling, u16::MAX);
         }
     }
 }
 
 /// Says what the words that were placed fill, and what the words that could go two ways are.
-fn fill_placed<'s>(
-    world: &mut World<'s>,
-    spelling: &Spelling<'_, '_, 's>,
-    placed: &[Placed],
-    filled: &mut Filled,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn fill_placed<'s>(world: &mut World<'s>, spelling: &Spelling<'_, '_, 's>, placed: &[Placed], filled: &mut Filled) {
     let mut fills: Vec<Vec<usize>> = vec![Vec::new(); spelling.free.len()];
     for (word, placed) in placed.iter().enumerate() {
         match *placed {
             Placed::Forced(slot) => fills[usize::from(slot)].push(word),
             Placed::Ambiguous(set) => {
-                diags.push(spelling.ambiguous(&world.book, word, set));
+                world.diags.push(spelling.ambiguous(&world.book, word, set));
                 attempt(filled, spelling, set);
             }
         }

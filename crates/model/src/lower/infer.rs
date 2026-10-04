@@ -38,18 +38,17 @@ impl Evidence {
 /// (rewritten by the account kind that takes it as another). None when nothing classifies it; an error, said, when
 /// the two ends say unrelated things at one rank.
 pub(super) fn classify(
-    world: &World<'_>,
+    world: &mut World<'_>,
     from: End,
     to: End,
     written: Option<Purposed>,
     loc: Loc,
-    diags: &mut Vec<Diagnostic>,
 ) -> Result<Option<Purposed>, ()> {
     if written.is_some() {
         return Ok(written);
     }
     let said = match (said_at(world, from, FlowSide::Out), said_at(world, to, FlowSide::Arrive)) {
-        (Some(source), Some(target)) => Some(outrank(world, source, target, loc, diags)?),
+        (Some(source), Some(target)) => Some(outrank(world, source, target, loc)?),
         (source, target) => source.or(target),
     };
     Ok(said.map(|said| taken(world, to.place, said).unwrap_or(said).purposed))
@@ -57,20 +56,14 @@ pub(super) fn classify(
 
 /// The better ranked of what the two ends say; the source's when they are of one rank and related, where the
 /// target's purpose is the same or a refinement of it.
-fn outrank(
-    world: &World<'_>,
-    source: Evidence,
-    target: Evidence,
-    loc: Loc,
-    diags: &mut Vec<Diagnostic>,
-) -> Result<Evidence, ()> {
+fn outrank(world: &mut World<'_>, source: Evidence, target: Evidence, loc: Loc) -> Result<Evidence, ()> {
     if source.rank() != target.rank() {
         return Ok(if source.rank() < target.rank() { source } else { target });
     }
     if related(world, source.purposed.purpose, target.purposed.purpose) {
         return Ok(source);
     }
-    diags.push(purpose_disagreement(world, loc, source, target));
+    world.diags.push(purpose_disagreement(world, loc, source, target));
     Err(())
 }
 

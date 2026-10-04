@@ -30,13 +30,12 @@ use crate::split::Sign;
 /// A contract's `also LINE [when E]`, compiled as the law it abbreviates.
 pub(crate) fn also<'a, 's>(
     world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
     site: &Placement<'a, 's>,
     also: &ast::Also<'s>,
     positions: Positions<'a>,
 ) -> Option<Law> {
     let name = world.book.names.intern("also");
-    let mut compiler = Compiler::placed(world, diags, site, name, When::of(&ast::Trigger::Flow));
+    let mut compiler = Compiler::placed(world, site, name, When::of(&ast::Trigger::Flow));
     compiler.positions = positions;
     // Both are read before either failure stops the line, so both are said.
     let when = also.when.map(|root| compiler.condition(root));
@@ -91,20 +90,20 @@ pub(crate) fn share(world: &mut World<'_>, owner: Owner, home: Home, share: &Sha
 impl<'s> Compiler<'_, '_, 's> {
     /// `derive ITEM | FLOW`, or nothing after what is wrong with it has been said.
     pub(super) fn derive(&mut self, line: &ast::AlsoLine<'s>, loc: Loc) -> Option<Effect> {
-        let said = read_line(self.world, self.home, self.file, line, loc, self.positions, self.diags);
+        let said = read_line(self.world, self.home, self.file, line, loc, self.positions);
         let Some(said) = said else {
             self.failed = true;
             return None;
         };
         let amount = self.derived_amount(said.amount)?;
-        let errors = self.diags.len();
-        let (codes, tail) = read_tail(self.world, self.home, self.file, Line::Also, said.clauses, self.diags);
+        let errors = self.world.diags.len();
+        let (codes, tail) = read_tail(self.world, self.home, self.file, Line::Also, said.clauses);
         let detail = (tail.detail != Detail::NONE).then(|| self.world.book.details.push(tail.detail));
         let select = match said.selectors {
-            Some(selectors) => lower_selectors(self.world, self.home, self.file, selectors, self.diags),
+            Some(selectors) => lower_selectors(self.world, self.home, self.file, selectors),
             None => no_selectors(self.world),
         };
-        if self.diags.len() != errors {
+        if self.world.diags.len() != errors {
             self.failed = true;
             return None;
         }
@@ -132,7 +131,7 @@ impl<'s> Compiler<'_, '_, 's> {
         match amount {
             ast::Amount::Computed(root) => self.expression(root, Ty::AMOUNT),
             ast::Amount::Literal(literal) => {
-                let read = self.world.literal_amount(self.file, literal, None).or_report(self.diags);
+                let read = self.world.literal_amount(self.file, literal, None).or_report(self.world);
                 let Some(amount) = read else {
                     self.failed = true;
                     return None;

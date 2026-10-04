@@ -521,15 +521,15 @@ type Seen = Map<(Holder, Sym, Day), Loc>;
 /// Resolves the properties written under things, and what each says of the slot it fills, into the facts. A kind's
 /// lines are its things' defaults: they are said of the kind, and the facts look up the kind chain when a thing says
 /// nothing.
-pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
-    native_builtins(world, collected, diags);
+pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>) {
+    native_builtins(world, collected);
     let mut seen = Seen::default();
     let mut filled = Filled::default();
-    stage_declared_values(world, collected, &mut seen, &mut filled, diags);
-    spelled::place_words(world, collected, &mut filled, diags);
-    let changes = property_changes(world, collected, &mut seen, diags);
+    stage_declared_values(world, collected, &mut seen, &mut filled);
+    spelled::place_words(world, collected, &mut filled);
+    let changes = property_changes(world, collected, &mut seen);
     paint_changes(world, changes);
-    missing_roles(world, collected, &filled, diags);
+    missing_roles(world, collected, &filled);
 }
 
 /// The values the property lines of declarations give, from the beginning of time. A slot of several is said once,
@@ -539,7 +539,6 @@ fn stage_declared_values<'a, 's>(
     collected: &Collected<'a, 's>,
     seen: &mut Seen,
     filled: &mut Filled,
-    diags: &mut Vec<Diagnostic>,
 ) {
     let mut sets: Map<(Holder, SlotId), Vec<Datum>> = Map::default();
     for &written in &collected.decls {
@@ -554,7 +553,7 @@ fn stage_declared_values<'a, 's>(
                 continue;
             }
             let Some(has) = has_named(world, target.kind, line.name.0) else {
-                diags.push(unknown_native_property(world, target, line));
+                world.diags.push(unknown_native_property(world, target, line));
                 // A near miss of a slot's name is an attempt to fill it: the typo is said, and the slot not again.
                 filled.extend(near_slot(world, target.kind, line.name.0).map(|number| (target.holder, number)));
                 continue;
@@ -562,12 +561,12 @@ fn stage_declared_values<'a, 's>(
             // A line that is wrong is still an attempt to fill the slot: it is said, and the slot not again.
             filled.insert((target.holder, has.number));
             let at = fill::At { home: written.home(), file: written.file(), line };
-            let Some(filling) = fill::fill(world, &at, &has.slot).or_report(diags) else {
+            let Some(filling) = fill::fill(world, &at, &has.slot).or_report(world) else {
                 continue;
             };
             match filling.said(has.slot.mult) {
                 Said::One(datum) => {
-                    if note_once(world, seen, target.holder, has.name, Day::MIN, line.loc, diags) {
+                    if note_once(world, seen, target.holder, has.name, Day::MIN, line.loc) {
                         world.paint(target.holder, has.number, Days::ALWAYS, datum);
                     }
                 }
@@ -581,20 +580,12 @@ fn stage_declared_values<'a, 's>(
 }
 
 /// Whether a value is the first said of the slot on the day, and said, if not, to be the second.
-fn note_once(
-    world: &World<'_>,
-    seen: &mut Seen,
-    holder: Holder,
-    name: Sym,
-    day: Day,
-    loc: Loc,
-    diags: &mut Vec<Diagnostic>,
-) -> bool {
+fn note_once(world: &mut World<'_>, seen: &mut Seen, holder: Holder, name: Sym, day: Day, loc: Loc) -> bool {
     let Some(first) = seen.get(&(holder, name, day)).copied() else {
         seen.insert((holder, name, day), loc);
         return true;
     };
-    diags.push(problem::filled_twice(world.book.name(name), loc, first));
+    world.diags.push(problem::filled_twice(world.book.name(name), loc, first));
     false
 }
 
@@ -603,7 +594,6 @@ fn property_changes<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
     seen: &mut Seen,
-    diags: &mut Vec<Diagnostic>,
 ) -> Vec<PropertyChange> {
     let mut changes = Vec::new();
     for written in &collected.statements {
@@ -613,7 +603,7 @@ fn property_changes<'a, 's>(
         if is_builtin_line(line.name.0) || says_a_loans_rate(collected, written.node.subject, line) {
             continue;
         }
-        if let Some(change) = property_change(world, written, line, changes.len(), seen, diags) {
+        if let Some(change) = property_change(world, written, line, changes.len(), seen) {
             changes.push(change);
         }
     }
@@ -634,26 +624,24 @@ fn property_change<'a, 's>(
     line: &Line<'s>,
     order: usize,
     seen: &mut Seen,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<PropertyChange> {
     let (file, statement) = (written.file(), written.node);
     let property_name = world.book.names.intern(line.name.0);
     // The statement pass owns unresolved subjects. This pass only consumes a custom property after its target
     // kind is known.
-    let target =
-        native_statement_target(world, written.home(), statement.subject, property_name, written.item.loc, diags)?;
+    let target = native_statement_target(world, written.home(), statement.subject, property_name, written.item.loc)?;
     let Some(has) = has_named(world, target.kind, line.name.0) else {
-        diags.push(unknown_native_property(world, target, line));
+        world.diags.push(unknown_native_property(world, target, line));
         return None;
     };
     let at = fill::At { home: written.home(), file, line };
-    let filling = fill::fill(world, &at, &has.slot).or_report(diags)?;
+    let filling = fill::fill(world, &at, &has.slot).or_report(world)?;
     let until = file[statement.tail].iter().find_map(|clause| match clause.kind {
         ClauseKind::Until(day) => Some(day),
         _ => None,
     });
     let Some(days) = Days::new(statement.date, until.unwrap_or(Day::MAX)) else {
-        diags.push(
+        world.diags.push(
             Diagnostic::error("property-until-order", "this property change ends before it begins")
                 .label(line.loc, "`until` is earlier than the change")
                 .help("move the end date to the change date or later"),
@@ -662,7 +650,7 @@ fn property_change<'a, 's>(
     };
     let key = (target.holder, has.name, statement.date);
     if let Some(first) = seen.get(&key).copied() {
-        diags.push(problem::twice("property change", line.loc, first));
+        world.diags.push(problem::twice("property change", line.loc, first));
         return None;
     }
     seen.insert(key, line.loc);
@@ -685,7 +673,7 @@ fn paint_changes(world: &mut World<'_>, mut changes: Vec<PropertyChange>) {
 /// The built-in properties of everything declared: what a kind says it says of its things, and a thing says its own.
 /// Only the first declaration of a thing says them. Kinds are read before the things of their sort, and the sorts in
 /// the order their lines need.
-fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>) {
     let mut first = Set::default();
     let mut work: Vec<_> = collected
         .decls
@@ -704,10 +692,10 @@ fn native_builtins<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>,
     });
     let mut pending = Pending::default();
     for (under, written) in work {
-        read_builtin_lines(world, &mut pending, written, under, diags);
+        read_builtin_lines(world, &mut pending, written, under);
     }
-    diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
-    native_system_currencies(world, collected, diags);
+    diagnose_asset_cycles(&mut world.book.assets, &world.book.names, &mut world.diags);
+    native_system_currencies(world, collected);
     pending.say(world);
 }
 
@@ -717,31 +705,30 @@ fn read_builtin_lines<'a, 's>(
     pending: &mut Pending,
     written: Written<'a, 's, Decl<'s>>,
     under: NativeTarget,
-    diags: &mut Vec<Diagnostic>,
 ) {
     let at = Lines::from_native(written);
     let own = Target::of(under.sort);
     let targets: &[Target] = if matches!(under.holder, Holder::Kind(_)) { &[Target::Kind, own] } else { &[own] };
     for line in at.lines {
         if line.name.0 == "owner" && !matches!((under.holder, under.sort), (Holder::Kind(_), Sort::Place(_))) {
-            owner_line(world, under, line, diags);
+            owner_line(world, under, line);
             continue;
         }
         if !BUILTINS.iter().any(|(name, _, _)| *name == line.name.0) {
             continue;
         }
         if targets.contains(&Target::Kind) && targets.contains(&Target::Asset) && line.name.0 == "part" {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("kind-property-target", "`part` is specific to an asset")
                     .label(line.loc, "write this under an `asset`, not its `kind`"),
             );
             continue;
         }
         if line.name.0 == "purpose" {
-            diags.extend(purpose_of_its_own(world, &at, under, line));
+            world.diags.extend(purpose_of_its_own(world, &at, under, line));
         }
         if let Err(problem) = read_line(world, pending, &at, line, under, targets) {
-            diags.push(problem);
+            world.diags.push(problem);
         }
     }
 }
@@ -777,11 +764,11 @@ fn purpose_of_its_own(
 
 /// An `owner` line under anything but a kind of account: an entity, an account or an asset has its owners read where it is
 /// declared, and an account's are held to the kinds its kind says may own it. It is no property of the rest.
-fn owner_line(world: &World<'_>, under: NativeTarget, line: &Line<'_>, diags: &mut Vec<Diagnostic>) {
+fn owner_line(world: &mut World<'_>, under: NativeTarget, line: &Line<'_>) {
     match under.holder {
-        Holder::Place(place) => diags.extend(owners_that_may_not(world, place, line)),
+        Holder::Place(place) => world.diags.extend(owners_that_may_not(world, place, line)),
         Holder::Entity(_) | Holder::Asset(_) => {}
-        _ => diags.push(
+        _ => world.diags.push(
             Diagnostic::error("unknown-property", "`owner` is not a property of this kind")
                 .label(line.loc, "owner is set on an entity, account, or asset"),
         ),
@@ -858,7 +845,7 @@ fn diagnose_asset_cycles(
     }
 }
 
-fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
+fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>) {
     let mut seen: Map<Id<System>, Loc> = Map::default();
     for written in &collected.settings {
         let (Home::System(system), Setting::Currency(unit)) = (written.home(), *written.node) else {
@@ -866,12 +853,12 @@ fn native_system_currencies<'s>(world: &mut World<'s>, collected: &Collected<'_,
         };
         let at = written.item.loc;
         if let Some(first) = seen.insert(system, at) {
-            diags.push(problem::twice("currency", at, first));
+            world.diags.push(problem::twice("currency", at, first));
             continue;
         }
         match world.commodity_of(Word::of(written.file(), unit.0)) {
             Ok(currency) => world.book.systems[system].currency = Some(currency),
-            Err(problem) => diags.push(problem),
+            Err(problem) => world.diags.push(problem),
         }
     }
 }
@@ -888,7 +875,7 @@ pub(crate) fn place_entities(world: &mut World<'_>) {
 
 /// Completes each system's exchange-rate policy after params have been
 /// declared, so `rates param NAME` resolves with the system's visibility.
-pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>) {
     let mut seen: Map<Id<System>, Loc> = Map::default();
     for written in &collected.settings {
         let (Home::System(system), Setting::Rates(policy)) = (written.home(), *written.node) else {
@@ -896,7 +883,7 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
         };
         let at = written.item.loc;
         if let Some(first) = seen.insert(system, at) {
-            diags.push(problem::twice("rate policy", at, first));
+            world.diags.push(problem::twice("rate policy", at, first));
             continue;
         }
         let policy = match policy {
@@ -906,11 +893,11 @@ pub(crate) fn system_rates<'s>(world: &mut World<'s>, collected: &Collected<'_, 
                 match world.seek_param(written.home(), word) {
                     Ok(Some(param)) => Some(RatePolicy::Param(param)),
                     Ok(None) => {
-                        diags.push(world.missing_param(written.home(), word));
+                        world.diags.push(world.missing_param(written.home(), word));
                         None
                     }
                     Err(problem) => {
-                        diags.push(problem);
+                        world.diags.push(problem);
                         None
                     }
                 }
@@ -953,19 +940,18 @@ fn native_target(world: &World<'_>, written: Written<'_, '_, Decl<'_>>) -> Optio
 /// What a property statement is about: the one thing with a property of that name among those its subject may
 /// name, or the only thing it may name. None, said, when two have such a property.
 fn native_statement_target(
-    world: &World<'_>,
+    world: &mut World<'_>,
     home: Home,
     subject: Subject<'_>,
     name: Sym,
     loc: Loc,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<NativeTarget> {
     let candidates = subject_candidates(world, home, subject, loc);
     let property = world.book.name(name);
     let mut having = candidates.iter().copied().filter(|target| has_named(world, target.kind, property).is_some());
     if let Some(first) = having.next() {
         if having.next().is_some() {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("ambiguous-property-target", "this property applies to more than one named thing")
                     .label(loc, "qualify the target so the intended thing is clear"),
             );
@@ -1092,12 +1078,7 @@ fn unknown_native_property(world: &World<'_>, target: NativeTarget, line: &Line<
 }
 
 /// Required slots that nothing fills: not the thing, and not a kind above it.
-fn missing_roles<'a, 's>(
-    world: &World<'s>,
-    collected: &Collected<'a, 's>,
-    filled: &Filled,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn missing_roles<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, filled: &Filled) {
     let book = &world.book;
     for &written in &collected.decls {
         if matches!(written.node.what, DeclKind::Kind | DeclKind::Purpose) {
@@ -1110,7 +1091,7 @@ fn missing_roles<'a, 's>(
             if filled.contains(&(target.holder, number)) || book.kinds.lineage(target.kind).any(by_kind) {
                 continue;
             }
-            diags.push(missing_role(world, written, target.kind, slot));
+            world.diags.push(missing_role(world, written, target.kind, slot));
         }
     }
 }

@@ -74,12 +74,11 @@ pub(crate) enum Reach {
 
 /// What `name` is, as the object of a purpose, or why it is none.
 pub(super) fn resolve_object<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     name: ast::Name<'s>,
     reach: Reach,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Object> {
     if let Some(sym) = world.book.names.get(name.0)
         && let Some(&asset) = world.book.lookup.assets.get(&sym)
@@ -88,12 +87,12 @@ pub(super) fn resolve_object<'s>(
     }
     let word = Word::of(file, name.0);
     match reach {
-        Reach::Parties => world.entity(home, word).map(Object::Entity).or_report(diags),
+        Reach::Parties => world.entity(home, word).map(Object::Entity).or_report(world),
         Reach::Anywhere => {
             if let Ok(end) = world.end(home, word) {
                 return Some(end.entity.map_or(Object::Place(end.place), Object::Entity));
             }
-            world.place(word).map(Object::Place).or_report(diags)
+            world.place(word).map(Object::Place).or_report(world)
         }
     }
 }
@@ -130,26 +129,17 @@ pub(crate) fn read_tail<'s>(
     file: &ast::File<'s>,
     line: Line<'_, '_, 's>,
     clauses: ast::Many<ast::Clause<'s>>,
-    diags: &mut Vec<Diagnostic>,
 ) -> (Run<Sym>, Tail) {
     let start = world.book.codes.len();
     let mut tail = Tail::new();
     for clause in &file[clauses] {
-        line.read(world, home, file, clause, &mut tail, diags);
+        line.read(world, home, file, clause, &mut tail);
     }
     (Run::of(start..world.book.codes.len()), tail)
 }
 
 impl<'s> Line<'_, '_, 's> {
-    fn read(
-        self,
-        world: &mut World<'s>,
-        home: Home,
-        file: &ast::File<'s>,
-        clause: &ast::Clause<'s>,
-        tail: &mut Tail,
-        diags: &mut Vec<Diagnostic>,
-    ) {
+    fn read(self, world: &mut World<'s>, home: Home, file: &ast::File<'s>, clause: &ast::Clause<'s>, tail: &mut Tail) {
         use Line::{Also, Flow, Measure, Term};
         match (self, clause.kind) {
             (_, ClauseKind::Code(code)) => {
@@ -161,8 +151,8 @@ impl<'s> Line<'_, '_, 's> {
                 // An object that names nothing is said; a term line keeps the purpose without it, any other is wrong.
                 let reach = if matches!(self, Term) { Reach::Parties } else { Reach::Anywhere };
                 let purpose = world.purpose(home, Word::of(file, written.name.0));
-                let of = written.of.and_then(|name| resolve_object(world, home, file, name, reach, diags));
-                match purpose.or_report(diags) {
+                let of = written.of.and_then(|name| resolve_object(world, home, file, name, reach));
+                match purpose.or_report(world) {
                     Some(purpose) if of.is_some() || written.of.is_none() || matches!(self, Term) => {
                         tail.purpose = Some(Purposed { purpose, of, source: Provenance::Written })
                     }
@@ -174,7 +164,7 @@ impl<'s> Line<'_, '_, 's> {
                 tail.waive = Some(Waive { loc: waive.at, reason });
             }
             (Flow(_) | Also | Measure(_), ClauseKind::For(ast::For::Whom(name))) => {
-                match world.entity(home, Word::of(file, name.0)).or_report(diags) {
+                match world.entity(home, Word::of(file, name.0)).or_report(world) {
                     Some(entity) => tail.detail.hold = Some(entity),
                     None => tail.valid = false,
                 }
@@ -182,10 +172,10 @@ impl<'s> Line<'_, '_, 's> {
             (Flow(_) | Also, ClauseKind::Since(day)) => tail.detail.since = Some(day),
             (Flow(_) | Also, ClauseKind::Due(ast::Due::On(day))) => tail.detail.due = Some(day),
             (Flow(_) | Also, ClauseKind::Basis(ast::Amount::Literal(literal))) => {
-                self.read_basis(world, file, literal, tail, diags)
+                self.read_basis(world, file, literal, tail)
             }
             (Flow(&FlowCx { code_index, .. }) | Measure(code_index), ClauseKind::Against(code)) => {
-                tail.detail.against = code_index.resolve(world, code, clause.at, CodeUse::Against, diags);
+                tail.detail.against = code_index.resolve(world, code, clause.at, CodeUse::Against);
                 tail.valid &= tail.detail.against.is_some();
             }
             (Flow(_), ClauseKind::For(ast::For::Period(first, last))) => {
@@ -196,22 +186,22 @@ impl<'s> Line<'_, '_, 's> {
                 tail.recognized = Some(previous_period(cx.day, relative))
             }
             (Flow(cx), ClauseKind::Due(ast::Due::After(span))) => tail.detail.due = Some(cx.day + span),
-            (Flow(_), ClauseKind::Via(name)) => match world.entity(home, Word::of(file, name.0)).or_report(diags) {
+            (Flow(_), ClauseKind::Via(name)) => match world.entity(home, Word::of(file, name.0)).or_report(world) {
                 Some(entity) => tail.payee = Some(entity),
                 None => tail.valid = false,
             },
             (Flow(cx), ClauseKind::Basis(ast::Amount::Computed(expr))) => match cx.roots.get(&expr) {
                 Some(&root) => tail.basis_root = Some(root),
                 None => {
-                    diags.push(
+                    world.diags.push(
                         Diagnostic::error("computed-basis", "computed basis expression was not compiled for this flow")
                             .label(clause.at, "the basis expression is not available"),
                     );
                     tail.valid = false;
                 }
             },
-            (Flow(_), ClauseKind::Price(literal)) => read_price(world, file, literal, clause.at, tail, diags),
-            _ => self.refuse(clause, tail, diags),
+            (Flow(_), ClauseKind::Price(literal)) => read_price(world, file, literal, clause.at, tail),
+            _ => self.refuse(clause, tail, &mut world.diags),
         }
     }
 
@@ -251,25 +241,18 @@ impl<'s> Line<'_, '_, 's> {
 
     /// `basis 400 USD`: what was paid for it, in the base currency. A unit that names no commodity is said as a
     /// missing unit, and on an `also` line as unknown first.
-    fn read_basis(
-        self,
-        world: &World<'s>,
-        file: &ast::File<'s>,
-        literal: ast::Literal<'s>,
-        tail: &mut Tail,
-        diags: &mut Vec<Diagnostic>,
-    ) {
+    fn read_basis(self, world: &mut World<'s>, file: &ast::File<'s>, literal: ast::Literal<'s>, tail: &mut Tail) {
         let at = file.loc(literal.0);
         let unit = match literal.unit().map(|unit| world.commodity_of(Word::of(file, unit.0))) {
             Some(Ok(unit)) => Some(unit),
             Some(Err(unknown)) if matches!(self, Line::Also) => {
-                diags.push(unknown);
+                world.diags.push(unknown);
                 None
             }
             _ => None,
         };
         let Some(unit) = unit else {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("basis-unit", "basis needs an explicit base-currency unit")
                     .label(at, "write the unit"),
             );
@@ -279,14 +262,14 @@ impl<'s> Line<'_, '_, 's> {
         match world.amount(literal.num(), unit, at) {
             Ok(amount) if amount.unit == world.book.base => tail.detail.basis = Some(amount.qty),
             Ok(_) => {
-                diags.push(
+                world.diags.push(
                     Diagnostic::error("basis-unit", "basis must be stated in the base currency")
                         .label(at, "another unit is not the base currency"),
                 );
                 tail.valid = false;
             }
             Err(problem) => {
-                diags.push(problem);
+                world.diags.push(problem);
                 tail.valid = false;
             }
         }
@@ -295,28 +278,22 @@ impl<'s> Line<'_, '_, 's> {
 
 impl<'s> FlowCx<'_, 's> {
     /// Reads a flow's tail: the codes it adds to the pool, and what the rest of it says.
-    pub fn lower_tail(
-        &self,
-        world: &mut World<'s>,
-        clauses: ast::Many<ast::Clause<'s>>,
-        diags: &mut Vec<Diagnostic>,
-    ) -> (Run<Sym>, Tail) {
-        read_tail(world, self.home, self.file, Line::Flow(self), clauses, diags)
+    pub fn lower_tail(&self, world: &mut World<'s>, clauses: ast::Many<ast::Clause<'s>>) -> (Run<Sym>, Tail) {
+        read_tail(world, self.home, self.file, Line::Flow(self), clauses)
     }
 }
 
 /// `@ 285.70 USD`: what one of the commodity is worth in another.
 fn read_price<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     file: &ast::File<'s>,
     literal: ast::Literal<'s>,
     clause_at: Loc,
     tail: &mut Tail,
-    diags: &mut Vec<Diagnostic>,
 ) {
     let at = file.loc(literal.0);
     let Some(name) = literal.unit() else {
-        diags.push(
+        world.diags.push(
             Diagnostic::error("price-unit", "a price needs a quoted commodity").label(at, "write `@ 285.70 USD`"),
         );
         tail.valid = false;
@@ -328,7 +305,8 @@ fn read_price<'s>(
         return;
     };
     let Some(rate) = literal.num().to_ratio().filter(|rate| !rate.is_zero()) else {
-        diags
+        world
+            .diags
             .push(Diagnostic::error("price-zero", "a price must be greater than zero").label(at, "this price is zero"));
         tail.valid = false;
         return;

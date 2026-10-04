@@ -28,9 +28,11 @@ use crate::{kinds, purposes};
 /// Quanta are `i64`; eighteen decimals is as fine as one can count.
 pub(crate) const MAX_SCALE: u8 = 18;
 
-/// The book under construction, with the indexes needed by native lowerers.
+/// The book under construction, with the indexes needed by native lowerers, and what is wrong with the sources: every
+/// pass that builds the book says it here, in the order it is found.
 pub(crate) struct World<'s> {
     pub book: Book<'s>,
+    pub diags: Vec<Diagnostic>,
     pub scopes: Scopes,
     pub systems: SystemIndex<'s>,
     /// Everything said of the things so far: frozen into the book once it is all said.
@@ -44,6 +46,12 @@ pub(crate) struct World<'s> {
     /// The names of two words or more that the sources write as an end, until `settle_addresses` has worked out what
     /// each means.
     pub(crate) references: Vec<&'s str>,
+}
+
+impl AsMut<Vec<Diagnostic>> for World<'_> {
+    fn as_mut(&mut self) -> &mut Vec<Diagnostic> {
+        &mut self.diags
+    }
 }
 
 impl World<'_> {
@@ -443,8 +451,17 @@ pub(crate) fn declare<'a, 's>(
     let book = book(made, names, systems_tree, settings);
     let painter = Facts::builder(book.holders.len());
     let (tabs, contract_endpoints) = (Tabs::default(), Map::default());
-    let mut world =
-        World { book, scopes, systems, painter, tallies: Set::default(), tabs, contract_endpoints, references };
+    let mut world = World {
+        book,
+        diags: Vec::new(),
+        scopes,
+        systems,
+        painter,
+        tallies: Set::default(),
+        tabs,
+        contract_endpoints,
+        references,
+    };
     world.say_tabs_are_claims();
     // What an entity's own declaration says its purpose is, said as a line under it would.
     for (entity, purpose) in entity_purposes {

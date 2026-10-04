@@ -60,17 +60,16 @@ pub(crate) struct Said<'s> {
 
 /// What `line` says, or nothing after what is wrong with it has been said.
 pub(crate) fn read_line<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     line: &ast::AlsoLine<'s>,
     at: Loc,
     positions: Positions<'_>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Said<'s>> {
     match line {
         ast::AlsoLine::Item(item) => Some(implied_item(item)),
-        ast::AlsoLine::Flow(flow) => implied_flow(world, home, file, flow, at, positions, diags),
+        ast::AlsoLine::Flow(flow) => implied_flow(world, home, file, flow, at, positions),
     }
 }
 
@@ -84,13 +83,12 @@ pub(crate) fn flow_ends<'s>(
     positions: Positions<'_>,
 ) -> Option<(Option<Id<Place>>, Option<Id<Place>>)> {
     let ast::AlsoLine::Flow(flow) = line else { return None };
-    let mut unsaid = Vec::new();
     let place = |stand| match stand {
         Stand::At(place) => Some(place),
         Stand::Flow | Stand::Subject => None,
     };
-    let from = implied_end(world, home, file, flow.from.end, positions, &mut unsaid)?;
-    let to = implied_end(world, home, file, flow.to.end, positions, &mut unsaid)?;
+    let from = implied_end(world, home, file, flow.from.end, positions).ok()?;
+    let to = implied_end(world, home, file, flow.to.end, positions).ok()?;
     Some((place(from), place(to)))
 }
 
@@ -101,23 +99,22 @@ fn implied_item<'s>(item: &ast::LineItem<'s>) -> Said<'s> {
 
 /// `-> escrow 410 USD`: a flow of its own, whose ends are the implying flow's own where it names none (`self`).
 fn implied_flow<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     flow: &ast::Flow<'s>,
     also_loc: Loc,
     positions: Positions<'_>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Said<'s>> {
     if !file[flow.body.legs].is_empty() || !file[flow.body.items].is_empty() {
-        diags.push(
+        world.diags.push(
             Diagnostic::error("also-flow-body", "a declaration `also` flow cannot have split legs or items")
                 .label(also_loc, "write one implied flow here"),
         );
         return None;
     }
     if flow.to.end.is_some_and(|end| !file[end.select].is_empty()) {
-        diags.push(
+        world.diags.push(
             Diagnostic::error(
                 "selector-target",
                 "selectors narrow the source endpoint; an implied flow target receives",
@@ -128,15 +125,16 @@ fn implied_flow<'s>(
     }
     // Both ends are looked up before either failure stops the line, so both are said.
     let (from, to) = (
-        implied_end(world, home, file, flow.from.end, positions, diags),
-        implied_end(world, home, file, flow.to.end, positions, diags),
+        implied_end(world, home, file, flow.from.end, positions),
+        implied_end(world, home, file, flow.to.end, positions),
     );
+    let (from, to) = (from.or_report(world), to.or_report(world));
     let (from, to) = (from?, to?);
-    let from_amount = implied_amount(file, flow.from.amount, also_loc, diags)?;
-    let to_amount = implied_amount(file, flow.to.amount, also_loc, diags)?;
+    let from_amount = implied_amount(file, flow.from.amount, also_loc, &mut world.diags)?;
+    let to_amount = implied_amount(file, flow.to.amount, also_loc, &mut world.diags)?;
     let amount = match (from_amount, to_amount) {
         (Some(_), Some(_)) => {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("also-flow-amount", "an implied flow states its amount on one side only")
                     .label(also_loc, "remove one of these amounts"),
             );
@@ -144,7 +142,7 @@ fn implied_flow<'s>(
         }
         (Some(amount), None) | (None, Some(amount)) => amount,
         (None, None) => {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("also-flow-amount", "an implied flow needs an amount")
                     .label(also_loc, "write an amount on one side of the arrow"),
             );
@@ -164,20 +162,16 @@ fn implied_end<'s>(
     file: &ast::File<'s>,
     end: Option<ast::End<'s>>,
     positions: Positions<'_>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Stand> {
-    let Some(end) = end else { return Some(Stand::Flow) };
+) -> Result<Stand, Diagnostic> {
+    let Some(end) = end else { return Ok(Stand::Flow) };
     if end.name.0 == "self" {
-        return Some(Stand::Subject);
+        return Ok(Stand::Subject);
     }
     let word = Word::of(file, end.name.0);
     match positions.of(world.book.names.get(word.text)) {
-        Standing::Stands(place) => Some(Stand::At(place)),
-        Standing::Empty => {
-            diags.push(empty_role(world, word, positions));
-            None
-        }
-        Standing::NoRole => world.end(home, word).map(|end| Stand::At(end.place)).or_report(diags),
+        Standing::Stands(place) => Ok(Stand::At(place)),
+        Standing::Empty => Err(empty_role(world, word, positions)),
+        Standing::NoRole => world.end(home, word).map(|end| Stand::At(end.place)),
     }
 }
 
@@ -224,7 +218,6 @@ pub(crate) fn lower_selectors<'s>(
     home: Home,
     file: &ast::File<'s>,
     selectors: ast::Many<ast::Select<'s>>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Run<Select> {
     let start = world.book.selectors.len();
     for written in &file[selectors] {
@@ -239,7 +232,7 @@ pub(crate) fn lower_selectors<'s>(
             ast::Select::Unit(name) => world.commodity_of(Word::of(file, name.0)).map(Select::Unit),
             ast::Select::End(name) => world.end(home, Word::of(file, name.0)).map(|end| Select::End(end.place)),
         };
-        if let Some(selector) = resolved.or_report(diags) {
+        if let Some(selector) = resolved.or_report(world) {
             world.book.selectors.push(selector);
         }
     }

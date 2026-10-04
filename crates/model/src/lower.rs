@@ -41,24 +41,19 @@ use crate::scope::Home;
 
 /// Reads the ordered input bindings a contract template may use (`input NAME [UNIT]`). The engine binds occurrence
 /// values by this order, while the compiler resolves each input name to its stable `Var::Input` index.
-fn inputs<'s>(
-    world: &mut World<'s>,
-    file: &ast::File<'s>,
-    props: ast::Many<ast::Prop<'s>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Box<[Input]> {
+fn inputs<'s>(world: &mut World<'s>, file: &ast::File<'s>, props: ast::Many<ast::Prop<'s>>) -> Box<[Input]> {
     let mut found: Vec<Input> = Vec::new();
     let mut seen: Map<axiom_core::Sym, Loc> = Map::default();
     for line in file[props].iter().filter(|prop| prop.name.0 == "input") {
-        let Some((name, unit)) = input(world, file, line).or_report(diags) else { continue };
+        let Some((name, unit)) = input(world, file, line).or_report(world) else { continue };
         let symbol = world.book.names.intern(name.text);
         if let Some(first) = seen.get(&symbol) {
-            diags.push(problem::duplicate(Noun::Input, Word { text: name.text, loc: line.loc }, Some(*first)));
+            world.diags.push(problem::duplicate(Noun::Input, Word { text: name.text, loc: line.loc }, Some(*first)));
             continue;
         }
         seen.insert(symbol, line.loc);
         if found.len() > usize::from(u16::MAX) {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("too-many-inputs", "a contract has too many inputs")
                     .label(line.loc, "input index exceeds the template limit")
                     .help("remove unused inputs; a template supports indices 0 through 65535"),
@@ -167,12 +162,11 @@ fn compile_roots<'s>(
     name: axiom_core::Sym,
     inputs: &[Input],
     roots: &[(ast::ExprId, Ty)],
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<(Program, Map<ast::ExprId, crate::law::NodeId>)> {
     if roots.is_empty() {
         return Some((Program::default(), Map::default()));
     }
-    let (program, nodes) = crate::laws::compile_template(world, diags, file, home, subject, name, inputs, roots)?;
+    let (program, nodes) = crate::laws::compile_template(world, file, home, subject, name, inputs, roots)?;
     let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
     Some((program, by_expr))
 }

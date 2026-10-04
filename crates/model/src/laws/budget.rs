@@ -58,24 +58,24 @@ struct Found<'a, 's> {
 /// Each generated warning law reads the effective limit through one typed
 /// `BudgetLimit` call, so later rows and bounded `until` changes are not baked
 /// into a stale literal.
-pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>], diags: &mut Vec<Diagnostic>) {
+pub(super) fn declare<'a, 's>(world: &mut World<'s>, sites: &'a [Site<'a, 's>]) {
     let mut found = Found::default();
     for site in sites {
         for item in &site.source.file.items {
-            found.read(world, site, item, diags);
+            found.read(world, site, item);
         }
     }
     let mut by_purpose: Vec<_> = found.entries.into_iter().collect();
     by_purpose.sort_by_key(|(purpose, _)| purpose.index());
     for (_, mut entries) in by_purpose {
         entries.sort_by_key(|entry| entry.term.begins());
-        lower_budget(world, &entries, diags);
+        lower_budget(world, &entries);
     }
 }
 
 impl<'a, 's> Found<'a, 's> {
     /// What one item says about budgets, which is nothing for most.
-    fn read(&mut self, world: &World<'s>, site: &Site<'a, 's>, item: &ast::Item<'s>, diags: &mut Vec<Diagnostic>) {
+    fn read(&mut self, world: &mut World<'s>, site: &Site<'a, 's>, item: &ast::Item<'s>) {
         let file: &'a ast::File<'s> = &site.source.file;
         match item.kind {
             ItemKind::Decl(reference) => {
@@ -84,19 +84,19 @@ impl<'a, 's> Found<'a, 's> {
                     return;
                 };
                 if decl.what != DeclKind::Purpose {
-                    diags.push(
+                    world.diags.push(
                         Diagnostic::error("budget-owner", "a declaration budget belongs to a purpose")
                             .label(item.loc, "write this inside a purpose declaration"),
                     );
                     return;
                 }
-                self.starting(world, site, decl.name, file[allowance], item.loc, diags);
+                self.starting(world, site, decl.name, file[allowance], item.loc);
             }
             ItemKind::Budget(reference) => {
                 let budget = &file[reference];
-                self.starting(world, site, budget.purpose, budget.allowance, item.loc, diags);
+                self.starting(world, site, budget.purpose, budget.allowance, item.loc);
             }
-            ItemKind::Statement(reference) => self.change(world, site, item, &file[reference], diags),
+            ItemKind::Statement(reference) => self.change(world, site, item, &file[reference]),
             _ => {}
         }
     }
@@ -104,20 +104,19 @@ impl<'a, 's> Found<'a, 's> {
     /// A purpose's starting budget, written once.
     fn starting(
         &mut self,
-        world: &World<'s>,
+        world: &mut World<'s>,
         site: &Site<'a, 's>,
         purpose: ast::Name<'s>,
         allowance: ast::Allowance<'s>,
         loc: Loc,
-        diags: &mut Vec<Diagnostic>,
     ) {
         let file: &'a ast::File<'s> = &site.source.file;
         let word = Word::of(file, purpose.0);
-        let Some(purpose) = world.purpose(site.home, word).or_report(diags) else {
+        let Some(purpose) = world.purpose(site.home, word).or_report(world) else {
             return;
         };
         if !self.declared.insert(purpose) {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error(
                     "duplicate-budget",
                     format!("purpose `{}` has more than one starting budget", word.text),
@@ -133,28 +132,27 @@ impl<'a, 's> Found<'a, 's> {
     /// `#purpose now budget …`, which may end `until` a day.
     fn change(
         &mut self,
-        world: &World<'s>,
+        world: &mut World<'s>,
         site: &Site<'a, 's>,
         item: &ast::Item<'s>,
         statement: &ast::Statement<'s>,
-        diags: &mut Vec<Diagnostic>,
     ) {
         let file: &'a ast::File<'s> = &site.source.file;
         let ast::Verb::Now(ast::Change::Budget(allowance)) = statement.verb else {
             return;
         };
         let ast::Subject::Purpose(name) = statement.subject else {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("budget-owner", "a dated budget change must name a purpose with `#`")
                     .label(item.loc, "write `#purpose now budget …`"),
             );
             return;
         };
-        let Some(purpose) = world.purpose(site.home, Word::of(file, name.0)).or_report(diags) else {
+        let Some(purpose) = world.purpose(site.home, Word::of(file, name.0)).or_report(world) else {
             return;
         };
         let Some(days) = Days::new(statement.date, last_day(file, statement)) else {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("budget-until", "a budget change ends before it begins")
                     .label(item.loc, "the `until` date precedes this change"),
             );
@@ -183,12 +181,12 @@ fn last_day(file: &ast::File<'_>, statement: &ast::Statement<'_>) -> Day {
 }
 
 /// One purpose's budget as a law that warns when its spending passes the limit.
-fn lower_budget<'s>(world: &mut World<'s>, entries: &[BudgetEntry<'_, 's>], diags: &mut Vec<Diagnostic>) {
+fn lower_budget<'s>(world: &mut World<'s>, entries: &[BudgetEntry<'_, 's>]) {
     let Some(&first) = entries.first() else {
         return;
     };
     let mut nodes = Arena::new();
-    let Some(terms) = terms_over_time(world, entries, &mut nodes, diags) else {
+    let Some(terms) = terms_over_time(world, entries, &mut nodes) else {
         return;
     };
     // The Plan reads Share dependencies from this effective terms timeline;
@@ -225,7 +223,6 @@ fn terms_over_time<'s>(
     world: &mut World<'s>,
     entries: &[BudgetEntry<'_, 's>],
     nodes: &mut Arena<Node>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Timeline<BudgetTerms>> {
     let first = entries.first()?;
     let nothing = BudgetTerms {
@@ -238,7 +235,7 @@ fn terms_over_time<'s>(
     let mut in_force = false;
     for &entry in entries {
         let prior = *timeline.at(entry.term.begins());
-        match (lower_budget_terms(world, entry, prior, nodes, diags), entry.term) {
+        match (lower_budget_terms(world, entry, prior, nodes), entry.term) {
             // A starting budget replaces the zero it began with.
             (Some(terms), Term::Starting) => timeline = Timeline::new(terms),
             (Some(terms), Term::Dated(days)) => timeline.paint(days, terms),
@@ -274,10 +271,9 @@ fn lower_budget_terms<'s>(
     entry: BudgetEntry<'_, 's>,
     prior: BudgetTerms,
     nodes: &mut Arena<Node>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<BudgetTerms> {
     let nodes_before = nodes.len();
-    let terms = lower_terms_on(world, entry, prior, nodes, diags);
+    let terms = lower_terms_on(world, entry, prior, nodes);
     if terms.is_none() {
         nodes.truncate(nodes_before);
     }
@@ -289,13 +285,12 @@ fn lower_terms_on<'s>(
     entry: BudgetEntry<'_, 's>,
     prior: BudgetTerms,
     nodes: &mut Arena<Node>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<BudgetTerms> {
-    let limit = lower_budget_limit(world, entry, nodes, diags)?;
+    let limit = lower_budget_limit(world, entry, nodes)?;
     // A dated change keeps what it does not say; a starting budget has nothing before it to keep.
     let dated = matches!(entry.term, Term::Dated(_));
     let funded = match entry.allowance.funded {
-        Some(_) => funding(world, entry.file, entry.allowance.funded, diags)?,
+        Some(_) => funding(world, entry.file, entry.allowance.funded)?,
         None if dated => prior.funded,
         None => None,
     };
@@ -314,16 +309,15 @@ fn lower_budget_limit<'s>(
     world: &mut World<'s>,
     entry: BudgetEntry<'_, 's>,
     nodes: &mut Arena<Node>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<BudgetLimit> {
     match entry.allowance.limit {
         ast::Limit::Amount(ast::Amount::Literal(literal)) => {
-            let amount = world.literal_amount(entry.file, literal, Some(world.book.base)).or_report(diags)?;
+            let amount = world.literal_amount(entry.file, literal, Some(world.book.base)).or_report(world)?;
             Some(BudgetLimit::Ready(Limit::Amount(amount)))
         }
         ast::Limit::Amount(ast::Amount::Computed(root)) => {
             let (program, local_root) =
-                compile::compile_budget_limit(world, diags, entry.file, entry.home, entry.purpose, root)?;
+                compile::compile_budget_limit(world, entry.file, entry.home, entry.purpose, root)?;
             let law_offset = nodes.len() as u32;
             for (_, node) in program.nodes.iter() {
                 nodes.push(Node {
@@ -337,7 +331,7 @@ fn lower_budget_limit<'s>(
         }
         ast::Limit::Share { percent, of } => {
             let word = Word::of(entry.file, of.0);
-            let of = world.purpose(entry.home, word).or_report(diags)?;
+            let of = world.purpose(entry.home, word).or_report(world)?;
             let rate = Ratio::percent(percent.mantissa as i128, percent.scale)?;
             Some(BudgetLimit::Ready(Limit::Share { rate, of }))
         }
@@ -345,10 +339,9 @@ fn lower_budget_limit<'s>(
 }
 
 fn funding(
-    world: &World<'_>,
+    world: &mut World<'_>,
     file: &ast::File<'_>,
     funded: Option<ast::Funding<'_>>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<(Id<crate::book::Place>, Id<crate::book::Place>)>> {
     funded
         .map(|funding| {
@@ -357,8 +350,8 @@ fn funding(
             match (from, to) {
                 (Ok(from), Ok(to)) => Some((from, to)),
                 (from, to) => {
-                    from.or_report(diags);
-                    to.or_report(diags);
+                    from.or_report(world);
+                    to.or_report(world);
                     None
                 }
             }

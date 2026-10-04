@@ -38,7 +38,7 @@ impl Shape {
 }
 
 /// Declare native S5 params directly from their arranged source sites.
-pub(crate) fn declare<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn declare<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>) {
     for param in &collected.params {
         let (file, written, home) = (param.file(), param.node, param.home());
         let system = if let Home::System(system) = home { Some(system) } else { None };
@@ -47,18 +47,18 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, collected: &Collected<'_, 's>, 
         let earlier = world.book.params.iter().find(|(_, param)| param.name == sym && param.system == system);
         if let Some((_, first)) = earlier {
             let (word, first) = (Word::of(file, name), Some(first.loc));
-            diags.push(problem::duplicate(Noun::Param, word, first));
+            world.diags.push(problem::duplicate(Noun::Param, word, first));
             continue;
         }
 
         let unit = match declared_unit(world, file, written) {
             Ok(unit) => unit,
             Err(error) => {
-                diags.push(error);
+                world.diags.push(error);
                 continue;
             }
         };
-        let rows = rows(world, home, file, written, unit, diags);
+        let rows = rows(world, home, file, written, unit);
         if !rows.is_empty() {
             world.book.params.push(Param { name: sym, unit, system, rows: rows.into(), loc: file.loc(name) });
         }
@@ -117,7 +117,6 @@ fn rows<'s>(
     file: &File<'s>,
     param: &Written<'s>,
     unit: Option<Dim<axiom_core::Id<crate::book::Commodity>>>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Vec<ParamRow> {
     let mut rows: Vec<ParamRow> = Vec::new();
     for row in &file[param.rows] {
@@ -127,15 +126,15 @@ fn rows<'s>(
                 let type_anchor = rows.iter().find(|first| !matches!(first.value, Value::Empty));
                 let type_error = type_anchor.and_then(|first| check_like(world, first, &parsed, unit).err());
                 if let Some(error) = shape_error.or(type_error) {
-                    diags.push(error);
+                    world.diags.push(error);
                 } else {
                     rows.push(parsed);
                 }
             }
-            Err(error) => diags.push(error),
+            Err(error) => world.diags.push(error),
         }
     }
-    sort_rows(&mut rows, diags);
+    sort_rows(&mut rows, &mut world.diags);
     rows
 }
 

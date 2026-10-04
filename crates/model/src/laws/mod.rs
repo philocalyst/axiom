@@ -31,7 +31,7 @@ use crate::problem::{self, Noun};
 use crate::scope::Home;
 use crate::sources::Site;
 
-pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: &mut Vec<Diagnostic>) {
+pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>]) {
     world.tallies = counted(sites);
     let mut seen: Set<(DeclKind, u32)> = Set::default();
     for site in sites {
@@ -43,14 +43,9 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
                         Home::System(system) => Owner::System(system),
                         Home::Project | Home::Builtin => Owner::Book,
                     };
-                    compile_native(
-                        world,
-                        diags,
-                        &Placement { file, home: site.home, owner, subject: Ty::Entity },
-                        &file[id],
-                    );
+                    compile_native(world, &Placement { file, home: site.home, owner, subject: Ty::Entity }, &file[id]);
                 }
-                ItemKind::Decl(id) => declare_in(world, site, &file[id], &mut seen, diags),
+                ItemKind::Decl(id) => declare_in(world, site, &file[id], &mut seen),
                 // Contract laws are compiled by the contract pass after every
                 // contract id exists, so references can point forward.
                 ItemKind::Contract(_)
@@ -67,7 +62,7 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, sites: &[Site<'_, 's>], diags: 
             }
         }
     }
-    budget::declare(world, sites, diags);
+    budget::declare(world, sites);
 }
 
 /// What the laws written under a declaration govern: their owner, what `self` is inside them, and the key that
@@ -81,75 +76,63 @@ struct Governed {
 /// The laws and `also` lines written under a declaration. A declaration's laws are compiled once, however many
 /// sources spell it, and an `also` is the law it abbreviates (`on flow`, `derive LINE`): read as a flow posts that is
 /// for what the declaration governs.
-fn declare_in<'s>(
-    world: &mut World<'s>,
-    site: &Site<'_, 's>,
-    decl: &ast::Decl<'s>,
-    seen: &mut Set<(DeclKind, u32)>,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn declare_in<'s>(world: &mut World<'s>, site: &Site<'_, 's>, decl: &ast::Decl<'s>, seen: &mut Set<(DeclKind, u32)>) {
     let file = &site.source.file;
-    let Some(Governed { owner, subject, key }) = governed(world, site.home, file, decl, diags) else {
+    let Some(Governed { owner, subject, key }) = governed(world, site.home, file, decl) else {
         return;
     };
     if seen.insert((decl.what, key)) {
         let placement = Placement { file, home: site.home, owner, subject };
         for law in &file[decl.laws] {
-            compile_native(world, diags, &placement, law);
+            compile_native(world, &placement, law);
         }
         for also in &file[decl.alsos] {
-            compile_also(world, diags, &placement, also, Positions::NONE);
+            compile_also(world, &placement, also, Positions::NONE);
         }
     }
 }
 
 /// What a declaration's laws govern, or None after saying why they govern nothing.
-fn governed<'s>(
-    world: &World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    decl: &ast::Decl<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Governed> {
+fn governed<'s>(world: &mut World<'s>, home: Home, file: &ast::File<'s>, decl: &ast::Decl<'s>) -> Option<Governed> {
     let word = Word::of(file, decl.name.0);
     let (owner, subject, key) = match decl.what {
         DeclKind::Kind => {
-            let kind = world.kind(home, word).or_report(diags)?;
+            let kind = world.kind(home, word).or_report(world)?;
             let subject = match world.book.kinds[kind].sort {
                 Sort::Place(_) => Ty::Place,
                 Sort::Entity => Ty::Entity,
                 Sort::Thing => Ty::Asset,
                 Sort::Commodity => {
-                    misplaced(diags, file, decl.laws, "a commodity kind");
+                    misplaced(&mut world.diags, file, decl.laws, "a commodity kind");
                     return None;
                 }
                 Sort::Contract => {
-                    misplaced(diags, file, decl.laws, "a contract kind");
+                    misplaced(&mut world.diags, file, decl.laws, "a contract kind");
                     return None;
                 }
             };
             (Owner::Kind(kind), subject, kind.index())
         }
         DeclKind::Account => {
-            let place = world.place(word).or_report(diags)?;
+            let place = world.place(word).or_report(world)?;
             (Owner::Place(place), Ty::Place, place.index())
         }
         DeclKind::Entity => {
-            let entity = world.entity(home, word).or_report(diags)?;
+            let entity = world.entity(home, word).or_report(world)?;
             (Owner::Entity(entity), Ty::Entity, entity.index())
         }
         DeclKind::Asset => {
-            let asset = world.book.asset(word.text).ok_or_else(|| world.missing_asset(word)).or_report(diags)?;
+            let asset = world.book.asset(word.text).ok_or_else(|| world.missing_asset(word)).or_report(world)?;
             (Owner::Asset(asset), Ty::Asset, asset.index())
         }
         DeclKind::Purpose => {
             // Purpose laws govern purpose-bearing flows, but `self` is the owner of the flow (LANGUAGE §8).
             // `total(window)` retains the purpose context in the law owner instead of changing `self`'s type.
-            let purpose = world.purpose(home, word).or_report(diags)?;
+            let purpose = world.purpose(home, word).or_report(world)?;
             (Owner::Purpose(purpose), Ty::Entity, purpose.index())
         }
         DeclKind::Commodity => {
-            misplaced(diags, file, decl.laws, "a commodity");
+            misplaced(&mut world.diags, file, decl.laws, "a commodity");
             return None;
         }
     };
@@ -160,33 +143,32 @@ fn governed<'s>(
 /// top-level declaration laws, and adds it to the owning book.
 pub(crate) fn compile_native<'s>(
     world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
     site: &Placement<'_, 's>,
     law: &ast::Law<'s>,
 ) -> Option<Id<Law>> {
     let owner = site.owner;
     if let Err(problem) = fits(world, owner, law) {
-        diags.push(problem);
+        world.diags.push(problem);
         return None;
     }
     if law.damaged {
         return None;
     }
-    let compiled = compile(world, diags, site, law)?;
+    let compiled = compile(world, site, law)?;
     Some(push(world, compiled))
 }
 
 /// Rebuilds the per-kind and per-system law runs after native lowering added nested laws to the Book arena, and
 /// says the order the laws run in: what `rules::govern` needs, once every place there will be exists.
-pub(crate) fn register_native(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) -> Vec<u32> {
+pub(crate) fn register_native(world: &mut World<'_>) -> Vec<u32> {
     register(world);
-    resolve_overrides(world, diags);
+    resolve_overrides(world);
     set_specificity(world);
-    rank(&world.book, diags)
+    rank(&world.book, &mut world.diags)
 }
 
 /// Resolve `overrides` after every top-level and nested law has a stable id.
-fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
+fn resolve_overrides(world: &mut World<'_>) {
     let pending: Vec<_> =
         world.book.laws.iter().filter_map(|(id, law)| law.override_name.map(|name| (id, name, law.loc))).collect();
     for (id, name, loc) in pending {
@@ -208,7 +190,7 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
         }
         match candidates.as_slice() {
             [target] if *target != id => world.book.laws[id].overrides = Some(*target),
-            [_target] => diags.push(
+            [_target] => world.diags.push(
                 Diagnostic::error("law-override", "a law cannot override itself")
                     .label(loc, "this is the law's own name"),
             ),
@@ -218,7 +200,7 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
                         .any(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
                 });
                 let nearest = closest(text, visible);
-                diags.push(problem::unknown(Noun::Law, Word { text, loc }, nearest));
+                world.diags.push(problem::unknown(Noun::Law, Word { text, loc }, nearest));
             }
             targets => {
                 let describe = |&target: &Id<Law>| {
@@ -226,7 +208,7 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
                     Candidate { is: format!("`{}`", world.book.name(law.name)), declared: Some(law.loc), write: None }
                 };
                 let candidates: Vec<_> = targets.iter().map(describe).collect();
-                diags.push(problem::ambiguous(Noun::Law, Word { text, loc }, &candidates));
+                world.diags.push(problem::ambiguous(Noun::Law, Word { text, loc }, &candidates));
             }
         }
     }
@@ -260,12 +242,11 @@ fn set_specificity(world: &mut World<'_>) {
 /// `positions` says.
 pub(crate) fn compile_also<'a, 's>(
     world: &mut World<'s>,
-    diags: &mut Vec<Diagnostic>,
     site: &Placement<'a, 's>,
     also: &ast::Also<'s>,
     positions: Positions<'a>,
 ) -> Option<Id<Law>> {
-    let law = compile::also(world, diags, site, also, positions)?;
+    let law = compile::also(world, site, also, positions)?;
     Some(push(world, law))
 }
 

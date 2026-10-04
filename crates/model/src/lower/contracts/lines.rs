@@ -236,14 +236,13 @@ pub(super) fn covers(file: &ast::File<'_>, props: ast::Many<ast::Prop<'_>>) -> R
 /// `rising 3% yearly` or `indexed to cpi yearly`: how what a contract asks grows. The first that is right counts;
 /// each that is wrong is said.
 pub(super) fn escalation<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     props: ast::Many<ast::Prop<'s>>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Escalation> {
     let lines = file[props].iter().filter(|prop| matches!(prop.name.0, "rising" | "indexed"));
-    lines.filter_map(|line| escalation_line(world, home, file, line).or_report(diags)).next()
+    lines.filter_map(|line| escalation_line(world, home, file, line).or_report(world)).next()
 }
 
 fn escalation_line<'s>(
@@ -352,14 +351,14 @@ fn kept_in<'s>(
 
 /// The shares a contract divides what it brings in by: each `share RATE for ENTITY`, as a percentage, a fraction or
 /// a measure of the area the contract or the asset it is about has. A line stops at the first pair that is wrong.
-pub(super) fn shares<'s>(world: &World<'s>, cx: &TermsCx<'_, 's>, diags: &mut Vec<Diagnostic>) -> Vec<Share> {
+pub(super) fn shares<'s>(world: &mut World<'s>, cx: &TermsCx<'_, 's>) -> Vec<Share> {
     let file = cx.file;
     let mut shares = Vec::new();
     let mut total = Ratio::ZERO;
     for line in file[cx.written.node.props].iter().filter(|prop| prop.name.0 == "share") {
         let mut a = Args::shaped(file, line, "contract-share", SHARE);
         let read = share_line(world, cx, &mut a, &mut total, &mut shares);
-        read.or_report(diags);
+        read.or_report(world);
     }
     shares
 }

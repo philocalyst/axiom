@@ -95,23 +95,23 @@ impl Unopened {
 
     /// Called after each record is lowered: when that one has begun the book, the loans made before it are opened. `at` says
     /// where an edit goes, when the record is the one that began it.
-    pub(super) fn after(&mut self, world: &mut World<'_>, at: impl FnOnce() -> Insertion, diags: &mut Vec<Diagnostic>) {
+    pub(super) fn after(&mut self, world: &mut World<'_>, at: impl FnOnce() -> Insertion) {
         if self.0.is_empty() {
             return;
         }
         if let Some(day) = world.book.first_fact() {
-            self.open(world, Begins::With { day, at: &at() }, diags);
+            self.open(world, Begins::With { day, at: &at() });
         }
     }
 
     /// Called when the journal is lowered: a book that has no fact is begun by its loans.
-    pub(super) fn finish(&mut self, world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
-        self.open(world, Begins::WithTheLoan, diags);
+    pub(super) fn finish(&mut self, world: &mut World<'_>) {
+        self.open(world, Begins::WithTheLoan);
     }
 
-    fn open(&mut self, world: &mut World<'_>, begins: Begins<'_>, diags: &mut Vec<Diagnostic>) {
+    fn open(&mut self, world: &mut World<'_>, begins: Begins<'_>) {
         for id in std::mem::take(&mut self.0) {
-            open_loan(world, id, begins, diags);
+            open_loan(world, id, begins);
         }
     }
 }
@@ -135,7 +135,7 @@ fn originations<'s>(collected: &Collected<'_, 's>) -> Set<(&'s str, Day)> {
 }
 
 /// Opens the debt of one loan, if it was made before the book began and its terms say any of it is owed.
-fn open_loan(world: &mut World<'_>, id: Id<Contract>, begins: Begins<'_>, diags: &mut Vec<Diagnostic>) {
+fn open_loan(world: &mut World<'_>, id: Id<Contract>, begins: Begins<'_>) {
     let book = &world.book;
     let contract = &book.contracts[id];
     let Some(loan) = contract.loan else { return };
@@ -144,28 +144,21 @@ fn open_loan(world: &mut World<'_>, id: Id<Contract>, begins: Begins<'_>, diags:
     let (Some(owed), Some(opening)) = (owed, book.entities[book.roots.opening].place) else { return };
     let owed = Amount::new(owed, loan.principal.unit);
     let note = note(book, contract, loan, owed, day, begins);
-    if push_opening(world, id, day, owed, opening, diags).is_some() {
-        diags.push(note);
+    if push_opening(world, id, day, owed, opening).is_some() {
+        world.diags.push(note);
     }
 }
 
 /// The flow out of the debt tab, and the transaction that owns it, as an `opening` line makes them. None, with the problem
 /// said, when what the flow is for cannot be told.
-fn push_opening(
-    world: &mut World<'_>,
-    id: Id<Contract>,
-    day: Day,
-    owed: Amount,
-    opening: Id<Place>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<()> {
+fn push_opening(world: &mut World<'_>, id: Id<Contract>, day: Day, owed: Amount, opening: Id<Place>) -> Option<()> {
     let contract = &world.book.contracts[id];
     let (debt, loc) = (contract.loan?.debt, contract.loc);
     let owner = world.book.places[debt].owner;
     let mut staged = Staged::open(world);
     let txn = Id::new(staged.book.txns.len() as u32);
     let end = |place| End { place, entity: None };
-    let purpose = classify(&staged, end(debt), end(opening), None, loc, diags).ok()?;
+    let purpose = classify(&mut staged, end(debt), end(opening), None, loc).ok()?;
     let codes = empty_codes(&staged);
     staged.book.flows.push(Flow {
         day,

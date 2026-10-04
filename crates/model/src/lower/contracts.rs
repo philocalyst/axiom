@@ -52,14 +52,14 @@ impl<'a, 's> WrittenContract<'a, 's> {
 /// Reserves every contract id before compiling any contract body. Terms and
 /// their computed roots are then compiled against the complete contract
 /// namespace, while occurrences are handled by [`super::record`].
-pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>) {
     let mut written = Vec::new();
     for contract in &collected.contracts {
         let (site, node, loc) = (contract.site, contract.node, contract.item.loc);
         let name = world.book.names.intern(node.name.0);
         if let Some(first) = world.book.lookup.contracts.get(&name).copied() {
             let (word, first) = (Word::of(contract.file(), node.name.0), Some(world.book.contracts[first].loc));
-            diags.push(problem::duplicate(Noun::Contract, word, first));
+            world.diags.push(problem::duplicate(Noun::Contract, word, first));
             continue;
         }
         let id = world.book.contracts.push(empty_contract(name, loc, world.book.roots.me));
@@ -73,7 +73,7 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
     }
 
     for written in written.iter().copied() {
-        if let Some(contract) = lower_contract(world, written, diags) {
+        if let Some(contract) = lower_contract(world, written) {
             world.book.contracts[written.id] = contract;
         }
     }
@@ -85,11 +85,11 @@ pub(crate) fn contracts<'a, 's>(world: &mut World<'s>, collected: &Collected<'a,
         let placement = Placement { file, home: written.home(), owner: Owner::Contract(written.id), subject: Ty::Flow };
         let mut laws = Vec::new();
         for also in &file[written.node.alsos] {
-            laws.extend(crate::laws::compile_also(world, diags, &placement, also, Positions::NONE));
+            laws.extend(crate::laws::compile_also(world, &placement, also, Positions::NONE));
         }
-        laws.extend(relator::legs(world, collected, written, diags));
+        laws.extend(relator::legs(world, collected, written));
         for law in &file[written.node.laws] {
-            laws.extend(crate::laws::compile_native(world, diags, &placement, law));
+            laws.extend(crate::laws::compile_native(world, &placement, law));
         }
         world.book.contracts[written.id].laws = laws.into_boxed_slice();
     }
@@ -133,23 +133,15 @@ struct Facts {
 }
 
 /// The entity a contract is with: the one written after `with`, else the one the contract's own name says.
-fn contract_party<'s>(
-    world: &World<'s>,
-    written: WrittenContract<'_, 's>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Entity>> {
+fn contract_party<'s>(world: &mut World<'s>, written: WrittenContract<'_, 's>) -> Option<Id<Entity>> {
     let name = written.node.party.unwrap_or(written.node.name);
-    world.entity(written.home(), Word::of(written.file(), name.0)).or_report(diags)
+    world.entity(written.home(), Word::of(written.file(), name.0)).or_report(world)
 }
 
 /// The owner of a contract: whoever owns the place its schedule is paid from or into, else the book's owner.
-fn contract_owner<'s>(
-    world: &World<'s>,
-    written: WrittenContract<'_, 's>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Entity>> {
+fn contract_owner<'s>(world: &mut World<'s>, written: WrittenContract<'_, 's>) -> Option<Id<Entity>> {
     match written.node.schedule.or(written.node.standing) {
-        Some(schedule) => schedule_owner(world, written.home(), written.file(), Some(schedule), diags),
+        Some(schedule) => schedule_owner(world, written.home(), written.file(), Some(schedule)),
         None => Some(world.book.roots.me),
     }
 }
@@ -161,51 +153,43 @@ fn contract_owner<'s>(
 fn loan_endpoint<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>) -> Option<End> {
     let loan = written.file()[written.node.props].iter().find(|prop| prop.name.0 == "loan")?;
     // What is wrong with the header is said when the contract is lowered, so what this finds out is not.
-    let said = &mut Vec::new();
-    let party = contract_party(world, written, said)?;
-    let owner = contract_owner(world, written, said).filter(|&owner| owner != party)?;
+    let said = world.diags.len();
+    let ends = contract_party(world, written).zip(contract_owner(world, written));
+    world.diags.truncate(said);
+    let (party, owner) = ends.filter(|&(party, owner)| owner != party)?;
     let loans = world.book.roots.kinds.debt;
     Some(End { place: world.tab(party, owner, loans, loan.loc), entity: Some(party) })
 }
 
-fn contract_facts<'a, 's>(
-    world: &mut World<'s>,
-    written: WrittenContract<'a, 's>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Facts> {
+fn contract_facts<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>) -> Option<Facts> {
     let (node, file) = (written.node, written.file());
-    let party = contract_party(world, written, diags)?;
-    let days = lines::days(file, node.props).or_report(diags)?;
-    let area = lines::area(world, file, node.props).or_report(diags)?;
-    let purpose = contract_purpose(world, written, diags)?;
+    let party = contract_party(world, written)?;
+    let days = lines::days(file, node.props).or_report(world)?;
+    let area = lines::area(world, file, node.props).or_report(world)?;
+    let purpose = contract_purpose(world, written)?;
     let description = node.description.map(|description| world.book.quoted_text(description.0));
-    let inputs = inputs(world, file, node.props, diags);
+    let inputs = inputs(world, file, node.props);
     Some(Facts { party, days, area, purpose, description, inputs })
 }
 
-fn lower_contract<'a, 's>(
-    world: &mut World<'s>,
-    written: WrittenContract<'a, 's>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Contract> {
+fn lower_contract<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>) -> Option<Contract> {
     let (node, file, home) = (written.node, written.file(), written.home());
-    let Facts { party, days, area, purpose, description, inputs: contract_inputs } =
-        contract_facts(world, written, diags)?;
+    let Facts { party, days, area, purpose, description, inputs: contract_inputs } = contract_facts(world, written)?;
     let anchor = days.first();
     let roots = contract_roots(file, node);
-    let compile = |world: &mut World<'s>, roots: &_, diags: &mut Vec<Diagnostic>| {
-        compile_roots(world, file, home, Ty::Flow, written.name, &contract_inputs, roots, diags)
+    let compile = |world: &mut World<'s>, roots: &_| {
+        compile_roots(world, file, home, Ty::Flow, written.name, &contract_inputs, roots)
     };
-    let (regular, standing) = (compile(world, &roots.regular, diags), compile(world, &roots.standing, diags));
+    let (regular, standing) = (compile(world, &roots.regular), compile(world, &roots.standing));
 
-    let owner = contract_owner(world, written, diags)?;
+    let owner = contract_owner(world, written)?;
     let default_holding = node
         .schedule
         .or(node.standing)
         .and_then(|schedule| schedule.terms.holding.map(|holding| (holding.name, schedule.at)));
-    let deposit = lines::deposit(world, written, Keeping { owner, default_holding }).or_report(diags)?;
-    let loan = contract_loan(world, written, party, owner, diags)?;
-    let relation = relator::relation(world, written, diags);
+    let deposit = lines::deposit(world, written, Keeping { owner, default_holding }).or_report(world)?;
+    let loan = contract_loan(world, written, party, owner)?;
+    let relation = relator::relation(world, written);
     let mut contract = empty_contract(written.name, written.site.source.file.loc(node.name.0), owner);
     if let Some((kind, fillers)) = relation {
         (contract.kind, contract.fillers) = (Some(kind), fillers);
@@ -224,20 +208,20 @@ fn lower_contract<'a, 's>(
     contract.doc = node_doc(world, written.site, written.loc);
     contract.loc = written.loc;
     contract.buys = node.standing.and_then(|schedule| match schedule.terms.payment {
-        Some(ast::Payment::Buy { unit, .. }) => resolve_commodity(world, file, unit, diags),
+        Some(ast::Payment::Buy { unit, .. }) => resolve_commodity(world, file, unit),
         _ => None,
     });
 
     let cx = TermsCx { written, file, inputs: &contract_inputs, anchor, party, purpose, description, area, loan };
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
-        contract.terms = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
+        contract.terms = Some(lower_terms(world, &cx, schedule, program, ids)?);
     }
     if let (Some(schedule), Some((program, ids))) = (node.standing, standing) {
-        contract.standing = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
+        contract.standing = Some(lower_terms(world, &cx, schedule, program, ids)?);
     }
-    for share in lines::shares(world, &cx, diags) {
+    for share in lines::shares(world, &cx) {
         if !bears(&world.book, share.entity) {
-            diags.push(share_for_a_party(&world.book, &share));
+            world.diags.push(share_for_a_party(&world.book, &share));
         }
         crate::laws::push_share(world, Owner::Contract(written.id), home, &share);
     }
@@ -257,18 +241,14 @@ fn owed_by_party(world: &mut World<'_>, contract: &Contract) {
 
 /// The purpose a contract is written for, with the object it is of: the purpose is the contract's, and nothing
 /// at all comes of a contract whose purpose names none.
-fn contract_purpose<'a, 's>(
-    world: &mut World<'s>,
-    written: WrittenContract<'a, 's>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Option<At<Purposed>>> {
+fn contract_purpose<'a, 's>(world: &mut World<'s>, written: WrittenContract<'a, 's>) -> Option<Option<At<Purposed>>> {
     let Some(purpose) = written.node.purpose else {
         return Some(None);
     };
     let (file, home) = (written.file(), written.home());
     let word = Word::of(file, purpose.name.0);
-    let id = world.purpose(home, word).or_report(diags)?;
-    let of = purpose.of.and_then(|object| resolve_object(world, home, file, object, Reach::Parties, diags));
+    let id = world.purpose(home, word).or_report(world)?;
+    let of = purpose.of.and_then(|object| resolve_object(world, home, file, object, Reach::Parties));
     Some(Some(At { value: Purposed { purpose: id, of, source: Provenance::Contract(written.id) }, loc: word.loc }))
 }
 
@@ -277,14 +257,13 @@ fn contract_loan<'s>(
     contract: WrittenContract<'_, 's>,
     party: Id<Entity>,
     owner: Id<Entity>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<(Loan, Ratio)>> {
-    let Some(line) = lines::loan(world, contract).or_report(diags)? else {
+    let Some(line) = lines::loan(world, contract).or_report(world)? else {
         return Some(None);
     };
     if party == owner {
         let lender = world.book.name(world.book.entities[party].path);
-        diags.push(
+        world.diags.push(
             Diagnostic::error("contract-loan-party", format!("`{lender}` cannot be both the lender and the borrower"))
                 .label(line.loc, "a loan is with someone other than the owner of the account it is paid from")
                 .help("write the lender after `with`, as in `contract mortgage with bank`"),
@@ -329,17 +308,14 @@ fn lower_terms<'a, 's>(
     schedule: ast::Schedule<'s>,
     program: Program,
     roots: Map<ast::ExprId, crate::law::NodeId>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let (file, home, node) = (cx.file, cx.written.site.home, cx.written.node);
-    let mut header = template_header(world, cx, schedule, &roots, diags)?;
+    let mut header = template_header(world, cx, schedule, &roots)?;
     let interest = split_loan_payment(world, cx, &mut header);
-    let mut legs = template_legs(world, cx, &header, node.body.legs, &roots, diags)?;
+    let mut legs = template_legs(world, cx, &header, node.body.legs, &roots)?;
     legs.splice(0..0, interest);
-    let lower = |world: &mut World<'s>, item, diags: &mut Vec<Diagnostic>| {
-        lower_header_item(world, cx, &header, &roots, item, diags)
-    };
-    let items: Vec<_> = file[node.body.items].iter().filter_map(|item| lower(world, item, diags)).collect();
+    let lower = |world: &mut World<'s>, item| lower_header_item(world, cx, &header, &roots, item);
+    let items: Vec<_> = file[node.body.items].iter().filter_map(|item| lower(world, item)).collect();
     let template = Promised {
         header: Header { flow: header.flow.clone(), out: header.out, arrive: header.arrive },
         side: header.side,
@@ -348,9 +324,9 @@ fn lower_terms<'a, 's>(
     };
     let due = node.deadline.as_ref().map(|deadline| Deadline {
         after: deadline.span,
-        otherwise: deadline.otherwise.as_ref().and_then(|item| lower(world, item, diags)),
+        otherwise: deadline.otherwise.as_ref().and_then(|item| lower(world, item)),
     });
-    let grace = lines::grace(file, node.props).or_report(diags)?;
+    let grace = lines::grace(file, node.props).or_report(world)?;
     Some(Terms {
         every: schedule.terms.cadence,
         on: file[schedule.terms.on].to_vec().into_boxed_slice(),
@@ -360,10 +336,10 @@ fn lower_terms<'a, 's>(
         estimate: schedule.terms.about,
         due,
         grace,
-        period: lines::period(file, node.props).or_report(diags).flatten(),
-        covers: lines::covers(file, node.props).or_report(diags).flatten(),
+        period: lines::period(file, node.props).or_report(world).flatten(),
+        covers: lines::covers(file, node.props).or_report(world).flatten(),
         prorated: has_property(file, node.props, "prorated"),
-        escalation: lines::escalation(world, home, file, node.props, diags),
+        escalation: lines::escalation(world, home, file, node.props),
         rate: cx.loan.map(|(_, rate)| rate),
     })
 }
@@ -375,13 +351,12 @@ fn template_header<'a, 's>(
     cx: &TermsCx<'a, 's>,
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<HeaderCx> {
     let (file, party) = (cx.file, cx.party);
     let hold = schedule.terms.holding?;
-    let holding = resolve_endpoint(world, cx.written.site.home, file, hold.name, diags)?;
+    let holding = resolve_endpoint(world, cx.written.site.home, file, hold.name)?;
     let Some(party_place) = world.book.entities[party].place else {
-        diags.push(
+        world.diags.push(
             Diagnostic::error("contract-party-place", "the contract party has no usable place")
                 .label(schedule.at, "the party's flow endpoint cannot be resolved"),
         );
@@ -392,7 +367,7 @@ fn template_header<'a, 's>(
         Direction::Into => (party_place, holding, FlowSide::Out),
     };
     let owner = world.book.places[holding].owner;
-    let ScheduleAmount { quantity, amount, buys } = schedule_amount(world, file, schedule, roots, diags)?;
+    let ScheduleAmount { quantity, amount, buys } = schedule_amount(world, file, schedule, roots)?;
     let mut flow = cx.flow(from, to, amount, owner, schedule.at);
     let (from_party, to_party) = match hold.direction {
         Direction::From => (None, Some(party)),
@@ -400,7 +375,7 @@ fn template_header<'a, 's>(
     };
     let purpose = cx.purpose.map(|at| at.value);
     let (from_end, to_end) = (End { place: from, entity: from_party }, End { place: to, entity: to_party });
-    flow.purpose = classify(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
+    flow.purpose = classify(world, from_end, to_end, purpose, schedule.at).ok()?;
     let arrive = buys.map_or(quantity, Quantity::Unknown);
     Some(HeaderCx { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
 }
@@ -435,19 +410,18 @@ fn template_legs<'a, 's>(
     header: &HeaderCx,
     legs: ast::Many<ast::Leg<'s>>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Vec<Leg<Flow>>> {
     let (file, home) = (cx.file, cx.written.site.home);
     let mut lowered = Vec::new();
     for leg in &file[legs] {
-        let to = resolve_endpoint(world, home, file, leg.end.name, diags)?;
-        let (part, amount) = template_quantity(world, file, leg.amount, roots, header.unit, diags)?;
+        let to = resolve_endpoint(world, home, file, leg.end.name)?;
+        let (part, amount) = template_quantity(world, file, leg.amount, roots, header.unit)?;
         let mut flow = cx.flow(header.from, to, amount, header.owner, leg.loc);
-        let (codes, tail) = read_tail(world, home, file, Line::Term, leg.tail, diags);
+        let (codes, tail) = read_tail(world, home, file, Line::Term, leg.tail);
         (flow.codes, flow.select, flow.waive) = (codes, no_selectors(world), tail.waive);
         let written = tail.purpose.or(cx.purpose.map(|at| at.value));
         let ends = (End { place: header.from, entity: header.from_party }, End { place: to, entity: None });
-        flow.purpose = classify(world, ends.0, ends.1, written, leg.loc, diags).ok()?;
+        flow.purpose = classify(world, ends.0, ends.1, written, leg.loc).ok()?;
         flow.description = tail.description.or(flow.description);
         lowered.push(Leg { flow, part });
     }
@@ -462,20 +436,19 @@ struct ScheduleAmount {
 }
 
 fn schedule_amount<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     file: &ast::File<'s>,
     schedule: ast::Schedule<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<ScheduleAmount> {
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
-            let expr = written_amount(world, file, roots, amount, world.book.base).or_report(diags)?;
+            let expr = written_amount(world, file, roots, amount, world.book.base).or_report(world)?;
             (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), None)
         }
         Some(ast::Payment::Buy { unit, spend }) => {
-            let buy_unit = resolve_commodity(world, file, unit, diags)?;
-            let expr = written_amount(world, file, roots, spend, world.book.base).or_report(diags)?;
+            let buy_unit = resolve_commodity(world, file, unit)?;
+            let expr = written_amount(world, file, roots, spend, world.book.base).or_report(world)?;
             (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), Some(buy_unit))
         }
         None => (Quantity::Derived, Amount::zero(world.book.base), None),
@@ -516,25 +489,24 @@ impl TermsCx<'_, '_> {
 /// What a quantity written in a contract's schedule takes of the group, and what the template carries meanwhile. A
 /// bare percentage is a share of the header's amount.
 fn template_quantity<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     file: &ast::File<'s>,
     quantity: ast::Quantity<'s>,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     fallback: Id<Commodity>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<(Part, Amount)> {
     if let ast::Quantity::Amount(ast::Amount::Computed(expr)) = quantity
         && let ExprKind::Pct(percent) = file.exprs[expr].kind
     {
         let Some(rate) = Ratio::percent(percent.mantissa as i128, percent.scale) else {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("contract-percentage", "this percentage cannot be represented")
                     .label(file.exprs[expr].loc, "use a smaller percentage"),
             );
             return None;
         };
         if rate.is_negative() || rate > Ratio::ONE {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("contract-percentage-range", "a split percentage must be between 0% and 100%")
                     .label(file.exprs[expr].loc, "this share would exceed the parent amount"),
             );
@@ -542,7 +514,7 @@ fn template_quantity<'s>(
         }
         return Some((Part::Share(rate), Amount::zero(fallback)));
     }
-    let (part, _) = written_part(world, file, roots, quantity, fallback, diags)?;
+    let (part, _) = written_part(world, file, roots, quantity, fallback).or_report(world)?;
     let stand_in = match part {
         Part::Of(quantity) => quantity.stand_in(fallback),
         Part::Rest | Part::Share(_) => Amount::zero(fallback),
@@ -557,44 +529,31 @@ fn lower_header_item<'s>(
     header: &HeaderCx,
     roots: &Map<ast::ExprId, crate::law::NodeId>,
     item: &ast::LineItem<'s>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Item<Says>> {
     let (file, home) = (cx.file, cx.written.site.home);
-    let amount = written_amount(world, file, roots, item.amount, header.unit).or_report(diags)?;
-    let (codes, tail) = read_tail(world, home, file, Line::Term, item.tail, diags);
+    let amount = written_amount(world, file, roots, item.amount, header.unit).or_report(world)?;
+    let (codes, tail) = read_tail(world, home, file, Line::Term, item.tail);
     let (purpose, description, waive) = (tail.purpose, tail.description, tail.waive);
     let flow = Says { purpose, description, codes, select: no_selectors(world), waive };
     Some(Item { sign: item.sign, amount: Cut::Of(amount), loc: item.loc, flow })
 }
 
-fn resolve_commodity<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    name: Name<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Commodity>> {
-    world.commodity_of(Word::of(file, name.0)).or_report(diags)
+fn resolve_commodity<'s>(world: &mut World<'s>, file: &ast::File<'s>, name: Name<'s>) -> Option<Id<Commodity>> {
+    world.commodity_of(Word::of(file, name.0)).or_report(world)
 }
 
-fn resolve_endpoint<'s>(
-    world: &World<'s>,
-    home: Home,
-    file: &ast::File<'s>,
-    name: Name<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<Place>> {
-    world.end(home, Word::of(file, name.0)).or_report(diags).map(|end| end.place)
+fn resolve_endpoint<'s>(world: &mut World<'s>, home: Home, file: &ast::File<'s>, name: Name<'s>) -> Option<Id<Place>> {
+    world.end(home, Word::of(file, name.0)).or_report(world).map(|end| end.place)
 }
 
 fn schedule_owner<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     schedule: Option<ast::Schedule<'s>>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<Entity>> {
     let holding = schedule?.terms.holding?;
-    let place = resolve_endpoint(world, home, file, holding.name, diags)?;
+    let place = resolve_endpoint(world, home, file, holding.name)?;
     Some(world.book.places[place].owner)
 }
 
