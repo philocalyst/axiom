@@ -831,6 +831,11 @@ impl Rules {
         &self.rows[Id::new(self.bases[watch.table() as usize] + watch.key() as u32)]
     }
 
+    /// Whether anything at all watches by this table: a book that has no rule in a table need not look up a row of it.
+    pub fn watches(&self, table: Table) -> bool {
+        !self.table(table).is_empty()
+    }
+
     /// Every rule of one table, row after row.
     pub fn table(&self, table: Table) -> &[Rule] {
         self.rows.span(self.bases[table as usize] as usize, self.bases[table as usize + 1] as usize)

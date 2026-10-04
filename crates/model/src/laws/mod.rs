@@ -319,10 +319,19 @@ fn misplaced(diags: &mut Vec<Diagnostic>, file: &ast::File, laws: ast::Many<ast:
 
 /// Whether the trigger suits what the law governs.
 fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
-    let thing_kind = matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Thing);
-    let place_kind = matches!(owner, Owner::Kind(kind) if matches!(world.book.kinds[kind].sort, Sort::Place(_)));
-    let entity_kind = matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Entity);
-    let allowed = match law.trigger {
+    if allowed(world, owner, law.trigger) { Ok(()) } else { Err(misfit(law)) }
+}
+
+/// Which owners a trigger is for: what a law is about is where, or what, it can be written under.
+fn allowed(world: &World, owner: Owner, trigger: Written) -> bool {
+    let sort_of = |owner| match owner {
+        Owner::Kind(kind) => Some(world.book.kinds[kind].sort),
+        _ => None,
+    };
+    let thing_kind = sort_of(owner) == Some(Sort::Thing);
+    let place_kind = matches!(sort_of(owner), Some(Sort::Place(_)));
+    let entity_kind = sort_of(owner) == Some(Sort::Entity);
+    match trigger {
         Written::In | Written::Out | Written::Gain => {
             matches!(owner, Owner::Place(_) | Owner::System(_) | Owner::Book) || place_kind
         }
@@ -335,19 +344,18 @@ fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
                 || thing_kind
                 || entity_kind
         }
-        Written::Each(_) | Written::Closing { .. } | Written::By(_) => {
-            !matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Commodity)
-        }
+        Written::Each(_) | Written::Closing { .. } | Written::By(_) => sort_of(owner) != Some(Sort::Commodity),
         Written::Always => {
             matches!(owner, Owner::Place(_) | Owner::Entity(_) | Owner::System(_) | Owner::Book | Owner::Asset(_))
                 || place_kind
                 || thing_kind
                 || entity_kind
         }
-    };
-    if allowed {
-        return Ok(());
     }
+}
+
+/// What a trigger that does not suit its owner says, and where the law could be written instead.
+fn misfit(law: &ast::Law) -> Diagnostic {
     let trigger = match law.trigger {
         Written::In => "on in",
         Written::Out => "on out",
@@ -382,9 +390,7 @@ fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
             "write a dated law inside an account, entity, purpose, asset, contract, kind, system, or the project",
         ),
     };
-    Err(Diagnostic::error("law-trigger", message)
-        .label(law.trigger_loc, "this trigger does not fit this owner")
-        .help(help))
+    Diagnostic::error("law-trigger", message).label(law.trigger_loc, "this trigger does not fit this owner").help(help)
 }
 
 /// Tells kinds and systems which laws are theirs.

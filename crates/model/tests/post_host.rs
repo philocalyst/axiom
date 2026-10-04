@@ -164,3 +164,19 @@ fn a_law_nothing_can_reach_is_said_not_silent() {
     let text = format!("{}kind boss : entity\n  also + 5% of amount #fee\n", Under::default().book());
     assert_eq!(lowered(&text).1, ["law-never-fires"], "no entity is a boss");
 }
+
+#[test]
+fn an_amount_of_any_commodity_says_what_to_write_where_one_commodity_is_counted() {
+    let counted = "  law counted\n    on flow\n    count amount as fees\n";
+    let text = Under { stripe: counted, ..Under::default() }.book();
+    let path = "axiom.ax";
+    let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+    let (_, diagnostics) = build(&[Source { path, file, embedded: false }]);
+    let said = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "type-mismatch")
+        .expect("a flow at a party moves any commodity");
+    assert_eq!(said.message, "expected an amount of USD, but this amount may be of any commodity");
+    assert!(said.help.iter().any(|help| help.text.contains("value(amount, USD)")), "{said:?}");
+}

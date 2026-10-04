@@ -21,7 +21,7 @@ use axiom_syntax::{
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
 use super::vars::When;
-use crate::book::{Entity, Input, Param};
+use crate::book::{Commodity, Entity, Input, Param};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
 use crate::journal::Program;
@@ -556,9 +556,24 @@ impl<'w, 'a, 's> Compiler<'w, 'a, 's> {
         if fits(want, found_ty) {
             return Some(node);
         }
-        let diagnostic = expected(&article(want.word()), found_ty, found.loc);
+        let diagnostic = match (want, found_ty) {
+            (Ty::Amount(Dim::Of(unit)), Ty::Amount(Dim::Any)) => self.unconverted(unit, found.loc),
+            _ => expected(&article(want.word()), found_ty, found.loc),
+        };
         self.report(diagnostic);
         None
+    }
+
+    /// An amount of whatever a flow moved, where one commodity is counted: it must say what it is worth.
+    fn unconverted(&self, unit: Id<Commodity>, loc: Loc) -> Diagnostic {
+        let book = &self.world.book;
+        let unit = book.name(book.commodities[unit].symbol);
+        Diagnostic::error(
+            "type-mismatch",
+            format!("expected an amount of {unit}, but this amount may be of any commodity"),
+        )
+        .label(loc, "a flow at what this law governs can move any commodity")
+        .help(format!("say what it is worth: `value(amount, {unit})`"))
     }
 
     fn condition(&mut self, root: ExprId) -> Option<NodeId> {
