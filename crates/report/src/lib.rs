@@ -10,6 +10,7 @@
 
 mod available;
 mod balance;
+mod balances;
 mod budget;
 mod calendar;
 mod claims;
@@ -25,6 +26,7 @@ pub mod json;
 mod lens;
 mod limits;
 mod lots;
+mod pivot;
 mod places;
 mod register;
 mod resolve;
@@ -42,11 +44,11 @@ mod tests;
 
 use std::borrow::Cow;
 
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
-use axiom_engine::{Options, Plan, Run};
+use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Span};
+use axiom_engine::{Plan, Run};
 use axiom_model::{Amount, Book, Period, Place, Trigger};
 
-use crate::history::Snapshots;
+use crate::balances::Balances;
 use crate::lens::{Lens, Whose};
 
 /// What to show. A client builds this from its own input surface.
@@ -238,31 +240,6 @@ pub trait ReportRenderer {
     fn render<'s>(&self, report: &Report<'s>, sources: &dyn SourceProvider) -> Self::Output;
 }
 
-/// Builds the view `query` asks for, about the money of `whose` (`--for`: an
-/// entity, a household including its members; default everything).
-pub fn report<'s>(book: &'s Book<'_>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
-    let plan = Plan::new(book);
-    let whose = Whose::resolve(book, whose)?;
-    views(Lens::new(&plan, &whose, run.today), run, query)
-}
-
-/// Builds a report with source-aware query resolution through the client's
-/// source catalog. Report cells borrow the model book for the returned view.
-pub fn report_with_sources<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    query: &Query,
-    whose: Option<&str>,
-    sources: &dyn SourceProvider,
-) -> Result<Report<'s>, Diagnostic> {
-    if let Some(loc) = resolve_source_line(query, sources) {
-        let query = Query::Line { loc };
-        report(book, run, &query, whose)
-    } else {
-        report(book, run, query, whose)
-    }
-}
-
 /// Turns a source target into a line query when the provider recognizes it.
 /// Unknown paths remain ordinary `why` targets so existing name diagnostics
 /// keep their useful suggestions.
@@ -280,48 +257,6 @@ pub fn resolve_source_line(query: &Query<'_>, sources: &dyn SourceProvider) -> O
         return None;
     }
     sources.locate(path, line)
-}
-
-/// The view `query` asks for, about the money of `whose`.
-fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book();
-    match query {
-        Query::Balance { globs, at, value, monthly } => {
-            balance::view_with_lens(lens.on(at.unwrap_or(run.today)), run, globs, *value, *monthly)
-        }
-        Query::Register { place, from, to } => {
-            register::view_with_lens(lens.on(to.unwrap_or(run.today)), run, place, *from, *to)
-        }
-        Query::Flow { by: FlowBy::Period(by), from, to } => {
-            Ok(flow::view_with_lens(lens.on(to.unwrap_or(run.today)), run, *by, *from))
-        }
-        Query::Flow { by: FlowBy::Party, from, to } => {
-            Ok(flow::view_by_party_with_lens(lens.on(to.unwrap_or(run.today)), run, *from))
-        }
-        Query::Available { at } => Ok(available::view_with_lens(lens.on(at.unwrap_or(run.today)), run)),
-        Query::Budget { at, by } => Ok(budget::view_with_lens(lens.on(at.unwrap_or(run.today)), run, *at, *by)),
-        Query::Limits { year } => Ok(limits::view_with_lens(lens, run, *year)),
-        Query::Claims { at } => {
-            let at = at.unwrap_or(run.today);
-            let holdings = claims::holdings_at(book, run, at);
-            Ok(claims::view_from(lens.on(at), run, holdings.iter()))
-        }
-        Query::Contracts => Ok(contracts::view_with_lens(lens, run)),
-        Query::Tax { year } => Ok(tax::view_with_lens(lens, run, *year)),
-        Query::Gains { year } => Ok(gains::view_with_lens(lens, run, *year)),
-        Query::Lots { place, at } => {
-            let scope = place.map(|text| resolve::place(book, text)).transpose()?;
-            let at = at.unwrap_or(run.today);
-            let holdings = claims::holdings_at(book, run, at);
-            Ok(lots::view_from(lens.on(at), scope, holdings.iter()))
-        }
-        Query::Forecast { until, paths } => {
-            let options = Options { today: run.today, relaxed: book.relaxed };
-            Ok(forecast::view(forecast::Past::Journal, run, lens, options, *until, *paths))
-        }
-        Query::Why { target } => why::target_with_lens(lens, run, target),
-        Query::Line { loc } => Ok(why::line_with_lens(lens, run, *loc)),
-    }
 }
 
 /// The one-line account of a healthy book that `axiom check` ends with.
@@ -344,7 +279,7 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
 pub fn summary_of(plan: &Plan<'_, '_>, run: &Run) -> Summary {
     let (everyone, today, book) = (Whose::default(), run.today, plan.book());
     let lens = Lens::new(plan, &everyone, today);
-    let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, run, &[today], false), 0);
+    let worth = balance::NetWorth::of(lens, &Balances::of(lens, run, &[today]), 0);
     // Built-in place rows exist in every book: only declared or used places
     // contribute to the summary.
     let used = |place: Id<Place>| {

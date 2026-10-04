@@ -321,6 +321,8 @@ pub(crate) struct Slot {
     pub holding: Holding,
     /// `plain` and every lot, kept in step: nobody sums lots to learn a balance.
     pub qty: Qty,
+    /// What `qty` was the last time the fold wrote it into the position's history.
+    recorded: Qty,
     /// How many lots are tied to an entity: only then are there colours to weigh.
     ties: u32,
     /// Lots before this one are exhausted.
@@ -371,7 +373,7 @@ impl PartialOrd for Ranked {
 impl Slot {
     fn new(place: Id<Place>, unit: Id<Commodity>, next: u32) -> Slot {
         let holding = Holding { place, unit, plain: Qty::ZERO, lots: Vec::new() };
-        Slot { holding, qty: Qty::ZERO, ties: 0, first: 0, dead: 0, ranked: None, next }
+        Slot { holding, qty: Qty::ZERO, recorded: Qty::ZERO, ties: 0, first: 0, dead: 0, ranked: None, next }
     }
 
     fn live(&self) -> usize {
@@ -953,6 +955,9 @@ pub(crate) struct Holdings {
     part_slots: axiom_core::Map<PartId, Vec<u32>>,
     /// A lot was exhausted since the last sweep.
     untidy: bool,
+    /// The slots handed out to change, or scaled, since the fold last wrote the balances that moved into the histories.
+    /// A slot is only ever changed through `entry` and `scale`, so a slot that is not here has the balance it had.
+    touched: Vec<u32>,
 }
 
 pub(crate) struct PartBasisAdjustment<'a> {
@@ -1065,7 +1070,8 @@ impl PartBasisAdjustment<'_> {
 
 impl Holdings {
     pub fn new(places: usize) -> Holdings {
-        Holdings { heads: vec![NONE; places], slots: Vec::new(), part_slots: axiom_core::Map::default(), untidy: false }
+        let part_slots = axiom_core::Map::default();
+        Holdings { heads: vec![NONE; places], slots: Vec::new(), part_slots, untidy: false, touched: Vec::new() }
     }
 
     fn chain(&self, head: u32) -> impl Iterator<Item = &Slot> {
@@ -1092,7 +1098,24 @@ impl Holdings {
             }
             at = new;
         }
+        self.touched.push(at);
         &mut self.slots[at as usize]
+    }
+
+    /// The slots whose balance has moved since this was last asked, each with the balance it holds now: what the fold
+    /// writes into the histories. A slot that was changed and changed back says nothing.
+    pub fn moved(&mut self) -> impl Iterator<Item = (u32, Qty)> + '_ {
+        let Holdings { touched, slots, .. } = self;
+        touched.drain(..).filter_map(|at| {
+            let slot = &mut slots[at as usize];
+            (std::mem::replace(&mut slot.recorded, slot.qty) != slot.qty).then_some((at, slot.qty))
+        })
+    }
+
+    /// Which place and commodity each slot holds, in the order the slots were made.
+    pub fn positions(&self) -> Vec<crate::histories::Position> {
+        let at = |slot: &Slot| crate::histories::Position { place: slot.place, unit: slot.unit };
+        self.slots.iter().map(at).collect()
     }
 
     /// Records that a live asset part can be held in this stable slot. The
@@ -1348,7 +1371,10 @@ impl Holdings {
 
     /// A split: every holding of `unit`, in every place, is multiplied by `ratio`.
     pub fn scale(&mut self, unit: Id<Commodity>, ratio: Ratio) {
-        self.slots.iter_mut().filter(|slot| slot.unit == unit).for_each(|slot| slot.scale(ratio));
+        for (at, slot) in self.slots.iter_mut().enumerate().filter(|(_, slot)| slot.unit == unit) {
+            slot.scale(ratio);
+            self.touched.push(at as u32);
+        }
         self.untidy = true;
     }
 

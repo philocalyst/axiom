@@ -2,7 +2,7 @@
 
 use axiom_core::Id;
 use axiom_engine::Run;
-use axiom_model::{Contract, Derivation, Origin};
+use axiom_model::Contract;
 
 use crate::lens::Lens;
 use crate::places::route;
@@ -133,18 +133,9 @@ fn derived_section<'s>(lens: Lens<'s, '_, '_, '_>, contract_id: Id<Contract>) ->
         lens.owns(crate::flow::movement_place(lens, flow)) && crate::register::contract_flow(flow.origin, contract_id)
     });
     for flow in flows {
-        let origin = match flow.origin {
-            Origin::Occurrence(_) => "occurrence",
-            Origin::Derived(Derivation::Interest(_)) => "interest",
-            Origin::Derived(Derivation::Principal(_)) => "principal",
-            Origin::Derived(Derivation::Claim(_)) => "claim",
-            Origin::Derived(Derivation::Otherwise(_)) => "late fee",
-            Origin::Derived(Derivation::Refund(_)) => "refund",
-            _ => "derived",
-        };
         derived.push(Row::new([
             Cell::Day(flow.day),
-            Cell::Word(origin),
+            Cell::Word(crate::register::contract_flow_word(flow.origin)),
             Cell::text(route(book, flow)),
             Cell::Source(flow.loc),
         ]));

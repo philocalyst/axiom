@@ -61,7 +61,9 @@ fn a_session_answers_as_the_pipeline_it_wraps() {
     assert_eq!((ours.flows, ours.places, ours.laws), (summary.flows, summary.places, summary.laws));
     assert_eq!(ours.net_worth, summary.net_worth);
     assert_eq!(ours.net_worth.qty, Qty(9_500), "100.00 USD less the 5.00 USD spent");
-    let direct = axiom_report::report(&book, &run, &balance(), None).unwrap();
+    let plan = axiom_engine::Plan::new(&book);
+    let folded = axiom_report::Folded::of(&plan, options());
+    let direct = axiom_report::Context::over(plan, folded, None).unwrap().report(&balance()).unwrap();
     assert_eq!(shown(&session), json::render(&direct, session.sources()));
 }
 
@@ -283,4 +285,49 @@ fn an_unknown_owner_is_an_error_and_the_book_is_still_folded() {
     let refused = session.query(&balance(), Some("nobody")).err().expect("no one is called nobody");
     assert_eq!(refused.code, "unknown-entity");
     assert_eq!(session.diagnostics().count(), 0, "the book's own diagnostics are there to be shown beside it");
+}
+
+/// Two owners, each with money in a commodity nothing prices: what a value cannot price is not the same for each.
+const TWO_OWNERS: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+entity me
+entity jordan
+entity shop
+purpose food : spending
+account assets/mine
+account assets/theirs
+  owner jordan
+opening 2026-01-01
+  assets/mine 100 EUR
+  assets/theirs 200 EUR
+2026-01-02 assets/mine -> shop 5 EUR #food
+2026-01-03 assets/theirs -> shop 6 EUR #food
+2026-01-04 assets/theirs -> shop 7 EUR #food
+";
+
+#[test]
+fn what_a_value_could_not_price_does_not_depend_on_whose_books_asked_first() {
+    let value = Query::Balance { globs: vec![], at: None, value: true, monthly: false };
+    let texts = Texts::default();
+    let fresh = || Session::open(Sources::in_memory(&texts, &[("axiom.ax", TWO_OWNERS)], &[]), options());
+    let ask = |session: &Session<'_>, owner| {
+        json::render(&session.query(&value, owner).expect("the value resolves"), session.sources())
+    };
+    let owners = [None, Some("me"), Some("jordan")];
+    let alone: Vec<_> = owners.iter().map(|&owner| ask(&fresh(), owner)).collect();
+    let note = "flows have no price on their day";
+    assert!(alone[0].contains(note) && alone[1].contains(note), "everyone and me are told of the flows: {alone:?}");
+    assert!(!alone[2].contains(note), "jordan owns no place that a flow of EUR moved through: {alone:?}");
+    let session = fresh();
+    for (&owner, said) in owners.iter().zip(&alone) {
+        assert_eq!(&ask(&session, owner), said, "asked in turn: {owner:?}");
+    }
+    let session = fresh();
+    for (&owner, said) in owners.iter().zip(&alone).rev() {
+        assert_eq!(&ask(&session, owner), said, "asked in turn, the other way: {owner:?}");
+    }
 }

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Day, Days, Id, Map, Qty, spread};
+use axiom_core::{Day, Days, Id, Map, Qty};
 use axiom_engine::{Counting, Counts, Piece, Posted, Run, Share};
 use axiom_model::{
     Action, Amount, Book, Class, Commodity, Dir, Entity, Flow, Object, Period, Place, Purpose, PurposeRoot, Purposed,
@@ -16,6 +16,7 @@ use axiom_model::{
 use crate::calendar::Periods;
 use crate::history::postings;
 use crate::lens::Lens;
+use crate::pivot::{Grid, Pivot};
 use crate::places::path;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
@@ -36,63 +37,11 @@ fn root_names(root: PurposeRoot) -> (&'static str, &'static str) {
     }
 }
 
-/// A table of quantities with a row of one value per period for each of whatever is being tallied: one flat vector,
-/// so that a row costs no allocation of its own.
-struct Grid {
-    width: usize,
-    rows: usize,
-    cells: Vec<Qty>,
-}
-
-impl Grid {
-    fn new(width: usize) -> Grid {
-        Grid { width, rows: 0, cells: Vec::new() }
-    }
-
-    /// A table of `rows` rows of zeros.
-    fn zeros(width: usize, rows: usize) -> Grid {
-        Grid { width, rows, cells: vec![Qty::ZERO; width * rows] }
-    }
-
-    /// Adds a row of zeros, and says which it is.
-    fn push(&mut self) -> usize {
-        self.cells.resize(self.cells.len() + self.width, Qty::ZERO);
-        self.rows += 1;
-        self.rows - 1
-    }
-
-    fn row(&self, at: usize) -> &[Qty] {
-        &self.cells[at * self.width..][..self.width]
-    }
-
-    fn row_mut(&mut self, at: usize) -> &mut [Qty] {
-        &mut self.cells[at * self.width..][..self.width]
-    }
-
-    /// Adds the row `from` into the row `into`.
-    fn add_row(&mut self, from: usize, into: usize) {
-        for period in 0..self.width {
-            let value = self.cells[from * self.width + period];
-            self.cells[into * self.width + period] += value;
-        }
-    }
-}
-
 /// The periods a flow report covers: from the day asked for, else from the first activity, the last twelve.
 fn periods_of(lens: Lens<'_, '_, '_, '_>, by: Period, from: Option<Day>) -> Periods {
     match from {
         Some(from) => Periods::covering(by, from, lens.day),
         None => Periods::covering(by, first_activity(lens, lens.day), lens.day).last(DEFAULT_PERIODS),
-    }
-}
-
-/// Spreads `amount` over the periods `recognized` touches, as far as `cutoff`, and says what each period gets.
-fn spread_over(periods: Periods, recognized: Days, cutoff: Day, amount: Qty, mut each: impl FnMut(usize, Qty)) {
-    for index in periods.overlapping(recognized.first(), recognized.last()) {
-        let window = periods.window(index).days();
-        if let Some(happened) = Days::new(window.first(), window.last().min(cutoff)) {
-            each(index, spread(amount, recognized, happened));
-        }
     }
 }
 
@@ -115,7 +64,7 @@ pub(crate) fn view_by_party_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run,
         let net: Vec<Qty> = income.iter().zip(&spending).map(|(&earned, &spent)| earned - spent).collect();
         section.push(net_row(lens.book(), &net));
     }
-    section.unpriced(totals.unpriced, "flow");
+    section.unpriced(totals.0.unpriced, "flow");
     Report::new("Income and spending").with(section)
 }
 
@@ -135,37 +84,22 @@ impl Party {
 }
 
 /// What each party moved under each purpose root, by period.
-struct PartyTotals {
-    /// The row of `grid` that holds a party's amounts under a root.
-    rows: Map<(PurposeRoot, Party), usize>,
-    grid: Grid,
-    /// Flows that could not be priced in the base currency.
-    unpriced: usize,
-}
+struct PartyTotals(Pivot<(PurposeRoot, Party)>);
 
 impl PartyTotals {
     fn of(lens: Lens<'_, '_, '_, '_>, run: &Run, periods: Periods) -> PartyTotals {
         let book = lens.book();
-        let mut totals = PartyTotals { rows: Map::default(), grid: Grid::new(periods.len()), unpriced: 0 };
+        let mut pivot = Pivot::new(periods);
         let classified = |_: &Flow, piece: &Piece| piece.purpose.is_some();
         for_each_counted(lens, run, lens.day, classified, |counted| {
-            let Counted { flow, purpose: Some(purpose), recognized, amount, .. } = counted else { return };
-            let root = book.purposes[purpose.purpose].root;
-            let Some(amount) = amount else {
-                totals.unpriced += 1;
-                return;
-            };
+            let Counted { flow, purpose: Some(purpose), .. } = counted else { return };
+            let Some(amount) = pivot.price(&counted) else { return };
             // The end that is not the book's own: where the money came from, or went.
             let other = if book.places[flow.from].class == Class::Outside { flow.from } else { flow.to };
             let party = flow.payee.map_or(Party::Place(other), Party::Entity);
-            let mut row = None;
-            spread_over(periods, recognized, lens.day, amount, |period, part| {
-                let at =
-                    *row.get_or_insert_with(|| *totals.rows.entry((root, party)).or_insert_with(|| totals.grid.push()));
-                totals.grid.row_mut(at)[period] += part;
-            });
+            pivot.add((book.purposes[purpose.purpose].root, party), &counted, amount, lens.day);
         });
-        totals
+        PartyTotals(pivot)
     }
 
     /// The rows of one root: its total, then each party, the largest first. The total, or `None` if nothing moved.
@@ -177,12 +111,9 @@ impl PartyTotals {
         section: &mut Section<'s>,
     ) -> Option<Vec<Qty>> {
         let book = lens.book();
-        let mut parties: Vec<(Party, &[Qty])> = self
-            .rows
-            .iter()
-            .filter(|((found, _), _)| *found == root)
-            .map(|(&(_, party), &at)| (party, self.grid.row(at)))
-            .collect();
+        let rows = self.0.keys().iter().filter(|(found, _)| *found == root);
+        let mut parties: Vec<(Party, &[Qty])> =
+            rows.map(|&key| (key.1, self.0.amounts(key).expect("a key has a row"))).collect();
         if parties.iter().all(|(_, amounts)| is_zero(amounts)) {
             return None;
         }
@@ -230,8 +161,8 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Peri
     let mut totals = PurposeTotals::of(lens, run, periods);
     totals.roll_up(lens.book());
     let mut section = totals.section(lens, periods);
-    section.unpriced(totals.unpriced, "flow");
-    if totals.spread {
+    section.unpriced(totals.0.unpriced, "flow");
+    if totals.0.spread {
         section.note("Flows written over a date range are recognized a little each day across the periods they cover.");
     }
     if section.rows.is_empty() {
@@ -244,66 +175,42 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Peri
     report
 }
 
-/// What the flows of a window add up to: by purpose, by purpose and the object it is of, and, for those with no
-/// purpose, by description. Each is a grid of one row per period, and the parents of the purpose tree are
-/// accumulated once, from the leaves up, rather than rescanning every flow for each subtree.
-struct PurposeTotals<'s> {
-    /// One row per purpose.
-    purposes: Grid,
-    /// Whether a purpose, or any below it, had a flow that moved something in the window.
-    active: Vec<bool>,
-    objects: Objects,
-    unclassified: Unclassified<'s>,
-    unpriced: usize,
-    /// Some flow is recognized over a range of days, not on one.
-    spread: bool,
+/// A row of the purpose table: a purpose, what a purpose is of, or what had no purpose (all of it, or by description).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Tally<'s> {
+    Purpose(Id<Purpose>),
+    Of(Id<Purpose>, Object),
+    Unclassified,
+    Described(Option<&'s str>),
 }
+
+/// What the flows of a window add up to: by purpose, by purpose and the object it is of, and, for those with no purpose, by
+/// description. The parents of the purpose tree are accumulated once, from the leaves up, rather than rescanning every flow
+/// for each subtree.
+struct PurposeTotals<'s>(Pivot<Tally<'s>>);
 
 impl<'s> PurposeTotals<'s> {
     fn of(lens: Lens<'s, '_, '_, '_>, run: &Run, periods: Periods) -> PurposeTotals<'s> {
-        let (width, purposes) = (periods.len(), lens.book().purposes.len());
-        let mut totals = PurposeTotals {
-            purposes: Grid::zeros(width, purposes),
-            active: vec![false; purposes],
-            objects: Objects { keys: Vec::new(), rows: Map::default(), grid: Grid::new(width) },
-            unclassified: Unclassified {
-                all: vec![Qty::ZERO; width],
-                rows: BTreeMap::new(),
-                grid: Grid::new(width),
-                active: Vec::new(),
-            },
-            unpriced: 0,
-            spread: false,
-        };
-        for_each_counted(lens, run, lens.day, |_, _| true, |counted| totals.add(lens, periods, counted));
+        let mut totals = PurposeTotals(Pivot::new(periods));
+        for_each_counted(lens, run, lens.day, |_, _| true, |counted| totals.add(lens, counted));
         totals
     }
 
     /// Adds what one posting counts to the purpose it is for, and the object of that, or to those with no purpose.
-    fn add(&mut self, lens: Lens<'s, '_, '_, '_>, periods: Periods, counted: Counted<'_>) {
-        let (book, Counted { flow, purpose, day, recognized, amount }) = (lens.book(), counted);
-        self.spread |= recognized.last() > day;
-        let Some(amount) = amount else {
-            self.unpriced += 1;
-            return;
-        };
-        let touches = periods.overlapping(recognized.first(), recognized.last()).next().is_some();
-        let moved = touches && !amount.is_zero();
-        let spreading = |row: &mut [Qty]| add_recognized(row, periods, recognized, lens.day, amount);
-        match purpose {
-            Some(purpose) => {
-                spreading(self.purposes.row_mut(purpose.purpose.index()));
-                self.active[purpose.purpose.index()] |= moved;
-                if let Some(object) = purpose.of {
-                    let at = self.objects.row(purpose.purpose, object);
-                    spreading(self.objects.grid.row_mut(at));
+    fn add(&mut self, lens: Lens<'s, '_, '_, '_>, counted: Counted<'_>) {
+        let (book, cutoff) = (lens.book(), lens.day);
+        let Some(amount) = self.0.price(&counted) else { return };
+        let mut add = |key| self.0.add(key, &counted, amount, cutoff);
+        match counted.purpose {
+            Some(Purposed { purpose, of, .. }) => {
+                add(Tally::Purpose(purpose));
+                if let Some(object) = of {
+                    add(Tally::Of(purpose, object));
                 }
             }
             None => {
-                spreading(&mut self.unclassified.all);
-                let at = self.unclassified.row(flow.description.map(|text| book.text(text)));
-                spreading(self.unclassified.grid.row_mut(at));
-                self.unclassified.active[at] |= moved;
+                add(Tally::Unclassified);
+                add(Tally::Described(counted.flow.description.map(|text| book.text(text))));
             }
         }
     }
@@ -311,9 +218,9 @@ impl<'s> PurposeTotals<'s> {
     /// Adds every purpose to its parent. Purpose ids are preordered, so going backwards adds each child exactly once.
     fn roll_up(&mut self, book: &Book<'_>) {
         for purpose in (0..book.purposes.len()).rev().map(|index| Id::<Purpose>::new(index as u32)) {
-            let Some(parent) = book.purposes.parent(purpose) else { continue };
-            self.purposes.add_row(purpose.index(), parent.index());
-            self.active[parent.index()] |= self.active[purpose.index()];
+            if let Some(parent) = book.purposes.parent(purpose) {
+                self.0.roll_up(Tally::Purpose(purpose), Tally::Purpose(parent));
+            }
         }
     }
 
@@ -321,15 +228,33 @@ impl<'s> PurposeTotals<'s> {
     fn section(&self, lens: Lens<'s, '_, '_, '_>, periods: Periods) -> Section<'s> {
         let book = lens.book();
         let mut section = table("Purpose", &periods);
-        let objects = self.objects.moved(book);
+        let objects = self.objects(book);
         let mut cursor = ObjectCursor { objects: &objects, next: 0 };
         for root in book.purposes.roots() {
-            for id in book.purposes.subtree(root).filter(|id| self.active[id.index()]) {
+            for id in book.purposes.subtree(root).filter(|&id| self.0.moved(Tally::Purpose(id))) {
                 self.push_purpose(lens, periods, &mut section, id, cursor.take(id));
             }
         }
-        self.unclassified.push_rows(lens, periods, &mut section);
+        self.push_unclassified(lens, periods, &mut section);
         section
+    }
+
+    /// The objects with something in the window, by purpose and then by name.
+    fn objects(&self, book: &Book<'_>) -> Vec<(Id<Purpose>, Object)> {
+        let held = |key: &Tally<'_>| self.0.amounts(*key).is_some_and(|amounts| !is_zero(amounts));
+        let mut moved: Vec<_> = self
+            .0
+            .keys()
+            .iter()
+            .filter_map(|key| match *key {
+                Tally::Of(purpose, object) if held(key) => Some((purpose, object)),
+                _ => None,
+            })
+            .collect();
+        moved.sort_by(|&(left, left_object), &(right, right_object)| {
+            left.cmp(&right).then_with(|| object_name(book, left_object).cmp(object_name(book, right_object)))
+        });
+        moved
     }
 
     /// A purpose's row, its facts, and a row below it for each object it is of.
@@ -339,106 +264,67 @@ impl<'s> PurposeTotals<'s> {
         periods: Periods,
         section: &mut Section<'s>,
         id: Id<Purpose>,
-        objects: &[(Id<Purpose>, Object, usize)],
+        objects: &[(Id<Purpose>, Object)],
     ) {
         let book = lens.book();
         let purpose = &book.purposes[id];
         let (name, concept) = (book.name(purpose.name), root_names(purpose.root).1);
-        let values = self.purposes.row(id.index());
+        let values = self.0.amounts(Tally::Purpose(id)).expect("a purpose that moved has a row");
         let depth = book.purposes.depth(id) as usize;
         let style = if book.purposes.parent(id).is_none() { Style::Total } else { Style::Normal };
         section.push(row(book, Cell::Name(name), depth, values, style));
         add_facts(section, lens, periods, concept, Some(name), values);
-        for &(_, object, at) in objects {
-            let (name, amounts) = (object_name(book, object), self.objects.grid.row(at));
+        for &(_, object) in objects {
+            let (name, amounts) =
+                (object_name(book, object), self.0.amounts(Tally::Of(id, object)).expect("an object that moved"));
             let label = Cell::list(" ", [Cell::Word("of"), Cell::Name(name)]);
             section.push(row(book, label, depth + 1, amounts, Style::Muted));
             add_facts(section, lens, periods, concept, Some(name), amounts);
         }
     }
-}
 
-/// What flows of a purpose that are of some object add up to: a row for each purpose and object.
-struct Objects {
-    /// Each row's purpose and object, in the order the rows were made.
-    keys: Vec<(Id<Purpose>, Object)>,
-    rows: Map<(Id<Purpose>, Object), usize>,
-    grid: Grid,
-}
-
-impl Objects {
-    /// The row for what `purpose` does to `object`, made when it is first asked for.
-    fn row(&mut self, purpose: Id<Purpose>, object: Object) -> usize {
-        *self.rows.entry((purpose, object)).or_insert_with(|| {
-            self.keys.push((purpose, object));
-            self.grid.push()
-        })
-    }
-
-    /// The objects with something in the window, by purpose and then by name: purpose, object and row.
-    fn moved(&self, book: &Book<'_>) -> Vec<(Id<Purpose>, Object, usize)> {
-        let mut moved: Vec<_> = self
-            .keys
+    /// What no purpose explains: a total row, and a row for each description that moved something, in description order.
+    fn push_unclassified(&self, lens: Lens<'s, '_, '_, '_>, periods: Periods, section: &mut Section<'s>) {
+        let book = lens.book();
+        let zeros = vec![Qty::ZERO; periods.len()];
+        let all = self.0.amounts(Tally::Unclassified).unwrap_or(&zeros);
+        let mut described: Vec<(Option<&'s str>, &[Qty])> = self
+            .0
+            .keys()
             .iter()
-            .enumerate()
-            .filter(|&(at, _)| !is_zero(self.grid.row(at)))
-            .map(|(at, &(purpose, object))| (purpose, object, at))
+            .filter_map(|key| match *key {
+                Tally::Described(description) if self.0.moved(*key) => Some((description, self.0.amounts(*key)?)),
+                _ => None,
+            })
             .collect();
-        moved.sort_by(|&(left, left_object, _), &(right, right_object, _)| {
-            left.cmp(&right).then_with(|| object_name(book, left_object).cmp(object_name(book, right_object)))
-        });
-        moved
+        if is_zero(all) && described.is_empty() {
+            return;
+        }
+        described.sort_by_key(|&(description, _)| description);
+        section.push(row(book, Cell::Word("Unclassified"), 0, all, Style::Total));
+        add_facts(section, lens, periods, "unclassified", None, all);
+        for (description, amounts) in described {
+            let label = description.map_or(Cell::Word("unclassified"), Cell::text);
+            section.push(row(book, label, 1, amounts, Style::Normal));
+            add_facts(section, lens, periods, "unclassified", description, amounts);
+        }
     }
 }
 
 /// Walks the objects of purposes in purpose order, as the purposes are walked in the same order.
 struct ObjectCursor<'a> {
-    objects: &'a [(Id<Purpose>, Object, usize)],
+    objects: &'a [(Id<Purpose>, Object)],
     next: usize,
 }
 
 impl<'a> ObjectCursor<'a> {
     /// The objects of `purpose`, passing those of any purpose before it.
-    fn take(&mut self, purpose: Id<Purpose>) -> &'a [(Id<Purpose>, Object, usize)] {
+    fn take(&mut self, purpose: Id<Purpose>) -> &'a [(Id<Purpose>, Object)] {
         let rest = &self.objects[self.next..];
-        let before = rest.partition_point(|&(of, ..)| of < purpose);
-        let of = rest[before..].partition_point(|&(found, ..)| found == purpose);
+        let before = rest.partition_point(|&(of, _)| of < purpose);
+        let of = rest[before..].partition_point(|&(found, _)| found == purpose);
         self.next += before + of;
         &rest[before..before + of]
-    }
-}
-
-/// What flows without a purpose add up to, in all and by description.
-struct Unclassified<'s> {
-    all: Vec<Qty>,
-    /// The row of `grid` for each description (or none), in description order.
-    rows: BTreeMap<Option<&'s str>, usize>,
-    grid: Grid,
-    /// Whether a row had a flow that moved something in the window.
-    active: Vec<bool>,
-}
-
-impl<'s> Unclassified<'s> {
-    fn row(&mut self, description: Option<&'s str>) -> usize {
-        *self.rows.entry(description).or_insert_with(|| {
-            self.active.push(false);
-            self.grid.push()
-        })
-    }
-
-    /// What no purpose explains: a total row, and a row for each description that moved something.
-    fn push_rows(&self, lens: Lens<'s, '_, '_, '_>, periods: Periods, section: &mut Section<'s>) {
-        if is_zero(&self.all) && !self.active.contains(&true) {
-            return;
-        }
-        let book = lens.book();
-        section.push(row(book, Cell::Word("Unclassified"), 0, &self.all, Style::Total));
-        add_facts(section, lens, periods, "unclassified", None, &self.all);
-        for (&description, &at) in self.rows.iter().filter(|&(_, &at)| self.active[at]) {
-            let label = description.map_or(Cell::Word("unclassified"), Cell::text);
-            section.push(row(book, label, 1, self.grid.row(at), Style::Normal));
-            add_facts(section, lens, periods, "unclassified", description, self.grid.row(at));
-        }
     }
 }
 
@@ -707,12 +593,6 @@ pub(crate) fn movement_place(lens: Lens<'_, '_, '_, '_>, flow: &axiom_model::Flo
 /// unpriced quantity views.
 pub(crate) fn scoped_movement_qty(lens: Lens<'_, '_, '_, '_>, flow: &axiom_model::Flow, qty: Qty) -> Qty {
     lens.place_qty(movement_place(lens, flow), qty)
-}
-
-fn add_recognized(values: &mut [Qty], periods: Periods, recognized: Days, cutoff: Day, amount: Qty) {
-    if !amount.is_zero() {
-        spread_over(periods, recognized, cutoff, amount, |index, part| values[index] += part);
-    }
 }
 
 fn first_activity(lens: Lens<'_, '_, '_, '_>, cutoff: Day) -> Day {

@@ -360,6 +360,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
         let Ledger { plan, options, horizon, mut world, mut record, .. } = self;
         record.settlements.sort_unstable_by_key(|&(flow, _)| flow);
+        let histories = record.balances.freeze(&world.holdings.positions(), book.places.len());
         world.assets.expire_carries_through(horizon);
         let (assets, pending_carries) = world.assets.into_run_parts();
         Run {
@@ -367,6 +368,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             horizon,
             posted: posted(plan, &record),
             holdings: world.holdings.into_sorted(),
+            histories,
             gains: record.gains,
             effects: record.effects,
             adjustments: record.adjustments,
@@ -449,6 +451,19 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     }
 
     fn step(&mut self, moment: Moment) {
+        self.take_fact(moment);
+        self.record_balances(moment.day);
+    }
+
+    /// Writes the balances that moved into the histories, as they stand when `day` has been done with them.
+    pub(crate) fn record_balances(&mut self, day: Day) {
+        let Ledger { world, record, .. } = self;
+        for (slot, balance) in world.holdings.moved() {
+            record.balances.push(slot, day, balance);
+        }
+    }
+
+    fn take_fact(&mut self, moment: Moment) {
         match moment.fact {
             Fact::Split(at) => {
                 let split = self.plan.book.splits[at as usize];

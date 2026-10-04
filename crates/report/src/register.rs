@@ -15,7 +15,7 @@ use crate::history::{Change, Posting, pad_ends, postings};
 use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
-use crate::table::{code_labels, gap_words};
+use crate::table::gap_words;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Builds a register using owner scope and display signs from the shared lens.
@@ -379,7 +379,19 @@ fn promise_row<'s>(contract: &Contract, promise: &axiom_engine::Promise, cutoff:
 
 fn contract_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, flow: &Flow) -> Row<'s> {
     let book = lens.book();
-    let activity = match flow.origin {
+    let posting = Posting::at(book, run, id);
+    Row::new([
+        Cell::Day(flow.day),
+        Cell::Word(contract_flow_word(flow.origin)),
+        purpose_cell(book, flow),
+        Cell::text(crate::places::route(book, flow)),
+        Cell::list(" ", [Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())), Cell::Source(flow.loc)]),
+    ])
+}
+
+/// What a contract's flow is, in a word: the occurrence it wrote, or what it derived.
+pub(crate) fn contract_flow_word(origin: Origin) -> &'static str {
+    match origin {
         Origin::Occurrence(_) => "occurrence",
         Origin::Derived(Derivation::Interest(_)) => "interest",
         Origin::Derived(Derivation::Principal(_)) => "principal",
@@ -388,15 +400,7 @@ fn contract_flow_row<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Flow>, fl
         Origin::Derived(Derivation::Refund(_)) => "refund",
         Origin::Derived(_) => "derived",
         Origin::Written => "flow",
-    };
-    let posting = Posting::at(book, run, id);
-    Row::new([
-        Cell::Day(flow.day),
-        Cell::Word(activity),
-        purpose_cell(book, flow),
-        Cell::text(crate::places::route(book, flow)),
-        Cell::list(" ", [Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())), Cell::Source(flow.loc)]),
-    ])
+    }
 }
 
 /// Whether a flow is one the contract wrote or derived.

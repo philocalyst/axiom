@@ -8,15 +8,16 @@
 //! The fold's results ([`Folded`]) do not borrow the plan, and the plan borrows
 //! the book, so a client that keeps the book cannot keep the plan beside it. It
 //! keeps the `Folded` and builds a plan each time it answers: a [`Context`]
-//! holds the plan it is given and either owns the `Folded` (one made by
-//! [`Context::new`]) or borrows the client's.
+//! holds the plan it is given and either owns the `Folded` or borrows the client's.
 
 use std::borrow::Borrow;
+use std::sync::OnceLock;
 
 use axiom_core::{Day, Diagnostic};
 use axiom_engine::{Checkpoint, Ledger, Options, Plan, Run};
 use axiom_model::Book;
 
+use crate::balance::Unpriced;
 use crate::closings;
 use crate::forecast::Past;
 use crate::lens::{Lens, Whose};
@@ -31,6 +32,8 @@ pub struct Folded {
     run: Run,
     checkpoint: Checkpoint,
     effects_prefix_len: usize,
+    /// The flow ends `balance --value` cannot price, found by the first view that asks and read by every one after.
+    unpriced: OnceLock<Unpriced>,
 }
 
 impl Folded {
@@ -39,7 +42,12 @@ impl Folded {
         let (run, ledger, effects_prefix_len) = plan.run_with_view_and_effects_prefix(options);
         let checkpoint = ledger.checkpoint();
         drop(ledger);
-        Folded { options, run, checkpoint, effects_prefix_len }
+        Folded { options, run, checkpoint, effects_prefix_len, unpriced: OnceLock::new() }
+    }
+
+    /// The flow ends of the run no price is known for, whoever's money `lens` is about.
+    pub(crate) fn unpriced(&self, lens: Lens) -> &Unpriced {
+        self.unpriced.get_or_init(|| Unpriced::of(lens, &self.run))
     }
 
     /// The journal as folded.
@@ -54,17 +62,6 @@ pub struct Context<'b, 's, F = Folded> {
     plan: Plan<'b, 's>,
     folded: F,
     whose: Whose,
-}
-
-impl<'b, 's> Context<'b, 's> {
-    /// Builds a plan, run and pre-closing checkpoint together so a client
-    /// cannot accidentally pair a checkpoint with a different run or book.
-    pub fn new(book: &'b Book<'s>, options: Options, whose: Option<&str>) -> Result<Context<'b, 's>, Diagnostic> {
-        let whose = Whose::resolve(book, whose)?;
-        let plan = Plan::new(book);
-        let folded = Folded::of(&plan, options);
-        Ok(Context { plan, folded, whose })
-    }
 }
 
 impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
@@ -94,8 +91,9 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
         let run = self.run();
         match query {
             Query::Balance { globs, at, value, monthly } => {
-                let at = at.unwrap_or(run.today);
-                super::balance::view_with_lens(self.lens(at), run, globs, *value, *monthly)
+                let lens = self.lens(at.unwrap_or(run.today));
+                let unpriced = value.then(|| self.folded().unpriced(lens));
+                super::balance::view_with_lens(lens, run, globs, unpriced, *monthly)
             }
             Query::Register { place, from, to } => {
                 super::register::view_with_lens(self.lens(to.unwrap_or(run.today)), run, place, *from, *to)
@@ -113,24 +111,31 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
                 Ok(super::budget::view_with_lens(self.lens(at.unwrap_or(run.today)), run, *at, *by))
             }
             Query::Limits { year } => Ok(super::limits::view_with_lens(self.lens(run.today), run, *year)),
-            Query::Claims { at } => {
-                let at = at.unwrap_or(run.today);
-                let ledger = self.ledger_at(at, run.today);
-                Ok(super::claims::view_from(self.lens(at), run, ledger.holdings()))
-            }
+            Query::Claims { at } => Ok(self.claims(at.unwrap_or(run.today))),
             Query::Contracts => Ok(super::contracts::view_with_lens(self.lens(run.today), run)),
             Query::Tax { year } => Ok(super::tax::view_with_lens(self.lens(run.today), run, *year)),
             Query::Gains { year } => Ok(super::gains::view_with_lens(self.lens(run.today), run, *year)),
-            Query::Lots { place, at } => {
-                let scope = place.map(|text| resolve::place(self.plan.book(), text)).transpose()?;
-                let at = at.unwrap_or(run.today);
-                let ledger = self.ledger_at(at, run.today);
-                Ok(super::lots::view_from(self.lens(at), scope, ledger.holdings()))
-            }
+            Query::Lots { place, at } => self.lots(*place, at.unwrap_or(run.today)),
             Query::Forecast { until, paths } => Ok(self.forecast(*until, *paths)),
-            Query::Why { target } => super::why::target_with_lens(self.lens(run.today), run, target),
+            Query::Why { target } => {
+                let lens = self.lens(run.today);
+                super::why::Target::of(lens, run, target)?.report(lens, run)
+            }
             Query::Line { loc } => Ok(super::why::line_with_lens(self.lens(run.today), run, *loc)),
         }
+    }
+
+    /// The claims open at `at`, from the parcels a fold to that day holds.
+    fn claims(&self, at: Day) -> Report<'b> {
+        let ledger = self.ledger_at(at, self.run().today);
+        super::claims::view_from(self.lens(at), self.run(), ledger.holdings())
+    }
+
+    /// What is held at `at`, with its cost and its gain: everywhere, or in the place `scope` names.
+    fn lots(&self, scope: Option<&str>, at: Day) -> Result<Report<'b>, Diagnostic> {
+        let place = scope.map(|text| resolve::place(self.plan.book(), text)).transpose()?;
+        let ledger = self.ledger_at(at, self.run().today);
+        Ok(super::lots::view_from(self.lens(at), place, ledger.holdings()))
     }
 
     /// What can be spent at `at`, and what more costs.
@@ -144,7 +149,7 @@ impl<'b, 's, F: Borrow<Folded>> Context<'b, 's, F> {
     fn forecast(&self, until: Option<Day>, paths: u32) -> Report<'b> {
         let folded = self.folded();
         let effects = &folded.run.effects[..folded.effects_prefix_len];
-        let past = Past::Checkpoint { at: &folded.checkpoint, effects };
+        let past = Past { at: &folded.checkpoint, effects };
         let options = Options { today: folded.run.today, relaxed: folded.options.relaxed };
         super::forecast::view(past, &folded.run, self.lens(folded.run.today), options, until, paths)
     }

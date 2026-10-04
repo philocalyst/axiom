@@ -100,6 +100,7 @@ impl Ledger<'_, '_, '_> {
         if self.is_asset_sale(m) {
             self.dispose_sold_asset(m);
         }
+        self.record_balances(m.day);
     }
 
     /// A `!` on an assertion accepts its gap: it is never unused.

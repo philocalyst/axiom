@@ -17,15 +17,13 @@ mod system;
 mod taxline;
 mod text;
 
-pub use self::line::line;
-
 use std::borrow::Cow;
 
 use axiom_core::{Diagnostic, Id, Sym};
 use axiom_engine::{Effect, Run, State};
 use axiom_model::{
-    Amount, Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System,
-    Trigger,
+    Amount, Asset, Book, Closing, Contract, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place,
+    StepKind, System, Trigger,
 };
 
 use crate::history::Posting;
@@ -113,45 +111,8 @@ fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> 
     section
 }
 
-pub(crate) fn target_with_lens<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    text: &str,
-) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book();
-    if let Some(contract) = text.strip_prefix("contract:") {
-        let contract = resolve::contract(book, contract)?;
-        return Ok(contract::report(lens, run, contract));
-    }
-    if let Some(entity) = text.strip_prefix("entity:") {
-        let entity = resolve::entity(book, entity)?;
-        return Ok(entity::report(lens, run, entity));
-    }
-    if let Some(asset) = text.strip_prefix("asset:") {
-        let asset = resolve::asset(book, asset)?;
-        return Ok(asset::report(lens, run, asset));
-    }
-    if let Some(code) = text.strip_prefix('^') {
-        return code::report(lens, run, code);
-    }
-    if let Some(purpose) = text.strip_prefix('#') {
-        return purpose::report(lens, run, purpose);
-    }
-    if let Some(asset) = book.asset(text) {
-        return Ok(asset::report(lens, run, asset));
-    }
-    if let Some(contract) = book.contract(text) {
-        return Ok(contract::report(lens, run, contract));
-    }
-    let quoted = text.strip_prefix('"').and_then(|text| text.strip_suffix('"')).unwrap_or(text);
-    if let Some(report) = self::text::report(lens, run, quoted) {
-        return Ok(report);
-    }
-    Ok(explain_with_lens(lens, run, identify(book, run, text)?))
-}
-
-/// What a name means, once found.
-pub(crate) enum Found<'a> {
+/// What a `why` is about, once what was typed has been found.
+pub(crate) enum Target<'a> {
     Place(Id<Place>),
     Entity(Id<Entity>),
     System(Id<System>),
@@ -160,71 +121,125 @@ pub(crate) enum Found<'a> {
     Laws(Box<[Id<Law>]>),
     /// A name some law counted or owed under.
     TaxLine(&'a str),
+    Asset(Id<Asset>),
+    Contract(Id<Contract>),
+    /// `^pattern`: the flows a code marks, and the events that changed them.
+    Code(&'a str),
+    /// `#name`: a purpose, which its page looks up and says if there is none.
+    Purpose(&'a str),
+    /// A description, and the written flows of the lens's owners that have exactly it.
+    Description(&'a str, Vec<Id<Flow>>),
 }
 
-pub(crate) fn explain_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, found: Found) -> Report<'s> {
-    let book = lens.book();
-    match found {
-        Found::Place(place) => place::report(lens, run, place),
-        Found::Entity(entity) => entity::report(lens, run, entity),
-        Found::System(system) => system::report(lens, run, system),
-        Found::Law(law) => law::report(lens, run, law),
-        Found::Laws(candidates) => law::which(book, &candidates),
-        Found::TaxLine(name) => taxline::report(lens, run, name),
+impl<'a> Target<'a> {
+    /// What `text` asks about. A prefix says which kind of thing (`contract:`, `entity:`, `asset:`, `^`, `#`); a bare word is
+    /// an asset, a contract, the description of some flow, and then a place, an entity, a system, a law or a tax line, in
+    /// that order, the first that it names.
+    pub fn of(lens: Lens<'_, '_, '_, '_>, run: &Run, text: &'a str) -> Result<Target<'a>, Diagnostic> {
+        let book = lens.book();
+        if let Some(name) = text.strip_prefix("contract:") {
+            return Ok(Target::Contract(resolve::contract(book, name)?));
+        }
+        if let Some(name) = text.strip_prefix("entity:") {
+            return Ok(Target::Entity(resolve::entity(book, name)?));
+        }
+        if let Some(name) = text.strip_prefix("asset:") {
+            return Ok(Target::Asset(resolve::asset(book, name)?));
+        }
+        if let Some(pattern) = text.strip_prefix('^') {
+            return Ok(Target::Code(pattern));
+        }
+        if let Some(name) = text.strip_prefix('#') {
+            return Ok(Target::Purpose(name));
+        }
+        if let Some(asset) = book.asset(text) {
+            return Ok(Target::Asset(asset));
+        }
+        if let Some(contract) = book.contract(text) {
+            return Ok(Target::Contract(contract));
+        }
+        let quoted = text.strip_prefix('"').and_then(|text| text.strip_suffix('"')).unwrap_or(text);
+        let described = self::text::flows(lens, run, quoted);
+        if !described.is_empty() {
+            return Ok(Target::Description(quoted, described));
+        }
+        Target::named(book, run, text)
+    }
+
+    /// A name is a place if it can be one, else an entity, a system, a law, or something a law tallied or owed. An ambiguous
+    /// place is an error, not a reason to look on. An entity that only stands in for its place is asked about as the entity:
+    /// its own laws and ties are what was wanted.
+    fn named(book: &Book, run: &Run, text: &'a str) -> Result<Target<'a>, Diagnostic> {
+        let entity = book.entity(text).ok();
+        match book.place(text) {
+            Ok(place) => {
+                return Ok(match entity {
+                    Some(entity) if book.entities[entity].place == Some(place) => Target::Entity(entity),
+                    _ => Target::Place(place),
+                });
+            }
+            Err(miss @ Miss::Ambiguous(_)) => return Err(resolve::place_miss(book, text, miss)),
+            Err(Miss::Unknown { .. }) => {}
+        }
+        if let Some(entity) = entity {
+            return Ok(Target::Entity(entity));
+        }
+        let named = |system: &System| {
+            let path = book.name(system.path);
+            path == text || path.strip_suffix(text).is_some_and(|before| before.ends_with('/'))
+        };
+        if let Some((system, _)) = book.systems.iter().find(|(_, system)| named(system)) {
+            return Ok(Target::System(system));
+        }
+        match book.law(text) {
+            Ok(law) => return Ok(Target::Law(law)),
+            Err(Miss::Ambiguous(candidates)) => return Ok(Target::Laws(candidates)),
+            Err(Miss::Unknown { .. }) => {}
+        }
+        if run.effects.iter().any(|effect| book.name(effect.name) == text) {
+            return Ok(Target::TaxLine(text));
+        }
+        Err(Target::nothing_named(book, run, text))
+    }
+
+    /// The error for a name that is none of those, with the nearest names of every kind to suggest.
+    fn nothing_named(book: &Book, run: &Run, text: &str) -> Diagnostic {
+        let laws = book.laws.values().map(|law| book.name(law.name));
+        let tallies = run.effects.iter().map(|effect| book.name(effect.name));
+        let things = names(book).chain(book.entities.values().map(|entity| book.name(entity.path)));
+        resolve::nothing_named(
+            "place, entity:NAME, system, ^code, #purpose, asset:NAME, contract:NAME, law, tax line or description",
+            text,
+            things
+                .chain(laws)
+                .chain(tallies)
+                .chain(book.purposes.values().map(|purpose| book.name(purpose.name)))
+                .chain(book.assets.values().map(|asset| book.name(asset.name)))
+                .chain(book.contracts.values().map(|contract| book.name(contract.name))),
+        )
+    }
+
+    /// The page about it.
+    pub fn report<'s>(self, lens: Lens<'s, '_, '_, '_>, run: &Run) -> Result<Report<'s>, Diagnostic> {
+        let book = lens.book();
+        Ok(match self {
+            Target::Place(place) => place::report(lens, run, place),
+            Target::Entity(entity) => entity::report(lens, run, entity),
+            Target::System(system) => system::report(lens, run, system),
+            Target::Law(law) => law::report(lens, run, law),
+            Target::Laws(candidates) => law::which(book, &candidates),
+            Target::TaxLine(name) => taxline::report(lens, run, name),
+            Target::Asset(asset) => asset::report(lens, run, asset),
+            Target::Contract(contract) => contract::report(lens, run, contract),
+            Target::Code(pattern) => return code::report(lens, run, pattern),
+            Target::Purpose(name) => return purpose::report(lens, run, name),
+            Target::Description(description, flows) => self::text::report(lens, run, description, &flows),
+        })
     }
 }
 
 pub(crate) fn line_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: axiom_core::Loc) -> Report<'s> {
     line::line(lens, run, at)
-}
-
-/// A name is a place if it can be one, else an entity, a system, a law, or
-/// something a law tallied or owed. An ambiguous place is an error, not a
-/// reason to look on. An entity that only stands in for its place is
-/// asked about as the entity: its own laws and ties are what was wanted.
-fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diagnostic> {
-    let entity = book.entity(text).ok();
-    match book.place(text) {
-        Ok(place) => {
-            return Ok(match entity {
-                Some(entity) if book.entities[entity].place == Some(place) => Found::Entity(entity),
-                _ => Found::Place(place),
-            });
-        }
-        Err(miss @ Miss::Ambiguous(_)) => return Err(resolve::place_miss(book, text, miss)),
-        Err(Miss::Unknown { .. }) => {}
-    }
-    if let Some(entity) = entity {
-        return Ok(Found::Entity(entity));
-    }
-    let named = |system: &System| {
-        let path = book.name(system.path);
-        path == text || path.strip_suffix(text).is_some_and(|before| before.ends_with('/'))
-    };
-    if let Some((system, _)) = book.systems.iter().find(|(_, system)| named(system)) {
-        return Ok(Found::System(system));
-    }
-    match book.law(text) {
-        Ok(law) => return Ok(Found::Law(law)),
-        Err(Miss::Ambiguous(candidates)) => return Ok(Found::Laws(candidates)),
-        Err(Miss::Unknown { .. }) => {}
-    }
-    if run.effects.iter().any(|effect| book.name(effect.name) == text) {
-        return Ok(Found::TaxLine(text));
-    }
-    let laws = book.laws.values().map(|law| book.name(law.name));
-    let tallies = run.effects.iter().map(|effect| book.name(effect.name));
-    let things = names(book).chain(book.entities.values().map(|entity| book.name(entity.path)));
-    Err(resolve::nothing_named(
-        "place, entity:NAME, system, ^code, #purpose, asset:NAME, contract:NAME, law, tax line or description",
-        text,
-        things
-            .chain(laws)
-            .chain(tallies)
-            .chain(book.purposes.values().map(|purpose| book.name(purpose.name)))
-            .chain(book.assets.values().map(|asset| book.name(asset.name)))
-            .chain(book.contracts.values().map(|contract| book.name(contract.name))),
-    ))
 }
 
 /// What a law does to a move: forbids it or warns of it (a limit), puts a

@@ -29,7 +29,13 @@ def mutate(text):
 
 COMMANDS = [["check"], ["check", "--json"], ["balance"], ["balance", "--value", "--json"], ["available"], ["claims", "--at", "2026-01-31"],
             ["lots"], ["flow", "--by", "party"], ["forecast", "--paths", "20"], ["why", "checking"], ["balance", "--for", "me"],
-            ["fmt", "--check"], ["sync", "--dry"], ["contracts", "--json"], ["tax", "2025"]]
+            ["fmt", "--check"], ["sync", "--dry"], ["contracts", "--json"], ["tax", "2025"],
+            # lane K7b: the views that read the pivot and the targets of `why`
+            ["flow"], ["flow", "--by", "year", "--json"], ["flow", "--by", "party", "--from", "2025-06-01", "--to", "2026-03-01"],
+            ["flow", "--from", "2026-01-01", "--for", "me"], ["why", "entity:me"], ["why", "#food"], ["why", "^c1"],
+            ["why", "axiom.ax:12"], ["why", "contract:rent"], ["register", "checking", "--to", "2026-02-15"], ["claims"], ["lots", "--at", "2026-02-15"]]
+# What a command's output may differ in from the baseline's is the baseline's mistake (K7b-map section 0.2): `balance` at a past
+# day, `--monthly`, `--value`. The oracles of crates/session/tests/histories.rs hold those; this holds the rest byte for byte.
 
 def run(binary, args, project):
     r = subprocess.run([binary, *args, "-C", project, "--today", "2026-04-16", "--color", "never"], capture_output=True, timeout=120)

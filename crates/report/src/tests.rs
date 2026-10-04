@@ -11,14 +11,20 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, Days, Facts, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
-use axiom_engine::{Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
+use axiom_engine::{
+    Bound, Cause, Effect, Gain, Headroom, Histories, Holding, Owed, Parcel, Position, Posted, Run, State,
+};
 use axiom_model::Effect as Consequence;
 use axiom_model::builtin;
 use axiom_model::*;
 
-use crate::lens::Whose;
-use crate::why::Found;
+use crate::lens::{Lens, Whose};
+use crate::why::Target;
 use crate::{Cell, FlowBy, Query, Report, Row, Section, Style};
+use crate::{
+    Context, Folded, available, balance, budget, claims, contracts, flow, gains, limits, lots, register, tax, why,
+};
+use axiom_engine::Options;
 
 fn day(y: i32, m: u32, d: u32) -> Day {
     Day::from_ymd(y, m, d).unwrap()
@@ -48,18 +54,78 @@ impl Household {
     fn report_for<'a>(&'a self, query: Query, whose: Option<&str>) -> Result<Report<'a>, axiom_core::Diagnostic> {
         let whose = whose.map_or_else(Whose::default, |name| Whose::of(&self.book, self.entity(name)));
         let plan = axiom_engine::Plan::new(&self.book);
-        crate::views(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, &query)
+        views(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, &query)
     }
 
-    fn why<'a>(&'a self, found: Found) -> Report<'a> {
+    fn why<'a>(&'a self, target: Target) -> Report<'a> {
         let whose = Whose::default();
         let plan = axiom_engine::Plan::new(&self.book);
-        crate::why::explain_with_lens(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run, found)
+        target
+            .report(crate::lens::Lens::new(&plan, &whose, self.run.today), &self.run)
+            .expect("the page of a thing that was found")
     }
 
     fn report<'a>(&'a self, query: Query) -> Report<'a> {
         self.report_for(query, None).expect("the query resolves")
     }
+}
+
+/// A context over `book`, folded through the day `options` say: what a client that folds once and asks many questions holds.
+pub(crate) fn context<'b, 's>(
+    book: &'b Book<'s>,
+    options: Options,
+    whose: Option<&str>,
+) -> Result<Context<'b, 's>, axiom_core::Diagnostic> {
+    let plan = axiom_engine::Plan::new(book);
+    let folded = Folded::of(&plan, options);
+    Context::over(plan, folded, whose)
+}
+
+/// The view `query` asks for, from a context folded through the run's day.
+pub(crate) fn report<'s>(
+    book: &'s Book<'_>,
+    run: &Run,
+    query: &Query,
+    whose: Option<&str>,
+) -> Result<Report<'s>, axiom_core::Diagnostic> {
+    context(book, Options { today: run.today, relaxed: book.relaxed }, whose)?.report(query)
+}
+
+/// The views over a run made by hand. No fold made it, so no context can hold it: what a context asks of the fold it
+/// kept (a ledger on a day, a checkpoint to forecast from) is asked of the final holdings and of the book instead, and a
+/// hand-built run has no forecast.
+fn views<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, query: &Query) -> Result<Report<'s>, axiom_core::Diagnostic> {
+    let at = |at: &Option<Day>| lens.on(at.unwrap_or(run.today));
+    Ok(match query {
+        Query::Balance { globs, at: day, value, monthly } => {
+            let lens = at(day);
+            let unpriced = value.then(|| balance::Unpriced::of(lens, run));
+            return balance::view_with_lens(lens, run, globs, unpriced.as_ref(), *monthly);
+        }
+        Query::Register { place, from, to } => return register::view_with_lens(at(to), run, place, *from, *to),
+        Query::Flow { by: FlowBy::Period(by), from, to } => flow::view_with_lens(at(to), run, *by, *from),
+        Query::Flow { by: FlowBy::Party, from, to } => flow::view_by_party_with_lens(at(to), run, *from),
+        Query::Available { at: day } => {
+            let lens = at(day);
+            let horizon = crate::closings::judged_through(lens.book(), lens.day);
+            let mut ledger = lens.plan().start(Options { today: horizon.max(run.today), relaxed: false });
+            ledger.advance_to_closing(lens.day);
+            available::from_ledger(lens, run, &ledger, horizon)
+        }
+        Query::Budget { at: day, by } => budget::view_with_lens(at(day), run, *day, *by),
+        Query::Limits { year } => limits::view_with_lens(lens, run, *year),
+        Query::Claims { at: day } => claims::view_from(at(day), run, run.holdings.iter()),
+        Query::Contracts => contracts::view_with_lens(lens, run),
+        Query::Tax { year } => tax::view_with_lens(lens, run, *year),
+        Query::Gains { year } => gains::view_with_lens(lens, run, *year),
+        Query::Lots { place, at: day } => {
+            let scope = place.map(|text| crate::resolve::place(lens.book(), text)).transpose()?;
+            lots::view_from(at(day), scope, run.holdings.iter())
+        }
+        Query::Forecast { .. } => unimplemented!("a hand-built run has no checkpoint to go on from"),
+        Query::Why { target } => return why::Target::of(lens, run, target)?.report(lens, run),
+        Query::Line { loc } => why::line_with_lens(lens, run, *loc),
+    })
 }
 
 // ─── The cast ───────────────────────────────────────────────────────────────
@@ -513,10 +579,45 @@ fn holdings(cast: &Cast, journal: &Journal) -> Vec<Holding> {
         .collect()
 }
 
+/// What each position of a hand-built journal held on each day it moved, by the plainest replay there is: a flow moves its
+/// two ends from the day it stands until it is returned. A run made by hand has no fold to record its histories, so it
+/// gets them this way, which is also the oracle's way (`crates/session/tests/histories.rs` holds the fold's to a replay).
+fn replayed(journal: &Journal, places: usize) -> Histories {
+    let mut moves: BTreeMap<Position, Vec<(Day, Qty)>> = BTreeMap::new();
+    for (flow, posted) in journal.flows.values().zip(&journal.posted) {
+        let standing = match posted.state {
+            State::Actual => Some((flow.day, Day::MAX)),
+            State::Settled(on) => Some((flow.day.max(on), Day::MAX)),
+            State::Returned(on) => Some((flow.day, on)),
+            State::Pending | State::Void | State::Planned => None,
+        };
+        let Some((from, past)) = standing else { continue };
+        for (place, unit, qty) in [(flow.from, flow.out.unit, -posted.out), (flow.to, flow.arrive.unit, posted.arrive)]
+        {
+            let at = moves.entry(Position { place, unit }).or_default();
+            at.push((from, qty));
+            if past != Day::MAX {
+                at.push((past, -qty));
+            }
+        }
+    }
+    let steps = moves.into_iter().map(|(position, mut moves)| {
+        moves.sort_by_key(|&(day, _)| day);
+        let mut held = Qty::ZERO;
+        let steps = moves.into_iter().map(|(day, change)| {
+            held += change;
+            (day, held)
+        });
+        (position, steps.collect())
+    });
+    Histories::from_steps(places, steps)
+}
+
 pub(crate) fn household() -> Household {
     let mut cast = Cast::new();
     let journal = journal(&mut cast);
     let records = records(&mut cast, &journal);
+    let histories = replayed(&journal, cast.places.len());
 
     let food = cast.id("expenses/food");
     let budget_rule = Rule { law: Id::new(0), subject: Subject::Place(food), days: Days::ALWAYS };
@@ -623,6 +724,7 @@ pub(crate) fn household() -> Household {
         horizon: day(2026, 3, 31),
         posted: journal.posted.into(),
         holdings: records.holdings,
+        histories,
         gains: records.gains,
         effects: records.effects,
         violations: Vec::new(),
@@ -797,29 +899,24 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
 }
 
 #[test]
-fn the_legacy_report_keeps_the_run_its_caller_supplied() {
-    let mut house = household();
-    let checking = house.place("assets/bank/checking");
-    house.run.holdings.iter_mut().find(|holding| holding.place == checking).unwrap().plain += Qty(100);
-    let report = crate::report(&house.book, &house.run, &balance(vec!["checking"], None, false, false), None).unwrap();
-    assert!(lines(&report.sections[0]).iter().any(|row| row == "    checking | 8,956.80 USD"));
-}
-
-#[test]
-fn today_from_the_run_and_from_the_flows_agree() {
-    // The run's holdings answer for today; two days are one pass over the flows.
+fn the_balances_on_the_last_day_are_what_the_run_holds() {
+    // The run's holdings are the journal's final state; the histories are made from the same flows, a day at a time.
     let house = household();
     let (everyone, today) = (Whose::default(), house.run.today);
     let plan = axiom_engine::Plan::new(&house.book);
     let lens = crate::lens::Lens::new(&plan, &everyone, today);
-    let from_holdings = crate::history::Snapshots::of(lens, &house.run, &[today], false);
-    let from_flows = crate::history::Snapshots::of(lens, &house.run, &[day(2026, 2, 1), today], false);
+    let balances = crate::balances::Balances::of(lens, &house.run, &[today]);
     for place in house.book.places.ids() {
-        let (held, replayed) =
-            (from_holdings.subtree(&house.book, 0, place), from_flows.subtree(&house.book, 1, place));
+        let held: Qty = house
+            .run
+            .holdings
+            .iter()
+            .filter(|holding| holding.unit == house.book.base && house.book.places.covers(place, holding.place))
+            .map(|holding| holding.qty())
+            .sum();
         assert_eq!(
-            held.get(house.book.base),
-            replayed.get(house.book.base),
+            balances.subtree(&house.book, 0, place).get(house.book.base),
+            held,
             "{}",
             house.book.name(house.book.places[place].path)
         );
@@ -827,24 +924,22 @@ fn today_from_the_run_and_from_the_flows_agree() {
 }
 
 #[test]
-fn snapshot_storage_scales_with_occupied_owner_pairs() {
+fn histories_hold_a_position_for_each_place_that_held_something_and_a_scope_sees_only_its_own() {
     let house = household();
-    let days = [day(2026, 1, 31), house.run.today];
-    let everyone = Whose::default();
-    let plan = axiom_engine::Plan::new(&house.book);
-    let lens = crate::lens::Lens::new(&plan, &everyone, house.run.today);
-    let all = crate::history::Snapshots::of(lens, &house.run, &days, false);
-    let (all_pairs, all_cells) = all.storage_shape();
-    let dense_cells = days.len() * house.book.places.len() * house.book.commodities.len();
-    assert_eq!(all_cells, days.len() * all_pairs);
-    assert!(all_cells < dense_cells / 2, "{all_cells} stored cells versus {dense_cells} dense cells");
+    let dense = house.book.places.len() * house.book.commodities.len();
+    let positions = house.run.histories.len();
+    assert!(positions < dense / 2, "{positions} positions against {dense} places and commodities");
 
+    let (everyone, today) = (Whose::default(), house.run.today);
+    let plan = axiom_engine::Plan::new(&house.book);
+    let assets = house.place("assets");
+    let held = |whose: &Whose| {
+        let lens = crate::lens::Lens::new(&plan, whose, today);
+        crate::balances::Balances::of(lens, &house.run, &[today]).subtree(&house.book, 0, assets).get(house.book.base)
+    };
     let jordan = Whose::of(&house.book, house.entity("jordan"));
-    let jordan_lens = crate::lens::Lens::new(&plan, &jordan, house.run.today);
-    let scoped = crate::history::Snapshots::of(jordan_lens, &house.run, &days, false);
-    let (jordan_pairs, jordan_cells) = scoped.storage_shape();
-    assert_eq!(jordan_cells, days.len() * jordan_pairs);
-    assert!(jordan_pairs < all_pairs, "owner scope should omit unowned pairs");
+    assert_eq!(held(&jordan), Qty(430_000), "jordan's checking and nothing else");
+    assert!(held(&everyone) > held(&jordan));
 }
 
 #[test]
@@ -1078,7 +1173,7 @@ fn the_summary_counts_the_places_that_were_declared_or_used() {
 #[test]
 fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed() {
     let house = household().with_headroom();
-    let report = house.why(Found::Place(house.place("assets/retirement")));
+    let report = house.why(Target::Place(house.place("assets/retirement")));
     let headings: Vec<_> =
         report.sections.iter().map(|section| section.heading.as_ref().map_or_else(String::new, cell)).collect();
     assert_eq!(headings, ["Composition", "Parcels", "Limits", "Governed by", "Recent flows"]);
@@ -1104,13 +1199,13 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
 #[test]
 fn why_an_entity_shows_its_places_ties_and_claims() {
     let house = household();
-    let grant = house.why(Found::Entity(house.entity("nsf")));
+    let grant = house.why(Target::Entity(house.entity("nsf")));
     let ties = grant.sections.iter().find(|section| heading(section) == Some("Held for it")).unwrap();
     assert_eq!(lines(ties), ["assets/bank/checking | 500.00 USD | 2025-06-01 | @1", "=Remaining | 500.00 USD |  |"]);
-    let client = house.why(Found::Entity(house.entity("acme")));
+    let client = house.why(Target::Entity(house.entity("acme")));
     let claims = client.sections.iter().find(|section| heading(section) == Some("Claims with it")).unwrap();
     assert!(lines(claims)[0].starts_with("!acme | ^inv-12"));
-    let jordan = house.why(Found::Entity(house.entity("jordan")));
+    let jordan = house.why(Target::Entity(house.entity("jordan")));
     // What is held, not what was earned: the statement of income and spending is `flow`.
     assert_eq!(lines(&jordan.sections[0]), ["assets/bank/jordan-checking | 4,300.00 USD"]);
 }
@@ -1119,7 +1214,7 @@ fn why_an_entity_shows_its_places_ties_and_claims() {
 fn why_a_system_says_what_each_of_its_laws_counted() {
     let house = household();
     let us = house.book.systems.iter().next().unwrap().0;
-    let report = house.why(Found::System(us));
+    let report = house.why(Target::System(us));
     assert_eq!(report.sections[0].notes.iter().map(cell).collect::<Vec<_>>(), ["Nobody in this book lives here."]);
     assert_eq!(
         lines(&report.sections[1]),
@@ -1132,7 +1227,7 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
 #[test]
 fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
     let house = household();
-    let report = house.why(Found::Laws(Box::new([Id::new(0), Id::new(3)])));
+    let report = house.why(Target::Laws(Box::new([Id::new(0), Id::new(3)])));
     assert_eq!(cell(&report.title), "`budget` is written in 2 places");
     assert_eq!(
         lines(&report.sections[0]),
@@ -1187,7 +1282,7 @@ fn claims_and_registers_are_about_whose_money_they_are() {
     assert!(claims.sections[0].rows.is_empty(), "the invoice is the first person's");
     let me = house.entity("me");
     let plan = axiom_engine::Plan::new(&house.book);
-    let mine = crate::views(
+    let mine = views(
         crate::lens::Lens::new(&plan, &Whose::of(&house.book, me), house.run.today),
         &house.run,
         &Query::Claims { at: None },

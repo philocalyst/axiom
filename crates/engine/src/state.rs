@@ -19,6 +19,7 @@ use axiom_model::{
 
 use crate::assets::Assets;
 use crate::eval::Outcome;
+use crate::histories::Changes;
 use crate::lots::{Holdings, Relief};
 use crate::monitor::Monitor;
 use crate::motion::Amounts;
@@ -90,6 +91,8 @@ pub(crate) struct Record {
     pub written_off: Vec<WriteOff>,
     pub violations: Vec<Violation>,
     pub pads: Vec<Pad>,
+    /// Every time a position's balance moved, for the histories the run ends with.
+    pub balances: Changes,
     pub diagnostics: Vec<Diagnostic>,
     /// How many times each law ran past its `when` filters.
     pub checks: Vec<u32>,

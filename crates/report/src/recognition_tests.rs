@@ -42,7 +42,8 @@ opening 2026-01-01
 
 /// The rows of the `flow` report by month, from January to March.
 fn flow(book: &Book, run: &axiom_engine::Run, by: FlowBy) -> Vec<String> {
-    let report = crate::report(book, run, &Query::Flow { by, from: Some(day(2026, 1, 1)), to: None }, None).unwrap();
+    let report =
+        crate::tests::report(book, run, &Query::Flow { by, from: Some(day(2026, 1, 1)), to: None }, None).unwrap();
     lines(&report.sections[0])
 }
 
@@ -118,7 +119,7 @@ fn a_payment_net_of_a_fee_is_the_invoice_as_income_and_the_fee_as_spending() {
 #[test]
 fn why_a_purpose_says_what_it_counted_in_cash_books() {
     with_run(&book("cash", CLAIM), day(2026, 3, 31), |book, run| {
-        let report = crate::report(book, run, &Query::Why { target: "#design" }, None).unwrap();
+        let report = crate::tests::report(book, run, &Query::Why { target: "#design" }, None).unwrap();
         let said: String = report.sections.iter().flat_map(|section| lines(section)).collect::<Vec<_>>().join("\n");
         assert!(said.contains("100.00 USD"), "{said}");
         assert!(!said.contains("300.00 USD"), "the claim made counted nothing: {said}");

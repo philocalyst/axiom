@@ -35,22 +35,12 @@ const SEED: u64 = 0x5EED_0A11_CE00_0001;
 /// Bootstrapping needs a past to draw from.
 const MIN_HISTORY_MONTHS: usize = 3;
 
-/// What a forecast goes on from: the fold the run came from.
-pub(crate) enum Past<'a> {
-    /// The checkpoint paired with the run, standing on its day before that day's closings, and the effects the run had
-    /// recorded by then: the checkpoint forgets what happened, and a forecast reads what it caused and these.
-    Checkpoint { at: &'a Checkpoint, effects: &'a [Effect] },
-    /// The journal, which the forecast folds itself.
-    Journal,
-}
-
-impl<'a> Past<'a> {
-    fn effects(&self) -> Option<&'a [Effect]> {
-        match *self {
-            Past::Checkpoint { effects, .. } => Some(effects),
-            Past::Journal => None,
-        }
-    }
+/// What a forecast goes on from: the fold the run came from. The checkpoint paired with the run, standing on its day before
+/// that day's closings, and the effects the run had recorded by then: the checkpoint forgets what happened, and a forecast
+/// reads what it caused and these.
+pub(crate) struct Past<'a> {
+    pub at: &'a Checkpoint,
+    pub effects: &'a [Effect],
 }
 
 /// The forecast of the lens's owners to `until` (default: a year ahead), with `paths` simulated futures around it.
@@ -72,7 +62,7 @@ pub(crate) fn view<'b, 's, 'p>(
     let trace = Trace::run(lens, &past, options, habits, &checkpoints);
     let (contract_rows, contract_issues) = contract_rows(lens, trace.ledger.recorded());
 
-    let due = coming_due(&trace, past.effects(), lens.whose, today);
+    let due = coming_due(&trace, past.effects, lens.whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
     let variable = Variable::from_history(lens, run, |flow| {
         expected.iter().any(|expectation| expectation.covers(flow)) || covered_by_contract(book, flow)
@@ -139,11 +129,10 @@ fn checkpoints(today: Day, until: Day) -> Vec<Day> {
 /// Obligations of the lens's owners falling due after `today`, soonest first.
 /// A checkpoint deliberately forgets past records, so its paired run supplies
 /// the exact pre-close prefix while the resumed ledger supplies closings and
-/// flows from today onward. A fresh legacy projection already has its complete
-/// history in the trace.
+/// flows from today onward.
 fn coming_due<'a>(
     trace: &'a Trace<'_, '_, '_>,
-    historical_effects: Option<&'a [Effect]>,
+    historical_effects: &'a [Effect],
     whose: &Whose,
     today: Day,
 ) -> Vec<&'a Effect> {
@@ -154,15 +143,15 @@ fn coming_due<'a>(
 
 /// Select the exact historical prefix and resumed effects without guessing
 /// record membership from dates or causes. The paired prefix ends before
-/// today's closings; a fresh legacy trace has no separate prefix.
+/// today's closings.
 fn select_due_effects<'a>(
-    historical: Option<&'a [Effect]>,
+    historical: &'a [Effect],
     resumed: &'a [Effect],
     whose: &Whose,
     today: Day,
 ) -> Vec<&'a Effect> {
     let belongs = |effect: &&Effect| whose.includes(effect.owner) && effect.owed().is_some_and(|owed| owed.due > today);
-    historical.into_iter().flat_map(|effects| effects.iter()).chain(resumed.iter()).filter(belongs).collect()
+    historical.iter().chain(resumed).filter(belongs).collect()
 }
 
 /// The liquid position at each checkpoint, less obligations already due.
@@ -508,18 +497,18 @@ mod tests {
             effect(today, Cause::Flow(Id::new(3)), today.add_days(4), 6),
             effect(today.add_days(1), Cause::Time, today.add_days(8), 7),
         ];
-        let due = select_due_effects(Some(&historical), &resumed, &Whose::default(), today);
+        let due = select_due_effects(&historical, &resumed, &Whose::default(), today);
         assert_eq!(
             due.iter().map(|effect| effect.amount.qty.0).collect::<Vec<_>>(),
             [1, 2, 3, 5, 6, 7],
             "the exact prefix keeps same-day pre-close Time effects, excludes already-due items, and adds each resumed closing once"
         );
 
-        let fresh_trace_effects = select_due_effects(None, &historical, &Whose::default(), today);
+        let fresh_trace_effects = select_due_effects(&[], &historical, &Whose::default(), today);
         assert_eq!(
             fresh_trace_effects.iter().map(|effect| effect.amount.qty.0).collect::<Vec<_>>(),
             [1, 2, 3],
-            "a fresh projection uses only its trace and does not add a paired-run prefix"
+            "a forecast with no prefix uses only its trace and does not add a paired-run prefix"
         );
     }
 
@@ -568,9 +557,13 @@ contract rent with landlord
     fn forecast_materializes_contracts_beside_a_run_whose_monitor_is_complete() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
             assert!(run.monitor_complete);
-            let report =
-                crate::report(book, run, &crate::Query::Forecast { until: Some(day(2026, 2, 28)), paths: 0 }, None)
-                    .unwrap();
+            let report = crate::tests::report(
+                book,
+                run,
+                &crate::Query::Forecast { until: Some(day(2026, 2, 28)), paths: 0 },
+                None,
+            )
+            .unwrap();
             let occurrences = report
                 .sections
                 .iter()
@@ -618,7 +611,7 @@ contract theirs-rent with landlord
         crate::source_tests::with_run(text, day(2026, 2, 1), |book, run| {
             let rows = |whose| {
                 let query = crate::Query::Forecast { until: Some(day(2026, 4, 30)), paths: 0 };
-                let report = crate::report(book, run, &query, whose).unwrap();
+                let report = crate::tests::report(book, run, &query, whose).unwrap();
                 let section = report
                     .sections
                     .iter()
@@ -638,9 +631,13 @@ contract theirs-rent with landlord
     #[test]
     fn native_contract_occurrences_change_projection_and_keep_typed_amounts() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
-            let report =
-                crate::report(book, run, &crate::Query::Forecast { until: Some(day(2026, 4, 30)), paths: 0 }, None)
-                    .unwrap();
+            let report = crate::tests::report(
+                book,
+                run,
+                &crate::Query::Forecast { until: Some(day(2026, 4, 30)), paths: 0 },
+                None,
+            )
+            .unwrap();
             let occurrences = report
                 .sections
                 .iter()
