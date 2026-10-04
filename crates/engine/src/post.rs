@@ -68,8 +68,9 @@ fn restarts_basis(plan: &Plan, m: &Motion) -> bool {
 }
 
 impl Ledger<'_, '_, '_> {
-    /// Applies a flow: moves its value and fires every law that watches it.
-    pub(crate) fn post(&mut self, m: &Motion) {
+    /// Moves one flow's value and fires every law that watches it. What the laws derive is queued, and posted by
+    /// [`post`](Ledger::post) once this has finished with them all.
+    pub(crate) fn post_flow(&mut self, m: &Motion) {
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
@@ -105,7 +106,7 @@ impl Ledger<'_, '_, '_> {
 
     /// A `!` on an assertion accepts its gap: it is never unused.
     fn accept_waiver(&mut self, m: &Motion) {
-        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_), false, Some(waive)) =
+        if let (Cause::Flow(_) | Cause::Transaction(_) | Cause::Applied(_) | Cause::Derived(_), false, Some(waive)) =
             (m.cause, m.opening, m.waive)
         {
             self.record.waivers.entry(waive.loc).or_insert(false);
@@ -138,12 +139,25 @@ impl Ledger<'_, '_, '_> {
     fn fire_arrival(&mut self, m: &Motion, on: &Occasion) {
         let rules = &self.plan.book.rules;
         self.fire(rules.at(Watch::In(m.to)), &Occasion { amount: Some(m.arrive), skip_internal: true, ..*on });
+        self.fire_touching(m, on);
         self.fire_purpose(m, on);
         self.fire_contract(m, on);
         self.fire_spend(m);
         self.fire(rules.at(Watch::Always(m.from)), on);
         if m.to != m.from {
             self.fire(rules.at(Watch::Always(m.to)), on);
+        }
+    }
+
+    /// The laws that say what happens to a flow at a place, either end: an account's, its kind's, and those of the
+    /// entity that stands there and of its kind. Value that moved around inside what a law governs entered and left
+    /// nothing, so such a flow does not fire it.
+    fn fire_touching(&mut self, m: &Motion, on: &Occasion) {
+        let rules = &self.plan.book.rules;
+        let on = Occasion { amount: Some(m.out), skip_internal: true, ..*on };
+        self.fire(rules.at(Watch::Touching(m.from)), &on);
+        if m.to != m.from {
+            self.fire(rules.at(Watch::Touching(m.to)), &on);
         }
     }
 

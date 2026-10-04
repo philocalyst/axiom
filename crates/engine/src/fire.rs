@@ -592,9 +592,8 @@ impl Ledger<'_, '_, '_> {
                 Outcome::Carry { step, amount, unit, within } => {
                     self.carry(rule, ctx, step, amount, unit, within);
                 }
-                // A law that derives is read when an occurrence is made, and the model keeps it out of every table
-                // a posted flow fires: one that gets here is a program that is not what the model made.
-                Outcome::Derive { step, .. } => self.fault(rule, ctx, step as usize, Fault::InvalidProgram),
+                // What a law derives is made now and posted when the flow that fired it has been through every law.
+                Outcome::Derive { step, template, amount } => self.derive_later(rule, ctx, step, (template, amount)),
                 Outcome::Priced { step, name, amount, owed } => self.charge(rule, ctx, step, (name, amount, owed)),
                 Outcome::Broken { step, warn } => self.violate(rule, ctx, step, warn),
                 Outcome::Faulted { step, fault } => self.fault(rule, ctx, step as usize, fault),
@@ -735,7 +734,7 @@ impl Ledger<'_, '_, '_> {
     /// A fault reached a step. It is reported once for what was missing (a
     /// price, a property of one thing, a param's rows), however many laws,
     /// steps and flows run into it.
-    fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
+    pub(crate) fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
         let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let facts = &self.plan.laws[rule.law.index()];
         let frame = Frame {

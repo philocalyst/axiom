@@ -7,8 +7,8 @@
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
 use axiom_model::{
-    Amount, Assert, Book, Class, Detail, Entity, Flow, FlowCodes, FlowView, Mode, Place, Purposed, RuntimeTxn, Select,
-    Text, Waive,
+    Amount, Assert, Book, Class, Detail, Entity, Flow, FlowCodes, FlowView, Mode, Offspring, Place, Purposed,
+    RuntimeTxn, Select, Text, Waive,
 };
 
 use crate::Cause;
@@ -58,12 +58,20 @@ impl Moves {
     }
 }
 
+/// Which way a flow runs: as it was written, or backwards, because the flow it was is returned.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Course {
+    Forward,
+    Back,
+}
+
 pub(crate) struct Motion<'f> {
     /// The immutable journal metadata, borrowed through the book's pooled view.
     /// Keeping one view avoids copying selector, code, and rare-detail data.
     pub view: Option<FlowView<'f>>,
     pub code_runs: FlowCodes,
     pub cause: Cause,
+    pub course: Course,
     pub day: Day,
     pub recognized: Days,
     pub from: Id<Place>,
@@ -125,6 +133,7 @@ impl<'f> Motion<'f> {
             view: Some(view),
             code_runs: view.code_runs(),
             cause,
+            course: Course::Forward,
             day,
             recognized: flow.recognized,
             from: flow.from,
@@ -146,6 +155,13 @@ impl<'f> Motion<'f> {
         }
     }
 
+    /// A flow a law derived, posting on `day`: a transaction of its own, which says which, and the cause of what it causes.
+    pub fn derived(book: &'f Book, id: Id<Offspring>, offspring: &'f Offspring, day: Day) -> Motion<'f> {
+        let flow = &offspring.flow;
+        let (txn, cause) = (RuntimeTxn::Derived(id), Cause::Derived(id));
+        Motion::from_view_at(book, book.flow_view(flow), txn, cause, day, Amounts::written(flow), 0)
+    }
+
     /// What an assertion posts to close a gap: `moved` arrives at the asserted
     /// place from `counter`, or, negative, leaves it for `counter`. The parcels
     /// belong to the transaction that last touched the place.
@@ -161,6 +177,7 @@ impl<'f> Motion<'f> {
         });
         Motion {
             cause: Cause::Time,
+            course: Course::Forward,
             day: assert.day,
             recognized: Days::on(assert.day),
             from,
@@ -187,13 +204,39 @@ impl<'f> Motion<'f> {
         }
     }
 
+    /// The flow as it runs in `course`: as written, or back.
+    pub fn running(self, course: Course) -> Motion<'f> {
+        match course {
+            Course::Forward => self,
+            Course::Back => self.reversed(),
+        }
+    }
+
     /// The same value moving back: what arrived leaves, and comes home. The
     /// original's lot selectors chose parcels at the other end and mean
     /// nothing here.
     pub fn reversed(&self) -> Motion<'f> {
         let (from, to) = (self.to, self.from);
         let (source, target) = (self.target, self.source);
-        Motion { from, to, source, target, out: self.arrive, arrive: self.out, moves: self.moves.reversed(), ..*self }
+        let course = Course::Back;
+        Motion {
+            from,
+            to,
+            source,
+            target,
+            out: self.arrive,
+            arrive: self.out,
+            moves: self.moves.reversed(),
+            course,
+            ..*self
+        }
+    }
+
+    /// Whether the laws that watch the flow may derive others from it. A flow run backwards has its derived flows
+    /// reversed and derives nothing anew, and a flow the run makes to be consistent with itself (a pad, a claim the
+    /// monitor makes: caused by time) or one no law sees (an opening) causes nothing.
+    pub fn derives(&self) -> bool {
+        self.course == Course::Forward && !self.opening && self.cause != Cause::Time
     }
 
     pub fn is_exchange(&self) -> bool {
