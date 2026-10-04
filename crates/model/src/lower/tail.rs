@@ -218,9 +218,11 @@ impl<'s> Line<'_, '_, 's> {
     /// What a line says of a clause it does not take; a term line and an ending say nothing.
     fn refuse(self, clause: &ast::Clause<'s>, tail: &mut Tail, diags: &mut Vec<Diagnostic>) {
         let (code, message, label) = match (self, clause.kind) {
-            (Line::Flow(_), _) => {
-                ("until-position", "`until` is only valid on a statement change or waiver", "it has no effect on a flow")
-            }
+            (Line::Flow(_), _) => (
+                "until-position",
+                "`until` is only valid on a statement change or waiver",
+                "it has no effect on a flow",
+            ),
             (Line::Also, ClauseKind::Due(_)) => (
                 "also-relative-due",
                 "a derived flow's due date must be absolute",

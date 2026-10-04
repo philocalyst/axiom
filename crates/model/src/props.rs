@@ -748,7 +748,12 @@ fn read_builtin_lines<'a, 's>(
 
 /// `purpose education` under a grant: `purpose` says what the flows with a party are for. A party whose kind has a
 /// purpose of its own to say (`grant-purpose`, what a grant's money may be spent on) and leaves it unsaid is told so.
-fn purpose_of_its_own(world: &World<'_>, at: &Lines<'_, '_>, under: NativeTarget, line: &Line<'_>) -> Option<Diagnostic> {
+fn purpose_of_its_own(
+    world: &World<'_>,
+    at: &Lines<'_, '_>,
+    under: NativeTarget,
+    line: &Line<'_>,
+) -> Option<Diagnostic> {
     let book = &world.book;
     let Holder::Entity(entity) = under.holder else { return None };
     let own = |slot: &&Slot| slot.range == Range::Value(Ty::Purpose) && book.name(slot.name) != "purpose";
@@ -765,10 +770,9 @@ fn purpose_of_its_own(world: &World<'_>, at: &Lines<'_, '_>, under: NativeTarget
         "purpose-of-its-own",
         format!("`purpose` is what the flows with `{party}` are for, not the {kind}'s own `{name}`"),
     );
-    let at_name = at.file.loc(line.name.0);
-    Some(warning.label(at_name, "the purpose of the flows with this party").help(format!(
-        "for the {kind}'s own, write `{name} {value}`"
-    )))
+    let (label, help) =
+        ("the purpose of the flows with this party", format!("for the {kind}'s own, write `{name} {value}`"));
+    Some(warning.label(at.file.loc(line.name.0), label).help(help))
 }
 
 /// An `owner` line under anything but a kind of account: an entity, an account or an asset has its owners read where it is

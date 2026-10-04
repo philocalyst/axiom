@@ -22,8 +22,8 @@ use crate::book::{Amount, Derived, Shape, Share, Stand};
 use crate::declare::World;
 use crate::errors::Reported;
 use crate::journal::Detail;
-use crate::lower::tail::{Line, no_selectors, read_tail};
 use crate::law::{BinOp, Effect, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var};
+use crate::lower::tail::{Line, no_selectors, read_tail};
 use crate::scope::Home;
 use crate::split::Sign;
 
