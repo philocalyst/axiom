@@ -801,8 +801,8 @@ fn ends_may_be_commodities_and_an_exchange_may_name_only_its_source() {
 
     let file = parse_clean("2026-03-26 VXUS -> 25.09 USD\n  foreign-tax 2.49 USD\n  fidelity ...\n");
     assert_eq!(file[txns(&file)[0].flow.body.legs].len(), 2);
-    // Both amounts are what says it is an exchange; a lone source is not one.
-    only_error("2026-02-05 fidelity -> 481.14 USD\n", "missing-legs");
+    // A price is what says it is an exchange; a lone source and an amount is not one.
+    only_error("2026-02-05 fidelity -> 481.14 USD\n", "exchange-no-price");
     only_error("2026-02-05 fidelity 1.62 VTI ->\n", "missing-legs");
 }
 
@@ -2722,7 +2722,7 @@ fn mistakes_in_structure_are_explained() {
     assert_eq!(&src[error.labels[0].loc.range()], "retirement 800 USD");
     assert!(error.help.iter().any(|help| help.text.contains("two transactions")));
 
-    only_error("2026-01-15 checking -> 5_200 USD\n", "missing-legs");
+    only_error("2026-01-15 checking -> 5_200 USD\n", "exchange-no-price");
     only_error("2026-01-15 acme -> 5 USD\n  a ...\n  b ...\n", "two-remainders");
 
     let src = "2026-01-15 acme -> 5_200 USD\n  retirement 800 USD\n   checking ...\n";
@@ -3327,4 +3327,110 @@ fn cuts_fall_between_items_and_keep_docs_with_theirs() {
             assert!(src[boundary..].starts_with("// note") || src[boundary..].starts_with("law"), "{boundary}");
         }
     }
+}
+
+// ─── The junction ───────────────────────────────────────────────────────────
+
+/// What the model reads of a flow: the name of each end and the text of each amount.
+fn reads<'a>(flow: &'a Flow<'a>) -> [(Option<&'a str>, Option<&'a str>); 2] {
+    let side = |side: &'a Side<'a>| {
+        let amount = match side.amount {
+            Some(Quantity::Amount(Amount::Literal(literal))) => Some(literal.0),
+            _ => None,
+        };
+        (side.end.map(|end| end.name.0), amount)
+    };
+    [side(&flow.from), side(&flow.to)]
+}
+
+#[test]
+fn a_take_is_a_give_written_from_the_other_end() {
+    let take = parse_clean("2026-01-15 checking <- acme 3_200 USD #wages\n");
+    let give = parse_clean("2026-01-15 acme -> checking 3_200 USD #wages\n");
+    let (take, give) = (&txns(&take)[0].flow, &txns(&give)[0].flow);
+    assert_eq!((take.junction, give.junction), (Junction::In, Junction::Out));
+    assert_eq!(reads(take), reads(give), "the model reads the same flow");
+    assert_eq!(reads(take), [(Some("acme"), None), (Some("checking"), Some("3_200 USD"))]);
+}
+
+#[test]
+fn a_purchase_and_a_sale_have_their_end_on_both_sides() {
+    let buy = parse_clean("2026-03-04 brokerage <- 7 VTI @ 285.70 USD\n");
+    let v4 = parse_clean("2026-03-04 brokerage -> brokerage 7 VTI @ 285.70 USD\n");
+    assert_eq!(reads(&txns(&buy)[0].flow), reads(&txns(&v4)[0].flow));
+
+    let sell = parse_clean("2026-03-05 brokerage[fifo] -> 1.62 VTI @ 297.00 USD\n");
+    let v4 = parse_clean("2026-03-05 brokerage[fifo] 1.62 VTI -> brokerage @ 297.00 USD\n");
+    let flow = &txns(&sell)[0].flow;
+    assert_eq!(reads(flow), reads(&txns(&v4)[0].flow));
+    assert_eq!(file_select(&sell, flow.from.end), 1, "the lots to sell are the source's");
+    assert_eq!(file_select(&sell, flow.to.end), 0, "and the proceeds' end names none");
+}
+
+fn file_select(file: &File<'_>, end: Option<End<'_>>) -> usize {
+    file[end.expect("an end").select].len()
+}
+
+#[test]
+fn legs_lead_with_their_arrow_and_an_owner_passes_a_partys_money_through() {
+    let src = "2026-03-14 me <- acme 12_000 USD #wages\n  -> irs 2_640 USD\n  -> checking ...\n";
+    let file = parse_clean(src);
+    let flow = &txns(&file)[0].flow;
+    assert_eq!(flow.through.map(|end| end.name.0), Some("me"));
+    assert_eq!(reads(flow), [(Some("acme"), None), (None, Some("12_000 USD"))], "what the model reads is v4's split");
+    assert!(file[flow.body.legs].iter().all(|leg| leg.arrow == Some(Junction::Out)));
+
+    let file = parse_clean("2026-03-14 me -> shop 100 USD\n  <- savings 30 USD\n  <- checking ...\n");
+    let flow = &txns(&file)[0].flow;
+    assert_eq!(flow.through.map(|end| end.name.0), Some("me"));
+    assert_eq!(reads(flow), [(None, None), (Some("shop"), Some("100 USD"))]);
+
+    let file = parse_clean("2026-03-14 checking <- 100 USD\n  <- shop 30 USD\n  <- acme ...\n");
+    assert_eq!(reads(&txns(&file)[0].flow), [(None, None), (Some("checking"), Some("100 USD"))]);
+}
+
+#[test]
+fn a_leg_that_points_the_wrong_way_or_not_at_all_is_told_which_arrow_to_write() {
+    let src = "2026-03-14 me <- acme 12_000 USD\n  <- irs 2_640 USD\n  -> checking ...\n";
+    let error = only_error(src, "leg-direction");
+    assert_eq!(first_fix(src, &error), ("<-", "->"));
+
+    let src = "2026-03-14 me <- acme 12_000 USD\n  irs 2_640 USD\n  -> checking ...\n";
+    let error = only_error(src, "leg-needs-arrow");
+    assert_eq!(first_fix(src, &error), ("", "-> "));
+
+    let src = "2026-03-14 checking -> 100 USD\n  <- shop 30 USD\n  -> savings ...\n";
+    only_error(src, "leg-direction");
+    let src = "2026-03-14 me <- acme 12_000 USD\n  shop 30 USD\n";
+    only_error(src, "leg-needs-arrow");
+}
+
+#[test]
+fn an_exchange_names_its_price_and_a_take_names_its_amount_last() {
+    only_error("2026-03-04 brokerage <- 7 VTI\n", "exchange-no-price");
+    only_error("2026-03-04 brokerage -> 7 VTI\n", "exchange-no-price");
+    only_error("2026-03-04 checking 5 USD <- acme\n", "amount-before-take");
+    only_error("2026-03-04 <- acme 5 USD\n", "expected-subject");
+    only_error("2026-03-04 checking <-\n", "takes-nothing");
+    let src = "2026-03-04 checking ← acme 5 USD\n";
+    let error = only_error(src, "unknown-arrow");
+    assert_eq!(first_fix(src, &error), ("←", "<-"));
+}
+
+#[test]
+fn a_less_than_a_negative_number_is_not_an_arrow() {
+    let file = parse_clean("law cap\n  on flow\n  require amount <-5 USD\n");
+    assert!(matches!(file.items[0].kind, ItemKind::Law(_)));
+    assert_eq!(tokens("a <- b"), [Tok::Name("a"), Tok::Punct(Punct::Back), Tok::Name("b")]);
+    assert_eq!(
+        tokens("a <-5")[1..],
+        [Tok::Punct(Punct::Lt), Tok::Punct(Punct::Minus), Tok::Number(Dec::parse(b"5").unwrap())]
+    );
+}
+
+#[test]
+fn the_house_style_writes_the_arrows_of_a_split_in_a_column() {
+    let src = "2026-03-14 me   <-   acme 12_000 USD #wages\n  -> irs 2_640 USD\n  ->   checking ...\n";
+    let once = formatted(src, Folder::default());
+    assert_eq!(once, "2026-03-14 me <- acme 12_000 USD #wages\n  -> irs      2_640 USD\n  -> checking ...\n");
 }

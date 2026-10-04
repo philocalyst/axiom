@@ -15,6 +15,7 @@ use axiom_core::{Day, Dec, Diagnostic, Loc};
 
 use crate::ast::*;
 use crate::dates::empty_range;
+use crate::flow::Arrows;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported, Scope};
@@ -22,8 +23,8 @@ use crate::parser::{Parse, Parser, Reported, Scope};
 /// What follows a dated line's subject, and so what the line is.
 #[derive(Clone, Copy)]
 enum Word {
-    /// An arrow: the subject is the source of a flow.
-    Flow,
+    /// An arrow: the line is a flow.
+    Flow(Junction),
     Value,
     Owes,
     Now,
@@ -38,7 +39,8 @@ enum Word {
 }
 
 /// What a dated line's subject is followed by when that is a punctuation mark.
-const PUNCTUATION: [(Punct, Word); 2] = [(Punct::Arrow, Word::Flow), (Punct::Eq, Word::Value)];
+const PUNCTUATION: [(Punct, Word); 3] =
+    [(Punct::Arrow, Word::Flow(Junction::Out)), (Punct::Back, Word::Flow(Junction::In)), (Punct::Eq, Word::Value)];
 
 /// What a dated line's subject is followed by when that is a word. A line with none is an occurrence.
 const WORDS: [(&str, Word); 12] = [
@@ -74,7 +76,7 @@ impl<'s> Parser<'s> {
         let head = self.head(Scope::Dated(date))?;
         let word = self.word();
         let from = match (head, word) {
-            (Head::Side(from), Some(Word::Flow)) => return self.flow(line, date, from, clauses),
+            (Head::Side(from), Some(Word::Flow(_))) => return self.flow(line, date, from, clauses),
             (Head::Side(from), _) => from,
             (Head::Said(subject), _) => return self.statement(line, date, subject, None, word),
         };
@@ -96,7 +98,7 @@ impl<'s> Parser<'s> {
             }
             Tok::Purpose(purpose) => Head::Said(self.bump_as(Subject::Purpose(purpose))),
             // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
-            Tok::Unit(unit) if !matches!(self.lexer.peek_second().tok, Tok::Punct(Punct::Arrow)) => {
+            Tok::Unit(unit) if !matches!(self.lexer.peek_second().tok, Tok::Punct(Punct::Arrow | Punct::Back)) => {
                 self.bump();
                 if let Tok::Number(_) = self.tok() {
                     return Err(self.price_needs_equals());
@@ -112,6 +114,14 @@ impl<'s> Parser<'s> {
                 Head::Side(from)
             }
         })
+    }
+
+    /// The way the next token points, if it is an arrow.
+    pub fn junction(&self) -> Option<Junction> {
+        match self.word() {
+            Some(Word::Flow(junction)) => Some(junction),
+            _ => None,
+        }
     }
 
     /// The word after the subject, if the table has it.
@@ -170,7 +180,7 @@ impl<'s> Parser<'s> {
         let mut statement = self.said(date, subject, amount, word)?;
         if let (Verb::Occurrence(_), Tok::Name(_)) = (&statement.verb, self.tok()) {
             // A name where the tail starts: a flow written without its arrow.
-            return Err(self.expected_arrow(true));
+            return Err(self.missing_arrow());
         }
         let header = self.end_header(line)?;
         if takes_lines(&statement.verb) {
@@ -219,7 +229,7 @@ impl<'s> Parser<'s> {
         }
         match word {
             // An arrow after a subject that no flow starts with is no verb.
-            None | Some(Word::Flow) => self.occurrence(subject),
+            None | Some(Word::Flow(_)) => self.occurrence(subject),
             Some(Word::Value) => self.value(scope),
             Some(Word::Owes) => self.owes(scope),
             Some(Word::Now) => self.now(scope).map(Verb::Now),
@@ -390,8 +400,10 @@ impl<'s> Parser<'s> {
         if !needs_lines && statement.body.legs.is_empty() && statement.body.items.is_empty() {
             return Ok(());
         }
-        let (legs, items) = (self.slice(statement.body.legs), statement.body.items);
         let legs_only = matches!(statement.verb, Verb::Filed(_));
+        let arrows = if legs_only { Arrows::Forbidden } else { Arrows::Tolerated(Junction::Out) };
+        self.legs_point(statement.body.legs, arrows)?;
+        let (legs, items) = (self.slice(statement.body.legs), statement.body.items);
         let items_only = matches!(statement.verb, Verb::Owes { .. } | Verb::Waived | Verb::Now(Change::Amendment));
         if let (true, Some(leg)) = (items_only, legs.first()) {
             return self.fail(takes_items_only(leg.loc, what_it_says(&statement.verb)));

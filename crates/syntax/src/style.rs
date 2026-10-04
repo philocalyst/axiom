@@ -9,10 +9,11 @@
 //!
 //! - A **block** is consecutive lines with nothing between them: no blank line,
 //!   no comment line. Its columns are as wide as its widest cell.
-//! - A header is `DATE SUBJECT VERB OBJECT AMOUNT TAIL`, where the object is the
-//!   end a flow goes to or the party a claim is owed to. Amounts start in one
-//!   column. A leg is `END AMOUNT TAIL`, and its numbers end in one column.
-//!   Items line their numbers up by indenting further, where the parser allows.
+//! - A header is `DATE SUBJECT VERB OBJECT AMOUNT TAIL`, whether it is a flow or a
+//!   statement, where the verb is `->`, `<-` or a word and the object is the end a
+//!   flow goes to or the party a claim is owed to. Amounts start in one column. A leg
+//!   is `ARROW END AMOUNT TAIL`, and its numbers end in one column. Items line their
+//!   numbers up by indenting further, where the parser allows.
 //! - A trailing comment keeps its column when its line allows, and a block's
 //!   comments move together to the leftmost column they all fit at.
 //! - A tail says: what a price and a change's span (`@`, `until`), `#purpose of
@@ -28,13 +29,15 @@ use std::ops::Range;
 use axiom_core::Loc;
 
 use crate::ast::*;
+use crate::flow::starts_end;
 use crate::lex::{Lexer, Punct, Tok, Token};
 
 /// The file, `src`, laid out in the house style. `file` is what `src` parsed to:
 /// lines that are not in it (an item that did not parse) are left alone.
 pub fn format(src: &str, file: &File) -> String {
-    let mut rows = Vec::new();
-    Reader { src, file, rows: &mut rows }.read();
+    let mut reader = Reader::new(src, file);
+    reader.read();
+    let mut rows = reader.rows;
     rows.sort_by_key(|row| row.line.start);
     let mut edits: HashMap<usize, String> = HashMap::new();
     for run in runs(&rows) {
@@ -94,27 +97,95 @@ struct Row {
     comment: Option<Comment>,
 }
 
+/// What a header line is, which is where its verb stands and whether an object follows it.
+#[derive(Clone, Copy)]
+pub(crate) enum Says<'a, 's> {
+    Flow,
+    Statement(&'a Verb<'s>),
+}
+
+/// A header line cut into the cells it is laid out in. The amount written between the subject and the verb stays
+/// apart from the subject, so that an upgrade can move it.
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct Header {
+    pub date: String,
+    pub subject: String,
+    /// `1.62 VTI` in `fidelity 1.62 VTI -> checking @ 297 USD`.
+    pub held: String,
+    /// `->`, `<-` or the word; none for a promise kept (`08 phone 47.30 USD`), whose amount is `amount`.
+    pub verb: String,
+    pub object: String,
+    pub amount: String,
+    pub tail: String,
+}
+
+impl Header {
+    /// The cells it is laid out in, and, for a promise kept, the amount that follows its subject unaligned.
+    fn cells(&self) -> (Vec<String>, Option<String>) {
+        let subject = [self.subject.as_str(), self.held.as_str()].into_iter().filter(|part| !part.is_empty());
+        let subject = subject.collect::<Vec<_>>().join(" ");
+        let fixed = |object: &str, amount: &str| {
+            vec![self.date.clone(), subject.clone(), self.verb.clone(), object.into(), amount.into(), self.tail.clone()]
+        };
+        match self.verb.is_empty() {
+            true => (fixed("", ""), Some(self.amount.clone()).filter(|amount| !amount.is_empty())),
+            false => (fixed(&self.object, &self.amount), None),
+        }
+    }
+}
+
+/// Where the parts of a header's tokens stand: the last of the date (and a range after it), the verb, and where the
+/// subject ends.
+struct Marks {
+    date: usize,
+    verb: Option<usize>,
+    subject_end: usize,
+}
+
+impl Marks {
+    fn of(tokens: &[Token<'_>], says: Says<'_, '_>) -> Option<Marks> {
+        // A range after the date is written with it: the clause it makes is not in the tail.
+        let spread = matches!(tokens.get(1).map(|token| token.tok), Some(Tok::Punct(Punct::DotDot)));
+        let date = if spread { 2 } else { 0 };
+        let verb = match says {
+            Says::Flow => tokens.iter().position(|token| matches!(token.tok, Tok::Punct(Punct::Arrow | Punct::Back))),
+            Says::Statement(verb) => (!matches!(verb, Verb::Occurrence(_))).then_some(date + 2),
+        };
+        let lost = matches!(says, Says::Flow) && verb.is_none();
+        let subject_end = verb.unwrap_or(date + 2);
+        (!(lost || verb.is_some_and(|at| at <= date) || tokens.len() < subject_end)).then_some(Marks {
+            date,
+            verb,
+            subject_end,
+        })
+    }
+}
+
 /// Reads the lines of a file that are flows, statements, legs or items.
-struct Reader<'a, 's> {
+pub(crate) struct Reader<'a, 's> {
     src: &'s str,
     file: &'a File<'s>,
-    rows: &'a mut Vec<Row>,
+    rows: Vec<Row>,
 }
 
 const TOP: usize = usize::MAX;
 
 impl<'a, 's> Reader<'a, 's> {
+    pub fn new(src: &'s str, file: &'a File<'s>) -> Reader<'a, 's> {
+        Reader { src, file, rows: Vec::new() }
+    }
+
     fn read(&mut self) {
         for (group, item) in self.file.items.iter().enumerate() {
             match item.kind {
                 ItemKind::Txn(id) => {
                     let txn = &self.file[id];
-                    self.flow_header(item.loc, &txn.flow);
+                    self.header(item.loc, txn.flow.tail, Says::Flow);
                     self.body(group, txn.flow.body);
                 }
                 ItemKind::Statement(id) => {
                     let statement = &self.file[id];
-                    self.statement_header(item.loc, statement);
+                    self.header(item.loc, statement.tail, Says::Statement(&statement.verb));
                     self.body(group, statement.body);
                 }
                 ItemKind::Opening(id) => {
@@ -173,43 +244,13 @@ impl<'a, 's> Reader<'a, 's> {
         self.rows.push(row);
     }
 
-    /// `DATE FROM -> TO TAIL`
-    fn flow_header(&mut self, loc: Loc, flow: &Flow<'s>) {
+    /// A header line, laid out: a flow and a statement are laid out in the same cells.
+    fn header(&mut self, loc: Loc, tail: Many<Clause<'s>>, says: Says<'_, 's>) {
+        let Some(header) = self.cut_header(loc, tail, says) else { return };
         let (start, end) = (loc.start as usize, loc.end as usize);
-        let tokens = self.lex(start..end);
-        let Some(arrow) = tokens.iter().position(|token| matches!(token.tok, Tok::Punct(Punct::Arrow))) else { return };
-        // A range after the date is written with it: the clause it makes is not in the tail.
-        let date_last =
-            if matches!(tokens.get(1).map(|token| token.tok), Some(Tok::Punct(Punct::DotDot))) { 2 } else { 0 };
-        if arrow <= date_last || tokens.len() <= date_last {
-            return;
-        }
-        let clauses: Vec<&Clause> =
-            self.file[flow.tail].iter().filter(|clause| clause.at.start >= tokens[arrow].loc.end).collect();
-        let (tail, head_end) = self.tail(&clauses, end);
-        let date = self.between(start, tokens[date_last].loc.end as usize);
-        let from = match arrow > date_last + 1 {
-            true => self.between(tokens[date_last + 1].loc.start as usize, tokens[arrow - 1].loc.end as usize),
-            false => String::new(),
-        };
-        let after: Vec<&Token> =
-            tokens[arrow + 1..].iter().filter(|token| (token.loc.start as usize) < head_end).collect();
-        let (object, amount) = match (flow.to.end, after.first()) {
-            (Some(_), Some(first)) => {
-                let last = self.end_of(&after, 0);
-                let object = self.between(first.loc.start as usize, after[last].loc.end as usize);
-                let amount = match after.get(last + 1) {
-                    Some(next) => self.between(next.loc.start as usize, head_end),
-                    None => String::new(),
-                };
-                (object, amount)
-            }
-            (_, Some(first)) => (String::new(), self.between(first.loc.start as usize, head_end)),
-            _ => (String::new(), String::new()),
-        };
-        let cells = vec![date, from, "->".to_string(), object, amount.trim_end().to_string(), tail];
         let (line, after) = self.line_of(start);
         let comment = self.comment(&line, end);
+        let (cells, spill) = header.cells();
         self.push(Row {
             line,
             after,
@@ -217,10 +258,69 @@ impl<'a, 's> Reader<'a, 's> {
             group: TOP,
             indent: 0,
             cells,
-            spill: None,
+            spill,
             literal: false,
             comment,
         });
+    }
+
+    /// `DATE SUBJECT [AMOUNT] VERB [OBJECT] [AMOUNT] TAIL`, cut into its cells; `None` for a line that is not one.
+    pub fn cut_header(&self, loc: Loc, tail: Many<Clause<'s>>, says: Says<'_, 's>) -> Option<Header> {
+        let (start, end) = (loc.start as usize, loc.end as usize);
+        let tokens = self.lex(start..end);
+        let marks = Marks::of(&tokens, says)?;
+        let verb_end = tokens[marks.verb.unwrap_or(marks.date + 1)].loc.end;
+        let clauses: Vec<&Clause> = self.file[tail].iter().filter(|clause| clause.at.start >= verb_end).collect();
+        let (tail, head_end) = self.tail(&clauses, end);
+        let after: Vec<&Token> = tokens[marks.verb.map_or(marks.subject_end, |at| at + 1)..]
+            .iter()
+            .filter(|token| (token.loc.start as usize) < head_end)
+            .collect();
+        let (object, amount) = self.object_and_amount(&after, head_end, says);
+        let (first, last) = (marks.date + 1, marks.subject_end - 1);
+        let (subject, held) = match first <= last {
+            true => self.subject_and_held(&tokens[first..=last]),
+            // A flow with no subject, as v4 wrote a split into its target, has nothing before its arrow.
+            false => (String::new(), String::new()),
+        };
+        let verb = marks.verb.map_or(String::new(), |at| match tokens[at].tok {
+            Tok::Punct(punct) => punct.spelling().to_string(),
+            _ => self.between(tokens[at].loc.start as usize, tokens[at].loc.end as usize),
+        });
+        let date = self.between(start, tokens[marks.date].loc.end as usize);
+        // The statements' amounts but a claim's stand where a flow's end does.
+        let (object, amount) = match says {
+            Says::Statement(verb) if !matches!(verb, Verb::Owes { .. } | Verb::Occurrence(_)) => {
+                (amount, String::new())
+            }
+            _ => (object, amount),
+        };
+        Some(Header { date, subject, held, verb, object, amount, tail })
+    }
+
+    /// The end a header is about, and the amount written after it.
+    fn subject_and_held(&self, tokens: &[Token<'s>]) -> (String, String) {
+        let refs: Vec<&Token> = tokens.iter().collect();
+        let last = self.end_of(&refs, 0);
+        let text = |from: &Token, to: &Token| self.between(from.loc.start as usize, to.loc.end as usize);
+        let held = tokens.get(last + 1).map_or(String::new(), |next| text(next, &tokens[tokens.len() - 1]));
+        (text(&tokens[0], &tokens[last]), held)
+    }
+
+    /// What follows a header's verb: the end it names, if it names one, and the amount.
+    fn object_and_amount(&self, after: &[&Token<'s>], head_end: usize, says: Says<'_, 's>) -> (String, String) {
+        let Some(first) = after.first() else { return (String::new(), String::new()) };
+        let object = match says {
+            Says::Flow => starts_end(first.tok, || after.get(1).map_or(Tok::Eol, |next| next.tok)),
+            Says::Statement(verb) => matches!(verb, Verb::Owes { .. }),
+        };
+        if !object {
+            return (String::new(), self.between(first.loc.start as usize, head_end).trim_end().to_string());
+        }
+        let last = self.end_of(after, 0);
+        let object = self.between(first.loc.start as usize, after[last].loc.end as usize);
+        let amount = after.get(last + 1).map_or(String::new(), |next| self.between(next.loc.start as usize, head_end));
+        (object, amount.trim_end().to_string())
     }
 
     /// The index of the last token of the end that starts at `tokens[first]`: a
@@ -235,57 +335,6 @@ impl<'a, 's> Reader<'a, 's> {
         }
     }
 
-    /// `DATE SUBJECT [VERB [OBJECT]] [AMOUNT] TAIL`
-    fn statement_header(&mut self, loc: Loc, statement: &Statement<'s>) {
-        let (start, end) = (loc.start as usize, loc.end as usize);
-        let tokens = self.lex(start..end);
-        let occurrence = matches!(statement.verb, Verb::Occurrence(_));
-        let words = if occurrence { 2 } else { 3 };
-        if tokens.len() < words {
-            return;
-        }
-        let clauses: Vec<&Clause> = self.file[statement.tail].iter().collect();
-        let (tail, head_end) = self.tail(&clauses, end);
-        let text = |token: &Token| self.between(token.loc.start as usize, token.loc.end as usize);
-        let date = text(&tokens[0]);
-        let subject = text(&tokens[1]);
-        let verb = if occurrence {
-            String::new()
-        } else {
-            self.between(tokens[2].loc.start as usize, tokens[2].loc.end as usize)
-        };
-        let (object, rest) = match (&statement.verb, tokens.get(words)) {
-            (Verb::Owes { .. }, Some(creditor)) => (text(creditor), words + 1),
-            _ => (String::new(), words),
-        };
-        let amount = match tokens.get(rest) {
-            Some(first) if (first.loc.start as usize) < head_end => self.between(first.loc.start as usize, head_end),
-            _ => String::new(),
-        };
-        let amount = amount.trim_end().to_string();
-        // A claim names who it is owed to before its amount; the others' amounts
-        // stand where a flow's end does, and a promise kept has no verb to wait for.
-        let (cells, spill) = match (&statement.verb, occurrence) {
-            (_, true) => (vec![date, subject, String::new(), String::new(), String::new(), tail], Some(amount)),
-            (Verb::Owes { .. }, _) => (vec![date, subject, verb, object, amount, tail], None),
-            _ => (vec![date, subject, verb, amount, String::new(), tail], None),
-        };
-        let spill = spill.filter(|amount| !amount.is_empty());
-        let (line, after) = self.line_of(start);
-        let comment = self.comment(&line, end);
-        self.push(Row {
-            line,
-            after,
-            kind: Kind::Header,
-            group: TOP,
-            indent: 0,
-            cells,
-            spill,
-            literal: false,
-            comment,
-        });
-    }
-
     /// The legs and items under one header.
     fn body(&mut self, group: usize, body: Body<'s>) {
         for leg in &self.file[body.legs] {
@@ -296,26 +345,28 @@ impl<'a, 's> Reader<'a, 's> {
         }
     }
 
-    /// `END AMOUNT TAIL`
+    /// `[ARROW] END AMOUNT TAIL`
     fn leg(&mut self, group: usize, leg: &Leg<'s>) {
         let (start, end) = (leg.loc.start as usize, leg.loc.end as usize);
         let tokens = self.lex(start..end);
-        let refs: Vec<&Token> = tokens.iter().collect();
+        let arrow = usize::from(leg.arrow.is_some());
+        let refs: Vec<&Token> = tokens.iter().skip(arrow).collect();
         if refs.is_empty() {
             return;
         }
         let clauses: Vec<&Clause> = self.file[leg.tail].iter().collect();
         let (tail, head_end) = self.tail(&clauses, end);
         let last = self.end_of(&refs, 0);
-        let end_cell = self.between(start, tokens[last].loc.end as usize);
-        let amount = match tokens.get(last + 1) {
+        let end_cell = self.between(refs[0].loc.start as usize, refs[last].loc.end as usize);
+        let amount = match refs.get(last + 1) {
             Some(next) if (next.loc.start as usize) < head_end => self.between(next.loc.start as usize, head_end),
             _ => String::new(),
         };
         let (line, after) = self.line_of(start);
         let indent = start - line.start;
         let comment = self.comment(&line, end);
-        let cells = vec![end_cell, amount.trim_end().to_string(), tail];
+        let cells =
+            vec![leg.arrow.map_or("", Junction::spelling).to_string(), end_cell, amount.trim_end().to_string(), tail];
         self.push(Row { line, after, kind: Kind::Leg, group, indent, cells, spill: None, literal: false, comment });
     }
 
@@ -458,51 +509,53 @@ fn columns<'r>(
     numbers: bool,
 ) -> Vec<(usize, String, Option<&'r Comment>)> {
     let count = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
-    let amount = if rows[0].kind == Kind::Header { 4 } else { 1 };
     let mut cells: Vec<Vec<String>> = rows.iter().map(|row| row.cells.clone()).collect();
     if numbers {
-        let longest =
-            cells.iter().filter_map(|row| number_of(&row[amount])).map(|(number, _)| width(number)).max().unwrap_or(0);
-        for row in &mut cells {
-            if let Some((number, rest)) = number_of(&row[amount]) {
-                let pad = " ".repeat(longest - width(number));
-                row[amount] = format!("{pad}{number}{}{rest}", if rest.is_empty() { "" } else { " " });
-            }
-        }
+        end_numbers_together(&mut cells, if rows[0].kind == Kind::Header { 4 } else { 2 });
     }
     let widths: Vec<usize> =
         (0..count).map(|column| cells.iter().map(|row| width(&row[column])).max().unwrap_or(0)).collect();
     rows.iter()
         .zip(&cells)
         .map(|(row, cells)| {
-            let mut text = " ".repeat(indent(row));
-            if let Some(spill) = &row.spill {
-                // Date, subject and what follows it, then the tail once, unaligned.
-                text.push_str(&format!("{} {:<width$} {spill}", cells[0], cells[1], width = widths[1]));
-                if !cells[count - 1].is_empty() {
-                    text.push(' ');
-                    text.push_str(&cells[count - 1]);
-                }
-                return (row.line.start, text, row.comment.as_ref());
-            }
-            let last = cells.iter().rposition(|cell| !cell.is_empty()).unwrap_or(0);
-            let mut first = true;
-            for (column, cell) in cells.iter().enumerate().take(last + 1) {
-                if widths[column] == 0 {
-                    continue;
-                }
-                if !first {
-                    text.push(' ');
-                }
-                first = false;
-                text.push_str(cell);
-                if column < last {
-                    text.push_str(&" ".repeat(widths[column] - width(cell)));
-                }
-            }
+            let text = " ".repeat(indent(row)) + &padded(cells, &widths, row.spill.as_deref());
             (row.line.start, text, row.comment.as_ref())
         })
         .collect()
+}
+
+/// Pads the numbers of column `at` on the left so that they end in one column.
+fn end_numbers_together(cells: &mut [Vec<String>], at: usize) {
+    let longest =
+        cells.iter().filter_map(|row| number_of(&row[at])).map(|(number, _)| width(number)).max().unwrap_or(0);
+    for row in cells {
+        if let Some((number, rest)) = number_of(&row[at]) {
+            let pad = " ".repeat(longest - width(number));
+            row[at] = format!("{pad}{number}{}{rest}", if rest.is_empty() { "" } else { " " });
+        }
+    }
+}
+
+/// One row's cells, each as wide as its column, with the last not padded. A promise kept has its amount after its subject
+/// and its tail once, unaligned.
+fn padded(cells: &[String], widths: &[usize], spill: Option<&str>) -> String {
+    let tail = &cells[cells.len() - 1];
+    if let Some(spill) = spill {
+        let text = format!("{} {:<width$} {spill}", cells[0], cells[1], width = widths[1]);
+        return if tail.is_empty() { text } else { format!("{text} {tail}") };
+    }
+    let last = cells.iter().rposition(|cell| !cell.is_empty()).unwrap_or(0);
+    let mut text = String::new();
+    for (column, cell) in cells.iter().enumerate().take(last + 1).filter(|(column, _)| widths[*column] > 0) {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(cell);
+        if column < last {
+            text.push_str(&" ".repeat(widths[column] - width(cell)));
+        }
+    }
+    text
 }
 
 /// An item's line, without its tail: its sign, and its amount.

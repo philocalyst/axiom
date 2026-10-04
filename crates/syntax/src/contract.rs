@@ -15,6 +15,7 @@ use axiom_core::{Diagnostic, Loc, Span};
 
 use crate::ast::*;
 use crate::dates::not_a_day;
+use crate::flow::Arrows;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Scope};
@@ -66,6 +67,7 @@ impl<'s> Parser<'s> {
             self.report(missing_schedule(header.loc));
         }
         let template = Body { legs: self.since(legs), items: self.since(items) };
+        let arrows = self.legs_point(template.legs, Arrows::Tolerated(Junction::Out));
         let contract = Contract {
             name,
             kind,
@@ -80,7 +82,7 @@ impl<'s> Parser<'s> {
             props: self.since(props),
             body: template,
             laws: self.since(laws),
-            damaged: body.is_err(),
+            damaged: body.is_err() || arrows.is_err(),
         };
         self.emit(&header, contract, ItemKind::Contract);
         Ok(())
