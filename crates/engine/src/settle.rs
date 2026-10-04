@@ -149,11 +149,11 @@ impl Ledger<'_, '_, '_> {
 
     /// What a flow out of an owner's money pays of the bills the owner has from the party whose place it goes to.
     fn paid_to_party(&self, m: &Motion) -> Option<Payment> {
-        let from_owner = m.source.class == Class::Asset && !self.plan.traits.place(m.from).claim;
-        if !from_owner || !self.plan.traits.has_tab(m.to) {
+        let traits = &self.plan.traits;
+        if m.source.class != Class::Asset || !traits.has_tab(m.to) || traits.place(m.from).claim {
             return None;
         }
-        let tab = self.plan.traits.tab_of(m.to, m.source.owner, Class::Debt)?;
+        let tab = traits.tab_of(m.to, m.source.owner, Class::Debt)?;
         Some(Payment { tab, rest: m.out.qty, reaches: Reaches::Owner })
     }
 

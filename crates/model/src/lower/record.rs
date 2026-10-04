@@ -144,10 +144,11 @@ pub(super) struct CodeIndex {
 impl CodeIndex {
     fn add(&mut self, world: &World<'_>, txn_id: Id<Txn>) {
         let (book, source) = (&world.book, &world.book.txns[txn_id]);
-        let makes_claim = source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
-        let header = source.codes.ids().map(|id| book.codes[id]);
         let flows = source.flows.ids().flat_map(|flow| book.flows[flow].codes.ids().map(|id| book.codes[id]));
-        for code in header.chain(flows) {
+        let mut codes = source.codes.ids().map(|id| book.codes[id]).chain(flows).peekable();
+        // Only a transaction with a code asks what its flows make: nearly none has one.
+        let makes_claim = codes.peek().is_some() && source.flows.ids().any(|flow| book.makes_claim(&book.flows[flow]));
+        for code in codes {
             self.all.note(code, txn_id, source.loc);
             if makes_claim {
                 self.claims.note(code, txn_id, source.loc);

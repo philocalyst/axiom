@@ -198,13 +198,10 @@ impl Book<'_> {
     /// or paid out of a `Debt` place that holds what the owner owes, to outside (a bill). The claim is a parcel that can be
     /// forgiven, and forgiving it gives the value back to where it came from, or to where it went.
     pub fn claim_made_in(&self, flow: &Flow) -> Option<Id<Place>> {
-        let (from, to) = (self.places[flow.from].class, self.places[flow.to].class);
-        if from == Class::Outside && self.is_claim(flow.to) {
-            Some(flow.to)
-        } else if (from, to) == (Class::Debt, Class::Outside) && self.is_claim(flow.from) {
-            Some(flow.from)
-        } else {
-            None
+        match self.places[flow.from].class {
+            Class::Outside if self.is_claim(flow.to) => Some(flow.to),
+            Class::Debt if self.places[flow.to].class == Class::Outside && self.is_claim(flow.from) => Some(flow.from),
+            _ => None,
         }
     }
 

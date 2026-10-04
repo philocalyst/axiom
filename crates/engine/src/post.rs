@@ -104,10 +104,14 @@ impl Ledger<'_, '_, '_> {
         self.record_balances(m.day);
     }
 
-    /// Whether either end of a flow holds parcels: an asset, or a place that says `claim` (what is owed is a parcel of a debt
-    /// place as well). Between places that hold none a flow is two credits.
+    /// Whether either end of a flow holds parcels: an asset, or a debt place that says `claim` (what is owed is a parcel there
+    /// as well). Between places that hold none a flow is two credits.
     fn holds_parcels(&self, m: &Motion) -> bool {
-        let holds = |end: &Place, at: Id<Place>| end.class == Class::Asset || self.plan.traits.place(at).claim;
+        let holds = |end: &Place, at: Id<Place>| match end.class {
+            Class::Asset => true,
+            Class::Debt => self.plan.traits.place(at).claim,
+            Class::Outside => false,
+        };
         holds(m.source, m.from) || holds(m.target, m.to)
     }
 
@@ -324,7 +328,7 @@ impl Ledger<'_, '_, '_> {
     /// claim, and the value in flight is one fresh slice. A debt place that says `claim` owes what leaves as a bill, a parcel.
     fn relieve_balance(&mut self, m: &Motion, settled: Qty) {
         self.scratch.relief.slices.clear();
-        match self.plan.traits.place(m.from).claim && m.course == Course::Forward {
+        match m.source.class == Class::Debt && self.plan.traits.place(m.from).claim && m.course == Course::Forward {
             true => self.owe(m),
             false => self.world.holdings.credit(m.from, m.out.unit, settled - m.out.qty),
         }
