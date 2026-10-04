@@ -273,3 +273,49 @@ fn report_context_errors_keep_report_failure_channels() {
     assert!(json.stderr.is_empty());
     fs::remove_dir_all(folder).unwrap();
 }
+
+/// A project whose journal is written the v4 way: a payment that arrives, a split of a paycheque, and a sale whose
+/// price is only said by its two amounts.
+fn project_written_the_v4_way(name: &str, sale: &str) -> PathBuf {
+    let folder = empty_folder(name);
+    let setup = "base USD\nuse std\nentity employer\nentity grocery-store #groceries\naccount assets/checking : bank\n\
+                 account assets/broker : brokerage\ncommodity NWND : stock\n";
+    fs::write(folder.join("axiom.ax"), setup).unwrap();
+    let journal = format!(
+        "2026-01-02 employer -> checking 1_000 USD #income\n2026-01-09 employer -> 3_000 USD\n  checking ...\n  \
+         grocery-store 100 USD\n{sale}"
+    );
+    fs::write(folder.join("journal.ax"), journal).unwrap();
+    folder
+}
+
+#[test]
+fn an_upgrade_writes_the_junctions_and_leaves_the_book_as_it_was() {
+    let folder = project_written_the_v4_way("upgrade", "");
+    let balance = |folder: &PathBuf| text(&axiom(&["balance", "--json"]).current_dir(folder).output().unwrap().stdout);
+    let before = balance(&folder);
+    let output = axiom(&["fmt", "--upgrade", "--color", "never"]).current_dir(&folder).output().expect("axiom runs");
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_eq!(
+        fs::read_to_string(folder.join("journal.ax")).unwrap(),
+        "2026-01-02 checking <- employer 1_000 USD #income\n\
+         2026-01-09 me       <- employer 3_000 USD\n  -> checking      ...\n  -> grocery-store 100 USD\n"
+    );
+    assert_eq!(balance(&folder), before);
+    let again = axiom(&["fmt", "--upgrade", "--check", "--color", "never"]).current_dir(&folder).output().unwrap();
+    assert_eq!(again.status.code(), Some(0), "an upgraded book is upgraded: {}", text(&again.stdout));
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn an_upgrade_does_not_guess_a_price_and_names_the_one_that_would_do() {
+    let sale = "2026-01-20 checking 9_799.99 USD -> broker 99.0799 NWND\n";
+    let folder = project_written_the_v4_way("upgrade-price", sale);
+    let before = fs::read_to_string(folder.join("journal.ax")).unwrap();
+    let output = axiom(&["fmt", "--upgrade", "--color", "never"]).current_dir(&folder).output().expect("axiom runs");
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stdout));
+    let said = text(&output.stderr);
+    assert!(said.contains("error[upgrade-price]") && said.contains("@ 98.91 USD"), "{said}");
+    assert_eq!(fs::read_to_string(folder.join("journal.ax")).unwrap(), before, "a refused file is not touched");
+    let _ = fs::remove_dir_all(folder);
+}

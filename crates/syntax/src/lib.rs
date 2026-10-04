@@ -43,13 +43,17 @@ mod source;
 mod statement;
 mod structure;
 mod style;
+mod upgrade;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod upgrade_tests;
 
 pub use ast::*;
 pub use dates::MONTHS;
 pub use style::format;
+pub use upgrade::{Registry, Standing, Upgraded, upgrade};
 
 use std::ops::Range;
 

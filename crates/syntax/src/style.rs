@@ -132,6 +132,12 @@ impl Header {
             false => (fixed(&self.object, &self.amount), None),
         }
     }
+
+    /// The line as one run of single blanks, for a rewrite to put in the place of the one it was cut from.
+    pub fn line(&self) -> String {
+        let (cells, spill) = self.cells();
+        cells.into_iter().chain(spill).filter(|cell| !cell.is_empty()).collect::<Vec<_>>().join(" ")
+    }
 }
 
 /// Where the parts of a header's tokens stand: the last of the date (and a range after it), the verb, and where the
@@ -173,6 +179,11 @@ const TOP: usize = usize::MAX;
 impl<'a, 's> Reader<'a, 's> {
     pub fn new(src: &'s str, file: &'a File<'s>) -> Reader<'a, 's> {
         Reader { src, file, rows: Vec::new() }
+    }
+
+    /// The file being read.
+    pub fn file(&self) -> &'a File<'s> {
+        self.file
     }
 
     fn read(&mut self) {
