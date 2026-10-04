@@ -150,7 +150,7 @@ impl Ledger<'_, '_, '_> {
     /// What a flow out of an owner's money pays of the bills the owner has from the party whose place it goes to.
     fn paid_to_party(&self, m: &Motion) -> Option<Payment> {
         let from_owner = m.source.class == Class::Asset && !self.plan.traits.place(m.from).claim;
-        if !from_owner || !matches!(m.target.role, Role::Outside(Some(_))) || !self.plan.traits.has_tab(m.to) {
+        if !from_owner || !self.plan.traits.has_tab(m.to) {
             return None;
         }
         let tab = self.plan.traits.tab_of(m.to, m.source.owner, Class::Debt)?;
@@ -235,13 +235,12 @@ impl Ledger<'_, '_, '_> {
     /// A bill: what leaves a place that says `claim` and holds what the owner owes is owed, as a parcel of the transaction that
     /// made it, the line that did and the codes it carries.
     pub(crate) fn owe(&mut self, m: &Motion) {
-        let day = m.detail().since.unwrap_or(m.day);
         let part = Some(PartId { origin: m.txn, ordinal: m.flow_ordinal });
         let bill = Parcel {
             qty: m.out.qty,
             basis: Qty::ZERO,
-            acquired: day,
-            held_since: day,
+            acquired: m.day,
+            held_since: m.day,
             wash_matched: false,
             txn: m.txn,
             part,

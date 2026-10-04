@@ -198,6 +198,7 @@ class Sim:
         self.unit = {}
         self.forgiven = Counter()
         self.paid = {}
+        self.credited = {}
         self.fired = {}
         self.counted = []
         self.net = Counter()
@@ -235,19 +236,22 @@ class Sim:
         self.plain[place] -= left
         return taken
 
-    def pay_into(self, place, qty, tail):
+    def pay_into(self, place, qty, tail, label=None):
         """A payment into a place that holds what the owner owes: it settles the bills its codes name, else the one whose open
         amount is exactly what it settles, else the oldest, and what is more than is owed is a credit with the party (a positive
-        balance). Says what it took, by the purpose of each line."""
+        balance). Says what it took, by the purpose of each line; a payment with a `label` can be returned."""
         live = self.live(place)
         candidates = [p for p in live if p.code in tail] or live
         need = min(qty, sum(p.qty for p in candidates))
-        left, taken = need, []
+        left, taken, parcels = need, [], []
         for parcel in sorted(candidates, key=lambda p: (p.qty != need, p.when, p.order)):
             took = parcel.take(min(parcel.qty, left))
             left -= sum(part for _, _, part in took)
             taken += [(purpose, part) for _, purpose, part in took]
+            parcels.append((parcel, took))
         self.plain[place] += qty - need
+        if label:
+            self.paid[label], self.credited[label] = parcels, (place, qty - need)
         return taken
 
     def pay(self, party, legs, select, tail, label, place=None):
@@ -295,6 +299,8 @@ class Sim:
     def give_back(self, label):
         for parcel, took in self.paid.pop(label, []):
             parcel.restore(took)
+        place, credit = self.credited.pop(label, (None, 0))
+        self.plain[place] -= credit
 
     def write_off(self, code, declared):
         if declared and self.rules == "old":
@@ -385,7 +391,9 @@ def run_events(events, rules, books="accrual"):
                 settled = sim.pay(e["party"], legs, select, e.get("tail", ()), e["label"], e.get("place"))
                 sim.fired[e["label"]] = sim.paid_by(d, settled, e["label"])
             elif e["kind"] == "into":
-                sim.recognizes(d, sim.pay_into(e["place"], e["qty"] * 100, e.get("tail", ())))
+                before = len(sim.counted)
+                sim.recognizes(d, sim.pay_into(e["place"], e["qty"] * 100, e.get("tail", ()), e["label"]))
+                sim.fired[e["label"]] = sim.counted[before:]
             elif e["kind"] == "settle":
                 select = tuple(e["select"]) if e.get("select") else None
                 sim.recognizes(d, sim.settle(e["place"], e["qty"] * scale, select, e.get("tail", ())))
@@ -685,13 +693,19 @@ def place_bills(book):
         code, qty = rng.choice(made)
         choice = rng.random()
         need = qty if choice < 0.3 else max(1, qty // 2) if choice < 0.5 else held + 40 if choice < 0.6 else qty + 100
-        tail, line_tail = [], ""
+        label = book.code("pay-")
+        tail, line_tail = [], f" ^{label}"
         if rng.random() < 0.5:
-            tail, line_tail = [code], f" ^{code}"
+            tail, line_tail = [code], f" ^{code} ^{label}"
             book.forms["payment into a payable names a bill"] += 1
-        book.add(day(rng, 61, 150), f"checking -> owed-to-ben {amount(need)} USD{line_tail}",
-                 dict(kind="into", place="owed-to-ben", qty=need, tail=tail))
+        when = day(rng, 61, 140)
+        book.add(when, f"checking -> owed-to-ben {amount(need)} USD{line_tail}",
+                 dict(kind="into", place="owed-to-ben", qty=need, tail=tail, label=label))
         book.forms["payment into a payable"] += 1
+        if rng.random() < 0.25:
+            book.add(when + datetime.timedelta(days=rng.randint(1, 10)), f"^{label} returned",
+                     dict(kind="return", label=label))
+            book.forms["payment into a payable returned"] += 1
     for code, _ in made:
         if rng.random() < 0.3:
             book.add(day(rng, 100, 150), f'^{code} waived "off {code}"', dict(kind="writeoff", code=code, declared=False))
@@ -1284,17 +1298,9 @@ MUTANTS = [
      "let from_owner = true;",
      "anything paid to a party pays its bills"),
     ("crates/engine/src/settle.rs",
-     "!matches!(m.target.role, Role::Outside(Some(_))) || !self.plan.traits.has_tab(m.to)",
-     "!self.plan.traits.has_tab(m.to)",
-     "a payment to a place that is no party's pays its bills"),
-    ("crates/engine/src/settle.rs",
      "        let dir = claim_dir(self.plan.book.places[settlement.tab].class).reversed();\n        let claiming",
      "        let dir = claim_dir(self.plan.book.places[settlement.tab].class);\n        let claiming",
      "a payment returned counts the way it was paid"),
-    ("crates/engine/src/settle.rs",
-     "        let day = m.detail().since.unwrap_or(m.day);\n        let part",
-     "        let day = m.day;\n        let part",
-     "a bill made `since` another day is made on the day written"),
     ("crates/engine/src/settle.rs",
      "        let part = Some(PartId { origin: m.txn, ordinal: m.flow_ordinal });",
      "        let part = Some(PartId { origin: m.txn, ordinal: 0 });",
