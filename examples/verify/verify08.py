@@ -26,7 +26,7 @@ def cents(x):
 # ── exchange rates: the latest price on or before a day ─────────────────────────────
 rates = defaultdict(list)
 for l in open(os.path.join(ROOT, "prices", "fx.ax")):
-    m = re.match(r"^(\d{4}-\d\d-\d\d) ([A-Z]+) ([\d.]+) USD", l)
+    m = re.match(r"^(\d{4}-\d\d-\d\d) ([A-Z]+) = ([\d.]+) USD", l)
     if m:
         rates[m.group(2)].append((m.group(1), D(m.group(3))))
 
@@ -76,36 +76,16 @@ for f in flows:
     if f.legs:
         if f.dst:                                  # not in this journal
             raise SystemExit("unexpected split shape")
-        # the legs are the targets of the header's source
-        if f.out is not None:                      # `girokonto 900.00 EUR ->` : the source names its amount
+        if f.out is not None:                      # a conversion: `girokonto 900.00 EUR ->`, the legs are what it became
             put(f.src, f.out_unit, -f.out, day)
-            rest_unit = None
-        else:                                      # `acme -> 5_400.00 EUR` : the header states the total
-            rest_unit = f.into_unit
-        total = sum((a for p, a, u in f.legs if a is not None and u == rest_unit), D(0))
-        for place, amount, unit in f.legs:
-            if amount is None:
-                amount, unit = f.into - total, rest_unit
-            put(place, unit, amount, day)
-            value = usd(amount, unit, day)
-            if f.src in ("acme", "employer-gmbh"):                        # income from a wages place
-                wages += value
-                if f.src == "employer-gmbh":
-                    foreign_earned += value
-                if place in ("us-401k",):
-                    pretax += value
-                if place == "taxes/federal":
-                    federal_paid += value
-                if place == "taxes/state":
-                    ca_withheld += value
-            if f.src in ("interest", "income/interest-de"):
-                interest += value
-            if place in ("lohnsteuer", "kapitalertragsteuer"):
-                foreign_tax += value
-            if place == "loan-interest":
-                student += value
-        if f.out is None:                          # the header's source gave the whole total
+            for place, amount, unit in f.legs:
+                put(place, unit, amount, day)
+        else:                                      # the student loan: `us-checking -> 420 USD`, principal and interest
             put(f.src, f.into_unit, -f.into, day)
+            for place, amount, unit in f.legs:
+                put(place, unit, amount, day)
+                if place == "mohela":              # the interest leg: the servicer carries `#student-loan-interest`
+                    student += usd(amount, unit, day)
         continue
     if f.out is None:                              # `SRC -> DST 5 UNIT [@ price]`
         if f.price:
@@ -116,11 +96,20 @@ for f in flows:
     else:                                          # an exchange with both amounts
         put(f.src, f.out_unit, -f.out, day)
         put(f.dst, f.into_unit, f.into, day)
-    if f.src in ("interest", "income/interest-de"):
-        interest += usd(f.into, f.into_unit, day)
-    if f.dst == "taxes/federal" and year_for == 2025:
+    value = usd(f.into, f.into_unit, day)
+    if f.src in ("acme", "employer-gmbh"):         # pay: the gross, in dollars at the rate of the day
+        wages += value
+        if f.src == "employer-gmbh":
+            foreign_earned += value
+    if f.dst == "us-401k" and "#payroll-deferral" in f.codes:
+        pretax += value
+    if "#interest-income" in f.codes:
+        interest += value
+    if f.dst == "finanzamt":
+        foreign_tax += value
+    if f.dst == "irs" and year_for == 2025:
         federal_paid += f.into
-    if f.dst == "taxes/state" and year_for == 2025:
+    if f.dst == "ftb" and year_for == 2025:
         ca_withheld += f.into
 
 # ── the return ──────────────────────────────────────────────────────────────────────────────────────

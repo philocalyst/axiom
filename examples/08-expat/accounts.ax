@@ -2,21 +2,23 @@
 // cash here: they are declared in `std` as currencies, so spending them realizes
 // no capital gain, and `available` counts them. The foreign account reporting
 // check is the running-maximum trick described below.
+//
+// Money sits in accounts. Whom it goes to is a party, and what it is for is a purpose: there are no
+// income, expense or equity accounts, so a merchant carries the purpose of what it sells
+// (`entity bvg #transport`), and a payment to no one in particular says its purpose itself
+// (`girokonto -> ? 53.72 EUR #groceries`).
 
 // ─── United States ──────────────────────────────────────────────────────────
 
-/// Interest paid on a student loan, which `tax.ax` deducts up to a limit.
-kind student-loan-interest : expense
-
-account assets/bank/us-checking : bank
-account assets/bank/us-savings  : bank
-account assets/retirement/us-401k : 401k
+account us-checking : bank
+account us-savings  : bank
+account us-401k : 401k
   employer acme
 
-account liabilities/visa : credit-card
+account visa : credit-card
 
 /// 31,120.40 USD at 4.53% at the start of the year; 420.00 USD a month.
-account liabilities/student-loan : loan
+account student-loan : loan
   rate     4.53%
   maturity 2032-06-30
 
@@ -32,7 +34,7 @@ account liabilities/student-loan : loan
 // value. A tally has one name per law, so it takes one law per account.
 
 /// The current account (Girokonto): salary arrives here and rent leaves.
-account assets/de/girokonto : bank
+account girokonto : bank
   holds EUR
   /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
   /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
@@ -41,10 +43,10 @@ account assets/de/girokonto : bank
   law fbar-max
     always
     let v = value(balance, USD)
-    count max(v - tally(fbar-girokonto), empty) as fbar-girokonto
+    count max(v - value(tally(fbar-girokonto), USD), empty) as fbar-girokonto
 
 /// A high-interest savings account (Tagesgeld).
-account assets/de/tagesgeld : bank
+account tagesgeld : bank
   holds EUR
   /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
   /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
@@ -53,11 +55,17 @@ account assets/de/tagesgeld : bank
   law fbar-max
     always
     let v = value(balance, USD)
-    count max(v - tally(fbar-tagesgeld), empty) as fbar-tagesgeld
+    count max(v - value(tally(fbar-tagesgeld), USD), empty) as fbar-tagesgeld
+
+/// Where German pay and interest pass: they arrive here gross and leave as the tax, the contributions and the net pay
+/// to the girokonto, the way a payslip reads. The employer withholds before it pays, so the girokonto never holds the
+/// gross: the running maximum below and the currency disposals read what an account holds. It is empty at the end of the day.
+account de-clearing : bank
+  holds EUR
 
 /// The rent deposit (Mietkaution): three months of base rent, blocked in a
 /// savings account in my name until the lease ends.
-account assets/de/kaution : bank
+account kaution : bank
   holds EUR
   liquidity 700d
   /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
@@ -67,10 +75,10 @@ account assets/de/kaution : bank
   law fbar-max
     always
     let v = value(balance, USD)
-    count max(v - tally(fbar-kaution), empty) as fbar-kaution
+    count max(v - value(tally(fbar-kaution), USD), empty) as fbar-kaution
 
 /// A Wise account in pounds, for the trip. It is a foreign account too.
-account assets/uk/wise : bank
+account wise : bank
   holds GBP
   /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
   /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
@@ -79,105 +87,75 @@ account assets/uk/wise : bank
   law fbar-max
     always
     let v = value(balance, USD)
-    count max(v - tally(fbar-wise), empty) as fbar-wise
+    count max(v - value(tally(fbar-wise), USD), empty) as fbar-wise
 
 
-// ─── Income and equity ──────────────────────────────────────────────────────
+// ─── What money is for ──────────────────────────────────────────────────────
+//
+// std and `us` declare rent, groceries, dining, utilities, transport, phone, travel, wages,
+// interest-income and the tax purposes. The rest are this book's.
 
-account income/salary-us : wages
-account income/salary-de : foreign-wages
-account income/interest    : interest
-account income/interest-de : interest
+purpose subscriptions : spending
+purpose shopping : spending
+purpose moving : spending
+purpose conference : spending
+purpose sightseeing : spending
+purpose payroll-tax : spending
+purpose sozialabgaben : spending
 
+/// What conversions and card fees cost. Written by hand: a conversion with a spread, not a fee, has no line
+/// here. A fee leg that carries it is a cost of the exchange, so it adds to what the money bought cost.
+purpose fees : spending
 
-// ─── Expenses ───────────────────────────────────────────────────────────────
+/// Pay set aside before tax into the 401(k) (IRC §402(e)(3)): a deferral counts toward the yearly limit, and is
+/// counted as pre-tax and taken back out of income. The pay stub says it: gross pay in, then the deferral.
+purpose payroll-deferral : pre-tax-deferral
+  law payroll-deferral
+    on flow
+    count amount as pretax
+    count -amount as total-income
 
-account expenses/sf-rent
-account expenses/de-rent
-account expenses/moving
 /// Groceries, in dollars in San Francisco and in euros in Berlin: one budget, in dollars.
-account expenses/groceries
-  budget 550 USD monthly
-account expenses/dining
-account expenses/utilities
-account expenses/transport
-account expenses/transit
-account expenses/shopping
-account expenses/subscriptions
-account expenses/phone
-account expenses/travel
-account expenses/conference
-account expenses/sightseeing
-/// Interest on the student loan: the servicer's statement splits each payment. `tax.ax` counts it.
-account expenses/loan-interest : student-loan-interest
-
-/// What conversions and card fees cost. Written by hand: a conversion with a
-/// spread, not a fee, has no line here.
-account expenses/fx-fees
-
-account expenses/taxes/federal : federal-tax
-account expenses/taxes/state   : ca-tax
-account expenses/taxes/payroll
-account expenses/taxes/sdi
-
-/// German tax taken from pay and from interest.
-account expenses/taxes/de/lohnsteuer : de-tax
-account expenses/taxes/de/kapitalertragsteuer : de-tax
-account expenses/taxes/de/sozialabgaben
+budget groceries 550 USD monthly
 
 
 // ─── Employers and payees ───────────────────────────────────────────────────
 
 entity acme : employer
-  via income/salary-us
 
-entity employer-gmbh : employer
-  via income/salary-de
+/// The German employer: what it pays is foreign wages (`us/abroad` counts them for the exclusion).
+entity employer-gmbh : foreign-employer
 
-entity landlord-sf : org
-  via expenses/sf-rent
-entity mohela : org
-  via liabilities/student-loan
-entity sea-freight : org
-  via expenses/moving
-entity lufthansa : org
-  via expenses/travel
-entity london-hotel : org
-  via expenses/travel
-entity hausverwaltung : org
-  via expenses/de-rent
-entity bvg : org
-  via expenses/transit
-entity netflix : org
-  via expenses/subscriptions
-entity apple : org
-  via expenses/subscriptions
-entity us-phone : org
-  via expenses/subscriptions
-entity pret-a-manger : org
-  via expenses/dining
-entity tfl : org
-  via expenses/transit
-entity design-conf : org
-  via expenses/conference
-entity borough-market : org
-  via expenses/dining
-entity british-museum : org
-  via expenses/sightseeing
-entity dishoom : org
-  via expenses/dining
-entity liberty : org
-  via expenses/shopping
-entity the-pub : org
-  via expenses/dining
-entity black-cab : org
-  via expenses/transit
-entity cafe : org
-  via expenses/dining
-entity heathrow-express : org
-  via expenses/transit
-entity ryanair : org
-  via expenses/travel
+entity ssa #payroll-tax
+entity edd #payroll-tax
+entity sozialversicherung #sozialabgaben
+
+/// What converting costs: Wise's fees, and the card's fee for a foreign transaction.
+entity wise-fees #fees
+entity card-issuer #fees
+
+entity landlord-sf #rent
+entity mohela #student-loan-interest
+entity sea-freight #moving
+entity lufthansa #travel
+entity london-hotel #travel
+entity hausverwaltung #rent
+entity bvg #transport
+entity netflix #subscriptions
+entity apple #subscriptions
+entity us-phone #subscriptions
+entity pret-a-manger #dining
+entity tfl #transport
+entity design-conf #conference
+entity borough-market #dining
+entity british-museum #sightseeing
+entity dishoom #dining
+entity liberty #shopping
+entity the-pub #dining
+entity black-cab #transport
+entity cafe #dining
+entity heathrow-express #transport
+entity ryanair #travel
 
 
 // ─── Foreign accounts: the yearly total ─────────────────────────────────────
@@ -189,6 +167,6 @@ entity ryanair : org
 /// `fbar-girokonto` and the others in `axiom tax`).
 law fbar
   each year
-  let total = tally(fbar-girokonto) + tally(fbar-tagesgeld) + tally(fbar-kaution) + tally(fbar-wise)
+  let total = value(tally(fbar-girokonto), USD) + value(tally(fbar-tagesgeld), USD) + value(tally(fbar-kaution), USD) + value(tally(fbar-wise), USD)
   count total as fbar-aggregate
   warn total <= 10_000 USD "foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15"

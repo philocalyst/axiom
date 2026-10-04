@@ -1,35 +1,36 @@
-2025-12-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
-2025-12-03 visa -> subscriptions 15.49 USD / netflix
-2025-12-03 girokonto -> groceries 40.90 EUR
-2025-12-05 us-checking -> 420 USD / mohela
+2025-12-01 girokonto -> hausverwaltung 1_450 EUR
+2025-12-03 visa -> netflix 15.49 USD
+2025-12-03 girokonto -> ? 40.90 EUR #groceries
+2025-12-05 us-checking -> 420 USD
   student-loan            315.32 USD   // principal
-  loan-interest           104.68 USD   // interest
-2025-12-05 girokonto -> transit 58 EUR / bvg
-2025-12-06 girokonto -> dining 18.75 EUR
-2025-12-07 visa -> subscriptions 2.99 USD / apple
+  mohela                  104.68 USD   // interest
+2025-12-05 girokonto -> bvg 58 EUR
+2025-12-06 girokonto -> ? 18.75 EUR #dining
+2025-12-07 visa -> apple 2.99 USD
 2025-12-08 girokonto 900.00 EUR ->
-  fx-fees                 4.77 EUR
+  wise-fees               4.77 EUR
   us-checking             1_040.17 USD
-2025-12-09 girokonto -> groceries 36.46 EUR
-2025-12-10 girokonto -> phone 19.99 EUR
-2025-12-13 girokonto -> dining 40.54 EUR
-2025-12-15 visa -> subscriptions 35 USD / us-phone
-2025-12-15 girokonto -> groceries 69.54 EUR
-2025-12-17 girokonto -> shopping 70.01 EUR
-2025-12-19 employer-gmbh -> 5_400.00 EUR
-  lohnsteuer              905.00 EUR   // income tax, tax class 1
-  sozialabgaben           1_163.70 EUR   // pension, health, unemployment, care
-  girokonto               ...
-2025-12-20 girokonto -> dining 29.06 EUR
+2025-12-09 girokonto -> ? 36.46 EUR #groceries
+2025-12-10 girokonto -> ? 19.99 EUR #phone
+2025-12-13 girokonto -> ? 40.54 EUR #dining
+2025-12-15 visa -> us-phone 35 USD
+2025-12-15 girokonto -> ? 69.54 EUR #groceries
+2025-12-17 girokonto -> ? 70.01 EUR #shopping
+2025-12-19 employer-gmbh -> de-clearing 5_400.00 EUR
+2025-12-19 de-clearing -> finanzamt 905.00 EUR   // income tax, tax class 1
+2025-12-19 de-clearing -> sozialversicherung 1_163.70 EUR   // pension, health, unemployment, care
+2025-12-19 de-clearing -> girokonto 3_331.30 EUR   // net pay
+2025-12-20 girokonto -> ? 29.06 EUR #dining
 
 /// November's statement, paid in full.
 2025-12-20 us-checking -> visa 53.48 USD
-2025-12-22 girokonto -> groceries 68.60 EUR
-2025-12-27 girokonto -> groceries 40.12 EUR
-2025-12-31 interest -> us-savings 64.73 USD
-2025-12-31 income/interest-de -> 33.76 EUR
-  kapitalertragsteuer     8.90 EUR
-  tagesgeld               ...
+2025-12-22 girokonto -> ? 68.60 EUR #groceries
+2025-12-27 girokonto -> ? 40.12 EUR #groceries
+2025-12-31 ? -> us-savings 64.73 USD #interest-income
+2025-12-31 ? -> de-clearing 33.76 EUR #interest-income
+2025-12-31 de-clearing -> finanzamt 8.90 EUR
+2025-12-31 de-clearing -> tagesgeld 24.86 EUR
+2025-12-31 de-clearing = empty
 2025-12-31 visa = 53.48 USD
 2025-12-31 us-checking = 20_005.75 USD
 2025-12-31 us-savings = 18_559.94 USD

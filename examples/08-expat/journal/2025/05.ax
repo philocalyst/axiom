@@ -1,27 +1,26 @@
-2025-05-01 us-checking -> sf-rent 3_400 USD / landlord-sf
-2025-05-04 visa -> groceries 155.14 USD
-2025-05-05 us-checking -> 420 USD / mohela
-  student-loan            307.11 USD   // principal
-  loan-interest           112.89 USD   // interest
-2025-05-09 visa -> dining    79.09 USD
-2025-05-11 visa -> groceries 77.45 USD
-2025-05-14 visa -> utilities 156.22 USD
-2025-05-16 visa -> transport 64.74 USD
-2025-05-18 visa -> groceries 145.60 USD
+2025-05-01 us-checking -> landlord-sf 3_400 USD
+2025-05-04 visa        -> ?           155.14 USD #groceries
+2025-05-05 us-checking ->             420 USD
+  -> student-loan 307.11 USD              // principal
+  -> mohela       112.89 USD              // interest
+2025-05-09 visa -> ? 79.09 USD  #dining
+2025-05-11 visa -> ? 77.45 USD  #groceries
+2025-05-14 visa -> ? 156.22 USD #utilities
+2025-05-16 visa -> ? 64.74 USD  #transport
+2025-05-18 visa -> ? 145.60 USD #groceries
 
 /// April's statement, paid in full.
-2025-05-20 us-checking -> visa      869.54 USD
-2025-05-21 visa        -> dining    100.48 USD
-2025-05-23 visa        -> shopping  78.56 USD
-2025-05-25 visa        -> groceries 88.54 USD
-2025-05-30 me          <- acme      10_416.67 USD
-  -> us-401k         625.00 USD           // 6% pre-tax
-  -> taxes/federal 1_180.00 USD
-  -> taxes/state     470.00 USD
-  -> taxes/payroll   796.87 USD           // Social Security and Medicare
-  -> taxes/sdi       125.00 USD           // California SDI
-  -> us-checking   ...
-2025-05-31 us-savings   <- interest      146.58 USD
+2025-05-20 us-checking  -> visa          869.54 USD
+2025-05-21 visa         -> ?             100.48 USD    #dining
+2025-05-23 visa         -> ?             78.56 USD     #shopping
+2025-05-25 visa         -> ?             88.54 USD     #groceries
+2025-05-30 us-checking  <- acme          10_416.67 USD #wages
+2025-05-30 us-checking  -> us-401k       625.00 USD    #payroll-deferral  // 6% pre-tax
+2025-05-30 us-checking  -> irs           1_180.00 USD
+2025-05-30 us-checking  -> ftb           470.00 USD
+2025-05-30 us-checking  -> ssa           796.87 USD                       // Social Security and Medicare
+2025-05-30 us-checking  -> edd           125.00 USD                       // California SDI
+2025-05-31 us-savings   <- ?             146.58 USD    #interest-income
 2025-05-31 visa         =  945.82 USD
 2025-05-31 us-checking  =  29_955.19 USD
 2025-05-31 us-savings   =  42_027.82 USD

@@ -9,19 +9,22 @@
 /// Interest paid on a student loan is deductible up to 2,500 USD a year (IRC
 /// §221). It comes off income before AGI, as an adjustment.
 ///
-/// To fix: the interest must be paid to a place of kind `student-loan-interest`;
+/// To fix: the interest must be paid as `#student-loan-interest`;
 /// `axiom why student-interest` lists what was counted.
 law student-interest-deduction
   each year closing 04-15
-  count min(tally(student-interest), student-loan-interest-limit[year]) as adjustments
+  count min(value(tally(student-interest), USD), student-loan-interest-limit[year]) as adjustments
+
+/// Interest paid on a student loan, which the law above deducts up to a limit.
+purpose student-loan-interest : spending
 
 /// Interest on a student loan, counted when it is paid.
 ///
-/// To fix: pay the interest leg of the loan payment to an expense place of kind
-/// `student-loan-interest`, and the principal leg to the loan.
+/// To fix: pay the interest leg of the loan payment to its servicer as `#student-loan-interest`, and the
+/// principal leg to the loan.
 law count-student-interest
   on in
-  when to is student-loan-interest
+  when purpose is #student-loan-interest
   count amount as student-interest
 
 // The most a year's student loan interest can take off income (IRC §221(b)).
