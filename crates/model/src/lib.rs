@@ -34,6 +34,7 @@ pub mod split;
 pub mod sync;
 
 mod addresses;
+mod args;
 pub mod builtin;
 mod collect;
 mod declare;
@@ -103,29 +104,31 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let said = declare::Said { sites: &sites, collected: &collected };
     let systems = declare::Systems { tree: systems_tree, index: systems, scopes };
     let mut world = declare::declare(said, &settings, names, systems, &mut diags);
-    slots::declare(&mut world, &collected, &mut diags);
-    props::declare(&mut world, &collected, &mut diags);
+    // From here on the world says what is wrong, after what was said before it was made.
+    world.diags = diags;
+    slots::declare(&mut world, &collected);
+    props::declare(&mut world, &collected);
     world.freeze_facts();
     props::place_entities(&mut world);
     world.book.lookup.addresses = addresses::Addresses::of(&world.book);
-    params::declare(&mut world, &collected, &mut diags);
-    props::system_rates(&mut world, &collected, &mut diags);
-    sync_lower::declare(&mut world, &sites, &collected, &mut diags);
-    laws::declare(&mut world, &sites, &mut diags);
-    lower::contracts(&mut world, &collected, &mut diags);
-    let order = laws::register_native(&mut world, &mut diags);
+    params::declare(&mut world, &collected);
+    props::system_rates(&mut world, &collected);
+    sync_lower::declare(&mut world, &sites, &collected);
+    laws::declare(&mut world, &sites);
+    lower::contracts(&mut world, &collected);
+    let order = laws::register_native(&mut world);
     world.settle_addresses();
-    lower::record(&mut world, &collected, &mut diags);
+    lower::record(&mut world, &collected);
     // What watches a place is worked out when the last claim tab has been made: a claim makes its tab while the
     // journal is lowered.
     rules::govern(&mut world.book, &order);
-    rules::unreached(&world.book, &mut diags);
+    rules::unreached(&world.book, &mut world.diags);
     // `end` statements say more of places, once the rest is lowered.
     world.freeze_facts();
     // What the contracts promise is known when the last waiver and ending has been lowered.
     world.book.promises = promise::Promises::compile(&world.book);
     // One cause is reported once, however many declarations shared the line.
-    let mut seen = Set::default();
+    let (book, mut diags, mut seen) = (world.book, world.diags, Set::default());
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));
-    (world.book, diags)
+    (book, diags)
 }

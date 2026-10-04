@@ -39,7 +39,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
             Cell::Name(book.name(book.entities[contract.party].path)),
             terms.map_or(Cell::Blank, |terms| terms_cell(lens, contract, terms, contract.waiver_on(run.today))),
             next.map_or(Cell::Blank, Cell::Day),
-            Cell::Count(kept, "kept"),
+            Cell::Count(kept, ""),
             if late == 0 { Cell::Blank } else { Cell::text(format!("{late} occurrences, {age} days")) },
             loan_balance,
         ];

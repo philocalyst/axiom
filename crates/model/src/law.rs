@@ -24,6 +24,7 @@ use crate::journal::Object;
 
 pub use axiom_syntax::BinOp;
 
+#[derive(Debug)]
 pub struct Law {
     pub name: Sym,
     pub doc: Option<Sym>,
@@ -667,7 +668,7 @@ pub enum Fault {
 /// owner's jurisdictions (each rule dated by the residence that brings it; a household's for its members' places).
 /// Every row, `Timed` included, is in dependency order: a law that reads `tally(x)` comes after every law that counts
 /// into `x`, and declaration order decides the rest.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Rules {
     rows: Groups<Row, Rule>,
     /// Where each table's rows begin, and, last, where the rows end.
@@ -675,6 +676,7 @@ pub struct Rules {
 }
 
 /// A row of [`Rules`]: one thing watched, for one kind of occasion.
+#[derive(Debug)]
 pub struct Row;
 
 /// What happens, which is also what decides the key a rule is looked up by.

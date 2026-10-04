@@ -1,0 +1,14 @@
+// raises relator-slot-missing
+use std
+base USD
+kind boss : org
+kind employment : contract
+  has employee person
+  has employer boss
+entity acme : boss
+entity alex : person
+entity me : person
+account checking : bank
+contract pay : employment with acme
+  employee me
+  5_000 USD monthly on 15 into checking

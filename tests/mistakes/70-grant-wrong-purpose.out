@@ -74,5 +74,14 @@ error[purpose]: grant money spent outside its purpose
     │                │                ╰── no value (`grant-purpose` is not set)
     │                ╰── empty
 
-✗ 7 errors
+warning[purpose-of-its-own]: `purpose` is what the flows with `scholarship` are for, not the grant's own `grant-purpose`
+   ╭─[70-grant-wrong-purpose.ax:12:3]
+   │
+12 │   purpose education
+   │   ───┬───
+   │      ╰── the purpose of the flows with this party
+   │
+   = help: for the grant's own, write `grant-purpose education`
+
+✗ 7 errors · 1 warning
 [exit status 1]

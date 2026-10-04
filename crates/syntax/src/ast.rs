@@ -135,7 +135,7 @@ impl<'s> Literal<'s> {
         };
         let number = text.bytes().position(is_blank).map_or(text, |end| &text[..end]);
         let dec = Dec::parse(number.as_bytes()).unwrap_or_default();
-        if negative { dec.neg() } else { dec }
+        if negative { -dec } else { dec }
     }
 
     /// The commodity, or `None` for `empty`, the zero of every commodity.
@@ -1005,14 +1005,9 @@ pub struct Holding<'s> {
     pub name: Name<'s>,
 }
 
-/// How often. `daily` is `every 1d`, `weekly` `every 7d`, `monthly` `every 1m`,
-/// `quarterly` `every 3m` and `yearly` `every 12m`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Cadence {
-    Every(Span),
-    /// `twice monthly`: two days in each month, `on 15, last`.
-    TwiceMonthly,
-}
+/// How often. `daily` is `every 1d`, `weekly` `every 7d`, `monthly` `every 1m`, `quarterly` `every 3m` and `yearly`
+/// `every 12m`: the calendar's own.
+pub use axiom_core::Cadence;
 
 /// Which way a schedule's money goes, for the holding.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -26,99 +26,64 @@ pub(crate) mod tail;
 pub(crate) use contracts::contracts;
 pub(crate) use record::record;
 
-use axiom_core::{Diagnostic, Loc, Map};
+use axiom_core::{Diagnostic, Id, Loc, Map};
 use axiom_syntax as ast;
 use axiom_syntax::{ExprKind, Subject};
 
-use crate::book::Input;
+use crate::args::Args;
+use crate::book::{Commodity, Input};
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::journal::Program;
 use crate::law::Ty;
 use crate::problem::{self, Noun};
 use crate::scope::Home;
 
-/// Reads the ordered input bindings a contract template may use. The engine
-/// binds occurrence values by this order, while the compiler resolves each
-/// input name to its stable `Var::Input` index.
-fn inputs<'s>(
-    world: &mut World<'s>,
-    file: &ast::File<'s>,
-    props: ast::Many<ast::Prop<'s>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Box<[Input]> {
+/// Reads the ordered input bindings a contract template may use (`input NAME [UNIT]`). The engine binds occurrence
+/// values by this order, while the compiler resolves each input name to its stable `Var::Input` index.
+fn inputs<'s>(world: &mut World<'s>, file: &ast::File<'s>, props: ast::Many<ast::Prop<'s>>) -> Box<[Input]> {
     let mut found: Vec<Input> = Vec::new();
     let mut seen: Map<axiom_core::Sym, Loc> = Map::default();
-    for prop in &file[props] {
-        if prop.name.0 != "input" {
-            continue;
-        }
-        let args = &file[prop.args];
-        if args.len() > 2 {
-            diags.push(
-                Diagnostic::error("contract-input", "an input takes a name and at most one unit")
-                    .label(prop.loc, "extra input arguments are not used")
-                    .help("write `input NAME` or `input NAME UNIT`"),
-            );
-            continue;
-        }
-        let Some(&name_id) = args.first() else {
-            diags.push(
-                Diagnostic::error("contract-input", "an input needs a name")
-                    .label(prop.loc, "write `input NAME [UNIT]`"),
-            );
-            continue;
-        };
-        let ExprKind::Name(name) = file.exprs[name_id].kind else {
-            diags.push(
-                Diagnostic::error("contract-input", "an input name must be a word")
-                    .label(file.exprs[name_id].loc, "write the input name here"),
-            );
-            continue;
-        };
-        let symbol = world.book.names.intern(name.0);
+    for line in file[props].iter().filter(|prop| prop.name.0 == "input") {
+        let Some((name, unit)) = input(world, file, line).or_report(world) else { continue };
+        let symbol = world.book.names.intern(name.text);
         if let Some(first) = seen.get(&symbol) {
-            let word = Word { text: name.0, loc: prop.loc };
-            diags.push(problem::duplicate(Noun::Input, word, Some(*first)));
+            world.diags.push(problem::duplicate(Noun::Input, Word { text: name.text, loc: line.loc }, Some(*first)));
             continue;
         }
-        seen.insert(symbol, prop.loc);
-
+        seen.insert(symbol, line.loc);
         if found.len() > usize::from(u16::MAX) {
-            diags.push(
+            world.diags.push(
                 Diagnostic::error("too-many-inputs", "a contract has too many inputs")
-                    .label(prop.loc, "input index exceeds the template limit")
+                    .label(line.loc, "input index exceeds the template limit")
                     .help("remove unused inputs; a template supports indices 0 through 65535"),
             );
             continue;
         }
-
-        let unit = match args.get(1).map(|&id| &file.exprs[id]) {
-            None => None,
-            Some(expr) => {
-                let unit_name = match expr.kind {
-                    ExprKind::Unit(unit) | ExprKind::Name(unit) => unit,
-                    _ => {
-                        diags.push(
-                            Diagnostic::error("contract-input-unit", "an input unit must name a commodity")
-                                .label(expr.loc, "write a commodity such as `USD`"),
-                        );
-                        continue;
-                    }
-                };
-                match world.commodity_of(Word { text: unit_name.0, loc: expr.loc }) {
-                    Ok(unit) => Some(unit),
-                    Err(diagnostic) => {
-                        diags.push(diagnostic);
-                        continue;
-                    }
-                }
-            }
-        };
-
-        found.push(Input { name: symbol, unit, loc: prop.loc });
+        found.push(Input { name: symbol, unit, loc: line.loc });
     }
     found.into_boxed_slice()
+}
+
+/// `input hours HR`: an input's name, and the commodity it is counted in if it says.
+fn input<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    line: &ast::Prop<'s>,
+) -> Result<(Word<'s>, Option<Id<Commodity>>), Diagnostic> {
+    let mut a = Args::shaped(file, line, "contract-input", "input NAME [UNIT]");
+    let name = a.name("a name")?;
+    let unit = match a.peek() {
+        None => None,
+        Some(_) => {
+            let unit = |expr: &ast::Expr<'s>| match expr.kind {
+                ExprKind::Unit(unit) | ExprKind::Name(unit) => Some(Word { text: unit.0, loc: expr.loc }),
+                _ => None,
+            };
+            Some(world.commodity_of(a.with("contract-input-unit", |a| a.arg("a commodity such as `USD`", unit))?)?)
+        }
+    };
+    a.done().map(|()| (name, unit))
 }
 
 /// The independent computed roots owned by the regular and standing terms.
@@ -197,12 +162,11 @@ fn compile_roots<'s>(
     name: axiom_core::Sym,
     inputs: &[Input],
     roots: &[(ast::ExprId, Ty)],
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<(Program, Map<ast::ExprId, crate::law::NodeId>)> {
     if roots.is_empty() {
         return Some((Program::default(), Map::default()));
     }
-    let (program, nodes) = crate::laws::compile_template(world, diags, file, home, subject, name, inputs, roots)?;
+    let (program, nodes) = crate::laws::compile_template(world, file, home, subject, name, inputs, roots)?;
     let by_expr = roots.iter().zip(nodes.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
     Some((program, by_expr))
 }

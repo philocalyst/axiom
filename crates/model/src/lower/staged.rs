@@ -12,7 +12,7 @@
 use std::mem;
 use std::ops::{Deref, DerefMut};
 
-use axiom_core::{Arena, Id, Run, Sym};
+use axiom_core::{Arena, Diagnostic, Id, Run, Sym};
 
 use crate::declare::World;
 use crate::journal::{Detail, Flow, Program, Select};
@@ -84,6 +84,12 @@ impl<'s> Deref for Staged<'_, 's> {
 impl DerefMut for Staged<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.world
+    }
+}
+
+impl AsMut<Vec<Diagnostic>> for Staged<'_, '_> {
+    fn as_mut(&mut self) -> &mut Vec<Diagnostic> {
+        &mut self.world.diags
     }
 }
 

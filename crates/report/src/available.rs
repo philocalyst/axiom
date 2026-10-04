@@ -186,7 +186,7 @@ fn place_label(lens: Lens, holding: &Holding, qty: Qty) -> String {
 /// with a due day.
 fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
     let (book, at) = (lens.book(), lens.day);
-    let soon = |day: Day| day >= at && day <= at.add(SOON);
+    let soon = |day: Day| day >= at && day <= at + SOON;
     let recorded = run.effects.iter().filter(|effect| effect.day <= at && lens.owns_entity(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
         let owed = effect.owed().filter(|owed| soon(owed.due))?;

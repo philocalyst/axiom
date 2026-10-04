@@ -221,6 +221,13 @@ impl Neg for Ratio {
     }
 }
 
+impl Neg for Dec {
+    type Output = Dec;
+    fn neg(self) -> Dec {
+        Dec { mantissa: -self.mantissa, scale: self.scale }
+    }
+}
+
 impl Ord for Ratio {
     fn cmp(&self, o: &Ratio) -> Ordering {
         (self.num as i128 * o.den as i128).cmp(&(o.num as i128 * self.den as i128))
@@ -343,10 +350,6 @@ impl Dec {
 
     pub fn is_zero(self) -> bool {
         self.mantissa == 0
-    }
-
-    pub fn neg(self) -> Dec {
-        Dec { mantissa: -self.mantissa, scale: self.scale }
     }
 
     /// Decimal places actually needed: `2.50` needs one.

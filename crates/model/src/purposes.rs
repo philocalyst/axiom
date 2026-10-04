@@ -5,11 +5,12 @@
 //! takes (`of KIND`).
 
 use axiom_core::{Diagnostic, Id, Interner, Loc, Sym};
-use axiom_syntax::{Decl, DeclKind, ExprKind};
+use axiom_syntax::{Decl, DeclKind};
 
+use crate::args::Args;
 use crate::book::{At, Kind, Miss, Purpose, PurposeRoot, PurposeRoots};
 use crate::collect::{Collected, Written};
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::kinds;
 use crate::names::Scoped;
 use crate::problem::{self, Among, Noun};
@@ -97,25 +98,17 @@ pub(crate) fn attach_objects<'s>(
             continue;
         }
         for prop in file[decl.props].iter().filter(|prop| prop.name.0 == "of") {
-            let [expr] = &file[prop.args][..] else {
-                diags.push(
-                    Diagnostic::error("purpose-object", "`of` needs exactly one kind name")
-                        .label(prop.loc, "write `of KIND`"),
-                );
-                continue;
-            };
-            let ExprKind::Name(kind_name) = file.exprs[*expr].kind else {
-                diags.push(
-                    Diagnostic::error("purpose-object", "`of` needs a kind name").label(prop.loc, "write `of KIND`"),
-                );
+            let mut args = Args::shaped(file, prop, "purpose-object", "of KIND");
+            let Some(kind_name) = args.name("a kind").and_then(|word| args.done().map(|()| word)).or_report(diags)
+            else {
                 continue;
             };
             let scope = seeing.scopes.of(written.home());
-            match kinds::find(kind_index, names, seeing.systems, kind_name.0, |visible| scope.sees(visible)) {
+            match kinds::find(kind_index, names, seeing.systems, kind_name.text, |visible| scope.sees(visible)) {
                 Ok(kind) => purposes.tree[id].of = Some(At { value: kind, loc: prop.loc }),
                 Err(_) => diags.push(
-                    Diagnostic::error("unknown-kind", format!("kind `{}` is not known here", kind_name.0))
-                        .label(file.loc(kind_name.0), "not a visible kind"),
+                    Diagnostic::error("unknown-kind", format!("kind `{}` is not known here", kind_name.text))
+                        .label(kind_name.loc, "not a visible kind"),
                 ),
             }
         }

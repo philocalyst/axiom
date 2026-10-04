@@ -29,52 +29,52 @@ use crate::slots::{Mult, Range, Slot, View};
 
 /// The kind a contract is `: KIND` of and who fills its slots, or nothing, after what is wrong with it has been said.
 pub(super) fn relation<'a, 's>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     written: WrittenContract<'a, 's>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<(Id<Kind>, Box<[Filler]>)> {
     let (file, node) = (written.file(), written.node);
     let named = Word::of(file, node.kind?.0);
-    let kind = world.kind(written.home(), named).or_report(diags)?;
+    let kind = world.kind(written.home(), named).or_report(world)?;
     if world.book.kinds[kind].sort != Sort::Contract {
-        diags.push(not_a_contract_kind(&world.book, named, kind));
+        world.diags.push(not_a_contract_kind(&world.book, named, kind));
         return None;
     }
     let slots: Vec<Slot> = world.book.schema.effective(&world.book.kinds, kind).copied().collect();
-    let fillers = fillers(world, written, kind, &slots, diags)?;
-    unfilled(&world.book, written, kind, &slots, &fillers, diags)?;
+    let fillers = fillers(world, written, kind, &slots)?;
+    unfilled(&world.book, written, kind, &slots, &fillers, &mut world.diags)?;
     Some((kind, fillers.into()))
 }
 
 /// Who fills what: each line of the contract that names a slot of its kind, checked once.
 fn fillers<'a, 's>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     written: WrittenContract<'a, 's>,
     kind: Id<Kind>,
     slots: &[Slot],
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<Vec<Filler>> {
     let (file, home) = (written.file(), written.home());
     let mut found: Vec<Filler> = Vec::new();
-    let errors = diags.len();
+    let errors = world.diags.len();
     for fill in &file[written.node.fills] {
         let slot_word = Word::of(file, fill.slot.0);
         let slot = world.book.names.get(slot_word.text).and_then(|name| slots.iter().find(|slot| slot.name == name));
         let Some(slot) = slot else {
-            diags.push(unknown_slot(&world.book, slot_word, kind, slots));
+            world.diags.push(unknown_slot(&world.book, slot_word, kind, slots));
             continue;
         };
         if let Some(first) = found.iter().find(|filled| filled.slot == slot.name).filter(|_| !many(slot)) {
-            diags.push(filled_twice(&world.book, slot, slot_word, first.loc));
+            world.diags.push(filled_twice(&world.book, slot, slot_word, first.loc));
             continue;
         }
-        let Some(entity) = world.entity(home, Word::of(file, fill.filler.0)).or_report(diags) else { continue };
+        let Some(entity) = world.entity(home, Word::of(file, fill.filler.0)).or_report(world) else {
+            continue;
+        };
         match fits(world, slot, entity) {
             Ok(()) => found.push(Filler { slot: slot.name, entity, loc: fill.loc }),
-            Err(problem) => diags.push(problem.say(world, slot, Word::of(file, fill.filler.0))),
+            Err(problem) => world.diags.push(problem.say(world, slot, Word::of(file, fill.filler.0))),
         }
     }
-    (diags.len() == errors).then_some(found)
+    (world.diags.len() == errors).then_some(found)
 }
 
 fn many(slot: &Slot) -> bool {
@@ -201,10 +201,9 @@ pub(super) fn legs<'a, 's>(
     world: &mut World<'s>,
     collected: &Collected<'a, 's>,
     written: WrittenContract<'a, 's>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Vec<Id<Law>> {
     let Some(kind) = world.book.contracts[written.id].kind else { return Vec::new() };
-    let Some((stands, empty)) = positions(world, written, kind, diags) else { return Vec::new() };
+    let Some((stands, empty)) = positions(world, written, kind) else { return Vec::new() };
     let positions = Positions { stands: &stands, empty: &empty };
     let mut laws = Vec::new();
     for (decl, alsos) in kind_alsos(world, collected, kind) {
@@ -214,7 +213,7 @@ pub(super) fn legs<'a, 's>(
             if touches_nothing(world, &site, also, positions) {
                 continue;
             }
-            laws.extend(compile_also(world, diags, &site, also, positions));
+            laws.extend(compile_also(world, &site, also, positions));
         }
     }
     laws
@@ -223,25 +222,24 @@ pub(super) fn legs<'a, 's>(
 /// Where each role stands in this book, and which the contract leaves empty. Nothing, after it is said, when a role
 /// stands somewhere this version cannot put it.
 fn positions<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     written: WrittenContract<'_, 's>,
     kind: Id<Kind>,
-    diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(Sym, Id<Place>)>, Vec<Sym>)> {
     let contract = &world.book.contracts[written.id];
     let holding = holding_of(world, written, contract)?;
-    let errors = diags.len();
+    let errors = world.diags.len();
     let mut stands = Vec::new();
     for filler in contract.fillers.iter() {
         match stand(&world.book, written, contract, holding, filler) {
             Ok(place) => stands.push((filler.slot, place)),
-            Err(problem) => diags.push(problem),
+            Err(problem) => world.diags.push(problem),
         }
     }
     let takes_entities = |slot: &&Slot| matches!(slot.range, Range::Kinds(_));
     let slots = world.book.schema.effective(&world.book.kinds, kind).filter(takes_entities);
     let empty = slots.map(|slot| slot.name).filter(|name| !stands.iter().any(|(slot, _)| slot == name)).collect();
-    (diags.len() == errors).then_some((stands, empty))
+    (world.diags.len() == errors).then_some((stands, empty))
 }
 
 /// The account a contract pays from or into, which is where its owner stands in every leg of its kind.

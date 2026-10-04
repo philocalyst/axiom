@@ -221,7 +221,7 @@ impl Calc<'_, '_> {
             }
             (Value::Day(day), Value::Span(span)) => {
                 let span = if minus { Span { months: -span.months, days: -span.days } } else { span };
-                Value::Day(day.add(span))
+                Value::Day(day + span)
             }
             (Value::Day(later), Value::Day(earlier)) if minus => Value::Span(later.since(earlier)),
             _ => unreachable!("{TYPED}"),

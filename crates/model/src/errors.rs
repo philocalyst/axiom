@@ -31,14 +31,15 @@ pub(crate) fn suggest<'a>(
     }
 }
 
-/// A lookup that fails with a diagnostic, whose failure is said and then gone on without.
+/// A lookup that fails with a diagnostic, whose failure is said and then gone on without: to a list of them, or to
+/// the world being built, which keeps its own.
 pub(crate) trait Reported<T> {
-    fn or_report(self, diags: &mut Vec<Diagnostic>) -> Option<T>;
+    fn or_report(self, said: &mut impl AsMut<Vec<Diagnostic>>) -> Option<T>;
 }
 
 impl<T> Reported<T> for Result<T, Diagnostic> {
-    fn or_report(self, diags: &mut Vec<Diagnostic>) -> Option<T> {
-        self.map_err(|problem| diags.push(problem)).ok()
+    fn or_report(self, said: &mut impl AsMut<Vec<Diagnostic>>) -> Option<T> {
+        self.map_err(|problem| said.as_mut().push(problem)).ok()
     }
 }
 

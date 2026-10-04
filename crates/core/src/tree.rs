@@ -27,12 +27,15 @@ struct Link {
     depth: u32,
 }
 
+/// A tree built from items in any order, and the new id of each input index.
+pub type Arranged<T> = (Tree<T>, Vec<Id<T>>);
+
 impl<T> Tree<T> {
     /// Arranges `items` in pre-order. `parents[i]` is the input index of item
     /// `i`'s parent; siblings keep their input order. Returns the tree and the
     /// new id of each input index, or, if parents form a cycle, the input
     /// indices that are on or beneath it.
-    pub fn build(items: Vec<T>, parents: &[Option<usize>]) -> Result<(Tree<T>, Vec<Id<T>>), Vec<usize>> {
+    pub fn build(items: Vec<T>, parents: &[Option<usize>]) -> Result<Arranged<T>, Vec<usize>> {
         let n = items.len();
         assert_eq!(parents.len(), n, "one parent slot per item");
         // Children grouped by parent; roots sit under a virtual parent `n`.

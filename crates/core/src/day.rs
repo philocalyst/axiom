@@ -8,6 +8,7 @@
 //! parsed eight bytes at a time.
 
 use std::fmt;
+use std::ops::Add;
 
 use crate::num;
 
@@ -58,7 +59,7 @@ impl Day {
         // 2. Years and the fraction of the year, from one 128-bit product.
         let num = C2 as u128 * jul as u128;
         let years = Y_SHIFT.wrapping_sub((num >> 64) as u32);
-        let part = ((24_451 * SCALE) as u128 * (num as u64) as u128 >> 64) as u32;
+        let part = (((24_451 * SCALE) as u128 * (num as u64) as u128) >> 64) as u32;
         // 3. January and February belong to the next civil year.
         let bump = (part < 3_952 * SCALE) as u32;
         let shift = if bump == 1 { SHIFT_1 } else { SHIFT_0 };
@@ -92,13 +93,7 @@ impl Day {
         Day(self.0 + n)
     }
 
-    /// Adds whole months (clamping to month end, so Jan 31 + 1m = Feb 28),
-    /// then days.
-    pub fn add(self, span: Span) -> Day {
-        self.checked_add(span).expect("the sum is a day")
-    }
-
-    /// [`Day::add`], or `None` when the calendar gives out first: a sum past
+    /// `day + span`, or `None` when the calendar gives out first: a sum past
     /// the years there are days for, or a start (`Day::MIN`) that is not a
     /// date to count months from.
     pub fn checked_add(self, span: Span) -> Option<Day> {
@@ -116,7 +111,7 @@ impl Day {
         if d2 < d1 {
             months -= 1;
         }
-        let days = self.0 - earlier.add(Span::months(months)).0;
+        let days = self.0 - (earlier + Span::months(months)).0;
         Span { months, days }
     }
 
@@ -153,6 +148,15 @@ impl Day {
         let w = num::digit_pairs(&digits);
         let year = (w & 0xFF) * 100 + (w >> 16 & 0xFF);
         Day::from_ymd(year as i32, (w >> 32 & 0xFF) as u32, (w >> 48) as u32)
+    }
+}
+
+/// Adds whole months (clamping to month end, so Jan 31 + 1m = Feb 28), then days. Past the days there are, it panics:
+/// [`Day::checked_add`] is the sum that can say so.
+impl Add<Span> for Day {
+    type Output = Day;
+    fn add(self, span: Span) -> Day {
+        self.checked_add(span).expect("the sum is a day")
     }
 }
 
@@ -285,7 +289,7 @@ mod tests {
     #[test]
     fn calendar_arithmetic() {
         let jan31 = Day::parse(b"2026-01-31").unwrap();
-        assert_eq!(jan31.add(Span::months(1)).to_string(), "2026-02-28");
+        assert_eq!((jan31 + Span::months(1)).to_string(), "2026-02-28");
         let born = Day::parse(b"1966-08-15").unwrap();
         let age = Day::parse(b"2026-02-14").unwrap().since(born);
         assert_eq!(age, Span { months: 59 * 12 + 5, days: 30 });

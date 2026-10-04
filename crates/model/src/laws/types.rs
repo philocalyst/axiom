@@ -49,11 +49,11 @@ pub(crate) fn binary(op: BinOp, left: Ty, right: Ty) -> Option<Ty> {
             (Ty::Empty, Ty::Num | Ty::Amount(Dim::Number)) | (Ty::Num | Ty::Amount(Dim::Number), Ty::Empty) => {
                 Some(Ty::Empty)
             }
-            _ => combine(left, right, Dim::mul),
+            _ => combine(left, right, Dim::times),
         },
         Div => match (left, right) {
             (Ty::Empty, Ty::Num | Ty::Amount(Dim::Number)) => Some(Ty::Empty),
-            _ => combine(left, right, Dim::div),
+            _ => combine(left, right, Dim::over),
         },
     }
 }

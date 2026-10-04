@@ -117,6 +117,7 @@ pub struct Promise {
 }
 
 /// Every contract's promise, compiled once when the book is built.
+#[derive(Debug)]
 pub struct Promises {
     terms: Arena<Term>,
     /// The children of every `All`, one after another.

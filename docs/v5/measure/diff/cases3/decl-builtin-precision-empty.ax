@@ -1,0 +1,24 @@
+// raises property-argument
+use std
+base USD
+entity me : person
+entity acme : org
+entity shop : org
+account checking : bank
+account savings : bank
+account escrow : bank
+  owner acme
+account wallet : bank
+  holds USD
+asset car : vehicle
+asset house : vehicle
+commodity VTI : stock
+kind sq : measure
+commodity SQF : sq
+param cpi
+  2026 3%
+param fee USD
+  2026 5 USD
+2025-12-31 market -> checking 9_000 USD
+commodity PTS : stock
+  precision

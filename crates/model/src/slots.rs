@@ -121,7 +121,7 @@ const VALUE_TYPES: [(&str, Ty); 12] = [
 const FIELD_WORDS: [&str; 8] = ["balance", "basis", "owner", "kind", "age", "unit", "year", "month"];
 
 /// Every slot of every kind, and the numbers of the slots.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Schema {
     slots: Arena<Slot>,
     kinds: Arena<Id<Kind>>,
@@ -319,7 +319,7 @@ struct At<'c, 'a, 's> {
 
 /// Reads the slots every kind declares. A kind's are declared after its ancestors', so what a kind repeats can be
 /// checked against what it narrows.
-pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's>) {
     let declarations = declarations(world, collected);
     for group in declarations.chunk_by(|a, b| a.0 == b.0) {
         let kind = group[0].0;
@@ -327,9 +327,9 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
         for (_, written) in group {
             let at = At { home: written.home(), file: written.file(), collected };
             for has in &at.file[written.node.slots] {
-                match read(world, &at, has, diags).and_then(|draft| admit(world, kind, &own, draft)) {
+                match read(world, &at, has).and_then(|draft| admit(world, kind, &own, draft)) {
                     Ok(draft) => own.push(draft),
-                    Err(diagnostic) => diags.push(diagnostic),
+                    Err(diagnostic) => world.diags.push(diagnostic),
                 }
             }
         }
@@ -349,7 +349,9 @@ pub(crate) fn declare<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, '
             DeclKind::Asset => "asset",
             _ => "commodity",
         };
-        diags.extend(written.file()[written.node.slots].iter().map(|has| problem::slot_on_a_thing(has.loc, noun)));
+        world
+            .diags
+            .extend(written.file()[written.node.slots].iter().map(|has| problem::slot_on_a_thing(has.loc, noun)));
     }
 }
 
@@ -374,14 +376,9 @@ fn declarations<'a, 's>(
 }
 
 /// One `has` line, resolved.
-fn read<'s>(
-    world: &mut World<'s>,
-    at: &At<'_, '_, 's>,
-    has: &Has<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Result<Draft, Diagnostic> {
+fn read<'s>(world: &mut World<'s>, at: &At<'_, '_, 's>, has: &Has<'s>) -> Result<Draft, Diagnostic> {
     let name = Word::of(at.file, has.name.0);
-    let (range, ty) = range(world, at, has, diags)?;
+    let (range, ty) = range(world, at, has)?;
     let mult = has.mult;
     let weight = match has.weight {
         Some(written) if matches!(mult, Mult::Some | Mult::Many) => {
@@ -395,12 +392,7 @@ fn read<'s>(
 }
 
 /// What a `has` line takes, and what its values are.
-fn range<'s>(
-    world: &mut World<'s>,
-    at: &At<'_, '_, 's>,
-    has: &Has<'s>,
-    diags: &mut Vec<Diagnostic>,
-) -> Result<(Drawn, Ty), Diagnostic> {
+fn range<'s>(world: &mut World<'s>, at: &At<'_, '_, 's>, has: &Has<'s>) -> Result<(Drawn, Ty), Diagnostic> {
     match has.takes {
         Takes::Unit(unit) => {
             let ty = Ty::Amount(unit_dim(world, at.file, unit)?);
@@ -420,10 +412,10 @@ fn range<'s>(
                     Ok((Drawn::Value(ty), ty))
                 }
                 [one] if one.0 == "name" => {
-                    diags.push(untyped(world, at, has, Word::of(at.file, one.0)));
+                    world.diags.push(untyped(world, at, has, Word::of(at.file, one.0)));
                     Ok((Drawn::Words(Vec::new()), Ty::Name))
                 }
-                names => kinds_range(world, at, has, names, diags),
+                names => kinds_range(world, at, has, names),
             }
         }
     }
@@ -432,11 +424,10 @@ fn range<'s>(
 /// The kinds a range names, all of one sort of thing. `entity` is said to take too much, and still declares the slot
 /// as widely as it said, so that what fills it adds no errors of its own.
 fn kinds_range<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     at: &At<'_, '_, 's>,
     has: &Has<'s>,
     names: &[Name<'s>],
-    diags: &mut Vec<Diagnostic>,
 ) -> Result<(Drawn, Ty), Diagnostic> {
     let mut kinds: Vec<Id<Kind>> = Vec::new();
     for name in names {
@@ -447,7 +438,7 @@ fn kinds_range<'s>(
             None => world.kind(at.home, word)?,
         };
         if kind == world.book.roots.kinds.entity {
-            diags.push(untyped(world, at, has, word));
+            world.diags.push(untyped(world, at, has, word));
         }
         if !kinds.contains(&kind) {
             kinds.push(kind);
@@ -498,7 +489,7 @@ fn unit_dim<'s>(world: &World<'s>, file: &File<'s>, written: Name<'s>) -> Result
     let loc = file.loc(written.0);
     let unit = |text: &str| world.commodity_of(Word { text, loc }).map(Dim::Of);
     let Some((top, bottom)) = written.0.split_once('/') else { return unit(written.0) };
-    match unit(top)?.div(unit(bottom)?) {
+    match unit(top)?.over(unit(bottom)?) {
         Some(dim) if dim != Dim::Number && dim != Dim::Any => Ok(dim),
         _ => Err(Diagnostic::error("has-unit", "this is not a supported amount unit")
             .label(loc, "write one commodity or a rate such as `USD/MI`")),

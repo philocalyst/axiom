@@ -641,6 +641,7 @@ pub enum Select {
 }
 
 /// Flows written together.
+#[derive(Debug)]
 pub struct Txn {
     pub day: Day,
     /// The flows it produced, in `Book::flows`.
@@ -808,6 +809,7 @@ pub struct Waive {
 }
 
 /// `2026-01-31 checking = 7_921.30 USD`, checked at the end of the day.
+#[derive(Debug)]
 pub struct Assert {
     pub day: Day,
     pub place: Id<Place>,
@@ -855,6 +857,7 @@ pub struct Split {
 /// `12 me worked 6.5 HR for halcyon ^inv-12`, `21 car used 44 MI
 /// #business-travel for studio` (LANGUAGE §5): an event that moves nothing.
 /// Purpose laws fire on it, and `total` counts it in its unit.
+#[derive(Debug)]
 pub struct Measure {
     pub day: Day,
     pub action: Action,
@@ -868,7 +871,8 @@ pub struct Measure {
     pub party: Option<Id<Entity>>,
     pub purpose: Option<Purposed>,
     pub description: Option<Text>,
-    pub codes: Box<[Sym]>,
+    /// In the book's pool of codes, as a flow's.
+    pub codes: Run<Sym>,
     /// The earlier transaction this work or use is about, when stated.
     pub against: Option<Id<Txn>>,
     pub loc: Loc,
@@ -891,6 +895,7 @@ pub struct Reading {
 }
 
 /// `2026-04-15 us filed 2025` with its tally lines (LANGUAGE §11).
+#[derive(Debug)]
 pub struct Filed {
     pub day: Day,
     pub system: Id<System>,
@@ -901,6 +906,7 @@ pub struct Filed {
 }
 
 /// `2026-02-06 #check-1041 settled`
+#[derive(Debug)]
 pub struct Event {
     pub day: Day,
     pub code: Sym,
@@ -945,7 +951,7 @@ pub enum ClaimChangeAction {
 }
 
 /// Prices by commodity pair and day.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Prices {
     /// Sorted by `(unit, quote, day)`.
     pub(crate) quotes: Vec<Quote>,
