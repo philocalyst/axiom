@@ -50,6 +50,7 @@ mod fire;
 mod histories;
 mod infer;
 mod ledger;
+mod loan_balance;
 mod lots;
 mod monitor;
 mod motion;
@@ -77,6 +78,8 @@ mod claim_tests;
 mod fixture;
 #[cfg(test)]
 mod histories_tests;
+#[cfg(test)]
+mod loan_tests;
 #[cfg(test)]
 mod payment_tests;
 #[cfg(test)]

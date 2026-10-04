@@ -1,12 +1,16 @@
 //! What is still owed of one stream of a promise.
 //!
 //! A residual is a cursor into the [`Promises`](super::Promises) terms and never a copy of them: the `Every` it is
-//! on, the day the next occurrence falls due, that occurrence's ordinal, and how much of a loan is still owed. It is 24
-//! bytes, so a fold keeps one for every schedule of every promise in a dense array and moves each with a store. It
-//! advances when the occurrence it waits for has been kept or missed; when nothing more is owed its term is
-//! [`Promises::DONE`].
+//! on, the day the next occurrence falls due, and that occurrence's ordinal. It is 12 bytes, so a fold keeps one for every
+//! schedule of every promise in a dense array and moves each with a store. It advances when the occurrence it waits for has
+//! been kept or missed; when nothing more is owed its term is [`Promises::DONE`].
+//!
+//! A loan's payments are a schedule of their own ([`Amortization`](super::Amortization)), walked once, and a stream that
+//! pays one is owed exactly the payments it has: the cursor is past the last when no payment is at its ordinal, whether the
+//! term ran out or a prepayment paid the loan off. What a loan owes after any of them is that schedule's to say, not the
+//! cursor's, so that however a fold meets a loan's facts it asks the same walk.
 
-use axiom_core::{Day, Qty};
+use axiom_core::Day;
 
 use super::{Promises, Term, TermId};
 
@@ -16,13 +20,9 @@ pub struct Residual {
     term: TermId,
     next: Day,
     ordinal: u32,
-    /// The ordinal the first payment of a loan has: payment `n` of the loan is the occurrence of ordinal `began + n`.
-    began: u32,
-    /// What a loan still owes: its principal before the first payment, zero after the last. Zero for what is no loan.
-    open: Qty,
 }
 
-const _: () = assert!(size_of::<Residual>() <= 24);
+const _: () = assert!(size_of::<Residual>() <= 12);
 
 impl Residual {
     /// What is owed of the stream that `every` is, before anything has been kept: its first occurrence is the first due
@@ -32,23 +32,25 @@ impl Residual {
     }
 
     /// What is owed of the stream from `day` on: its first occurrence is the first owed day on or after `day` (and, for a
-    /// loan, after the day the loan was made), with the ordinal it has in the schedule, and what a loan still owes is what
-    /// the payments before it left. A contract with no `from` does not walk from the beginning of time to get here.
+    /// loan, after the day the loan was made), with the ordinal it has in the schedule. A contract with no `from` does not
+    /// walk from the beginning of time to get here.
     pub fn starting_at(promises: &Promises, every: TermId, day: Day) -> Residual {
         let Term::Every { schedule, body } = promises.term(every) else { return Residual::done() };
-        let schedule = promises.schedule_of(schedule);
-        let annuity = promises.annuity_of(body).map(|annuity| promises.annuity(annuity));
-        let began = annuity.map_or(0, |annuity| schedule.before(Day(annuity.begins().0.saturating_add(1))));
-        let ordinal = schedule.before(day).max(began);
-        let open = annuity.map_or(Qty::ZERO, |annuity| annuity.owed_after(ordinal - began));
-        let owed = annuity.is_none_or(|_| open != Qty::ZERO);
-        let first = schedule.nth(ordinal).filter(|_| owed);
-        first.map_or(Residual::done(), |next| Residual { term: every, next, ordinal, began, open })
+        let first = promises.annuity_of(body).map_or(0, |annuity| promises.annuity(annuity).first());
+        Residual::at(promises, every, promises.schedule_of(schedule).before(day).max(first))
+    }
+
+    /// The residual of the stream that `every` is, waiting for the occurrence of `ordinal`; done if there is none.
+    fn at(promises: &Promises, every: TermId, ordinal: u32) -> Residual {
+        let Term::Every { schedule, body } = promises.term(every) else { return Residual::done() };
+        let owed = promises.annuity_of(body).is_none_or(|annuity| promises.annuity(annuity).pays(ordinal));
+        let next = promises.schedule_of(schedule).nth(ordinal).filter(|_| owed);
+        next.map_or(Residual::done(), |next| Residual { term: every, next, ordinal })
     }
 
     /// Nothing owed.
     pub fn done() -> Residual {
-        Residual { term: Promises::DONE, next: Day::MIN, ordinal: 0, began: 0, open: Qty::ZERO }
+        Residual { term: Promises::DONE, next: Day::MIN, ordinal: 0 }
     }
 
     pub fn is_done(&self) -> bool {
@@ -65,32 +67,17 @@ impl Residual {
         self.ordinal
     }
 
-    /// What a loan still owes before the next payment.
-    pub fn open(&self) -> Qty {
-        self.open
-    }
-
     /// The day the deadline of the next occurrence passes, if its promise has one.
     pub fn deadline(&self, promises: &Promises) -> Option<Day> {
         let Term::Every { body, .. } = promises.term(self.term) else { return None };
         self.next.checked_add(promises.deadline_of(body)?)
     }
 
-    /// The occurrence this waits for has been kept or missed: wait for the one after it. A loan that the payment has
-    /// paid off is done, whatever the schedule would go on to say. The last payment of a loan pays off what is left
-    /// (see [`Annuity::pay`](super::Annuity::pay)), so a loan is done when nothing is owed, and one whose payment cannot be worked out is
-    /// not waited for again.
+    /// The occurrence this waits for has been kept or missed: wait for the one after it. A loan is done after its last
+    /// payment, which is the one that pays it off.
     pub fn advance(&mut self, promises: &Promises) {
-        let Term::Every { schedule, body } = promises.term(self.term) else { return };
-        let paid_off = promises.annuity_of(body).is_some_and(|annuity| {
-            let paid = promises.annuity(annuity).pay(self.open, self.ordinal - self.began);
-            self.open = paid.map_or(Qty::ZERO, |paid| paid.open);
-            self.open == Qty::ZERO
-        });
-        self.ordinal = self.ordinal.saturating_add(1);
-        match promises.schedule_of(schedule).nth(self.ordinal).filter(|_| !paid_off) {
-            Some(next) => self.next = next,
-            None => *self = Residual::done(),
+        if !self.is_done() {
+            *self = Residual::at(promises, self.term, self.ordinal.saturating_add(1));
         }
     }
 }

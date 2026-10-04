@@ -82,6 +82,8 @@ pub enum Quantity {
     All(Option<Id<Commodity>>),
     /// What the contract's own rule says it is: a loan's payment.
     Derived,
+    /// What the contract's own rule says of the interest in a loan's payment: the leg of it that the lender keeps.
+    Interest,
 }
 
 impl Quantity {
@@ -89,7 +91,7 @@ impl Quantity {
     pub fn root(self) -> Option<NodeId> {
         match self {
             Quantity::Amount(expr) | Quantity::Pending(expr) | Quantity::Target(expr) => expr.root(),
-            Quantity::Unknown(_) | Quantity::All(_) | Quantity::Derived => None,
+            Quantity::Unknown(_) | Quantity::All(_) | Quantity::Derived | Quantity::Interest => None,
         }
     }
 }

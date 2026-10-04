@@ -1,0 +1,11 @@
+error[contract-rate-change]: `netflix` is no loan, so it has no rate to change
+   ╭─[111-loan-rate-on-no-loan.ax:18:1]
+   │
+18 │ 2026-03-01 netflix now at 6.5%
+   │ ───────────────┬──────────────
+   │                ╰── only a contract with a `loan` line has a rate
+   │
+   = help: write the rate on the loan: `loan AMOUNT on DATE at 6.25% over SPAN`
+
+✗ 1 error
+[exit status 1]

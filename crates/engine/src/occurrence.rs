@@ -15,12 +15,12 @@ mod derive;
 
 use std::borrow::Cow;
 
-use axiom_core::{Arena, Day, Days, Id, Loc, Ratio};
-use axiom_model::promise::Sched;
+use axiom_core::{Arena, Day, Days, Id, Loc, Qty, Ratio};
+use axiom_model::promise::{Paid, Sched};
 use axiom_model::{
     Amount, Answer, Bear, Book, Commodity, Contract, Detail, Draw, Drawn, End, Env, Expr, Failed, Fault, Flow,
-    FlowSide, Infer, Item, Line, Made, Mode, OccurrenceTail, Origin, Part, Program, Promised, Remainder, Remaining,
-    Resolved, RuntimeDetail, RuntimeFlow, RuntimeTxn, Says, ScheduleKind, Sign, Solved, Terms, Value,
+    FlowSide, ForecastError, Infer, Item, Line, Made, Mode, OccurrenceTail, Origin, Part, Program, Promised, Remainder,
+    Remaining, Resolved, RuntimeDetail, RuntimeFlow, RuntimeTxn, Says, ScheduleKind, Sign, Solved, Terms, Value,
     WrittenOccurrence, solve,
 };
 
@@ -719,10 +719,27 @@ impl Env for Reads<'_, '_, '_, '_> {
     }
 
     fn payment(&mut self, at: Line) -> Result<Answer, TemplateError> {
+        let (unit, paid) = self.scheduled(at)?;
+        Ok(Answer::Amount(Amount::new(paid.interest + paid.principal, unit)))
+    }
+
+    /// The interest the schedule says of the payment, held to what the header has left, so that a line that states less than
+    /// the interest pays that and makes no negative principal. A payment with no interest has no leg for it.
+    fn interest(&mut self, at: Line, left: Option<&Remaining>) -> Result<Answer, TemplateError> {
+        let (unit, paid) = self.scheduled(at)?;
+        let paid = left.map_or(paid.interest, |left| paid.interest.min(left.arrive.qty)).max(Qty::ZERO);
+        Ok(if paid == Qty::ZERO { Answer::Omitted } else { Answer::Amount(Amount::new(paid, unit)) })
+    }
+}
+
+impl Reads<'_, '_, '_, '_> {
+    /// What the loan's schedule says the payment due on the day the line is read for pays, and in what commodity.
+    fn scheduled(&self, at: Line) -> Result<(Id<Commodity>, Paid), TemplateError> {
         let reading = self.site(at).0;
-        let loan = self.lent.plan.book.promises.loan(reading.contract);
-        loan.map(|loan| Answer::Amount(loan.payment()))
-            .ok_or(TemplateError::Forecast(axiom_model::ForecastError::UnsupportedLoan(reading.due)))
+        let unsupported = TemplateError::Forecast(ForecastError::UnsupportedLoan(reading.due));
+        let loan = self.lent.plan.book.promises.loan(reading.contract).ok_or(unsupported)?;
+        let paid = loan.paid_on(reading.due).map_err(TemplateError::Forecast)?;
+        Ok((loan.terms().principal().unit, paid))
     }
 }
 

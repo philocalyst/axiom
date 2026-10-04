@@ -1,0 +1,21 @@
+// MISTAKE: the payment of February was written with 4,650.63 USD, a thousand over its payment, and the lender says that thousand was an escrow and not principal. The schedule took it as a prepayment.
+base USD
+use std
+
+entity bank : lender
+account checking : bank
+asset condo : property
+
+opening 2026-01-01
+  checking 900_000 USD
+
+contract mortgage with bank
+  loan 120_000 USD on 2026-01-15 at 6% over 3y for condo
+  monthly on 1 from checking
+  from 2026-02-01
+  until 2026-02-28
+
+2026-01-15 mortgage
+
+2026-02-01 mortgage 4_650.63 USD
+2026-02-28 mortgage = 116_949.37 USD

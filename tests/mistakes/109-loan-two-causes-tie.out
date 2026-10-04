@@ -1,0 +1,28 @@
+error[loan-balance]: `mortgage` owes 110,786.79 USD on 2026-03-02 by its schedule, and the statement says 113,868.08 USD
+   ╭─[109-loan-two-causes-tie.ax:21:1]
+   │
+21 │ 2026-03-02 mortgage = 113_868.08 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── 3,081.29 USD more than the schedule
+   │
+   = note: the schedule's payment of 2026-03-01 paid 569.34 USD of interest and 3,081.29 USD of
+           principal and left 110,786.79 USD owed
+   = note: no cause is named: the payment due 2026-03-01 (3,081.29 USD) that no line keeps and the
+           line of 2026-02-01 (3,081.29 USD) that states more than its payment explain the 3,081.29
+           USD alike, so the statement alone cannot say which
+   = help: write what happened: the payment, or `2026-03-02 mortgage now at RATE` if the lender
+           changed the rate
+
+warning[missed-occurrence]: `mortgage` was due on 2026-03-01 and no occurrence was written
+   ╭─[109-loan-two-causes-tie.ax:12:1]
+   │
+12 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── last due 121 days ago, on 2026-03-01
+   │
+   = note: not kept: 2026-03-01
+   = help: write what happened: `2026-03-01 mortgage`, with its own amount if it was another
+   = help: or say it was not owed: `2026-03-01 mortgage waived`
+
+✗ 1 error · 1 warning
+[exit status 1]

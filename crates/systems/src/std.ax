@@ -281,3 +281,9 @@ format camt053
   memo AddtlNtryInf, RmtInf/Ustrd
   code NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref
   via NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm
+
+// ─── What a loan pays ───────────────────────────────────────────────────────
+
+/// What a loan's payment pays off of what is owed (LANGUAGE §7): a transfer from the owner's holding to the debt it pays
+/// down. The interest is `#interest`. A built-in name: a book that declares its own `principal` purpose collides with it.
+purpose principal : transfer

@@ -1,0 +1,30 @@
+error[loan-balance]: `mortgage` owes 110,802.28 USD on 2026-04-02 by its schedule, and the statement says 113,868.16 USD
+   ╭─[105-loan-missed-payment.ax:22:1]
+   │
+22 │ 2026-04-02 mortgage = 113_868.16 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── 3,065.88 USD more than the schedule
+   │
+   = note: the schedule's payment of 2026-04-01 paid 569.42 USD of interest and 3,081.21 USD of
+           principal and left 110,802.28 USD owed
+   = note: likely cause: a payment was missed: the payment due 2026-03-01 would have paid off
+           exactly the 3,065.88 USD of principal that is the difference, and no line of the journal
+           keeps it
+   = help: write the payment of 2026-03-01, if it was made
+22 + 2026-03-01 mortgage
+   = help: or say the payment of 2026-03-01 was not owed
+22 + 2026-03-01 mortgage waived
+
+warning[missed-occurrence]: `mortgage` was due on 2026-03-01 and no occurrence was written
+   ╭─[105-loan-missed-payment.ax:12:1]
+   │
+12 │ contract mortgage with bank
+   │ ─────────────┬─────────────
+   │              ╰── last due 121 days ago, on 2026-03-01
+   │
+   = note: not kept: 2026-03-01
+   = help: write what happened: `2026-03-01 mortgage`, with its own amount if it was another
+   = help: or say it was not owed: `2026-03-01 mortgage waived`
+
+✗ 1 error · 1 warning
+[exit status 1]

@@ -27,19 +27,23 @@
 //! a `Choose` (see `docs/v5/lanes/K5a-map.md`, section 6). `deposit`, `match`, `resets` and `prepay` are written, checked
 //! and read by nothing, and so they compile to nothing.
 
+mod amortization;
 mod annuity;
+mod causes;
 mod reckon;
 mod residual;
 mod schedule;
 
-pub use annuity::{Annuity, Paid};
+pub use amortization::{Amortization, Entry, Halt, Kind, Said};
+pub use annuity::{Annuity, Event, Paid, State};
+pub use causes::{Cause, Disagreement};
 pub use reckon::{Proration, Reckoning, Recognition};
 pub use residual::Residual;
 pub use schedule::{Keep, Nearest, Sched, Schedule, Skip};
 
-use axiom_core::{Arena, Cadence, DaySet, Days, Dues, Id, On, Run, Span};
+use axiom_core::{Arena, Cadence, Day, DaySet, Days, Dues, Id, On, Run, Span};
 
-use crate::book::{Book, Contract, Entity, ScheduleKind, Terms};
+use crate::book::{Book, Contract, Entity, ForecastError, ScheduleKind, Terms};
 use crate::split::FlowSide;
 
 /// The id of a term.
@@ -124,6 +128,8 @@ pub struct Promises {
     skips: Vec<Skip>,
     reckonings: Arena<Reckoning>,
     annuities: Arena<Annuity>,
+    /// The schedule of every loan, one after another.
+    entries: Vec<Entry>,
     /// By contract.
     promises: Vec<Promise>,
 }
@@ -141,6 +147,7 @@ impl Default for Promises {
             skips: Vec::new(),
             reckonings: Arena::new(),
             annuities: Arena::new(),
+            entries: Vec::new(),
             promises: Vec::new(),
         }
     }
@@ -156,6 +163,9 @@ impl Promises {
         for (_, contract) in book.contracts.iter() {
             let promise = promises.promise(contract);
             promises.promises.push(promise);
+        }
+        for (id, _) in book.contracts.iter() {
+            promises.amortize(book, id);
         }
         promises
     }
@@ -244,11 +254,41 @@ impl Promises {
         Some(self.schedule_of(stream.schedule))
     }
 
-    /// The loan a contract's regular schedule pays down.
-    pub fn loan(&self, contract: Id<Contract>) -> Option<&Annuity> {
+    /// The loan a contract's regular schedule pays down, with the schedule the book's events make of it.
+    pub fn loan(&self, contract: Id<Contract>) -> Option<Amortization<'_>> {
+        let annuity = self.loan_of(contract)?;
+        Some(Amortization::new(self.annuity(annuity), &self.entries))
+    }
+
+    /// The id of the loan a contract's regular schedule pays down.
+    fn loan_of(&self, contract: Id<Contract>) -> Option<Id<Annuity>> {
         let stream = self.get(contract)?.regular?;
         let Term::Every { body, .. } = self.term(stream.every) else { return None };
-        self.annuity_of(body).map(|annuity| self.annuity(annuity))
+        self.annuity_of(body)
+    }
+
+    /// Works out the schedule of the contract's loan, if it has one: its owed days after it was made, and every event the
+    /// book states of it, walked once.
+    fn amortize(&mut self, book: &Book<'_>, id: Id<Contract>) {
+        let (Some(annuity_id), Some(stream)) = (self.loan_of(id), self.get(id).and_then(|promise| promise.regular))
+        else {
+            return;
+        };
+        let (annuity, contract) = (*self.annuity(annuity_id), &book.contracts[id]);
+        let schedule = self.schedule_of(stream.schedule);
+        let after = Day(annuity.begins().0.saturating_add(1));
+        let first = schedule.before(after);
+        let due_days = Days::new(after, schedule.life().last()).into_iter().flat_map(|window| schedule.days(window));
+        let dues: Vec<Day> = due_days.take(annuity.periods() as usize).collect();
+        let index = |day| match annuity.resets() {
+            Some(resets) => reckon::index_on(book, resets.index, day),
+            None => Err(ForecastError::InvalidRate),
+        };
+        let walked = amortization::walk(&annuity, &dues, &Said::of(book, id, contract), index);
+        let payments = walked.entries.iter().filter(|entry| entry.kind == Kind::Pay).count() as u32;
+        let run = Run::of(self.entries.len()..self.entries.len() + walked.entries.len());
+        self.entries.extend(walked.entries);
+        self.annuities[annuity_id].walked(first, payments, run, walked.halted);
     }
 
     fn promise(&mut self, contract: &Contract) -> Promise {

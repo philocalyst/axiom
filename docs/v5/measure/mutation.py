@@ -42,7 +42,10 @@ def mutate(tree, work, mutants, detect, only=None):
     source = os.path.join(work, "tree")
     if not os.path.isdir(source):
         os.makedirs(work, exist_ok=True)
-        shutil.copytree(os.path.abspath(tree), source, ignore=lambda at, names: leave_out(tree, at, names))
+        # A copy with the times of the original: cargo takes a file older than what it built from for unchanged, and a tree copied over
+        # an earlier sweep's build would be "built" with that sweep's last mutant.
+        shutil.copytree(os.path.abspath(tree), source, ignore=lambda at, names: leave_out(tree, at, names),
+                        copy_function=shutil.copy)
     assert detect(source, work) is None, "the baseline fails its own oracle"
     known = failing_tests(source, work)
     print(f"the tests fail without a mutant: {sorted(known)}", flush=True)

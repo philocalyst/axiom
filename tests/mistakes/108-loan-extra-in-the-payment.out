@@ -1,0 +1,18 @@
+error[loan-balance]: `mortgage` owes 115,949.37 USD on 2026-02-28 by its schedule, and the statement says 116,949.37 USD
+   ╭─[108-loan-extra-in-the-payment.ax:21:1]
+   │
+21 │ 2026-02-28 mortgage = 116_949.37 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── 1,000.00 USD more than the schedule
+   │
+   = note: the schedule's payment of 2026-02-01 paid 600.00 USD of interest and 3,050.63 USD of
+           principal and left 116,949.37 USD owed
+   = note: the schedule's prepayment of 2026-02-01 paid off 1,000.00 USD of principal and left
+           115,949.37 USD owed
+   = note: likely cause: an extra was counted as principal: the line of 2026-02-01 (1,000.00 USD)
+           states more than its payment, and the schedule took it as principal
+   = help: if it paid an escrow, write it as `also -> escrow AMOUNT #escrow` on the contract and the
+           line without its amount
+
+✗ 1 error
+[exit status 1]

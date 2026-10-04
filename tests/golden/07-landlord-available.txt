@@ -1,15 +1,3 @@
-error[assertion]: lender holds 279,000.00 USD, not 278,759.79 USD
-   ╭─[journal/2025/02.ax:18:1]
-   │
-18 │ 2025-02-28 home-loan = 278_759.79 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── 240.21 USD less than the ledger holds
-   │
-   = note: 240.21 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-18 + 2025-02-28 home-loan = 278_759.79 USD !
-
 error[assertion]: deposit-bank holds 0.00 USD, not 2,400.00 USD
    ╭─[journal/2025/02.ax:21:1]
    │
@@ -34,104 +22,6 @@ error[assertion]: deposits holds 0.00 USD, not 2,400.00 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 22 + 2025-02-28 deposits = 2_400.00 USD !
 
-error[assertion]: lender holds 279,000.00 USD, not 278,518.22 USD
-   ╭─[journal/2025/03.ax:19:1]
-   │
-19 │ 2025-03-31 home-loan = 278_518.22 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 241.57 USD less than the ledger holds
-   │
-   = note: the 240.21 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 241.57 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-19 + 2025-03-31 home-loan = 278_518.22 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 278,275.29 USD
-   ╭─[journal/2025/04.ax:19:1]
-   │
-19 │ 2025-04-30 home-loan = 278_275.29 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 242.93 USD less than the ledger holds
-   │
-   = note: the 481.78 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 242.93 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-19 + 2025-04-30 home-loan = 278_275.29 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 278,031.00 USD
-   ╭─[journal/2025/05.ax:13:1]
-   │
-13 │ 2025-05-31 home-loan = 278_031.00 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 244.29 USD less than the ledger holds
-   │
-   = note: the 724.71 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 244.29 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-13 + 2025-05-31 home-loan = 278_031.00 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 277,785.33 USD
-   ╭─[journal/2025/06.ax:19:1]
-   │
-19 │ 2025-06-30 home-loan = 277_785.33 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 245.67 USD less than the ledger holds
-   │
-   = note: the 969.00 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 245.67 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-19 + 2025-06-30 home-loan = 277_785.33 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 277,538.28 USD
-   ╭─[journal/2025/07.ax:13:1]
-   │
-13 │ 2025-07-31 home-loan = 277_538.28 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 247.05 USD less than the ledger holds
-   │
-   = note: the 1,214.67 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 247.05 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-13 + 2025-07-31 home-loan = 277_538.28 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 277,289.84 USD
-   ╭─[journal/2025/08.ax:13:1]
-   │
-13 │ 2025-08-31 home-loan = 277_289.84 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 248.44 USD less than the ledger holds
-   │
-   = note: the 1,461.72 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 248.44 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-13 + 2025-08-31 home-loan = 277_289.84 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 277,040.01 USD
-   ╭─[journal/2025/09.ax:39:1]
-   │
-39 │ 2025-09-30 home-loan = 277_040.01 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 249.83 USD less than the ledger holds
-   │
-   = note: the 1,710.16 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 249.83 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-39 + 2025-09-30 home-loan = 277_040.01 USD !
-
 error[assertion]: bills holds 0.00 USD, not 14,200.00 USD
    ╭─[journal/2025/09.ax:40:1]
    │
@@ -143,20 +33,6 @@ error[assertion]: bills holds 0.00 USD, not 14,200.00 USD
    = help: record the missing flow
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 40 + 2025-09-30 bills = 14_200 USD !
-
-error[assertion]: lender holds 279,000.00 USD, not 276,788.77 USD
-   ╭─[journal/2025/10.ax:21:1]
-   │
-21 │ 2025-10-31 home-loan = 276_788.77 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 251.24 USD less than the ledger holds
-   │
-   = note: the 1,959.99 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 251.24 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-21 + 2025-10-31 home-loan = 276_788.77 USD !
 
 error[assertion]: deposit-bank holds -2,400.00 USD, not 2,500.00 USD
    ╭─[journal/2025/10.ax:25:1]
@@ -184,44 +60,12 @@ error[assertion]: deposits holds 0.00 USD, not 2,500.00 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 26 + 2025-10-31 deposits = 2_500.00 USD !
 
-error[assertion]: lender holds 279,000.00 USD, not 276,536.12 USD
-   ╭─[journal/2025/11.ax:13:1]
-   │
-13 │ 2025-11-30 home-loan = 276_536.12 USD
-   │ ──────────────────┬──────────────────
-   │                   ╰── another 252.65 USD less than the ledger holds
-   │
-   = note: the 2,211.23 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 252.65 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-13 + 2025-11-30 home-loan = 276_536.12 USD !
-
 error[contract-occurrence-date]: this day is outside every contract schedule's grace window
    ╭─[journal/2025/12.ax:12:1]
    │
 12 │ 2025-12-29 manager-fee 200.00 USD
    │ ────────────────┬────────────────
    │                 ╰── no active scheduled occurrence is close enough to this date
-
-error[assertion]: lender holds 2,717.95 USD, not 0.00 USD
-   ╭─[journal/2025/12.ax:36:1]
-   │
-23 │ 2025-12-29 rental-bank -> home-loan 276_282.05 USD ^loan
-   │ ────────────────────────────┬───────────────────────────
-   │                             ╰── -276,282.05 USD from rental-bank
-   ⋮
-36 │ 2025-12-31 home-loan = empty
-   │ ──────────────┬─────────────
-   │               ╰── another 254.07 USD less than the ledger holds
-   │
-   = note: the 2,463.88 USD gap reported at an earlier assertion is carried; only what is new is
-           explained here
-   = note: 254.07 USD is neither twice a flow nor a transposition: most likely a flow is missing
-   = help: record the missing flow
-   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
-36 + 2025-12-31 home-loan = empty !
 
 error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
    ╭─[journal/2025/12.ax:38:1]
@@ -260,8 +104,8 @@ error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
    = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 38 + 2025-12-31 rental-bank = 0.00 USD !
 
-✗ 18 errors
-✗ rests on a book with 18 errors (`axiom check` lists them): what they touch may be wrong
+✗ 7 errors
+✗ rests on a book with 7 errors (`axiom check` lists them): what they touch may be wrong
 
 Available on 2026-04-16
 

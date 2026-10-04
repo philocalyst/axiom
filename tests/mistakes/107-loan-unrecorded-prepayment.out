@@ -1,0 +1,16 @@
+error[loan-balance]: `mortgage` owes 116,949.37 USD on 2026-02-28 by its schedule, and the statement says 116,000.00 USD
+   ╭─[107-loan-unrecorded-prepayment.ax:21:1]
+   │
+21 │ 2026-02-28 mortgage = 116_000 USD
+   │ ────────────────┬────────────────
+   │                 ╰── 949.37 USD less than the schedule
+   │
+   = note: the schedule's payment of 2026-02-01 paid 600.00 USD of interest and 3,050.63 USD of
+           principal and left 116,949.37 USD owed
+   = note: likely cause: a prepayment nobody wrote: 949.37 USD is exactly what the schedule owes
+           beyond the statement
+   = help: record the prepayment, from the account it was paid from
+21 + 2026-02-28 checking -> mortgage 949.37 USD
+
+✗ 1 error
+[exit status 1]

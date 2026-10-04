@@ -1,0 +1,15 @@
+error[loan-balance]: `mortgage` owes 116,949.37 USD on 2026-02-28 by its schedule, and the statement says 116,949.38 USD
+   ╭─[110-loan-no-cause.ax:21:1]
+   │
+21 │ 2026-02-28 mortgage = 116_949.38 USD
+   │ ──────────────────┬─────────────────
+   │                   ╰── 0.01 USD more than the schedule
+   │
+   = note: the schedule's payment of 2026-02-01 paid 600.00 USD of interest and 3,050.63 USD of
+           principal and left 116,949.37 USD owed
+   = note: no cause explains it: 0.01 USD is not the principal of the payments no line keeps, of the
+           payments that were short, or of an extra, and the statement does not say less is owed
+   = help: if the lender changed the rate, write `2026-02-28 mortgage now at RATE`
+
+✗ 1 error
+[exit status 1]

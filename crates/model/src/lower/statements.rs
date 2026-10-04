@@ -3,7 +3,7 @@
 
 use axiom_core::{Day, Days, Dec, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Sym};
 use axiom_syntax as ast;
-use axiom_syntax::{ClauseKind, Quantity, Subject};
+use axiom_syntax::{ClauseKind, ExprKind, Quantity, Subject};
 
 use super::flow::{
     Codes, Ends, FlowCx, ResolvedEnd, Shape, empty_codes, keep_program, make_resolved_flow, push_flow_expressions,
@@ -12,7 +12,9 @@ use super::flow::{
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::{Reach, Tail, written_purpose};
-use crate::book::{Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, Role};
+use crate::book::{
+    Amount, Asset, Change as BookChange, Commodity, Contract, Entity, EventState, Place, RateChange, Role,
+};
 use crate::builtin;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -563,6 +565,47 @@ pub(super) fn lower_contract_change<'s>(world: &mut World<'s>, at: Stated<'_, '_
                 .label(loc, "there is no regular or standing occurrence here"),
         );
     }
+}
+
+/// Whether a statement's subject names a contract: what `2029-03-01 mortgage now at 6.25%` is about, even where the name is
+/// also a kind's.
+pub(super) fn names_a_contract(world: &World<'_>, subject: Subject<'_>) -> bool {
+    matches!(subject, Subject::Name(name) if world.book.contract(name.0).is_some())
+}
+
+/// `2029-03-01 mortgage now at 6.25%`: from this day the lender's yearly rate is that (LANGUAGE §7). The loan's schedule
+/// refigures its payment over what is left from that day's balance.
+pub(super) fn lower_rate_change<'s>(
+    world: &mut World<'s>,
+    at: Stated<'_, '_, 's>,
+    line: &ast::Prop<'s>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let Subject::Name(name) = at.statement.subject else { return };
+    let Some(contract_id) = world.book.contract(name.0) else { return };
+    if world.book.contracts[contract_id].loan.is_none() {
+        diags.push(
+            Diagnostic::error("contract-rate-change", format!("`{}` is no loan, so it has no rate to change", name.0))
+                .label(at.loc, "only a contract with a `loan` line has a rate")
+                .help("write the rate on the loan: `loan AMOUNT on DATE at 6.25% over SPAN`"),
+        );
+        return;
+    }
+    let rate = match &at.file()[line.args] {
+        [only] => match at.file().exprs[*only].kind {
+            ExprKind::Pct(percent) => Ratio::percent(percent.mantissa as i128, percent.scale),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(rate) = rate.filter(|rate| !rate.is_negative()) else {
+        diags.push(
+            Diagnostic::error("contract-loan-rate", "a loan rate must be a nonnegative percentage")
+                .label(line.loc, "write the new rate as a percentage, as in `now at 6.25%`"),
+        );
+        return;
+    };
+    world.book.contracts[contract_id].rates.push(RateChange { day: at.statement.date, rate, loc: at.loc });
 }
 
 /// The parser takes one `until` and one description per statement, and no clause a waiver has no use for; only

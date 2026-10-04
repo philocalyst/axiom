@@ -18,7 +18,7 @@ use crate::book::{
 use crate::collect::Collected;
 use crate::declare::World;
 use crate::errors::{Reported, Word};
-use crate::journal::{Flow, Infer, Mode, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
+use crate::journal::{Flow, Infer, Mode, Object, Origin, Program, Provenance, Purposed, Select, TEMPLATE_TXN, Waive};
 use crate::law::{Owner, Ty};
 use crate::laws::{Placement, Positions};
 use crate::problem::{self, Noun};
@@ -112,6 +112,7 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<Entity>) -> Contract {
         deposit: None,
         deposit_holding: None,
         loan: None,
+        rates: Vec::new(),
         ended: None,
         laws: Box::default(),
         doc: None,
@@ -225,17 +226,7 @@ fn lower_contract<'a, 's>(
         _ => None,
     });
 
-    let cx = TermsCx {
-        written,
-        file,
-        inputs: &contract_inputs,
-        anchor,
-        party,
-        purpose,
-        description,
-        area,
-        loan_rate: loan.map(|(_, rate)| rate),
-    };
+    let cx = TermsCx { written, file, inputs: &contract_inputs, anchor, party, purpose, description, area, loan };
     if let (Some(schedule), Some((program, ids))) = (node.schedule, regular) {
         contract.terms = Some(lower_terms(world, &cx, schedule, program, ids, diags)?);
     }
@@ -671,7 +662,8 @@ struct TermsCx<'a, 's> {
     purpose: Option<At<Purposed>>,
     description: Option<Text>,
     area: Option<Amount>,
-    loan_rate: Option<Ratio>,
+    /// The loan the contract is, and the yearly rate it was made at.
+    loan: Option<(Loan, Ratio)>,
 }
 
 /// The header flow of a schedule, with what the legs and the items under it are made against.
@@ -696,8 +688,10 @@ fn lower_terms<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let (file, home, node) = (cx.file, cx.written.site.home, cx.written.node);
-    let header = template_header(world, cx, schedule, &roots, diags)?;
-    let legs = template_legs(world, cx, &header, node.body.legs, &roots, diags)?;
+    let mut header = template_header(world, cx, schedule, &roots, diags)?;
+    let interest = split_loan_payment(world, cx, &mut header);
+    let mut legs = template_legs(world, cx, &header, node.body.legs, &roots, diags)?;
+    legs.splice(0..0, interest);
     let lower = |world: &mut World<'s>, item, diags: &mut Vec<Diagnostic>| {
         lower_header_item(world, cx, &header, &roots, item, diags)
     };
@@ -712,13 +706,9 @@ fn lower_terms<'a, 's>(
         after: deadline.span,
         otherwise: deadline.otherwise.as_ref().and_then(|item| lower(world, item, diags)),
     });
-    let every = match schedule.terms.cadence {
-        ast::Cadence::Every(span) => Cadence::Every(span),
-        ast::Cadence::TwiceMonthly => Cadence::TwiceMonthly,
-    };
     let grace = grace_property(file, node.props, diags)?;
     Some(Terms {
-        every,
+        every: written_cadence(schedule.terms.cadence),
         on: file[schedule.terms.on].to_vec().into_boxed_slice(),
         template: Box::new([template]),
         program,
@@ -730,8 +720,16 @@ fn lower_terms<'a, 's>(
         covers: coverage_property(file, node.props, diags),
         prorated: has_property(file, node.props, "prorated"),
         escalation: escalation_property(world, home, file, node.props, diags),
-        rate: cx.loan_rate,
+        rate: cx.loan.map(|(_, rate)| rate),
     })
+}
+
+/// The cadence a schedule is written with, as the promise holds it.
+fn written_cadence(cadence: ast::Cadence) -> Cadence {
+    match cadence {
+        ast::Cadence::Every(span) => Cadence::Every(span),
+        ast::Cadence::TwiceMonthly => Cadence::TwiceMonthly,
+    }
 }
 
 /// The flow a schedule promises as a whole: between the holding and the party, in the direction written, with
@@ -769,6 +767,27 @@ fn template_header<'a, 's>(
     flow.purpose = classify(world, from_end, to_end, purpose, schedule.at, diags).ok()?;
     let arrive = buys.map_or(quantity, Quantity::Unknown);
     Some(HeaderCx { flow, out: quantity, arrive, from, from_party, side, owner, unit: amount.unit })
+}
+
+/// A loan's payment is a split (LANGUAGE §7): the payment leaves the owner's holding, the interest of it goes to the lender
+/// (`#interest`, `of` the asset the loan is `for`), and what the interest leaves, the principal, goes to the debt tab
+/// (`#principal`). The header keeps what its leg leaves, so the two add up to the payment on every payment. Returns the
+/// interest's leg, and makes the header the principal's; nothing for a schedule that says its own amount, one that is paid
+/// into the owner's holding, or a contract that is no loan.
+fn split_loan_payment(world: &World<'_>, cx: &TermsCx<'_, '_>, header: &mut HeaderCx) -> Option<Leg<Flow>> {
+    let (loan, _) = cx.loan.filter(|_| matches!(header.out, Quantity::Derived) && header.side == FlowSide::Arrive)?;
+    let lender = world.book.entities[cx.party].place?;
+    let purposed = |name, of| {
+        let purpose = world.book.purpose(name).ok()?;
+        Some(Purposed { purpose, of, source: Provenance::Derived })
+    };
+    let unit = loan.principal.unit;
+    header.unit = unit;
+    (header.flow.out, header.flow.arrive) = (Amount::zero(unit), Amount::zero(unit));
+    let interest =
+        Flow { to: lender, purpose: purposed("interest", loan.asset.map(Object::Asset)), ..header.flow.clone() };
+    (header.flow.to, header.flow.purpose) = (loan.debt, purposed("principal", None));
+    Some(Leg { flow: interest, part: Part::Of(Quantity::Interest) })
 }
 
 /// A promised split leg names the recipient. The source end of the scheduled header is kept and that portion is
