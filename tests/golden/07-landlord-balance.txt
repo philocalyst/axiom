@@ -109,19 +109,17 @@ error[assertion]: rental-bank holds 200.00 USD, not 0.00 USD
 
 Balances at 2026-04-16
 
-  Place                  Balance
-  ──────────────────────────────
-  checking        173,866.60 USD
-  ──────────────────────────────
-  deposit-bank     -4,900.00 USD
-  ──────────────────────────────
-  rental-bank         200.00 USD
-  ──────────────────────────────
-  summit-roofing   14,200.00 USD
+  Place                Balance
+  ────────────────────────────
+  checking      173,866.60 USD
+  ────────────────────────────
+  deposit-bank   -4,900.00 USD
+  ────────────────────────────
+  rental-bank       200.00 USD
 
   Net worth       Value (USD)
   ───────────────────────────
   Assets       169,166.60 USD
-  Liabilities   14,200.00 USD
+  Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    154,966.60 USD
+  Net worth    169,166.60 USD
