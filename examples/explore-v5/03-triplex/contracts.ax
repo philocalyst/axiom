@@ -6,6 +6,7 @@ contract mortgage with first-federal
   loan 374_400 USD on 2022-08-12 at 5.25% over 30y for triplex
   monthly on 1 from checking                   // ▸ 2,067.45 of principal and interest
   escrow 870 USD into escrow                   // 7,840 property tax and 2,600 insurance, over twelve
+  from 2022-10-01                              // the first payment: the schedule counts from here, not from the loan's day
 
 contract property-tax with monroe-county
   about 3_920.00 USD yearly on 01-31, 07-31 from escrow #property-tax of triplex   // ✎ 03b2: as elsewhere, a list of dates
