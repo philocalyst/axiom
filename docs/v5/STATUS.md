@@ -35,7 +35,7 @@ Where the rewrite stands, and what is waiting on a decision. Read [`DESIGN.md`](
 | L1 the junction | one line grammar, `<-` and `@`, legs lead with arrows, `fmt --upgrade` ports every example; syntax only: the lowered book is identical | running (map first) |
 | L2/L3 language, semantic | positions under their agent, debts as promises, optional counterparty, purposes without a direction root | after L1 and K6 (brief not yet written); lane U's plan may take them in (they delete model lines) |
 | D the user's decisions | the small behaviour changes decided above: prorata R1, the exchange fee, the monitor's one warning, the claim's purpose, mortgage interest, `match` out, the examples | brief written, starts when K6b has merged |
-| **U unification** | **the pass that brings the tree to the ceiling: one formulation per concept, from about 53,400 to 27,000 or fewer code lines, every behaviour kept.** An Opus lane in phases: a plan first (`docs/v5/UNIFY.md`), then checkpoints that each merge. It may absorb K12b, K4c, K3e, K3f, K7c and L2/L3, or sequence around them | running (phase 0: the plan) |
+| **U unification** | **the pass that brings the tree to the ceiling: one formulation per concept, from about 53,400 to 27,000 or fewer code lines, every behaviour kept.** An Opus lane in phases: a plan first (`docs/v5/UNIFY.md`), then checkpoints that each merge. It may absorb K12b, K4c, K3e, K3f, K7c and L2/L3, or sequence around them | **plan approved** (`UNIFY.md` on `-v5-unify`: 49 unifications, C1 to C6, then a second round C7; ledger -9,900 net, lands about 46,450 before C7: see Decisions, "the gap"); phase 1a (instruments) running; C1 starts when K6b, L1 and D have merged |
 
 Test baseline before any lane: 734 passed, 4 failed, 8 ignored. Lane C on top: 777 passed, the same 4 failed, 13
 ignored (the new ones are benchmarks). The four failures are the ones `v2/REMAINING.md` names.
@@ -77,6 +77,20 @@ numbers refer to the questions as the lanes asked them, kept further down. **Who
 | 15 | the mortgage-interest deduction | **(c)**: the itemized deduction reads `#interest of ASSET` for a home-kind asset, and the asset's shares decide the personal part, so one interest posting never counts twice and any loan `for` a home works; `05-family`'s house interest is written `#interest` | lane D |
 | 16 | a loan's last payment, `principal` | accepted as built (ACTUS) | none |
 | 17 | what the grammar accepts and nothing reads | `match` **leaves the grammar** (its diagnostic names the `also` line that does it); `deposit` is built with K3f; `?` beside `...` stays `cannot-infer` and LANGUAGE says so | lane D (`match`); K3f |
+
+**The gap, and what I am doing about it (2026-10-04, after lane U's plan, `UNIFY.md`).** Lane U read all 55,367 true code lines and
+found that **27,000 is not reachable by unification with the features and the output kept**: its ledger (49 unifications in six
+checkpoints, each byte-identical against a baseline binary) deletes 16,285 lines and adds 6,360, **net about -9,900**, landing at
+**about 46,450** (44,500 by the old counter, which hid 1,948 lines of code: the count is restated). The proposal's 27,000 was a
+clean-room estimate of a smaller feature set; the lanes since added about 4,400 lines of features (loans, addresses, recognition,
+the session, the post host). I did not accept that as the end: lane U also does a **second round (C7)** over the unified tree, the
+per-checkpoint report says planned against delivered, and **I pulled only what removes nothing you have**: generic-but-helpful
+shape errors for declared lines (L-d, signature-derived, about -400), and, last and only if still above, the v3/v4 readers
+(L-e, about -550). **Not pulled, because each removes something you use** (the cost is in `UNIFY.md` section 4.2): sync's importers
+counted outside the budget (-2,300, a counting trick), the habit forecast (-430), the `why` pages (-850), `available`'s what-if (-300),
+asset parts (-900), relators (-450), addresses (-1,100), help text (-350). With every one pulled it would be about 38,500; 27,000
+needs whole features (sync, the forecast, budgets, loans beyond a fixed schedule, claims, rich diagnostics, about -11,450 more).
+**This is the one decision the report to you must put first: features or the number.**
 
 Lane D is one Sonnet lane of small, separate commits (`docs/v5/lanes/lane-D-decisions.md`). Lane U is one Opus lane in
 phases, each ending in a merge (`docs/v5/lanes/lane-U-unify.md`).
