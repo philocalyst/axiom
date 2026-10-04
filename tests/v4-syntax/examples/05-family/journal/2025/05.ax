@@ -1,5 +1,5 @@
 2025-05-01 joint-checking -> mortgage 474.46 USD ^mortgage-2025-05 // principal
-2025-05-01 joint-checking -> lender 2_010.00 USD #mortgage-interest // interest
+2025-05-01 joint-checking -> lender 2_010.00 USD #interest of house // interest
 2025-05-01 joint-checking -> escrow 690.00 USD // taxes and insurance
 2025-05-02 card -> netflix 17.99 USD
 2025-05-03 card -> costco 207.91 USD
