@@ -2003,3 +2003,34 @@ fn why_a_claims_code_says_the_day_it_was_waived_and_what_was_forgiven() {
         assert!(events[0].contains("2026-02-15") && events[0].contains("waived, 300.00 USD forgiven"), "{events:?}");
     });
 }
+
+#[test]
+fn a_purpose_whose_flows_came_to_nothing_has_no_row() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity shop
+purpose candy : spending
+purpose pastry : spending
+account checking
+opening 2026-01-01
+  checking 100 USD
+2026-01-05 checking -> shop 0 USD #candy
+2026-01-06 checking -> shop 5 USD #pastry
+";
+    with_run(source, day(2026, 2, 1), |book, run| {
+        let query =
+            Query::Flow { by: FlowBy::Period(axiom_model::Period::Month), from: Some(day(2026, 1, 1)), to: None };
+        let report = crate::tests::report(book, run, &query, None).unwrap();
+        let named = |purpose: &str| {
+            report.sections[0]
+                .rows
+                .iter()
+                .any(|row| matches!(row.cells.first(), Some(crate::Cell::Name(name)) if *name == purpose))
+        };
+        assert!(named("pastry"), "what moved is a row");
+        assert!(!named("candy"), "a flow of nothing moved nothing, and a purpose that moved nothing is no row");
+    });
+}

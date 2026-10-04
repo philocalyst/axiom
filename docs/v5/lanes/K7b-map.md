@@ -7,9 +7,10 @@ non-test lines by `briefs/loc.py` (`report` is 7,027 of them; the brief's 8,995 
 
 **What was done before this map was written, and why.** The measurements in §2 need the recorder, so a first version of it was
 written to take them: `engine/src/histories.rs`, the hooks in `lots.rs`, `ledger.rs`, `post.rs`, `state.rs`, and `report`'s switch
-from the replay to the histories (`balances.rs`, `balance.rs`, `lens.rs`, `history.rs`). That code is **uncommitted** while this map is
-committed, and it goes in as separate commits after it (the engine half, then the report half), with the debugging line that printed
-the sizes taken out. Every number marked *(scratch)* is from it. The baseline binary (`3f17468`) is built and kept.
+from the replay to the histories (`balances.rs`, `balance.rs`, `lens.rs`, `history.rs`). That code was **uncommitted** when this map
+was committed, and went in as separate commits after it (the engine half, then the report half), with the debugging line that
+printed the sizes taken out. Every number marked *(scratch)* is from it. The baseline binary (`3f17468`) is built and kept.
+**Sections 0 to 10 are the map as approved; §11 onwards says what was built, where it differs from them, and what it measured.**
 
 ## 0. Where the brief does not match the code
 
@@ -43,8 +44,9 @@ Eleven things, each of which decides something below.
    hypothetical withdrawal to it. A `(day, qty)` column per position cannot say which claim is still open. The re-fold they pay today
    (`Context::ledger_at`: +0.12 s at 100k, +0.25 s at 1m for `claims`; `available --at <past>`: +12.3 s at 1m, K7a-map §3) is the cost of
    *state at a day*, and a stepper of quantities is not state. §5 says what would remove it (month-end checkpoints, or parcels in
-   columns: K3e) and why it is not this lane's. **`ledger_at` and `available`'s forks stay.** `holdings_at` is the free-function path
-   (`report::report`), which exists for `Past::Journal` in `forecast/`, which this lane is told to stay out of: so it stays too (§6).
+   columns: K3e) and why it is not this lane's. **`ledger_at` and `available`'s forks stay.** `holdings_at` was the free-function path
+   (`report::report`), which exists for `Past::Journal` in `forecast/`, which this lane was told to stay out of: so it stayed too (§6)
+   *until the orchestrator allowed the three-line edit that removes `Past::Journal`; the path is deleted (§11)*.
 5. **`tax` and `budget` do not read postings.** `tax.rs` reads `Run.effects` and `budget.rs` reads `Run.headroom`: what the fold's laws
    counted (K3d-map §0.1). A pivot over postings would *recompute* what the fold already decided, which is the opposite of facts out.
    They are not instantiations, and the delete list does not count them.
@@ -172,7 +174,7 @@ What a `why` page can follow today, by where the edge lives:
 | edge | where | notes |
 |---|---|---|
 | flow → the statement and its line | `Flow.txn → Txn { loc, doc, codes, flows }`, `Flow.loc` | `book.txns[flow.txn].flows` is the consecutive run of its legs and items |
-| flow → how it came to be | `Flow.origin: Origin::{Written, Derived(Derivation), Occurrence(Id<Contract>)}` (model) | `Derivation` names the contract (`Interest`, `Principal`, `Claim`, `Otherwise`, `Refund`) or the asset (`Disposal`), **not the flow or the rule that caused it** |
+| flow → how it came to be | `Flow.origin: Origin::{Written, Derived(Derivation), Occurrence(Id<Contract>)}` (model) | `Derivation` names the contract (`Interest`, `Principal`, `Claim`, `Otherwise`, `Refund`), the asset (`Disposal`), the law (`Reparation`), the `also` line (`Also`), the kind (`SalesTax`), the sharer (`Share`) or the party (`PaidFor`), **never the flow that caused it** *(corrected after the build: the first version of this row left the last four out)* |
 | flow → who said its purpose | `Flow.purpose: Purposed { purpose, of, source: Provenance }` | `Provenance::{Written, Contract, Entity, Party, Commodity, Account, Derived}` |
 | flow → what it settled | `Run.settlements: [(Id<Flow>, Settlement)]` (sorted by flow) | a returned payment's is kept (K3d) |
 | flow → what it caused | `Effect.cause`, `Gain.cause`, `Violation.cause`: `Cause::{Flow(id), Transaction(txn), Applied(n), Time}` | **only as a scan**: no index by cause; `why LINE` does three scans of `run` per flow |
@@ -306,3 +308,288 @@ DESIGN §3.9: a linear view patches itself from the delta between a checkpoint a
 | C | the cause index, `Target`, the walk, the four shared tables | `why` goldens byte-identical; harness over `why` of every place, purpose, entity, law and line of every example |
 | D | §9, in this file | |
 | end | this file's "what was built, measured, not finished, and the three places I am least proud of" | |
+
+---
+
+*Sections 0 to 10 are the map as approved before the lane's code was committed (with three corrections marked in place). What follows
+was written when the lane was done: what was built, where it differs from the map, where the baseline was wrong, what it measured,
+what is not finished, and what the orchestrator may decide for K7c.*
+
+## 11. What was built, against §10
+
+| commit | step | what |
+|---|---|---|
+| `e5248e4` | 0 | this map |
+| `83df805` | A1 | `engine/histories.rs` (`Histories`, `Steps`, `Extremes`, `Changes`), the hooks (`Slot.recorded`, `Holdings.touched`, `moved()`), `Ledger::record_balances` at the end of `post` and of `step`, `Run::histories`; the engine's own oracle (`histories_tests.rs`: a ledger advanced a day at a time against the history, on books that settle, return, split, pad and claim) |
+| `9bf577d` | A2 | `report/balances.rs`: `Balances` replaces `Snapshots`; `history.rs` 326 to 72 lines; `unpriced_flows` |
+| `fe8f6b4` | A3 | `crates/session/tests/histories.rs` (the fold oracle and the replay oracle on every example and probe book), `dates.py`, `fuzzbooks.py`, `histories_mutants.py`, `crates/session/examples/scrub.rs` |
+| `f6f3ad4` | | the free-function path deleted (`report`, `report_with_sources`, `views`, `holdings_at`, `available::view_with_lens`, `Context::new`, `Past::Journal`) |
+| `47401bc` | B | `report/pivot.rs`: `Pivot<K>` over a flat `Grid`; the party table, the purpose table and `why #purpose`'s totals are instantiations |
+| `bbffce9` | C | `why::Target` (what `why X` asked about, resolved once), `consequences` in one pass |
+| `ee13f10`, `708e313` | | measure: the monitor-claim test, mutants that fail only a known test are not killed, `fuzzcmds.py` asks for the pivot's views and every kind of `why` |
+| `e9c09c9` | | what a value could not price is asked of the run once (`Unpriced`, `Folded::unpriced`: `--value` a read), `why/asset.rs` split in four (it was 106 lines, the only function over 80 in `report`), `Target::named`'s error tail its own function, a returned flow and a priced flow in the unpriced-count test |
+| `0d28182` | | `Context::report`'s claims and lots arms are methods, `Run::histories` says a resumed fold records from its checkpoint, the session test pins which owner is told of what |
+| `6e859a7` | | measure: the mutants of the unpriced list, `climutate.py` and `report_mutants.py` (mutants of the pivot and of `why` held to the baseline's outputs through a built CLI) |
+| (the commit that carries this section) | | this section, `K7b-baseline-wrong.tsv` |
+
+**Where it differs from the map, and why.**
+
+- **§6, the free path stays: it did not.** The orchestrator allowed the edit in `forecast.rs` and `forecast/trace.rs` that removes
+  `Past::Journal` (`Past` is `{ at: &Checkpoint, effects: &[Effect] }`; `coming_due` and `select_due_effects` take slices; three
+  `trace.rs` tests start from `plan.start(options).checkpoint()`), and with it `report`, `report_with_sources`, `views`,
+  `holdings_at`, `available::view_with_lens`, `journal_ends_by` and `Context::new` went. `forecast/` needed nothing else from
+  the path: `holdings_at` had no caller left.
+- **§4, no cause index.** `consequences` does one pass over gains, effects and violations for all the flows of a page, ranks each by
+  the position of the flow it names and sorts by (rank, kind). That removed the scan per flow without an index, and a second structure
+  to keep in step with the fold. `Cause::Time` still names no period (missing 1 stays missing).
+- **§4, C is smaller than "one walk".** `Target` and `consequences` are built; "the claims a payment settled" is not (no page shows it).
+  `why/*` is 1,177 + 279 lines of which most are sections about their own target (§4 said so: -100 at best). The size C came to is +8
+  lines (a `Target` enum with its resolver costs what `identify` and `target_with_lens` cost).
+- **§3, the pivot is not in `forecast`.** `forecast/variable.rs::purpose_history` still calls `for_each_counted` and keeps its own
+  rows: `forecast/` was out of bounds.
+- **§7, the harness counts.** `docs/v5/measure/diff/run.sh` writes 552 outputs, not 468 (K3d's probes), and `allcmds.sh` 796 commands (1,592 files: an output and an error stream each; K7a's "1,592 outputs" is the files).
+- **§0.7, the unpriced count is a list asked once, not a function.** `unpriced_flows` scanned every posting for each `--value`
+  (2.6 ms of a question's 2.7 ms at 100k, 43 of 44 ms at 1m, measured by taking it out: §13), which made `--value` 2.1 to 2.8 times
+  the baseline and not a read. The ends it counts do not depend on whose money is asked of or on the day asked (a price is the book's), so
+  `Unpriced::of` finds them once, by the first `--value` a `Folded` is asked for, and `Unpriced::standing` counts those a view
+  needs (a handful, not a million postings). `Folded` holds it in a `OnceLock`. Every harness of §12 was run on the build that has it.
+  It costs 16 lines and a test that the first asker's owner is not every asker's
+  (`what_a_value_could_not_price_does_not_depend_on_whose_books_asked_first`), and two mutants.
+- **No `STATUS.md` edit:** the orchestrator writes "STATUS after K7b" (the history of `docs/v5/STATUS.md` says so); the numbers are here.
+
+**Where the lines went** (non-test, `briefs/loc.py`; each row is the commit that made the change):
+
+| step | engine | report | whole tree |
+|---|---|---|---|
+| baseline `3f17468` | 11,828 | 7,027 | 53,604 |
+| A1 the recorder | +218 | 0 | +218 |
+| A2 `Balances` for `Snapshots` | 0 | -211 | -211 |
+| the free path | 0 | -123 | -123 |
+| B the pivot | 0 | +11 | +11 |
+| C `Target` and one pass | 0 | +8 | +8 |
+| the asset split and `named` | 0 | +18 | +18 |
+| the unpriced count asked once of a `Folded` (`Unpriced`, §13) | 0 | +16 | +16 |
+| **now** | **12,046** | **6,746** | **53,541** (-63) |
+
+**Honest accounting against the target.** The brief asked for `report` at 5,500 or less and the orchestrator accepted about 6,500. It
+is **6,746**: 1,246 over the target and 246 over what was accepted. `report` is -281 from the baseline and the engine +218, so
+**the tree shrank by 63 lines**, not by the 1,500 the target asked of `report`. A does not delete a line by itself (the recorder is
+`engine`'s 218; what it removed was `report`'s 211): the lines moved to the layer that has the facts, as §6 said they would. 5,500
+needed outputs to change (§14 prices each such change; all of them together come to about -315).
+
+Deleted files: none. New non-test files: `engine/histories.rs` (342 lines with its tests, 182 without), `report/balances.rs` (30),
+`report/pivot.rs` (102). Deleted functions: 38 definitions in 36 names, of which the longest were `Snapshots::replay` (116 lines),
+`why::identify` (44), `why::target_with_lens` (36), `history::final_state` (15), `history::keep` (14), `flow::moved`/`push_rows` (13 each), and
+`history::{accumulate, empty, held, pair_index, subtree, split, of, cell, change, column_from, days, storage_shape, add_assign, journal_ends_by}`,
+`available::view_with_lens`, `claims::holdings_at`, `Context::new`, `lens::{governs, subject_qty}`, `forecast::effects`,
+`why::explain_with_lens`, and six warnings with them (`report` built with 6 dead-code and unused-import warnings and builds with none;
+`engine` and `cli` keep their 14 and 1, which are not this lane's).
+
+**Function lengths** (`docs/v5/measure/hist.py`, whole `crates/`; baseline in brackets): 1 to 10 lines 2,058 (2,040), 11 to 20 707
+(700), 21 to 40 514 (513), **41 to 80 127 (129)**, **81 to 160 six (eight)**, 161 to 320 none, 321 and over one (the model's `lower_occurrence`,
+not this lane's). The two over 80 that went are `Snapshots::replay` (116) and `why/asset::report` (106, split here); the six left are the
+engine's `fire::carry`, `post::dispose_sold_asset` and `lots::prepare_part_carry_additions`, and the model's and the CLI's. In `report`
+alone: 81 to 160 none (two), 41 to 80 twenty (twenty-two). Functions this lane touched that are over 40: `ledger::finish` 50 (was 48:
+28 lines are the one struct literal of `Run`), `balance::view_with_lens` 42 (was 41), `balance::push_place` 56 (was 59). Nothing the
+lane wrote is over 40 (the longest are `why/line::consequences`, 40, `asset::part_row`, `Target::named` and `histories::assemble`, about 32 each).
+
+## 12. Where the baseline was wrong
+
+**`balance` at a day the run has not ended on, `--monthly`, `--value`, and `--today D`, said what the flows said, and not what the
+fold held.** Each row of [`K7b-baseline-wrong.tsv`](K7b-baseline-wrong.tsv) is one (book, position): the first day on which the baseline's
+number and the fold's differ, the two numbers, how many of the days asked differ, and the cause. There are 177 of them, in 21 books (and one note, below).
+**In every one the fold is right**: `Ledger::balance` advanced a day at a time (`histories_tests.rs`, and the same oracle over every
+example and probe book in `crates/session/tests/histories.rs`) says the fold's number to the unit on every day of every book, and the
+baseline's own `balance` (no `--at`) says it too on the last day, so the baseline contradicted itself. Three causes:
+
+| cause | rows | what the baseline did |
+|---|---|---|
+| a kept occurrence's flows | 94 | `Snapshots::replay` added up the flows the journal wrote; an occurrence a line kept is a promise whose template flows the fold posts and the journal does not hold, so `balance --at` did not count them (and counted the placeholder line's zeros) |
+| a claim settled, forgiven, or made by the monitor | 70 | a payment from a party relieves the owner's tab and a write-off takes a claim's parcels out: neither is a flow end, so the replay kept the tab at its full amount (`recognition-writeoff-lines.ax`: `ann 3,300.00 USD` on 2026-02-20 where `claims --at` said 2,300.00 open on the same day) |
+| an asset counted twice | 13 | an asset opened by an `opening` line is a flow end and a holding: the replay counted both (`05-family` `crv` and `house`: 2 where the book holds 1) |
+
+The first differing day of each book (the full list is the tsv):
+
+| book | day | position | baseline | fold (right) |
+|---|---|---|---|---|
+| 02-household | 2026-01-01 | `checking` | 9,200.00 USD | 5,750.00 USD |
+| 04-freelancer | 2025-02-12 | `brightwave` | -9,600.00 USD | -6,400.00 USD |
+| 05-family | 2024-12-31 | `crv` | 2 | 1 |
+| 07-landlord | 2025-02-01 | `lender` | 3,842.30 USD | 5,651.89 USD |
+| 11-sam | 2026-01-01 | `checking` | 8,412.55 USD | 5,969.63 USD |
+| v4-sketch | 2026-01-01 | `checking` | 8,412.55 USD | 3,619.63 USD |
+| explore-v5/01-agency | 2026-01-01 | `card-me` | 0.00 USD | -84.00 USD |
+| explore-v5/02-family | 2026-01-01 | `car1` | 2 | 1 |
+| explore-v5/03-triplex | 2026-01-01 | `checking` | 23,140.62 USD | 21,073.17 USD |
+| explore-v5/04-nomad | 2026-01-02 | `kraken` | 0 | -0.001435 ETH |
+| explore-v5/05-budgeter | 2026-01-01 | `card` | -486.20 USD | -531.20 USD |
+| explore-v5/06-family-addresses | 2024-12-31 | `crv` | 2 | 1 |
+| probes `claim-party-flow`, `claim-recognition`, `claim-writeoff`, `recognition-{accrual,cash,writeoff-lines}`, `split-payment` | e.g. 2026-01-20 | `ann` or `fernhill` | e.g. -1,100 | -800 (`claim-party-flow`) |
+| probes `stmts-ok` | 2026-06-01 | `boat` | 2 | 1 |
+| probes `promise-no-from` | 2026-02-01 | `checking` | 20,000 | 17,100 |
+
+**One more output changed, and it is the same cause:** `balance --value --at 2024-07-01` on `06-investor` said
+"3 flows have no price on their day and are not counted in the value." and now says nothing. The baseline counted, for a column on a
+split day, flows that had not happened yet; the count is now flows that stood on a day asked.
+
+**What the differential harness found, as it was run.** `dates.py` (every view that reads a past day, twelve days of every example,
+text and `--json`) and `whys.py` (every kind of `why` target of every example, text and JSON, with and without `--for`) leave only the
+rows above: every differing output is a `balance` form of a book in the tsv, and no `register`, `claims`, `lots`, `flow` or `why`
+output differs. The command fuzz (`fuzzcmds.py`, 300 mutants x 27 commands) found 33 mutants that differ, all `balance --value --json`
+on a mutant of `05-family`, and in all of them only the cells `crv` and `house` (2 where the new binary says 1: the asset counted
+twice); nothing else on the line moves.
+
+## 13. Measured
+
+The machine is shared (load average 2.4 to 8 while these ran, in each run's header in `scratchpad/k7b`); every comparison alternates the
+baseline binary (`3f17468`) and this one and takes the fastest.
+
+**In-process, which is what the 5x of the brief is about** (`crates/session/examples/scrub.rs`: one project opened and folded once,
+then the same view asked of forty days spread over the book; the one file is built against both commits; fastest of 5 sweeps at 100k
+and of 3 at 1m, over 3 and 2 alternating rounds). Two ways of asking: a `Context` that keeps its plan (the view alone), and a `Session`,
+which builds a `Plan` for each answer (K7a):
+
+| a question, over 40 days | 100k baseline | 100k now | | 1m baseline | 1m now | |
+|---|---|---|---|---|---|---|
+| **the view alone**: `balance --at` | 6.24 ms | 0.053 ms | **117x** | 78.2 ms | 0.48 ms | **164x** |
+| `balance --at --value` | 6.99 ms | 0.063 ms | **112x** | 93.4 ms | 0.49 ms | **189x** |
+| `balance --monthly --at` | 6.38 ms | 0.42 ms | **15x** | 93.3 ms | 3.03 ms | **31x** |
+| `register --to` (a statement, §0.3) | 23 µs | 26 µs | same | 51 µs | 59 µs | same |
+| `claims --at` (a re-fold, §5), 8 days | 12.4 ms | 13.5 ms | same | 142 ms | 152 ms | same |
+| **through a `Session`**: `balance --at` | 21.4 ms | 14.1 ms | 1.5x | 254 ms | 160 ms | 1.6x |
+| `balance --at --value` | 23.6 ms | 15.6 ms | 1.5x | 275 ms | 161 ms | 1.7x |
+| `balance --monthly --at` | 22.3 ms | 15.6 ms | 1.4x | 271 ms | 161 ms | 1.7x |
+| a `Plan`, built for each answer | 14.7 ms | 14.6 ms | | 173 ms | 161 ms | |
+
+The brief's 5x is true of the view, by 15 to 190 times, and false of the product: through a `Session` it is 1.4 to 1.7 times, because
+the plan is 14.6 ms of a 14.1 ms answer (the answers are the plan and a view that costs nothing). §15 says what lifts it. The
+`claims --at` row is within the noise of the load, and a little above it (+9% and +7%, in the direction a recorder that a re-fold does
+not read would cost); it is the one number here I would re-measure on a quiet machine. **`balance --value` was 2.1x to 2.8x until its
+count of unpriced flows stopped being a scan of every posting** (a build with the scan taken out measured 0.06 to 0.1 ms at 100k and 0.54 ms at 1m: the scan
+was all of it; §11).
+
+**One-shot, the CLI** (`ab.py`: interleaved, wall and user, fastest and median of 11 runs at 100k and of 5 at 1m). A command folds
+whatever it asks, so a view that is free saves the CLI nothing and the recorder's cost is what shows:
+
+| | 100k, baseline / now (fastest) | 1m, baseline / now (fastest, median) |
+|---|---|---|
+| `check` | 0.411 / 0.410 s | 4.12 / 4.30 s (4.46 / 4.56) |
+| `balance --at` | 0.429 / 0.437 s | |
+| `balance --monthly` | 0.436 / 0.464 s | 4.51 / 4.56 s (4.54 / 4.60) |
+| `balance --value --at` | 0.404 / 0.428 s | 4.38 / 4.39 s (4.63 / 4.61) |
+| `register p1-checking`, `flow`, `claims` | 0.408 / 0.417, 0.431 / 0.430, 0.414 / 0.421 s | |
+
+Wall time on this machine is inside the noise (a `check` at 1m was +4.3% fastest and +2.1% median; `check` at 100k was -0.2%). The
+instructions are not: **callgrind, `check`: +1.11% at 100k (1,898.8M to 1,919.9M) and +1.10% at 1m (17,567.8M to 17,761.3M)**, the cost
+of the recorder (a push for each slot handed out, a drain for each fact, 16 bytes a step, the counting sort at the end). Instructions
+of the views that read it: `balance --monthly` -1.3%, `balance --at` -0.8%, `balance --value --at` -0.3% at 100k.
+
+**Memory** (`bench/timeit.py`, peak RSS of `check`, fastest of 3): 100k 80,348 to 80,680 KB (+0.4%), 1m 680,564 to 680,424 KB (-0.02%).
+The histories are 1.4 MB at 100k and 11.9 MB at 1m (§2: 759 positions and 113,538 steps; 2,236 positions and 990,112 steps), under
+the peak that the model's build and the fold make, which is why the peak does not move.
+
+**Proof.**
+
+- **The oracles.** Exact: a ledger advanced a day at a time against the history (`engine/histories_tests.rs`: six books that settle,
+  return, split, pad and claim, and the claim the monitor makes), and the same on every example and probe book
+  (`crates/session/tests/histories.rs`: 52 projects (every example and probe book), 11,922 days, 170 positions the replay gets wrong and the classifier names). Naive: the old replay, rebuilt in the test and classified by cause, which is
+  where §12's 177 rows come from. Generated: 200 projects mutated from the examples (`fuzzbooks.py`), 127,442 days, 628 positions the replay gets wrong and the classifier names, none unexplained.
+- **The tests.** `cargo test --workspace --release --no-fail-fast`: **1,162 passed, 2 failed, 21 ignored**; the two are
+  `a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot` (engine) and
+  `a_context_forecast_keeps_historical_and_same_day_obligations_once` (report), which fail identically at `3f17468` (checked in a
+  build of it). 19 tests were added, 3 renamed from `snapshots_*` to `balances_*`, and 4 deleted with the code they tested (the shape of
+  `Snapshots`' storage, the free-function report twice, the agreement of the final-state shortcut with the replay).
+  Clippy on `engine`, `report` and `session`: 130 warnings before, 124 after; five of the new ones are the one lint that fires on
+  every function returning `Result<_, Diagnostic>` (136 in the tree) in `tests.rs` helpers and `Target::of`'s chain.
+- **The differential harness against the baseline binary**, with this build: `allcmds.sh` 796 commands: **20 differ**, every one
+  `balance --at`, `--monthly` or `--value` (text and JSON) of `02-household`, `04-freelancer`, `05-family`, `07-landlord` or
+  `11-sam`; `diff/run.sh` 552 outputs: **1 differs** (`stmts-ok.balance`, `boat` 2 for 1); `dates.py` 6,928 commands over 53
+  projects: **614 differ**, every one a `balance`, `--value`, `--monthly`, `--for` or `--today` of a book of §12's table and none
+  of `claims`, `lots`, `available`, `flow` or `register`; `whys.py` 14,568 commands (every kind of target of 51 projects, text and
+  JSON, with and without `--for`): **0 differ**; the 60 goldens and 213 mistakes regenerate with no `git diff`; the command fuzz
+  (`fuzzcmds.py`, 700 mutants of the examples x 27 commands, two seeds): 82 differ, all `balance --value --json` of a mutant of
+  `05-family` and in each only the cells `crv` and `house` (2 for 1).
+- **Mutants of the recorder and of the balance reads** (`histories_mutants.py`, 30): 28 first: all killed, but three of them (`post-does-not-record`,
+  `unpriced-counts-the-day-it-ended`, `unpriced-ignores-prices`) only by a test that fails at `3f17468` with no mutant at all, which kills
+  nothing: that was the finding of the run, and `mutate.py` now ignores the known failures. Tests were added (a claim the monitor makes;
+  a returned flow and a flow in a priced commodity in the unpriced test) and the three re-run: each killed by the new test. When
+  the unpriced count became a list (§11) its six mutants were re-run: **five killed, one survived**, `unpriced-ignores-the-owner`
+  (the count of a place is not filtered by whose it is), because the session test held only that an answer agrees with itself;
+  it now says who is told of what, and fails with the mutant (applied by hand to the tree, run, restored). **No mutant of the 30
+  survives.** The whole sweep was not re-run after the last test edits: the three mutants of the first group and the six of the
+  second were, each against the tree it was written for.
+- **Mutants of the pivot and of `why`, killed by the harness and not by the unit tests** (`report_mutants.py`, 18, each built into
+  a CLI and held to the outputs above by `climutate.py`): 12 of the 18 were run (the pivot and the two flow
+  tables): **11 killed, every one by `allcmds.sh`** (the flow views of the examples), **1 survived**,
+  `pivot-a-zero-amount-moves-its-row` (a purpose whose flows all came to nothing shown as a row of zeros): no example or probe has a
+  flow of nothing under a purpose with no other flow. `a_purpose_whose_flows_came_to_nothing_has_no_row` was added and fails with the
+  mutant (by hand). **The six mutants of `why` are written and not run** (the order of what a line caused, the quotes of a
+  description, an entity that stands for its place, the owner scope of a description): the sweep was stopped for time. `whys.py` holds
+  every page byte for byte on 14,568 commands, and how sensitive it is to these six is not measured.
+
+
+## 14. Candidate output unifications, for K7c to decide
+
+The lane was told not to change bytes to reach 5,500, so none of these is done. Each is a change of what the CLI prints; the lines are
+**estimates from the functions that would go, read from the code and not built** (a built one is -20% to +30% of its estimate; the
+pivot was estimated at -100 and came to +11 for B). "Goldens" is the files of `tests/golden` (60) that hold the layout; "other" is
+what `allcmds.sh` (796 commands), `whys.py` and `dates.py` would show.
+
+| | change | lines | goldens that change | other outputs |
+|---|---|---|---|---|
+| U1 | `balance --value` without the note "N flows have no price on their day and are not counted in the value." | **-45**: `Unpriced` 27 lines (`of`, `standing`), its place in `Folded` and `Context::report` 6, `Posting::standing` 10, the note 4 (it was -30 before the count became a list: §11 spent 16 lines to make `--value` a read, and this takes them back) | **none** (no golden holds the note; `household-value.txt` has no unpriced flow) | 8 of the 796 commands `allcmds.sh` runs (it writes 1,592 files, an output and an error stream each): `balance --value` of `05-family`, `06-investor`, `08-expat`, `11-sam`, text and JSON |
+| U2 | the register of an entity, of an asset and of a contract is the list of the postings that touch it, in the place register's columns; the terms and promises that the contract register mixes in are left to `why contract:`, which has "Terms over time" and "Occurrences" | **about -130**: three row builders (`entity_flow_row` 30, `asset_flow_row` 19, `contract_flow_row` 11) become one, `terms_row` 20, `promise_row` 12, `basis_row` 11, `dated_register` 14, `purpose_cell` 3, less about 20 for the one that stays | **none** (`household-register.txt` is `register checking`, a place; no golden registers an entity, an asset or a contract) | every `register entity:/asset:/contract:`; none in `allcmds.sh` |
+| U3 | `why asset:`'s "Flows about it" and `why contract:`'s "Derived flows" are `flows_table`, the table `why ^code`, `why "text"` and a tax line already share (Date, Flow, Amount, State, From; the most recent are shown and the rest counted) | **about -45**: `asset::about` 33 and `contract::derived_section` 25, less the selection they keep | **none** (`household-why-*` are a law, a place and a purpose) | `why asset:` and `why contract:` |
+| U4 | `why #purpose`'s Limits, Headroom and Budgets are the rows of `limits` and `budget` | **about -60**: `purpose::budget_section` 52, `budget_limit` 9, `headroom_row` 10, `limits_section` 29, less what they call | **none** (the only golden with these sections is `household-budget.txt`, which stays if `budget` is not touched) | `why #purpose` |
+| U5 | `flow --by party` as the periods table with the party under each purpose root, and not a table of its own | **about -40**: `view_by_party_with_lens` 20, `push_root` 29, `label`, `table`, `row`, `net_row`, less the shared rows | **none** (`household-flow.txt` is by period) | `flow --by party`: 22 of the 796 commands (11 books, text and JSON) |
+| U6 | one `why` layout: a facts table, then Flows, then Consequences, for every kind of target | **not estimated**: the pages' own sections (composition and parcels of a place, a law's facts, an asset's parts, a contract's terms and occurrences, a purpose's budgets) are information, not layout; what goes is their different headings and column orders | `household-why-place.txt`, `household-why-law.txt`, `household-why-code.txt` | every `why` |
+
+All of U1 to U5 come to about **-320**: `report` would be about 6,425, still 925 over 5,500. **No combination of byte-neutral or output
+changes in `report` alone reaches 5,500.** What would: parcels in columns (K3e), so that `claims --at`, `lots --at` and `available --at`
+read columns and not a re-fold, which takes `Context::ledger_at`, `holdings`'s plumbing and `available`'s forks (about -100 in `report`,
+more in `engine`), and a decision on `json.rs` (450 lines of typed cells for the same tables). Said now so it is not found later.
+
+Two more that are not about output and are not this lane's: (1) `claims::owed_by_you` (44 lines with `settled_codes`) walks
+`book.touching` per payable place because a payable is still a plain balance, not a claim place (K3d left it); once it is one, `open`'s
+first branch reads it and the second goes. (2) `Standing` (§13): a `Plan` for each answer is the floor of a session's scrubbing, and
+`Lens::plan()` is why it cannot be lifted without touching `eval.rs`.
+
+## 15. What is not finished
+
+- **Claims, lots and available at a day still re-fold** (`Context::ledger_at`). The lane's name is "facts out, the views stop
+  re-folding": `balance` in every form no longer does (and `summary`); `claims --at`, `lots --at` and `available --at` do. §5 says why
+  (state at a day is parcels, not balances) and what removes it (parcels in columns, K3e; or month-end checkpoints a `Session` makes
+  on a second past query).
+- **A session still builds a `Plan` for each answer** (13.6 ms at 100k, 179 ms at 1m): the floor of in-session scrubbing (§13).
+  The lever is a `Standing` (owners, sides and what is known, the part of a `Plan` that `Lens` reads) that a `Plan` derefs to, so that a
+  `balance` lens needs no plan. It is not built because `Lens::plan()` is read by forecast, available, flow and register and K6's
+  `eval.rs` reads `plan.sides` and `plan.known`; it is a change across both.
+- **`Steps::extremes` has no product consumer**: a peak or a low is asked by no view yet (FBAR is a law of a system, not a view). It
+  is built, tested against a scan and mutated, and nothing calls it.
+- **The deltas (§9) are a design**, as the brief said, and are not built.
+- **No cause index and no `Cause::Time { law, period }`** (§11, §4 missing 1 and 2): a period-end effect's page stops at "a period
+  ending".
+- **`forecast/variable.rs::purpose_history` keeps its own rows** over `for_each_counted` (out of bounds).
+- **The first `balance --value` of a run scans every posting once** (2.6 ms at 100k, 43 ms at 1m) for the unpriced note, and every one
+  after reads the list it made (§11).
+- **A hand-built `Run` in the tests** gets its histories from a naive replay of its journal (`tests.rs::replayed`): an oracle of its own
+  kind, the one place a test's `Histories` are not the fold's.
+
+## 16. The three places I am least proud of
+
+1. **The session floor.** The lane made the view of a balance a read (§13: `balance --at` 0.053 ms in a context that keeps its plan,
+   117 times the baseline's 6.24 ms at 100k, 164 times at 1m), and a client scrubbing through a `Session` gets **1.5 times** (21.4 to
+   14.1 ms), not five: `Session::query` builds a `Plan` for each answer and the plan alone is 14.6 ms. The measurement says exactly
+   where the time went; the lever is named and not built, because it crosses K6's `eval.rs`. The 5x of the brief is true of the view and
+   false of the product.
+2. **A deletes nothing, and the target is missed by 1,246 lines.** The tree is -63, `report` is 6,746 against 5,500, and the one
+   thing the recorder was built to serve with a peak or a low (`extremes`) is called by nobody. I said in the map that the lines would
+   move to the layer that has the facts; they did, and the 5,500 was not a number this lane could reach without changing bytes (§14
+   prices it: about -320 with all of them). The lane's half-built claim is that "the views stop re-folding": three of them still do.
+3. **A cache whose correctness is one fact, and the oracle's classifier.** `Folded` now holds a `OnceLock<Unpriced>` that the first
+   `balance --value` fills with the flow ends nothing prices, for whoever asked; it is right because `Lens::value` reads the book's
+   prices and not whose money the lens is about, and nothing enforces that but a test (`what_a_value_could_not_price_does_not_depend_on_whose_books_asked_first`)
+   and a mutant. If `value` ever reads `whose`, the first asker's answer is every asker's. And the replay oracle's `cause()` is a
+   classifier I wrote to explain the baseline's differences: it sorts the 177 rows of §12 into three names, and a wrong name would
+   be noticed by nothing (the exact oracle, the ledger advanced a day at a time, does not depend on it, so it cannot hide a wrong
+   balance; but §12's "cause" column is my reading of each).

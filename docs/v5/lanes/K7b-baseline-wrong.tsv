@@ -1,0 +1,178 @@
+project	first day it differs	position	old balance --at	fold (right)	days that differ	cause
+examples/02-household	2026-01-01	checking	9,200.00 USD	5,750.00 USD	91 days	a kept occurrence's flows
+examples/02-household	2026-01-01	insurer	0.00 USD	600.00 USD	91 days	a kept occurrence's flows
+examples/02-household	2026-01-01	landlord	0.00 USD	2,850.00 USD	91 days	a kept occurrence's flows
+examples/02-household	2026-01-16	utility	0.00 USD	118.40 USD	76 days	a kept occurrence's flows
+examples/04-freelancer	2025-02-12	brightwave	-9,600.00 USD	-6,400.00 USD	428 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-02-12	brightwave	6,400.00 USD	3,200.00 USD	428 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-03-28	fernhill	-9,000.00 USD	-4,500.00 USD	384 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-03-28	fernhill	4,500.00 USD	0.00 USD	384 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-04-20	orbit-labs	-8,250.00 USD	-5,500.00 USD	361 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-04-20	orbit-labs	5,500.00 USD	2,750.00 USD	361 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-08-15	northpeak	-14,800.00 USD	-7,400.00 USD	244 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-08-15	northpeak	7,400.00 USD	0.00 USD	244 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-12-15	delta-rugs	-3,800.00 USD	0.00 USD	122 days	a claim settled, forgiven or made by the monitor
+examples/04-freelancer	2025-12-15	delta-rugs	3,800.00 USD	0.00 USD	122 days	a claim settled, forgiven or made by the monitor
+examples/05-family	2024-12-31	crv	2 crv	1 crv	367 days	an asset counted twice
+examples/05-family	2024-12-31	house	2 house	1 house	367 days	an asset counted twice
+examples/07-landlord	2025-02-01	lender	3,842.30 USD	5,651.89 USD	335 days	a kept occurrence's flows
+examples/07-landlord	2025-02-01	rental-bank	4,747.70 USD	2,938.11 USD	335 days	a kept occurrence's flows
+examples/07-landlord	2025-02-03	tenant-a	0.00 USD	-2,400.00 USD	333 days	a kept occurrence's flows
+examples/07-landlord	2025-03-05	hartwell-pm	0.00 USD	192.00 USD	303 days	a kept occurrence's flows
+examples/07-landlord	2025-10-01	tenant-b	0.00 USD	-2,500.00 USD	93 days	a kept occurrence's flows
+examples/11-sam	2026-01-01	checking	8,412.55 USD	5,969.63 USD	86 days	a kept occurrence's flows
+examples/11-sam	2026-01-01	condo	2 condo	1 condo	86 days	an asset counted twice
+examples/11-sam	2026-01-01	dana	0.00 USD	-2,350.00 USD	86 days	a kept occurrence's flows
+examples/11-sam	2026-01-01	equinox	0.00 USD	240.00 USD	86 days	a kept occurrence's flows
+examples/11-sam	2026-01-01	greystar	0.00 USD	2,900.00 USD	86 days	a kept occurrence's flows
+examples/11-sam	2026-01-01	rocket	0.00 USD	1,892.92 USD	86 days	a kept occurrence's flows
+examples/11-sam	2026-01-01	visa	-1,240.18 USD	-1,480.18 USD	86 days	a kept occurrence's flows
+examples/11-sam	2026-01-03	figma	0.00 USD	15.00 USD	84 days	a kept occurrence's flows
+examples/11-sam	2026-01-08	mint	0.00 USD	45.00 USD	79 days	a kept occurrence's flows
+examples/11-sam	2026-01-22	netflix	0.00 USD	15.49 USD	65 days	a kept occurrence's flows
+examples/11-sam	2026-03-01	state-farm	0.00 USD	1,140.00 USD	27 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-01	checking	8,412.55 USD	3,619.63 USD	91 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-01	condo	2 condo	1 condo	91 days	an asset counted twice
+examples/v4-sketch	2026-01-01	equinox	0.00 USD	240.00 USD	91 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-01	greystar	0.00 USD	2,900.00 USD	91 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-01	rocket	0.00 USD	1,892.92 USD	91 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-01	visa	-1,240.18 USD	-1,480.18 USD	91 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-03	figma	0.00 USD	15.00 USD	89 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-08	mint	0.00 USD	45.00 USD	84 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-15	lumen	-1,545.30 USD	-4,600.00 USD	77 days	a kept occurrence's flows
+examples/v4-sketch	2026-01-22	netflix	0.00 USD	15.49 USD	70 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-01	card-me	0.00 USD	-84.00 USD	182 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-01	google-workspace	0.00 USD	84.00 USD	182 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-03	card-maya	0.00 USD	-45.00 USD	180 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-03	card-theo	0.00 USD	-87.50 USD	180 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-03	figma	0.00 USD	45.00 USD	180 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-03	slack	0.00 USD	87.50 USD	180 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-05	operating	0.00 USD	-2,400.00 USD	178 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-05	ravi	0.00 USD	2,400.00 USD	178 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-07	kestrel	0.00 USD	-1,200.00 USD	176 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-08	northwind	0.00 USD	-4,500.00 USD	175 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-09	notion	0.00 USD	48.00 USD	174 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-12	adobe	0.00 USD	359.97 USD	171 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-14	onepassword	0.00 USD	39.95 USD	169 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-15	irs	0.00 USD	17,636.50 USD	168 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-15	my-checking	0.00 USD	-8,800.00 USD	168 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-15	orchard-health	0.00 USD	-1,000.00 USD	168 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-15	theo-checking	0.00 USD	-4,900.00 USD	168 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-20	github	0.00 USD	84.00 USD	163 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-20	ledger-cpa	0.00 USD	650.00 USD	163 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-22	quickbooks	0.00 USD	90.00 USD	161 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-31	daniel	0.00 USD	6,264.80 USD	152 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-01-31	maya	0.00 USD	5,228.15 USD	152 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-02-04	ashgrove	-18,538.80 USD	-9,269.40 USD	148 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-04	ashgrove	9,269.40 USD	0.00 USD	148 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-19	nova-fitness	-5,219.70 USD	-2,571.30 USD	133 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-19	nova-fitness	2,648.40 USD	0.00 USD	133 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-20	foxglove	-6,621.00 USD	-2,317.35 USD	132 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-20	foxglove	4,303.65 USD	0.00 USD	132 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-24	tidewater	-10,400.00 USD	-5,200.00 USD	128 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-24	tidewater	5,200.00 USD	0.00 USD	128 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-26	kiln-ceramics	-5,300.00 USD	-2,650.00 USD	126 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-02-26	kiln-ceramics	2,650.00 USD	0.00 USD	126 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-03-01	hiscox	0.00 USD	4,860.00 USD	123 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-03-30	meridian-law	-13,276.25 USD	-8,276.25 USD	94 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-03-30	meridian-law	8,276.25 USD	3,276.25 USD	94 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-02	halcyon	-4,670.02 USD	-2,335.01 USD	91 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-02	halcyon	2,335.01 USD	0.00 USD	91 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-08	granite-peak	-23,614.90 USD	-11,807.45 USD	85 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-08	granite-peak	11,807.45 USD	0.00 USD	85 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-13	ironbark	-15,228.30 USD	-7,614.15 USD	80 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-13	ironbark	7,614.15 USD	0.00 USD	80 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-20	driftwood	-17,294.05 USD	-11,997.25 USD	73 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-20	driftwood	5,376.25 USD	79.45 USD	73 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-04-30	wa-esd	0.00 USD	1,061.40 USD	63 days	a kept occurrence's flows
+examples/explore-v5/01-agency	2026-05-01	hollis-foods	-10,814.30 USD	-7,062.40 USD	62 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-01	hollis-foods	3,751.90 USD	0.00 USD	62 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-08	juniper-books	-6,400.30 USD	-3,200.15 USD	55 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-08	juniper-books	3,200.15 USD	0.00 USD	55 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-18	sable-hotels	-4,138.12 USD	0.00 USD	45 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-18	sable-hotels	4,138.12 USD	0.00 USD	45 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-20	elm-street-dental	-6,959.70 USD	-3,428.50 USD	43 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-20	elm-street-dental	3,531.20 USD	0.00 USD	43 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-28	plover-outdoors	-8,800.00 USD	-4,400.00 USD	35 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-05-28	plover-outdoors	4,400.00 USD	0.00 USD	35 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-06-05	larkspur	-11,255.70 USD	-5,627.85 USD	27 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-06-05	larkspur	5,627.85 USD	0.00 USD	27 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-06-08	quill-press	-7,945.20 USD	-3,972.60 USD	24 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-06-08	quill-press	3,972.60 USD	0.00 USD	24 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-06-19	oakline	-11,062.40 USD	-7,062.40 USD	13 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/01-agency	2026-06-19	oakline	7,062.40 USD	3,062.40 USD	13 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/02-family	2026-01-01	car1	2 car1	1 car1	366 days	an asset counted twice
+examples/explore-v5/02-family	2026-01-01	home	2 home	1 home	366 days	an asset counted twice
+examples/explore-v5/02-family	2026-01-01	me-checking	18,420.55 USD	16,263.11 USD	366 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-01-01	rocket	0.00 USD	2,157.44 USD	366 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-01-12	pge	0.00 USD	148.00 USD	355 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-03-01	state-farm	0.00 USD	940.00 USD	307 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-03-14	sf-fcu	0.00 USD	560.20 USD	294 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-07-01	joint-checking	18,400.00 USD	15,636.62 USD	185 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-07-01	newrez	887.75 USD	3,651.13 USD	185 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-09-01	west-84th	4,850.00 USD	9,700.00 USD	123 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-09-14	coned	0.00 USD	118.00 USD	110 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-12-01	joint-visa	-37,192.75 USD	-39,492.75 USD	32 days	a kept occurrence's flows
+examples/explore-v5/02-family	2026-12-01	little-oaks	1,610.00 USD	3,910.00 USD	32 days	a kept occurrence's flows
+examples/explore-v5/03-triplex	2026-01-01	checking	23,140.62 USD	21,073.17 USD	274 days	a kept occurrence's flows
+examples/explore-v5/03-triplex	2026-01-01	first-federal	0.00 USD	2,067.45 USD	274 days	a kept occurrence's flows
+examples/explore-v5/03-triplex	2026-01-01	unit-a	2 unit-a	1 unit-a	274 days	an asset counted twice
+examples/explore-v5/03-triplex	2026-01-01	unit-b	2 unit-b	1 unit-b	274 days	an asset counted twice
+examples/explore-v5/03-triplex	2026-01-01	unit-c	2 unit-c	1 unit-c	274 days	an asset counted twice
+examples/explore-v5/03-triplex	2026-03-06	tenant-b	-185.00 USD	-92.50 USD	210 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/03-triplex	2026-03-06	tenant-b	92.50 USD	0.00 USD	210 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/03-triplex	2026-06-01	escrow	4,400.00 USD	1,800.00 USD	123 days	a kept occurrence's flows
+examples/explore-v5/03-triplex	2026-06-01	state-farm	0.00 USD	2,600.00 USD	123 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-02	kraken	0.00 ETH	-0.001435 ETH	243 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-02	kraken-stake	2.41 ETH	2.411435 ETH	243 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-08	github	0.00 USD	4.00 USD	237 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-08	notion	0.00 USD	10.00 USD	237 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-08	visa	-1,738.49 USD	-1,752.49 USD	237 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-10	nordlicht	-8,400.00 EUR	-4,200.00 EUR	204 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-10	nordlicht	4,200.00 EUR	0.00 EUR	235 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/04-nomad	2026-01-12	wise-bal	6,518.55 EUR	10,718.55 EUR	233 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-14	cloudflare	0.00 USD	20.00 USD	231 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-15	brightside	0.00 GBP	-3,100.00 GBP	230 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-15	wise-bal	1,204.10 GBP	4,304.10 GBP	230 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-16	chase-checking	14,220.80 USD	11,820.80 USD	229 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-16	irs	0.00 USD	2,400.00 USD	229 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-01-28	oakline-labs	-5,912.70 USD	-2,912.70 USD	217 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/04-nomad	2026-01-28	oakline-labs	3,000.00 USD	0.00 USD	217 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/04-nomad	2026-03-02	lx-cowork	0.00 EUR	180.00 EUR	184 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-03-08	millennium	3,180.00 EUR	3,140.01 EUR	178 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-03-08	nos	0.00 EUR	39.99 EUR	178 days	a kept occurrence's flows
+examples/explore-v5/04-nomad	2026-03-14	greenline-apts	-3,300.00 USD	-1,650.00 USD	172 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/04-nomad	2026-03-14	greenline-apts	1,650.00 USD	0.00 USD	172 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/04-nomad	2026-06-15	brightside	1,200.00 GBP	0.00 GBP	79 days	a claim settled, forgiven or made by the monitor
+examples/explore-v5/05-budgeter	2026-01-01	card	-486.20 USD	-531.20 USD	213 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-01-01	peak-gym	0.00 USD	45.00 USD	213 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-01-03	mint	0.00 USD	30.00 USD	211 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-01-15	acme-corp	0.00 USD	-2,450.00 USD	199 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-01-15	checking	3,412.60 USD	5,665.10 USD	199 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-01-15	savings	8,240.00 USD	8,437.50 USD	199 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-01-22	netflix	0.00 USD	15.49 USD	192 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-02-10	nyt	0.00 USD	100.00 USD	173 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-03-20	klarna	0.00 USD	60.00 USD	135 days	a kept occurrence's flows
+examples/explore-v5/05-budgeter	2026-04-01	geico	0.00 USD	612.00 USD	123 days	a kept occurrence's flows
+examples/explore-v5/06-family-addresses	2024-12-31	crv	2 crv	1 crv	367 days	an asset counted twice
+examples/explore-v5/06-family-addresses	2024-12-31	house	2 house	1 house	367 days	an asset counted twice
+docs/v5/measure/diff/cases2/claim-party-flow.ax	2026-01-20	ann	-1,100.00 USD	-800.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/claim-party-flow.ax	2026-01-20	ann	800.00 USD	500.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/claim-recognition.ax	2026-01-20	ann	-600.00 USD	-300.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/claim-recognition.ax	2026-01-20	ann	300.00 USD	0.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/claim-writeoff.ax	2026-02-15	ann	-500.00 USD	-200.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/claim-writeoff.ax	2026-02-15	ann	500.00 USD	200.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/promise-no-from.ax	2026-02-01	checking	20,000.00 USD	17,100.00 USD	30 days	a kept occurrence's flows
+docs/v5/measure/diff/cases2/promise-no-from.ax	2026-02-01	greystar	0.00 USD	2,900.00 USD	30 days	a kept occurrence's flows
+docs/v5/measure/diff/cases2/recognition-accrual.ax	2026-01-20	ann	-900.00 USD	-600.00 USD	28 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/recognition-accrual.ax	2026-01-20	ann	500.00 USD	200.00 USD	28 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/recognition-cash.ax	2026-01-20	ann	-900.00 USD	-600.00 USD	28 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/recognition-cash.ax	2026-01-20	ann	500.00 USD	200.00 USD	28 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/recognition-writeoff-lines.ax	2026-02-10	ann	-4,300.00 USD	-3,300.00 USD	35 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/recognition-writeoff-lines.ax	2026-02-10	ann	3,300.00 USD	2,300.00 USD	35 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/split-payment.ax	2026-01-20	fernhill	-6,200.00 USD	-3,100.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/split-payment.ax	2026-01-20	fernhill	3,100.00 USD	0.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/stmts-ok.ax	2026-06-01	boat	2 boat	1 boat	32 days	an asset counted twice
+docs/v5/measure/diff/cases2/stmts-ok.ax	2026-06-01	car	2 car	1 car	32 days	an asset counted twice
+docs/v5/measure/diff/cases2/stmts-ok.ax	2026-07-01	client	0.00 USD	50.00 USD	2 days	a claim settled, forgiven or made by the monitor
+docs/v5/measure/diff/cases2/stmts-ok.ax	2026-07-01	client	50.00 USD	0.00 USD	2 days	a claim settled, forgiven or made by the monitor
