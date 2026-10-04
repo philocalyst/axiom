@@ -275,8 +275,8 @@ the lane's code answered rather than the tests, because they were not mutants of
 pays its bills" (a clause the code did not need, removed) and "a bill made `since` another day is made on the day written" (an
 argument a bill does not have, removed). The ones killed by tests were run again against the strengthened tests ("a loan's tab is
 settled by what is paid to its lender" among them): killed by the tests every time. Final: every mutant killed by the oracle or by a
-test; none survives. The commit of the timings (`0592e23`) rewrote the code of seven of them (the gate, `claim_made_in`, `paid_to_party`,
-`relieve_balance`) and added one (the code index asks only a transaction that has a code): those eight ran again after it, all killed by the
+test; none survives. The commit of the timings (`0592e23`) rewrote the code of six of them (the gate, `claim_made_in` twice, `paid_to_party` twice,
+`relieve_balance`) and added one (the code index asks only a transaction that has a code): those seven ran again after it, all killed by the
 oracle.
 
 **`fuzz.py ... diff`** (1,000 mutants of the examples, seed 5): panics old = new = 0, output differs 0, regressions 0.
