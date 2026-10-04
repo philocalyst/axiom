@@ -150,16 +150,8 @@ impl FlowSide {
     }
 }
 
-/// How a line item bears on the flow it is under (LANGUAGE §3).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Sign {
-    /// Carved out of the header's amount.
-    Carve,
-    /// Comes on top of it.
-    Add,
-    /// Taken off it.
-    Less,
-}
+/// How a line item bears on the flow it is under (LANGUAGE §3): as written.
+pub use axiom_syntax::Sign;
 
 /// A header, the legs that take from it, and the items under it. `H` is the header, `F` how a leg names its
 /// flow, `I` what an item says of the flow it makes: [`Promised`] and [`Made`] are the two phases.

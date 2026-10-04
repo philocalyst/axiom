@@ -8,7 +8,7 @@ use axiom_syntax::Subject;
 use super::flow::{
     Codes, Ends, FlowCx, Parent, ResolvedEnd, ResolvedQuantity, Shape, TxnCx, empty_codes, endpoint, flow_roots,
     keep_program, lower_items, make_flow, make_resolved_flow, priced, push_flow_expressions, push_item_root,
-    push_quantity_root, push_tail_roots, resolve_amount, resolve_end, resolve_quantity,
+    push_quantity_root, push_tail_roots, resolve_end, resolve_quantity, written_amount,
 };
 use super::loan_opening::{Insertion, Unopened};
 use super::push_amount_root;
@@ -21,7 +21,7 @@ use crate::balance::{self, Settled, Total};
 use crate::book::{Amount, Contract, Place, ScheduleKind, Terms};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
-use crate::errors::Word;
+use crate::errors::{Reported, Word};
 use crate::journal::{
     Action, Detail, Flow, FlowExpressions, Infer, Mode, OccurrenceTail, Origin, Program, Txn, TxnKind,
     WrittenOccurrence,
@@ -845,7 +845,8 @@ fn lower_occurrence<'a, 's>(
     let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
     let txn_id = Id::new(staged.book.txns.len() as u32);
     let cx = FlowCx { file, home: site.home, day: statement.date, txn: txn_id, loc, roots: &roots, code_index };
-    let occurrence_amount = amount.and_then(|amount| resolve_amount(&staged, &cx, amount, fallback, diags));
+    let occurrence_amount =
+        amount.and_then(|amount| written_amount(&staged, cx.file, cx.roots, amount, fallback).or_report(diags));
     if amount.is_some() && occurrence_amount.is_none() {
         return;
     }
@@ -1472,9 +1473,9 @@ fn lower_owes<'a, 's>(
     }
     let mode = if opening { Mode::Opening } else { Mode::Actual };
     let mut built = Built { flow_roots: Vec::new(), group: None, successful: true };
-    if let Some(written_amount) = amount {
+    if let Some(written) = amount {
         let base = staged.book.base;
-        let Some(expr) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
+        let Some(expr) = written_amount(&staged, cx.file, cx.roots, written, base).or_report(diags) else {
             return;
         };
         let (amount, root) = (expr.stand_in(base), expr.root());

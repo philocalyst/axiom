@@ -9,12 +9,12 @@ use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Run, Sym, Timeline}
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Direction, ExprKind, Name};
 
+use super::flow::{written_amount, written_part};
 use super::infer::classify;
 use super::tail::{Reach, resolve_object, written_purpose, written_waive};
 use super::{compile_roots, contract_roots, inputs};
 use crate::book::{
-    Amount, Asset, At, Book, Cadence, Commodity, Contract, Deadline, Entity, Input, Loan, Place, Role, Share, Terms,
-    Text,
+    Amount, Asset, At, Book, Commodity, Contract, Deadline, Entity, Input, Loan, Place, Role, Share, Terms, Text,
 };
 use crate::collect::Collected;
 use crate::declare::World;
@@ -27,7 +27,7 @@ use crate::promise::Blame;
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::sources::Site;
-use crate::split::{Cut, Expr, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says, Sign};
+use crate::split::{Cut, FlowSide, Header, Item, Leg, Part, Promised, Quantity, Says};
 
 /// A contract as written, with the id reserved for it and its name.
 #[derive(Clone, Copy)]
@@ -352,7 +352,7 @@ fn lower_terms<'a, 's>(
     });
     let grace = lines::grace(file, node.props).or_report(diags)?;
     Some(Terms {
-        every: written_cadence(schedule.terms.cadence),
+        every: schedule.terms.cadence,
         on: file[schedule.terms.on].to_vec().into_boxed_slice(),
         template: Box::new([template]),
         program,
@@ -366,14 +366,6 @@ fn lower_terms<'a, 's>(
         escalation: lines::escalation(world, home, file, node.props, diags),
         rate: cx.loan.map(|(_, rate)| rate),
     })
-}
-
-/// The cadence a schedule is written with, as the promise holds it.
-fn written_cadence(cadence: ast::Cadence) -> Cadence {
-    match cadence {
-        ast::Cadence::Every(span) => Cadence::Every(span),
-        ast::Cadence::TwiceMonthly => Cadence::TwiceMonthly,
-    }
 }
 
 /// The flow a schedule promises as a whole: between the holding and the party, in the direction written, with
@@ -480,12 +472,12 @@ fn schedule_amount<'s>(
 ) -> Option<ScheduleAmount> {
     let (quantity, amount, buys) = match schedule.terms.payment {
         Some(ast::Payment::Fixed(amount)) => {
-            let expr = template_amount(world, file, amount, roots, world.book.base, diags)?;
+            let expr = written_amount(world, file, roots, amount, world.book.base).or_report(diags)?;
             (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), None)
         }
         Some(ast::Payment::Buy { unit, spend }) => {
             let buy_unit = resolve_commodity(world, file, unit, diags)?;
-            let expr = template_amount(world, file, spend, roots, world.book.base, diags)?;
+            let expr = written_amount(world, file, roots, spend, world.book.base).or_report(diags)?;
             (Quantity::Amount(expr), Quantity::Amount(expr).stand_in(world.book.base), Some(buy_unit))
         }
         None => (Quantity::Derived, Amount::zero(world.book.base), None),
@@ -523,7 +515,8 @@ impl TermsCx<'_, '_> {
     }
 }
 
-/// What a leg of a promise takes of its header, and the amount its flow carries until the fold has read it.
+/// What a quantity written in a contract's schedule takes of the group, and what the template carries meanwhile. A
+/// bare percentage is a share of the header's amount.
 fn template_quantity<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
@@ -551,54 +544,12 @@ fn template_quantity<'s>(
         }
         return Some((Part::Share(rate), Amount::zero(fallback)));
     }
-    let written = match quantity {
-        ast::Quantity::Amount(amount) => {
-            Quantity::Amount(template_amount(world, file, amount, roots, fallback, diags)?)
-        }
-        ast::Quantity::Pending(amount) => {
-            Quantity::Pending(template_amount(world, file, amount, roots, fallback, diags)?)
-        }
-        ast::Quantity::Target(amount) => {
-            Quantity::Target(template_amount(world, file, amount, roots, fallback, diags)?)
-        }
-        ast::Quantity::Unknown(unit) => Quantity::Unknown(resolve_commodity(world, file, unit, diags)?),
-        ast::Quantity::All(unit) => {
-            let unit = match unit {
-                Some(unit) => Some(resolve_commodity(world, file, unit, diags)?),
-                None => None,
-            };
-            Quantity::All(unit)
-        }
-        ast::Quantity::Rest => return Some((Part::Rest, Amount::zero(fallback))),
-        ast::Quantity::Whole => unreachable!("the parser reads `basis` as a quantity only in an opening"),
+    let (part, _) = written_part(world, file, roots, quantity, fallback, diags)?;
+    let stand_in = match part {
+        Part::Of(quantity) => quantity.stand_in(fallback),
+        Part::Rest | Part::Share(_) => Amount::zero(fallback),
     };
-    Some((Part::Of(written), written.stand_in(fallback)))
-}
-
-/// A written amount of a promise: its literal, or the node of the terms' program that computes it.
-fn template_amount<'s>(
-    world: &World<'s>,
-    file: &ast::File<'s>,
-    amount: ast::Amount<'s>,
-    roots: &Map<ast::ExprId, crate::law::NodeId>,
-    fallback: Id<Commodity>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Expr> {
-    match amount {
-        ast::Amount::Literal(literal) => {
-            world.literal_amount(file, literal, Some(fallback)).or_report(diags).map(Expr::Literal)
-        }
-        ast::Amount::Computed(root) => {
-            let Some(&node) = roots.get(&root) else {
-                diags.push(
-                    Diagnostic::error("template-root", "a computed template amount was not compiled")
-                        .label(file.exprs[root].loc, "this amount has no typed program node"),
-                );
-                return None;
-            };
-            Some(Expr::Computed(node))
-        }
-    }
+    Some((part, stand_in))
 }
 
 /// One item under a schedule's header: carved from it, added to it or taken from it.
@@ -611,14 +562,10 @@ fn lower_header_item<'s>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Item<Says>> {
     let (file, home) = (cx.file, cx.written.site.home);
-    let amount = template_amount(world, file, item.amount, roots, header.unit, diags)?;
+    let amount = written_amount(world, file, roots, item.amount, header.unit).or_report(diags)?;
     let tail = lower_term_tail(world, home, file, item.tail, diags);
     Some(Item {
-        sign: match item.sign {
-            ast::Sign::Carve => Sign::Carve,
-            ast::Sign::Add => Sign::Add,
-            ast::Sign::Less => Sign::Less,
-        },
+        sign: item.sign,
         amount: Cut::Of(amount),
         loc: item.loc,
         flow: Says {

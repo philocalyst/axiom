@@ -20,7 +20,6 @@ use crate::errors::{Reported, Word};
 use crate::journal::{Detail, Purposed, Select, Waive};
 use crate::lower::tail::{Reach, written_purpose, written_waive};
 use crate::scope::Home;
-use crate::split::Sign;
 
 /// Where each role of a contract's kind stands in the book the contract is lowered into: the place its filler is at,
 /// which is the owner's holding where the filler is the owner and the filler's outside place where it is anyone else.
@@ -187,12 +186,7 @@ pub(crate) fn flow_ends<'s>(
 
 /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow that implies it.
 fn implied_item<'s>(item: &ast::LineItem<'s>) -> Said<'s> {
-    let sign = match item.sign {
-        ast::Sign::Carve => Sign::Carve,
-        ast::Sign::Add => Sign::Add,
-        ast::Sign::Less => Sign::Less,
-    };
-    Said { shape: Shape::Item(sign), amount: item.amount, clauses: item.tail, selectors: None }
+    Said { shape: Shape::Item(item.sign), amount: item.amount, clauses: item.tail, selectors: None }
 }
 
 /// `-> escrow 410 USD`: a flow of its own, whose ends are the implying flow's own where it names none (`self`).

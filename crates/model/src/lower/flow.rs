@@ -18,7 +18,7 @@ use crate::law::{NodeId, Ty};
 use crate::resolve::End;
 use crate::scope::Home;
 use crate::solve::{Line, LiteralEnv, Resolved};
-use crate::split::{Cut, Endpoint, Expr, FlowSide, Item, Made, Part, Quantity, Sign};
+use crate::split::{Cut, Endpoint, Expr, FlowSide, Item, Made, Part, Quantity};
 
 #[derive(Clone, Copy)]
 pub(super) struct ResolvedEnd {
@@ -184,61 +184,6 @@ impl ResolvedQuantity {
     }
 }
 
-/// What a quantity written in a flow is, in `fallback`'s unit when it names none. None when it cannot be, which is
-/// said for a commodity that does not exist and, as it always was, for nothing else.
-pub(super) fn resolve_quantity<'s>(
-    world: &mut World<'s>,
-    cx: &FlowCx<'_, 's>,
-    quantity: ast::Quantity<'s>,
-    fallback: Id<crate::book::Commodity>,
-    side: FlowSide,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<ResolvedQuantity> {
-    let file = cx.file;
-    let mut commodity = |unit: ast::Name<'s>| world.commodity_of(Word::of(file, unit.0)).or_report(diags);
-    let (part, own) = match quantity {
-        ast::Quantity::Amount(written) => {
-            (Part::Of(Quantity::Amount(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
-        }
-        ast::Quantity::Pending(written) => {
-            (Part::Of(Quantity::Pending(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
-        }
-        ast::Quantity::Target(written) => {
-            (Part::Of(Quantity::Target(stated_amount(world, cx, written, fallback)?)), Mode::Actual)
-        }
-        ast::Quantity::Unknown(unit) => (Part::Of(Quantity::Unknown(commodity(unit)?)), Mode::Actual),
-        ast::Quantity::All(unit) => {
-            let unit = match unit {
-                Some(unit) => Some(commodity(unit)?),
-                None => None,
-            };
-            (Part::Of(Quantity::All(unit)), Mode::Actual)
-        }
-        ast::Quantity::Rest => (Part::Rest, Mode::Actual),
-        // An opening line's one unit of an asset: nothing keeps it as a quantity, only as an amount.
-        ast::Quantity::Whole => {
-            let one = Amount::new(Qty(1), fallback);
-            (Part::Of(Quantity::Amount(Expr::Literal(one))), Mode::Opening)
-        }
-    };
-    Some(ResolvedQuantity::of(part, own, fallback, side))
-}
-
-/// A written amount: its literal, or the node that computes it. A literal that is no amount costs the
-/// whole quantity and says nothing: the diagnostic is dropped here, as it always was, and is not the caller's to
-/// report.
-fn stated_amount<'s>(
-    world: &World<'s>,
-    cx: &FlowCx<'_, 's>,
-    written: ast::Amount<'s>,
-    fallback: Id<crate::book::Commodity>,
-) -> Option<Expr> {
-    match written {
-        ast::Amount::Literal(literal) => world.literal_amount(cx.file, literal, Some(fallback)).ok().map(Expr::Literal),
-        ast::Amount::Computed(expr) => Some(Expr::Computed(*cx.roots.get(&expr)?)),
-    }
-}
-
 /// The flow a header with both its ends named makes: what it says moves, checked and priced, and the expressions
 /// its amounts and basis are computed by.
 pub(super) fn make_flow<'s>(
@@ -278,6 +223,76 @@ pub(super) fn make_flow<'s>(
 
 /// The amounts a header states for each side, whichever sides it states, and how sure they are; a transfer states
 /// the same amount at both ends.
+/// A written amount: the literal in its unit, else in `fallback`, or the node compiled for its expression (said to be
+/// missing when it is: a template's expressions are compiled with the contract, and one may have failed).
+pub(super) fn written_amount<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    roots: &Map<ast::ExprId, NodeId>,
+    written: ast::Amount<'s>,
+    fallback: Id<Commodity>,
+) -> Result<Expr, Diagnostic> {
+    match written {
+        ast::Amount::Literal(literal) => world.literal_amount(file, literal, Some(fallback)).map(Expr::Literal),
+        ast::Amount::Computed(root) => match roots.get(&root) {
+            Some(&node) => Ok(Expr::Computed(node)),
+            None => Err(Diagnostic::error("template-root", "a computed template amount was not compiled")
+                .label(file.exprs[root].loc, "this amount has no typed program node")),
+        },
+    }
+}
+
+/// What a quantity written at one side of a line takes of its group, and how it is had; what is wrong with it goes to
+/// `said`.
+pub(super) fn written_part<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    roots: &Map<ast::ExprId, NodeId>,
+    written: ast::Quantity<'s>,
+    fallback: Id<Commodity>,
+    said: &mut Vec<Diagnostic>,
+) -> Option<(Part, Mode)> {
+    let commodity =
+        |unit: ast::Name<'s>, said: &mut Vec<Diagnostic>| world.commodity_of(Word::of(file, unit.0)).or_report(said);
+    let amount = |amount: ast::Amount<'s>, said: &mut Vec<Diagnostic>| {
+        written_amount(world, file, roots, amount, fallback).or_report(said)
+    };
+    let quantity = match written {
+        ast::Quantity::Amount(written) => Quantity::Amount(amount(written, said)?),
+        ast::Quantity::Pending(written) => Quantity::Pending(amount(written, said)?),
+        ast::Quantity::Target(written) => Quantity::Target(amount(written, said)?),
+        ast::Quantity::Unknown(unit) => Quantity::Unknown(commodity(unit, said)?),
+        ast::Quantity::All(None) => Quantity::All(None),
+        ast::Quantity::All(Some(unit)) => Quantity::All(Some(commodity(unit, said)?)),
+        ast::Quantity::Rest => return Some((Part::Rest, Mode::Actual)),
+        // An opening line's one unit of an asset: nothing keeps it as a quantity, only as an amount.
+        ast::Quantity::Whole => {
+            return Some((Part::Of(Quantity::Amount(Expr::Literal(Amount::new(Qty(1), fallback)))), Mode::Opening));
+        }
+    };
+    Some((Part::Of(quantity), Mode::Actual))
+}
+
+/// What a quantity written in a flow is, in `fallback`'s unit when it names none. None when it cannot be, which is
+/// said for a commodity that does not exist and, as it always was, for nothing else: an amount that is not one is
+/// dropped here.
+pub(super) fn resolve_quantity<'s>(
+    world: &World<'s>,
+    cx: &FlowCx<'_, 's>,
+    quantity: ast::Quantity<'s>,
+    fallback: Id<Commodity>,
+    side: FlowSide,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<ResolvedQuantity> {
+    let mut said = Vec::new();
+    let read = written_part(world, cx.file, cx.roots, quantity, fallback, &mut said);
+    if matches!(quantity, ast::Quantity::Unknown(_) | ast::Quantity::All(_)) {
+        diags.append(&mut said);
+    }
+    let (part, own) = read?;
+    Some(ResolvedQuantity::of(part, own, fallback, side))
+}
+
 fn stated_amounts(
     loc: Loc,
     out: Option<ResolvedQuantity>,
@@ -480,7 +495,7 @@ pub(super) fn lower_items<'s>(
     for item in &cx.file[items] {
         let cut = match share_of(cx.file, item.amount) {
             Some(rate) => Cut::Share(rate),
-            None => match resolve_amount(staged, cx, item.amount, staged.book.base, diags) {
+            None => match written_amount(staged, cx.file, cx.roots, item.amount, staged.book.base).or_report(diags) {
                 Some(expr) => Cut::Of(expr),
                 None => continue,
             },
@@ -518,16 +533,7 @@ pub(super) fn lower_items<'s>(
         } else {
             None
         };
-        lowered.push(Item {
-            sign: match item.sign {
-                ast::Sign::Carve => Sign::Carve,
-                ast::Sign::Add => Sign::Add,
-                ast::Sign::Less => Sign::Less,
-            },
-            amount: cut,
-            loc: item.loc,
-            flow,
-        });
+        lowered.push(Item { sign: item.sign, amount: cut, loc: item.loc, flow });
     }
     lowered.into_boxed_slice()
 }
@@ -556,22 +562,6 @@ pub(super) fn push_flow_expressions(
 ) {
     if out.is_some() || arrive.is_some() || basis.is_some() {
         roots.push(FlowExpressions { flow, out, arrive, basis });
-    }
-}
-
-/// A written amount of a record: its literal, or the node that computes it. None after the problem is said.
-pub(super) fn resolve_amount<'s>(
-    world: &World<'s>,
-    cx: &FlowCx<'_, 's>,
-    amount: ast::Amount<'s>,
-    fallback: Id<crate::book::Commodity>,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Expr> {
-    match amount {
-        ast::Amount::Literal(literal) => {
-            world.literal_amount(cx.file, literal, Some(fallback)).or_report(diags).map(Expr::Literal)
-        }
-        ast::Amount::Computed(root) => Some(Expr::Computed(*cx.roots.get(&root)?)),
     }
 }
 
