@@ -116,9 +116,10 @@ impl<'s> Parser<'s> {
         })
     }
 
-    /// The way the next token points, if it is an arrow.
+    /// The way the next token points, if it is an arrow. Only punctuation can be one, so no word is looked up.
     pub fn junction(&self) -> Option<Junction> {
-        match self.word() {
+        let Tok::Punct(punct) = self.tok() else { return None };
+        match Self::punctuation(punct) {
             Some(Word::Flow(junction)) => Some(junction),
             _ => None,
         }
@@ -127,10 +128,14 @@ impl<'s> Parser<'s> {
     /// The word after the subject, if the table has it.
     fn word(&self) -> Option<Word> {
         match self.tok() {
-            Tok::Punct(punct) => PUNCTUATION.iter().find(|(known, _)| *known == punct).map(|&(_, word)| word),
+            Tok::Punct(punct) => Self::punctuation(punct),
             Tok::Name(name) => WORDS.iter().find(|(known, _)| *known == name).map(|&(_, word)| word),
             _ => None,
         }
+    }
+
+    fn punctuation(punct: Punct) -> Option<Word> {
+        PUNCTUATION.iter().find(|(known, _)| *known == punct).map(|&(_, word)| word)
     }
 
     /// The rest of a flow whose source was read: the arrow, its target, the tail and the lines under it.

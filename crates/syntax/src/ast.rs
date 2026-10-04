@@ -374,6 +374,8 @@ tables! {
     items: LineItem<'s>,
     /// The selectors of ends: [`End::select`].
     selects: Select<'s>,
+    /// The owners flows pass through: [`Course::Through`].
+    owners: End<'s>,
     /// The clauses of tails: [`Flow::tail`].
     clauses: Clause<'s>,
     /// The `also` lines of declarations: [`Contract::alsos`], [`Decl::alsos`].
@@ -528,11 +530,34 @@ pub struct Flow<'s> {
     pub tail: Many<Clause<'s>>,
     /// The indented lines under the header.
     pub body: Body<'s>,
-    /// Which way the arrow was written.
-    pub junction: Junction,
-    /// The owner whose book a split passes through, when the header names one that is no end of it: `me` in `me <-
-    /// acme 12_000 USD` with legs. The split's source (or, with `->`, its destination) is the other end.
-    pub through: Option<End<'s>>,
+    /// Which way the arrow was written, and whose book the flow passes through.
+    pub course: Course<'s>,
+}
+
+/// Which way a flow's arrow points, and whether the flow passes through an owner: the one the header names when it is
+/// no end of the flow, `me` in `me <- acme 12_000 USD` with legs (the split's source, or with `->` its destination, is
+/// the other end). One value, so that a flow costs one word for both and the owner is not stored where there is none.
+#[derive(Clone, Copy, Debug)]
+pub enum Course<'s> {
+    Direct(Junction),
+    Through(Junction, Ref<End<'s>>),
+}
+
+impl<'s> Course<'s> {
+    /// The way the arrow points.
+    pub const fn junction(self) -> Junction {
+        match self {
+            Course::Direct(junction) | Course::Through(junction, _) => junction,
+        }
+    }
+
+    /// The owner the flow passes through: `&file[through]`.
+    pub const fn through(self) -> Option<Ref<End<'s>>> {
+        match self {
+            Course::Direct(_) => None,
+            Course::Through(_, owner) => Some(owner),
+        }
+    }
 }
 
 /// Which way a flow's arrow points, and so what happened to the end it starts from or points at. A line is about its

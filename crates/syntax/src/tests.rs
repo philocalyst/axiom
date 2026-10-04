@@ -3417,7 +3417,7 @@ fn a_take_is_a_give_written_from_the_other_end() {
     let take = parse_clean("2026-01-15 checking <- acme 3_200 USD #wages\n");
     let give = parse_clean("2026-01-15 acme -> checking 3_200 USD #wages\n");
     let (take, give) = (&txns(&take)[0].flow, &txns(&give)[0].flow);
-    assert_eq!((take.junction, give.junction), (Junction::In, Junction::Out));
+    assert_eq!((take.course.junction(), give.course.junction()), (Junction::In, Junction::Out));
     assert_eq!(reads(take), reads(give), "the model reads the same flow");
     assert_eq!(reads(take), [(Some("acme"), None), (Some("checking"), Some("3_200 USD"))]);
 }
@@ -3440,18 +3440,23 @@ fn file_select(file: &File<'_>, end: Option<End<'_>>) -> usize {
     file[end.expect("an end").select].len()
 }
 
+/// The owner a flow passes through, by name.
+fn through<'s>(file: &File<'s>, flow: &Flow<'s>) -> Option<&'s str> {
+    flow.course.through().map(|owner| file[owner].name.0)
+}
+
 #[test]
 fn legs_lead_with_their_arrow_and_an_owner_passes_a_partys_money_through() {
     let src = "2026-03-14 me <- acme 12_000 USD #wages\n  -> irs 2_640 USD\n  -> checking ...\n";
     let file = parse_clean(src);
     let flow = &txns(&file)[0].flow;
-    assert_eq!(flow.through.map(|end| end.name.0), Some("me"));
+    assert_eq!(through(&file, flow), Some("me"));
     assert_eq!(reads(flow), [(Some("acme"), None), (None, Some("12_000 USD"))], "what the model reads is v4's split");
     assert!(file[flow.body.legs].iter().all(|leg| leg.arrow == Some(Junction::Out)));
 
     let file = parse_clean("2026-03-14 me -> shop 100 USD\n  <- savings 30 USD\n  <- checking ...\n");
     let flow = &txns(&file)[0].flow;
-    assert_eq!(flow.through.map(|end| end.name.0), Some("me"));
+    assert_eq!(through(&file, flow), Some("me"));
     assert_eq!(reads(flow), [(None, None), (Some("shop"), Some("100 USD"))]);
 
     let file = parse_clean("2026-03-14 checking <- 100 USD\n  <- shop 30 USD\n  <- acme ...\n");

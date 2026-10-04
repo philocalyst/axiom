@@ -105,7 +105,7 @@ impl<'a, 's> Upgrade<'a, 's> {
 
     /// A flow written the v4 way, rewritten: its header, and the arrows of its legs.
     fn flow(&mut self, loc: Loc, flow: &Flow<'s>) {
-        if flow.junction == Junction::In || flow.through.is_some() {
+        if !matches!(flow.course, Course::Direct(Junction::Out)) {
             return;
         }
         let Some(header) = self.reader.cut_header(loc, flow.tail, Says::Flow) else { return };

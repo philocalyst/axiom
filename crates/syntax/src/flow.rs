@@ -23,7 +23,9 @@ impl<'s> Parser<'s> {
         }
         let tail = self.tail(scope, clauses)?;
         let flow = match junction {
-            Junction::Out => Flow { from: subject, to: object, tail, body: Body::default(), junction, through: None },
+            Junction::Out => {
+                Flow { from: subject, to: object, tail, body: Body::default(), course: Course::Direct(junction) }
+            }
             Junction::In => self.taken(subject, object, tail, arrow)?,
         };
         Ok((flow, arrow))
@@ -38,7 +40,7 @@ impl<'s> Parser<'s> {
             return self.fail(amount_before_take(arrow, &subject, &object));
         }
         let (from, to) = (Side { end: object.end, amount: None }, Side { end: subject.end, amount: object.amount });
-        Ok(Flow { from, to, tail, body: Body::default(), junction: Junction::In, through: None })
+        Ok(Flow { from, to, tail, body: Body::default(), course: Course::Direct(Junction::In) })
     }
 
     /// Reads the legs under `line` into `flow` and settles what the header and they say together.
@@ -113,17 +115,22 @@ impl<'s> Parser<'s> {
 
     /// Consumes the arrow, which is `junction`'s. `=>`, `→` and `←` are read as one, with an error that says how to
     /// write it, so the flow around them is still kept.
-    fn written_arrow(&mut self, junction: Junction) -> Loc {
+    pub fn written_arrow(&mut self, junction: Junction) -> Loc {
         let loc = self.bump().loc;
-        let (written, arrow) = (self.text(loc), junction.spelling());
-        if written != arrow {
-            let diag =
-                Diagnostic::error("unknown-arrow", format!("`{written}` is not the flow arrow; write `{arrow}`"))
-                    .label(loc, format!("money moves with `{arrow}`"))
-                    .fix("replace it", loc, arrow);
-            self.report(diag);
+        // The lexer's `->` and `<-` are the two that start with these bytes; the others it reads as arrows do not.
+        if !matches!(self.src.as_bytes()[loc.start as usize], b'-' | b'<') {
+            self.unknown_arrow(loc, junction);
         }
         loc
+    }
+
+    #[cold]
+    fn unknown_arrow(&mut self, loc: Loc, junction: Junction) {
+        let (written, arrow) = (self.text(loc), junction.spelling());
+        let diag = Diagnostic::error("unknown-arrow", format!("`{written}` is not the flow arrow; write `{arrow}`"))
+            .label(loc, format!("money moves with `{arrow}`"))
+            .fix("replace it", loc, arrow);
+        self.report(diag);
     }
 
     fn arrow_expected(&self) -> Diagnostic {
@@ -444,14 +451,14 @@ impl<'s> Parser<'s> {
         let form = match (written(&flow.from), written(&flow.to), legs) {
             (Some(left), Some(right), _) if ends => Some((Form::TwoAmounts, at(left).to(at(right)))),
             (Some(left), None, true) => Some((Form::DanglingAmount, at(left).to(arrow))),
-            _ => (flow.junction == Junction::Out && flow.from.end.is_none() && flow.through.is_none())
+            _ => (matches!(flow.course, Course::Direct(Junction::Out)) && flow.from.end.is_none())
                 .then_some((Form::NoSubject, arrow)),
         };
         if let Some((form, loc)) = form {
             self.old.note(form, loc, 1);
         }
         // The legs of a split or a through-split lead with an arrow; the others may leave it off.
-        if flow.junction == Junction::Out && flow.through.is_none() {
+        if matches!(flow.course, Course::Direct(Junction::Out)) {
             self.note_bare_legs(flow.body.legs);
         }
     }
@@ -459,23 +466,25 @@ impl<'s> Parser<'s> {
     /// Legs under a header that names two ends are how an owner passes a party's money on: `me <- acme 12_000 USD` with
     /// `->` legs, `me -> shop 100 USD` with `<-` legs. Without arrows on them it is many-to-many.
     fn settle_through(&mut self, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
+        let junction = flow.course.junction();
         let first = &self.slice(flow.body.legs)[0];
-        let (arrowed, first) = (first.arrow.is_some() || flow.junction == Junction::In, first.loc);
+        let (arrowed, at) = (first.arrow.is_some() || junction == Junction::In, first.loc);
         if !arrowed || flow.from.amount.is_some() {
-            return self.fail(many_to_many(arrow, first));
+            return self.fail(many_to_many(arrow, at));
         }
-        flow.through = match flow.junction {
+        let owner = match junction {
             Junction::Out => flow.from.end.take(),
             Junction::In => flow.to.end.take(),
         };
+        flow.course = Course::Through(junction, self.push(owner.expect("settle sends only flows that name both ends")));
         self.settle_split(flow)
     }
 
     /// One named end and legs for the other: the arrows they lead with point the way the split goes.
     fn settle_split(&mut self, flow: &Flow<'s>) -> Parse<()> {
         let toward = if flow.from.end.is_some() { Junction::Out } else { Junction::In };
-        let arrows = match (flow.junction, flow.through) {
-            (Junction::Out, None) => Arrows::Tolerated(toward),
+        let arrows = match flow.course {
+            Course::Direct(Junction::Out) => Arrows::Tolerated(toward),
             _ => Arrows::Required(toward),
         };
         self.legs_point(flow.body.legs, arrows)?;
@@ -489,12 +498,12 @@ impl<'s> Parser<'s> {
     /// was written, and the model refuses it.
     fn settle_exchange(&mut self, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
         let (from, to) = (flow.from.amount.is_some(), flow.to.amount.is_some());
-        let named = flow.junction == Junction::In || flow.from.end.is_some();
+        let named = flow.course.junction() == Junction::In || flow.from.end.is_some();
         if from && to && flow.to.end.is_none() {
             return Ok(());
         }
         if !named || !to || from {
-            return self.fail(match flow.junction {
+            return self.fail(match flow.course.junction() {
                 Junction::In => takes_nothing(arrow, flow.to.end),
                 Junction::Out => missing_legs(arrow, flow.from.end.is_some()),
             });
@@ -509,7 +518,8 @@ impl<'s> Parser<'s> {
     /// How the legs under a header write their arrows, and whether they do. A leg that leads with an arrow when it is
     /// told it need not still has to point the right way.
     pub fn legs_point(&mut self, legs: Many<Leg<'s>>, arrows: Arrows) -> Parse<()> {
-        let problem = self.slice(legs).iter().find_map(|leg| self.arrow_problem(leg, arrows));
+        let faulty = self.slice(legs).iter().find_map(|leg| Some((leg, arrows.fault(leg.arrow)?)));
+        let problem = faulty.map(|(leg, fault)| fault.said(leg.loc, self.arrow_at(leg)));
         problem.map_or(Ok(()), |diag| self.fail(diag))
     }
 
@@ -519,17 +529,6 @@ impl<'s> Parser<'s> {
         if let Some(first) = bare.next() {
             let more = bare.count();
             self.old.note(Form::BareLeg, first, 1 + more as u32);
-        }
-    }
-
-    fn arrow_problem(&self, leg: &Leg<'s>, arrows: Arrows) -> Option<Diagnostic> {
-        match (leg.arrow, arrows) {
-            (None, Arrows::Required(toward)) => Some(leg_needs_arrow(leg.loc, toward)),
-            (Some(written), Arrows::Required(toward) | Arrows::Tolerated(toward)) if written != toward => {
-                Some(leg_direction(self.arrow_at(leg), toward))
-            }
-            (Some(_), Arrows::Forbidden) => Some(tally_arrow(self.arrow_at(leg))),
-            _ => None,
         }
     }
 
@@ -638,7 +637,7 @@ impl<'s> Flow<'s> {
     /// purchase).
     fn within(&mut self) {
         let bare = |end: Option<End<'s>>| end.map(|end| End { select: Many::EMPTY, ..end });
-        match self.junction {
+        match self.course.junction() {
             Junction::Out => {
                 self.from.amount = self.to.amount.take();
                 self.to.end = bare(self.from.end);
@@ -655,6 +654,39 @@ pub(crate) enum Arrows {
     Required(Junction),
     Tolerated(Junction),
     Forbidden,
+}
+
+/// What is wrong with the arrow of a leg. Small, so that the legs that are right cost no diagnostic to find.
+#[derive(Clone, Copy)]
+enum Fault {
+    Missing(Junction),
+    Wrong(Junction),
+    Tally,
+}
+
+impl Arrows {
+    /// What is wrong with a leg that wrote `written` (or none), if anything.
+    fn fault(self, written: Option<Junction>) -> Option<Fault> {
+        match (written, self) {
+            (None, Arrows::Required(toward)) => Some(Fault::Missing(toward)),
+            (Some(written), Arrows::Required(toward) | Arrows::Tolerated(toward)) if written != toward => {
+                Some(Fault::Wrong(toward))
+            }
+            (Some(_), Arrows::Forbidden) => Some(Fault::Tally),
+            _ => None,
+        }
+    }
+}
+
+impl Fault {
+    /// The error for a leg written at `leg`, whose arrow (if it has one) is at `arrow`.
+    fn said(self, leg: Loc, arrow: Loc) -> Diagnostic {
+        match self {
+            Fault::Missing(toward) => leg_needs_arrow(leg, toward),
+            Fault::Wrong(toward) => leg_direction(arrow, toward),
+            Fault::Tally => tally_arrow(arrow),
+        }
+    }
 }
 
 /// Whether a token starts an end and not an amount: a name, a commodity (an amount starts with its number, so one
@@ -700,12 +732,12 @@ fn takes_nothing(arrow: Loc, subject: Option<End<'_>>) -> Diagnostic {
 fn exchange_no_price(arrow: Loc, flow: &Flow<'_>) -> Diagnostic {
     let (end, amount) = (flow.from.end.or(flow.to.end), flow.to.amount.and_then(Quantity::literal));
     let (end, amount) = (end.map_or("fidelity", |end| end.name.0), amount.map_or("7 VTI", |amount| amount.0));
-    let example = format!("{end} {} {amount} @ 297.00 USD", flow.junction.spelling());
+    let example = format!("{end} {} {amount} @ 297.00 USD", flow.course.junction().spelling());
     let diag = Diagnostic::error("exchange-no-price", "this line has one end and an amount, but no price and no legs")
         .label(arrow, "nothing says what the amount was exchanged for, or where it goes")
         .help(format!("an exchange says its price: `{example}`"))
         .help("or indent legs below the line to split the amount among ends");
-    match flow.junction {
+    match flow.course.junction() {
         Junction::Out => diag.fix(
             "or send it to `?`, the party for money whose destination is unknown",
             Loc::new(arrow.file, arrow.end, arrow.end),
