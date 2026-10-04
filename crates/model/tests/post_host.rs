@@ -48,7 +48,7 @@ fn lowered(text: &str) -> (Book<'_>, Vec<String>) {
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
     let (book, diagnostics) = build(&[Source { path, file, embedded: false }]);
-    (book, diagnostics.into_iter().map(|diagnostic| diagnostic.code.into_owned()).collect())
+    (book, diagnostics.into_iter().map(|diagnostic| diagnostic.code.to_string()).collect())
 }
 
 /// The one law the book has that is owned by `owner`, which derives.

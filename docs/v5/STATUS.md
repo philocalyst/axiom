@@ -223,6 +223,15 @@ regression; it is what v4 left. K5d is the lane that makes them real, and each i
 
 ## Lane U, in numbers
 
+C2, one lowering of a line that moves value: **55,938**, −205 from the v5 head `9590f36` (56,143); model 18,908 (−212), core
+3,502 (+8), session 501 (−1). Planned against delivered: the `Diagnostic` behind one `Box` (first, the coordinator's) +9,
+clippy 277 to 58 warnings; U7 −1,130/**−198** (`Recording`, the context of a dated record, with its skeleton and its steps as
+methods; the journal, the occurrence and the loan's origination on it; the contract's template and the law's `also` line keep
+their own lowering); U8 −110/**0** and U9 −110/**0** (the resolvers and openings are as short as a table of them); U10
+−100/**−16**: **−214 of −1,450** (14%). Byte-identical to `9590f36` in `diff/`, all 577 Books, goldens, mistakes and the
+declared-lines corpus; the release suite green. With C1, 32% of plan: the ledger's rest lands the tree near **53,500**;
+distance to 27,000: **28,938**. UNIFY §13 says, for the user, what gets under 40,000 and what under 27,000.
+
 C1, one site, one tail, one property reader: **56,143**, −966 from the v5 head `bce9735` (57,109); model 19,120 (−972),
 syntax 6,438 (−4), core 3,494 (+10, phase 1a). Per entry, planned (with L-d) against delivered: U4 −960/**−437**, U3
 −200/**−82**, U2 −270/**−150**, U1 −840/**−350** (the world keeps its diagnostics, −259; a statement is lowered in its

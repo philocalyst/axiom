@@ -82,9 +82,11 @@ pub(super) fn loan<'s>(world: &World<'s>, contract: WrittenContract<'_, 's>) -> 
         None => None,
         Some(_) => {
             let asset = a.with("contract-loan-asset", |a| a.word(&["for"]).and_then(|_| a.asset(world)));
-            let undeclared = |problem: Diagnostic| match problem.code == "unknown-asset" {
-                true => Diagnostic { code: "contract-loan-asset".into(), ..problem },
-                false => problem,
+            let undeclared = |mut problem: Diagnostic| {
+                if problem.code == "unknown-asset" {
+                    problem.code = "contract-loan-asset".into();
+                }
+                problem
             };
             Some(asset.map_err(undeclared)?.0)
         }

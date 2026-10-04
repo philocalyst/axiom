@@ -4,6 +4,7 @@
 //! command line decides how to draw it.
 
 use std::borrow::Cow;
+use std::ops::{Deref, DerefMut};
 
 /// A loaded source file.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -53,8 +54,14 @@ pub enum Disposition {
     Waived,
 }
 
+/// What went wrong, behind one pointer: a `Result` whose error is a diagnostic is no wider than its value and a
+/// reference, and the parts read as fields of it.
 #[derive(Clone, Debug)]
-pub struct Diagnostic {
+pub struct Diagnostic(Box<Parts>);
+
+/// The parts of a [`Diagnostic`].
+#[derive(Clone, Debug)]
+pub struct Parts {
     pub severity: Severity,
     /// A stable kebab-case name: `unknown-place`, or a law's own name
     /// (`deferral-limit`) for what a law found.
@@ -81,17 +88,24 @@ pub struct Help {
     pub edit: Option<(Loc, String)>,
 }
 
+impl Deref for Diagnostic {
+    type Target = Parts;
+    fn deref(&self) -> &Parts {
+        &self.0
+    }
+}
+
+impl DerefMut for Diagnostic {
+    fn deref_mut(&mut self) -> &mut Parts {
+        &mut self.0
+    }
+}
+
 impl Diagnostic {
     pub fn new(severity: Severity, code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Diagnostic {
-        Diagnostic {
-            severity,
-            code: code.into(),
-            disposition: Disposition::Open,
-            message: message.into(),
-            labels: vec![],
-            notes: vec![],
-            help: vec![],
-        }
+        let (code, message, disposition, labels, notes, help) =
+            (code.into(), message.into(), Disposition::Open, vec![], vec![], vec![]);
+        Diagnostic(Box::new(Parts { severity, code, disposition, message, labels, notes, help }))
     }
 
     pub fn error(code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Diagnostic {

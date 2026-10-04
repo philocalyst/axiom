@@ -66,9 +66,6 @@
 //! ```
 
 #![forbid(unsafe_code)]
-// `Diagnostic` is 128 bytes and every crate of the workspace returns it by value in an `Err`; a smaller or interned one
-// (STATUS, "What K0b found") would remove the lint, and this is the one place this crate says it knows.
-#![allow(clippy::result_large_err)]
 
 mod edit;
 mod session;
