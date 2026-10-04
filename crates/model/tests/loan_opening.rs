@@ -201,6 +201,14 @@ fn a_loan_made_after_the_books_first_fact_is_left_as_the_journal_says() {
 }
 
 #[test]
+fn a_loan_made_on_the_day_the_book_begins_was_made_in_it_and_is_not_opened() {
+    // The book's first fact is on the loan's own day and nothing originates it: the journal has not said where the cash went,
+    // and the terms do not say it for the journal. Only a loan made before the first fact is opened.
+    let (book, diagnostics) = built(&format!("opening 2025-01-15\n  checking 900_000 USD\n{LOAN}"));
+    assert!(implied(&book).is_empty() && notes(&diagnostics).is_empty());
+}
+
+#[test]
 fn a_loan_paid_off_before_the_book_began_opens_nothing() {
     let paid = "contract car with bank\n  loan 1_000 USD on 2024-01-15 at 0% over 6m\n  monthly on 1 from checking\n";
     let (book, diagnostics) = built(&format!("{paid}{OPENING}"));

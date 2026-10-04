@@ -164,7 +164,7 @@ model/promise.rs              Promises::owed_before(book, contract, day) -> Opti
 model/promise/amortization.rs Amortization::owed_before(day); Said.begins (the day the book begins), set by Said::of
 model/promise/causes.rs       explain: payments from said.begins only
 model/journal.rs              Derivation::Opening(Id<Contract>)
-model/lower/loan_opening.rs   NEW: which loans are unopened, the opening's flow and transaction, the note        ~110 lines
+model/lower/loan_opening.rs   NEW: which loans are unopened, the opening's flow and transaction, the note        (215 lines: see §10.2)
 model/lower/record.rs         record(): the loop asks the unopened loans to open once the first fact is made     ~+10
 engine/plan.rs, timeline.rs   Plan reads book.first_fact(); the function goes
 report/register.rs            the word for the new derivation (contract_flow_word, contract_flow)                 +2
@@ -210,3 +210,86 @@ differs by that payment and the opening does not. It is a book that waives a pay
   watched from today on the baseline (`scratchpad/k5e/p/decl`: `✓ 0 flows`, a forecast whose tab goes negative).
 * §4 by a scratch test in `crates/session/tests/` (deleted: it was never committed) that read each example's book and printed
   the loan, its first fact and its schedule's balance the day before.
+
+## 10. What was built, what the map got wrong, and what moved
+
+Written last, from the tree and the runs. Commits, in order: this map; the oracle before any code (`loans.py gen ... pre`); the first fact moved to the
+`Book` with the cause that stops counting payments before it; the opening itself with its tests, the four mistake books and LANGUAGE §5 and §7; and this
+section with the boundary test the sweep asked for.
+
+### 10.1 What the code is
+
+* `model/book.rs` `Book::first_fact`, moved from `engine/timeline.rs` (-9 there); `Plan` reads it.
+* `model/promise.rs` `Promises::owed_before(book, contract, day)`: `amortize` split into the loop over contracts and `amortize_with(promise, said)`, which the opening
+  calls on `Promises::alone(contract)` with `Said::rated` (the rates a statement said by then). `amortization.rs` `Amortization::owed_before`, `Said::begins`;
+  `causes.rs` counts payments from `said.begins`.
+* `model/journal.rs` one variant, `Derivation::Opening(contract)`; `report/register.rs` its word and its being the contract's own (2 lines).
+* `model/lower/loan_opening.rs`: `Unopened` (the loans no opening names and no line originates, by day made), `Begins` (the first fact's day, or none), `open_loan`,
+  `push_opening` (the flow, the transaction), `note` and `Insertion` (where the edit goes). `lower/record.rs`: `record()` asks `unopened.after(..)` after each record and
+  `unopened.finish(..)` after the last; its tail became `index_flows`, so that no function over 40 lines is lengthened (`record` 55 to 36).
+* Nothing in `engine/{ledger,state,post,fire}.rs`, nothing in `engine/loan_balance.rs`, no new `unsafe`, no `bool` parameter, no new dependency.
+
+### 10.2 Where the code differs from this map
+
+* **`loan_opening.rs` is 215 lines (33 of them its doc), not ~110.** The map did not price three things: the pre-scan of the journal for `DATE NAME` (`originations`: a rejected
+  origination line still says the loan began that day, and `native_records::loan_origination_rejects_a_second_amount_without_partial_flows` failed until it was read), the
+  edit as **a line of the opening that begins the book** (`Insertion`: when the book begins with an `opening` the lender's number is one line under it, the rendering of a block
+  inserted before an identical header being a diff the reader cannot follow), and the `Begins` enum.
+* **§0.4 was right and one of its inputs was not.** The lowering walks the loan from the terms, the rates said and the resets, and nothing the journal does: held to the compiled
+  schedule by a test over five variations (`the_opening_is_the_number_the_schedule_compiled_after_the_journal_gives`) and by the oracle's 7,500 books. The oracle found the corner
+  §7 already named, in a form the map did not: **a line that is itself the book's first fact and keeps a payment due before it** (`2026-02-16 loan` keeping the due day 2026-02-15). The
+  opening has the payment paid, the line posts it again, and the tab ends one principal below the schedule; the statement of what is owed shows it as `assertion` against the tab. The
+  generator does not draw it (`settle` returns false and the case is redrawn). A fix that reads the lines lowered so far would cover the common case (the line that begins the book) and not
+  a later one; it is not built.
+* **The tests that said "no diagnostic" for a book with a loan and no origination** (`model/tests/tabs.rs`: three) now allow the one note. The brief changes this behaviour; the commit says so.
+* **`explore-v5/03-triplex` loses one assertion, not four** (the gap is carried, §0.6); `02-family` four.
+
+### 10.3 What changed in the outputs, and why
+
+No golden moved. No existing mistake book moved (four are new: 112 the note and its edit, 113 an opening that names the loan, 114 a book that says nothing but a loan, 115 a lender's number the
+schedule cannot explain). The views of every example project (`check --all`, `balance`, `balance --monthly`, `claims`, `contracts`, `forecast`, `available`, `flow`, on 2026-03-31 and 2026-12-31) are
+byte-identical to the baseline's except for four projects, none a golden:
+
+| example | before | after | why |
+|---|---|---|---|
+| `11-sam` (2026-03-31) | `rocket` -1,095.13 USD; liabilities -334.42; net worth 75,728.49 | `rocket` 311,345.99 USD owed; liabilities 312,106.70; net worth -236,712.63 | the debt opens with 312,441.12 USD (the book's own comment says so) and the three payments the book keeps take it to 311,345.99; the net worth is negative because the condo (basis 402,000) has no price in this book, as when an `opening` line says the same number. A note |
+| `v4-sketch` | `rocket` -1,095.13; liabilities -460.94 | `rocket` 311,345.99; the same | the same book; 87 errors before and after |
+| `explore-v5/02-family` | 134 errors | 130 | four `rocket holds -N USD, not 462,302.32 USD` assertions on the mortgage's tab agree; the book's `loan-balance`s stay (its first payment is one month before its comment's) |
+| `explore-v5/03-triplex` | 66 errors | 65 | `first-federal holds -509.16 USD, not 355,671.89 USD` agrees (the debt opens with 356,181.05 USD) |
+| `flow` of the four | | `Unclassified` of January gains the opening (312,441.12 USD in `11-sam`) | `flow` counts an opening's flows as unclassified, as it counts the book's own; an `opening` line that says `mortgage 312_441.12 USD` moves it the same |
+
+### 10.4 Numbers
+
+| what | result |
+|---|---|
+| non-test Rust lines (`briefs/loc.py`) | 55,039 to 55,246: **+207**. `model` 19,549 to 19,762 (+213: `loan_opening.rs` +154 (215 lines with its doc), `record.rs` +25 (`Record::insertion` 13, the hook 4, `index_flows` is a move), `amortization.rs` +13, `promise.rs` +11, `book.rs` +8, `lower.rs` and `journal.rs` +1 each), `engine` 12,451 to 12,443 (-8: `first_fact` leaves the timeline), `report` +2. The brief said a few hundred lines at most; it is 207, of which the edit's placement (`Insertion` and `Record::insertion`) is about 35 |
+| function lengths (`hist.py`) | 1-10 lines: 2,130 to 2,142 functions; 11-20: 740 to 745; 21-40: 524 to 525; 41-80: 127 to 127; 81-160: 6 to 6; over 320: 1 to 1. No function over 40 lines was added or lengthened (`record` is 36, was 55) |
+| the oracle (`loans.py`) | **7,500 books whose first fact is after the loan** (seeds 7, 11 and 13) agree with the independent reference, 0 differ (the baseline: 4,050 differ). Each form asked: first fact an opening (6,032), a line that keeps a due day (523), a flow into the loan (855), a statement (90); the tab said by an opening that agrees with the schedule (1,849) or differs from it (1,896); 3,791 books with a rate said (some before the book began); resets with caps and lives; both prepayment modes (4,922 shorten, 2,578 recast); 7,196 with a missed payment; 14,978 statements; a loan paid off before the book (67, nothing opened); every cause. **The 4,500 of the old shape still agree** (seeds 7 and 11 of lane K5d) |
+| mutation (`loans.py mutate`, the `pre` corpus, first 600 books) | 31 mutants of the opening, its day, its amount, the first fact, the cause and the edit: **30 killed** (16 by the oracle, 14 by a named test), **1 survived and is equivalent** (`first_claim_change` taken out of `Book::first_fact`: a claim is made by a flow, which is earlier). K5d's mutant of the cause was rewritten for its new text and is killed by the oracle |
+| `fuzz.py ... diff` | 3,000 mutants of the examples 04 to 10: 0 differ between the baseline and this build (the note left out), 0 panics. 3,000 mutants of seven loan projects (`11-sam`, `v4-sketch`, `02-family`, `03-triplex`, `05-family`, `07-landlord`, `05-budgeter`): 0 panics |
+| `splits.py all` | 1,000 projects, 27,690 commands: 0 differ |
+| `claims.py` | 600 projects dumped by the baseline and this build: all byte-identical |
+| tests | `cargo test --workspace --release`: only the two known failures (`a_prorata_place_realizes_only_the_lots_share_and_deferrals_merge_into_one_lot`, `a_context_forecast_keeps_historical_and_same_day_obligations_once`); the K7b histories oracle (`crates/session/tests/histories.rs`) holds; `tests/golden.sh` and `tests/mistakes/run.sh` regenerate to the committed files |
+| `axiom check`, `bench/` (no loan), interleaved, fastest | 100k: 0.318 s baseline, 0.310 s now (15 runs); 1m: 2.860 s baseline, 2.882 s now (11 runs; median 3.071 and 3.003). Load average 2.3 to 7. No slowdown: the hook is one `Vec::is_empty` a record |
+
+### 10.5 What is not finished, and what is for the user to decide
+
+* **A loan made in the book with no origination line** (`02-family`'s `mortgage-2` and `car-loan`; the brief's rule is only for a loan made before the first fact) still leaves its tab at zero. It cannot be opened from its
+  terms: where the cash arrived is a fact only the book knows (`mortgage-2` is a refinance that took 20,000 USD out). **The least surprising spelling is a warning, not an implied flow**: `warning[loan-not-originated]` on
+  a loan made on or after the book's first fact whose day has no `DATE NAME` line, with the line as the edit (`2026-05-20 mortgage-2`, the origination K5d reads, which puts the principal in the holding the schedule pays from) and
+  `DATE NAME -> HOLDING` as the other. It is one pass over the same pre-scan (`originations`).
+* **Two inputs of the lowering's walk that the journal can still change**: the late first line above, and a waiver dated on or after the first fact of a due day before it (it makes the compiled schedule differ by that
+  payment and the opening not). Both are books that say something about a payment from before they began; a statement of what is owed shows each as an assertion on the tab.
+* **A book that declares a loan and says nothing else** is begun by it (the decision of §5.1) and warns, once, that its payments since are not kept: `note[loan-opening]` and `warning[missed-occurrence]` (mistake 114). Opening the debt at
+  `today - 1` instead would need the day the fold is run for, which the lowering does not have.
+* **`why contract`'s schedule** says "not written" for a payment before the book began, which is true and says less than "before the book".
+
+### 10.6 The three places I am least proud of
+
+1. **The opening follows the record that makes the first fact, on the same day.** It is the only place to put it that keeps the arena in order and the first fact where it was, and it is right because a place's balance at the end of a day does
+   not depend on the order of the day's flows, which no law, assertion or report of a debt tab observes. A book that begins with the loan's own payment line posts the principal into the tab before the debt is opened: right at the
+   end of the day, and one order of the day that nothing asks about. The tests and the oracle cover a first record that is an opening, a line, a flow and a statement.
+2. **Two walks of one loan.** `Promises::owed_before` (at lowering, over the events before the first fact) and `Promises::compile` (after, over all of them) share `walk` and every input but the journal, and are held equal by a test and by
+   7,500 books. They can still differ in the two corners of §10.5. One walk would be right and cannot exist until the opening may be made after the journal is lowered, which the arena of flows forbids.
+3. **`Insertion` reads bytes.** The model finds the start of a line and its indent in the source text (`rfind('\n')`) to word an edit for a diagnostic. It is 20 lines in the lowering for what is a code action (add a line to a block), and belongs
+   in the diagnostic's own vocabulary (an edit that says "a line, in this block, indented as its neighbours") for the editor, the MCP server and the GUI to place; I did not build that vocabulary.
