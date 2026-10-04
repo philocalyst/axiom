@@ -940,28 +940,6 @@ pub(crate) fn shortfall(book: &Book, m: &Motion, held: Qty, admitted: Qty, short
     d.help("record the purchase before this flow, or check the quantity; the missing amount is left as a negative balance so the rest of the ledger stays consistent")
 }
 
-/// A flow into or out of `PLACE.basis` that the place cannot carry: it holds
-/// no parcel to take the basis (`carried` is false), or less basis than the
-/// flow takes off.
-pub(crate) fn basis_shortfall(
-    book: &Book,
-    m: &Motion,
-    place: Id<Place>,
-    held: Qty,
-    amount: Qty,
-    carried: bool,
-) -> Diagnostic {
-    let (name, base) = (show::place(book, place), |qty: Qty| book.show(Amount::new(qty, book.base)).to_string());
-    let what = if carried {
-        format!("{name} has {} of basis, and this flow takes {} off", base(held), base(amount))
-    } else {
-        format!("{name} holds nothing to carry a change of basis")
-    };
-    Diagnostic::error("no-basis", what)
-        .label(m.loc, "a basis flow changes the basis of the parcels a place holds, and moves no quantity")
-        .help("record what the place holds first, or check the amount and the selectors")
-}
-
 /// A claim still open past its day: who owes what, and for how long.
 pub(crate) fn overdue(
     book: &Book,

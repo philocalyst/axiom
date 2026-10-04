@@ -107,17 +107,6 @@ impl<'f> Motion<'f> {
         Motion::from_view_at(book, book.flow_view(flow), txn, cause, day, amounts, flow_ordinal)
     }
 
-    pub fn from_view(
-        book: &'f Book,
-        view: FlowView<'f>,
-        txn: RuntimeTxn,
-        cause: Cause,
-        day: Day,
-        amounts: Amounts,
-    ) -> Motion<'f> {
-        Motion::from_view_at(book, view, txn, cause, day, amounts, 0)
-    }
-
     pub fn from_view_at(
         book: &'f Book,
         view: FlowView<'f>,

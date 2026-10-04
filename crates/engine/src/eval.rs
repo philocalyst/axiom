@@ -141,8 +141,6 @@ pub(crate) struct Context<'a> {
     /// What `self` is.
     pub subject: Subject,
     pub owner: Id<Entity>,
-    /// Governing purpose for purpose-law or template expression evaluation.
-    pub governing_purpose: Option<Id<axiom_model::Purpose>>,
     /// A compiled journal or contract-template expression has `self: flow`;
     /// ordinary law subjects remain place/entity/asset values.
     pub flow_subject: bool,
@@ -180,7 +178,6 @@ impl<'a> Context<'a> {
         Context {
             subject,
             owner,
-            governing_purpose: None,
             flow_subject: false,
             budget_history: false,
             inputs: None,
@@ -208,11 +205,6 @@ impl<'a> Context<'a> {
 
     pub fn for_law(mut self, law: Id<Law>) -> Self {
         self.law_id = Some(law);
-        self
-    }
-
-    pub fn for_purpose(mut self, purpose: Id<axiom_model::Purpose>) -> Self {
-        self.governing_purpose = Some(purpose);
         self
     }
 
@@ -1220,7 +1212,6 @@ impl<'a, 's> Machine<'a, 's> {
 
     fn purpose_total(&self, purpose: Option<Id<axiom_model::Purpose>>, window: Window) -> Value {
         let purpose = purpose
-            .or(self.ctx.governing_purpose)
             .or_else(|| {
                 self.law.and_then(|law| match law.owner {
                     axiom_model::Owner::Purpose(purpose) => Some(purpose),
@@ -1372,7 +1363,6 @@ impl<'a, 's> Machine<'a, 's> {
                 }
                 let occasion = Occasion::time(on, Days::on(on));
                 let mut context = Context::new(self.ctx.subject, self.ctx.owner, &occasion);
-                context.governing_purpose = self.ctx.governing_purpose;
                 context.inputs = self.ctx.inputs;
                 context.budget_history = true;
                 let value = expression(
