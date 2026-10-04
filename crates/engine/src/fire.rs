@@ -21,6 +21,7 @@ use crate::eval::{self, Context, Env, Occasion, Outcome};
 use crate::explain::{self, Frame};
 use crate::facts::{Reads, Shortcut};
 use crate::ledger::Ledger;
+use crate::lots::{CarryLotAddition, Shares};
 use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::scope::owner_of;
@@ -35,6 +36,31 @@ fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
     let internal = on.skip_internal
         && on.motion.is_some_and(|m| plan.inside(rule.subject, m.from) && plan.inside(rule.subject, m.to));
     rule.days.overlaps(on.span) && !internal
+}
+
+/// How a wash sale's loss, `amount` for `sold` shares, goes into the shares `bought` (the latest first): each takes its share
+/// of the loss for what it holds, as far as the shares sold go. Says the additions, how many shares they matched, and how much
+/// of the loss they took.
+fn allot(
+    bought: Vec<(Day, PartId, Qty)>,
+    sold: Qty,
+    amount: Qty,
+    held_since: Day,
+) -> Option<(Vec<CarryLotAddition>, Qty, Qty)> {
+    let held = bought.iter().try_fold(Qty::ZERO, |sum, &(.., qty)| sum.0.checked_add(qty.0).map(Qty))?;
+    let (matched, mut shares) = (held.min(sold), Shares::new(amount, sold));
+    let (mut left, mut carried, mut additions) = (matched, Qty::ZERO, Vec::new());
+    for (acquired, part, held) in bought {
+        if left.is_zero() {
+            break;
+        }
+        let quantity = held.min(left);
+        let addition = CarryLotAddition { part, acquired, held_since, quantity, amount: shares.take(quantity) };
+        carried = carried.0.checked_add(addition.amount.0).map(Qty)?;
+        additions.push(addition);
+        left -= quantity;
+    }
+    Some((additions, matched, carried))
 }
 
 fn law_consumes(book: &axiom_model::Book<'_>, law: Id<Law>) -> bool {
@@ -366,46 +392,8 @@ impl Ledger<'_, '_, '_> {
         let sold =
             ctx.amount.filter(|sold| sold.unit == unit).map(|_| realized.quantity).filter(|&qty| qty > Qty::ZERO);
         let sold = sold.filter(|_| amount <= loss).ok_or(invalid)?;
-        // The owner's shares bought within the window that no loss was carried into, by the day and part they were bought.
-        let mut bought: Vec<(Day, PartId, Qty)> = Vec::new();
-        for slot in self.plan.places_of(ctx.owner).iter().filter_map(|&place| self.world.holdings.get(place, unit)) {
-            for lot in slot
-                .holding
-                .lots
-                .iter()
-                .filter(|lot| lot.qty > Qty::ZERO && !lot.wash_matched && lot.acquired <= ctx.day)
-            {
-                let Some(part) = lot.part.filter(|&part| part != from) else { continue };
-                if !crate::Assets::within_carry_window(lot.acquired, ctx.day, within) {
-                    continue;
-                }
-                match bought.iter_mut().find(|(day, seen, _)| (*day, *seen) == (lot.acquired, part)) {
-                    Some((_, _, qty)) => *qty = qty.0.checked_add(lot.qty.0).map(Qty).ok_or(invalid)?,
-                    None => bought.push((lot.acquired, part, lot.qty)),
-                }
-            }
-        }
-        bought.sort_by_key(|&(day, ..)| std::cmp::Reverse(day));
-        let held =
-            bought.iter().try_fold(Qty::ZERO, |sum, &(.., qty)| sum.0.checked_add(qty.0).map(Qty)).ok_or(invalid)?;
-        let (matched, mut shares) = (held.min(sold), crate::lots::Shares::new(amount, sold));
-        let (mut left, mut carried, mut additions) = (matched, Qty::ZERO, Vec::new());
-        for (acquired, part, held) in bought {
-            if left.is_zero() {
-                break;
-            }
-            let quantity = held.min(left);
-            let addition = crate::lots::CarryLotAddition {
-                part,
-                acquired,
-                held_since: realized.held_since,
-                quantity,
-                amount: shares.take(quantity),
-            };
-            carried = carried.0.checked_add(addition.amount.0).map(Qty).ok_or(invalid)?;
-            additions.push(addition);
-            left -= quantity;
-        }
+        let bought = self.bought_within(ctx, unit, from, within)?;
+        let (additions, matched, carried) = allot(bought, sold, amount, realized.held_since).ok_or(invalid)?;
         if !additions.is_empty() {
             self.carry_basis_to_parts(unit, &additions).map_err(|_| invalid)?;
             self.sample_temporal(ctx.day);
@@ -433,6 +421,33 @@ impl Ledger<'_, '_, '_> {
             codes,
         };
         self.world.assets.enqueue_carry(carry).map_err(|_| invalid)
+    }
+
+    /// The shares of `unit` the owner of `ctx` bought within `within` of its day and holds, that no loss was carried into
+    /// yet and that are not the sold ones (`from`): what a wash sale's loss goes into, by the day and part they were bought,
+    /// the latest first.
+    fn bought_within(
+        &self,
+        ctx: &Context,
+        unit: Id<Commodity>,
+        from: PartId,
+        within: Span,
+    ) -> Result<Vec<(Day, PartId, Qty)>, Fault> {
+        let mut bought: Vec<(Day, PartId, Qty)> = Vec::new();
+        let slots = self.plan.places_of(ctx.owner).iter().filter_map(|&place| self.world.holdings.get(place, unit));
+        let lots = slots.flat_map(|slot| &slot.holding.lots);
+        for lot in lots.filter(|lot| lot.qty > Qty::ZERO && !lot.wash_matched && lot.acquired <= ctx.day) {
+            let Some(part) = lot.part.filter(|&part| part != from) else { continue };
+            if !crate::Assets::within_carry_window(lot.acquired, ctx.day, within) {
+                continue;
+            }
+            match bought.iter_mut().find(|(day, seen, _)| (*day, *seen) == (lot.acquired, part)) {
+                Some((_, _, qty)) => *qty = qty.0.checked_add(lot.qty.0).map(Qty).ok_or(Fault::InvalidProgram)?,
+                None => bought.push((lot.acquired, part, lot.qty)),
+            }
+        }
+        bought.sort_by_key(|&(day, ..)| std::cmp::Reverse(day));
+        Ok(bought)
     }
 
     /// Reads a floor of nothing (`balance >= empty`) straight off the holdings
@@ -679,5 +694,39 @@ impl Ledger<'_, '_, '_> {
             let diagnostic = explain::faulted(&frame, fault, origin, holder);
             self.record.report(diagnostic);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allot;
+    use crate::PartId;
+    use axiom_core::{Day, Id, Qty};
+    use axiom_model::RuntimeTxn;
+
+    fn part(ordinal: u32) -> PartId {
+        PartId { origin: RuntimeTxn::Adjustment { place: Id::new(1), day: Day(1) }, ordinal }
+    }
+
+    #[test]
+    fn a_loss_goes_into_no_more_shares_than_were_sold_or_bought_and_no_more_than_the_loss() {
+        let bought = || vec![(Day(30), part(0), Qty(4)), (Day(20), part(1), Qty(5))];
+        // Sold 6 of a loss of 100: the latest 4 take 4/6 of it, the next 2 the rest, and the loss is carried whole.
+        let (additions, matched, carried) = allot(bought(), Qty(6), Qty(100), Day(5)).unwrap();
+        let taken: Vec<_> = additions.iter().map(|a| (a.acquired, a.quantity, a.amount, a.held_since)).collect();
+        assert_eq!(taken, [(Day(30), Qty(4), Qty(67), Day(5)), (Day(20), Qty(2), Qty(33), Day(5))]);
+        assert_eq!((matched, carried), (Qty(6), Qty(100)));
+        // Sold 12 but bought 9: only 9 are matched and only their share of the loss goes in.
+        let (additions, matched, carried) = allot(bought(), Qty(12), Qty(120), Day(5)).unwrap();
+        assert_eq!(additions.iter().map(|a| a.quantity).collect::<Vec<_>>(), [Qty(4), Qty(5)]);
+        assert_eq!((matched, carried), (Qty(9), Qty(90)));
+        // Nothing bought, nothing carried; a holding that does not add up is no allotment at all.
+        assert_eq!(
+            allot(Vec::new(), Qty(6), Qty(100), Day(5)).map(|(a, m, c)| (a.len(), m, c)),
+            Some((0, Qty(0), Qty(0)))
+        );
+        assert!(
+            allot(vec![(Day(2), part(0), Qty(i64::MAX)), (Day(1), part(1), Qty(1))], Qty(1), Qty(1), Day(1)).is_none()
+        );
     }
 }
