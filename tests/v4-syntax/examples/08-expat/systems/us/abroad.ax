@@ -6,7 +6,7 @@
 /// `lives us/abroad` and the country. Residences may overlap, so both systems
 /// govern the same days. This one adds what only a citizen abroad has:
 ///
-///   foreign-earned   pay from a place of kind `foreign-wages`, in dollars
+///   foreign-earned   pay with the purpose `foreign-wages`, in dollars
 ///   feie-excluded    the foreign earned income exclusion (Form 2555)
 ///
 /// The exclusion is an adjustment: it counts into the `adjustments` line of `us`,
@@ -25,17 +25,21 @@ system us/abroad
 use us
 
 
-/// Pay earned abroad, from an employer in the country of residence.
-kind foreign-wages : wages
+/// Pay earned abroad, from an employer in the country of residence: wages, so `us` counts it, and foreign.
+purpose foreign-wages : wages
+
+/// An employer abroad: what it pays is foreign wages.
+kind foreign-employer : employer
+  pays foreign-wages
 
 
 /// Pay from a foreign employer counts as foreign earned income, in dollars at
 /// the rate of the day.
 ///
-/// To fix: pay earned abroad must arrive from a place of kind `foreign-wages`.
+/// To fix: pay earned abroad must be `#foreign-wages`, as the pay of a `foreign-employer` is.
 law count-foreign-earned
   on in
-  when from is foreign-wages
+  when purpose is #foreign-wages
   count value(amount, USD) as foreign-earned
 
 /// The foreign earned income exclusion (IRC §911): pay earned abroad, up to a
@@ -50,8 +54,8 @@ law count-foreign-earned
 law feie
   each year closing 04-15
   let cap = feie-limit[year] * days-abroad[year] / 365
-  let excluded = min(tally(foreign-earned), cap)
-  let with-it = max(tally(total-income) - tally(adjustments) - standard-deduction[year, owner.filing], empty)
+  let excluded = min(value(tally(foreign-earned), USD), cap)
+  let with-it = max(value(tally(total-income), USD) - value(tally(adjustments), USD) - standard-deduction[year, owner.filing], empty)
   let without = max(with-it - excluded, empty)
   let stacking = progressive(ordinary[year, owner.filing], with-it) - progressive(ordinary[year, owner.filing], excluded) - progressive(ordinary[year, owner.filing], without)
   count excluded as feie-excluded

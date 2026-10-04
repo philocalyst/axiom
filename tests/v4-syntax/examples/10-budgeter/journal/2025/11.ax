@@ -1,62 +1,60 @@
-2025-11-01 checking -> rent 1_150 USD / landlord
-2025-11-01 checking -> transport 48 USD / metro
-2025-11-01 checking -> fun 29 USD / gym
-2025-11-03 checking -> utilities 61.84 USD / power-co
+2025-11-01 checking -> landlord 1_150 USD
+2025-11-01 checking -> metro 48 USD
+2025-11-01 checking -> gym 29 USD
+2025-11-03 checking -> power-co 61.84 USD
 
 /// The yearly membership: 139.00 USD, once a year. It is paid on November 3 and belongs to the twelve months after: written with the range it covers, the
 /// subscriptions envelope sees 11.58 USD a month instead of a 139.00 USD spike on the day.
-2025-11-03..2026-11-02 visa -> subscriptions 139 USD / amazon-prime
-2025-11-04 visa -> dining 21.35 USD
-2025-11-05 visa -> groceries 89.89 USD / aldi
+2025-11-03..2026-11-02 visa -> amazon-prime 139 USD
+2025-11-04 visa -> ? 21.35 USD #dining
+2025-11-05 visa -> aldi 89.89 USD
 
 /// Urgent care copay and the pharmacy.
-2025-11-06 visa -> medical 30 USD / urgent-care
-2025-11-06 visa -> medical 12.40 USD / cvs
+2025-11-06 visa -> urgent-care 30 USD
+2025-11-06 visa -> cvs 12.40 USD
 2025-11-06 checking -> savings 100 USD for car-fund
 2025-11-06 checking -> savings 100 USD for insurance-fund
 2025-11-06 checking -> savings 250 USD for trip-fund
 2025-11-06 checking -> savings 100 USD for emergency-fund
 2025-11-06 checking = 3_625.40 USD
 2025-11-07 checking -> wallet ? USD
-2025-11-08 visa -> phone 40 USD / mint-mobile
+2025-11-08 visa -> mint-mobile 40 USD
 2025-11-08 checking = 3_545.40 USD
-2025-11-09 visa -> transport 21.95 USD / rideshare
+2025-11-09 visa -> rideshare 21.95 USD
 
 /// A check from a client for freelance work, 350.00 USD, deposited by phone.
-2025-11-10 corner-cafe -> checking 350 USD #deposit-14
-2025-11-10 checking -> car 285.40 USD / carmax-finance
-2025-11-10 visa -> dining 43.09 USD
-2025-11-11 visa -> subscriptions 15.49 USD / netflix
-2025-11-12 visa -> groceries 58.40 USD / aldi
-2025-11-13 wallet -> dining 6.48 USD
-2025-11-14 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
+2025-11-10 corner-cafe -> checking 350 USD ^deposit-14
+2025-11-10 checking -> carmax-finance 285.40 USD
+2025-11-10 visa -> ? 43.09 USD #dining
+2025-11-11 visa -> netflix 15.49 USD
+2025-11-12 visa -> aldi 58.40 USD
+2025-11-13 wallet -> ? 6.48 USD #dining
+2025-11-14 studio -> checking 2_307.69 USD #wages
+2025-11-14 checking -> irs 226.00 USD
+2025-11-14 checking -> ssa 176.54 USD
+2025-11-14 checking -> health-plan 60.00 USD #pretax-premium
 
 /// It came back: insufficient funds. The bank takes the 350.00 USD out again and charges 12.00 USD.
-2025-11-14 #deposit-14 returned
-2025-11-14 checking -> fees 12 USD / first-bank
-2025-11-14 visa -> subscriptions 11.99 USD / spotify
-2025-11-15 checking -> student-loan 190 USD / mohela
-2025-11-15 visa -> fun 34.36 USD
-2025-11-16 visa -> dining 27.79 USD
-2025-11-19 visa -> groceries 73.74 USD / aldi
-2025-11-20 visa -> subscriptions 2.99 USD / apple
-2025-11-21 visa -> transport 12.95 USD / rideshare
+2025-11-14 ^deposit-14 returned
+2025-11-14 checking -> first-bank 12 USD
+2025-11-14 visa -> spotify 11.99 USD
+2025-11-15 checking -> mohela 190 USD
+2025-11-15 visa -> ? 34.36 USD #fun
+2025-11-16 visa -> ? 27.79 USD #dining
+2025-11-19 visa -> aldi 73.74 USD
+2025-11-20 visa -> apple 2.99 USD
+2025-11-21 visa -> rideshare 12.95 USD
 2025-11-22 checking -> visa 593.08 USD
-2025-11-23 visa -> dining 36.42 USD
-2025-11-24 visa -> fun 32.71 USD
-2025-11-24 wallet -> dining 9.21 USD
-2025-11-26 visa -> subscriptions 22.99 USD / adobe
-2025-11-27 visa -> groceries 51.87 USD / aldi
-2025-11-28 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
-2025-11-28 visa -> dining 18.83 USD
+2025-11-23 visa -> ? 36.42 USD #dining
+2025-11-24 visa -> ? 32.71 USD #fun
+2025-11-24 wallet -> ? 9.21 USD #dining
+2025-11-26 visa -> adobe 22.99 USD
+2025-11-27 visa -> aldi 51.87 USD
+2025-11-28 studio -> checking 2_307.69 USD #wages
+2025-11-28 checking -> irs 226.00 USD
+2025-11-28 checking -> ssa 176.54 USD
+2025-11-28 checking -> health-plan 60.00 USD #pretax-premium
+2025-11-28 visa -> ? 18.83 USD #dining
 2025-11-30 visa = 798.21 USD
 2025-11-30 checking = 6_155.22 USD
 2025-11-30 savings = 4_750.00 USD

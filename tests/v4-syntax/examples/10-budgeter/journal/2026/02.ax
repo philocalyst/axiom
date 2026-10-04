@@ -1,27 +1,26 @@
-2026-02-01 checking -> rent 1_150 USD / landlord
-2026-02-01 checking -> transport 48 USD / metro
-2026-02-01 checking -> fun 29 USD / gym
-2026-02-03 checking -> utilities 61.84 USD / power-co
-2026-02-04 visa -> dining 18.42 USD
-2026-02-05 visa -> groceries 67.86 USD / trader-joes
-2026-02-06 studio -> 2_307.69 USD
-  taxes/federal         226.00 USD
-  taxes/payroll         176.54 USD
-  health                60.00 USD
-  checking              ...
+2026-02-01 checking -> landlord 1_150 USD
+2026-02-01 checking -> metro 48 USD
+2026-02-01 checking -> gym 29 USD
+2026-02-03 checking -> power-co 61.84 USD
+2026-02-04 visa -> ? 18.42 USD #dining
+2026-02-05 visa -> trader-joes 67.86 USD
+2026-02-06 studio -> checking 2_307.69 USD #wages
+2026-02-06 checking -> irs 226.00 USD
+2026-02-06 checking -> ssa 176.54 USD
+2026-02-06 checking -> health-plan 60.00 USD #pretax-premium
 2026-02-06 checking -> savings 100 USD for car-fund
 2026-02-06 checking -> savings 100 USD for insurance-fund
 2026-02-06 checking -> savings 250 USD for trip-fund
 2026-02-06 checking -> savings 100 USD for emergency-fund
-2026-02-07 wallet -> personal-care 35 USD / barber
-2026-02-08 visa -> phone 40 USD / mint-mobile
-2026-02-09 visa -> transport 15.54 USD / rideshare
-2026-02-10 checking -> car 285.40 USD / carmax-finance
-2026-02-10 visa -> dining 25.63 USD
-2026-02-11 visa -> subscriptions 15.49 USD / netflix
-2026-02-12 visa -> groceries 82.49 USD / trader-joes
-2026-02-13 wallet -> dining 6.21 USD
-2026-02-14 visa -> subscriptions 11.99 USD / spotify
+2026-02-07 wallet -> barber 35 USD
+2026-02-08 visa -> mint-mobile 40 USD
+2026-02-09 visa -> rideshare 15.54 USD
+2026-02-10 checking -> carmax-finance 285.40 USD
+2026-02-10 visa -> ? 25.63 USD #dining
+2026-02-11 visa -> netflix 15.49 USD
+2026-02-12 visa -> trader-joes 82.49 USD
+2026-02-13 wallet -> ? 6.21 USD #dining
+2026-02-14 visa -> spotify 11.99 USD
 2026-02-14 visa = 839.28 USD
 2026-02-14 checking = 6_597.01 USD
 2026-02-14 savings = 4_813.75 USD

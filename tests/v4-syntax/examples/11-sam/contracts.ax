@@ -51,7 +51,7 @@ contract gym with equinox
 contract mortgage with rocket
   loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
   monthly on 1 from checking               // ▸ 1,892.92: the payment follows from the loan
-  also -> escrow 410 USD #escrow           // property tax and insurance, with each payment
+  also -> escrow 410 USD #escrow-deposit           // property tax and insurance, with each payment
 
 /// Dana's lease on the condo, with a deposit held for her.
 contract lease with dana

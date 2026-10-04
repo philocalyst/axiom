@@ -1,169 +1,130 @@
 // Where money is, what each envelope may take, and who is paid.
 //
-// A budget is a property of an account: `budget 350 USD monthly`. It covers the
-// account and everything under it, and only warns. There is no rollover: each month
+// A budget is a limit on a purpose: `budget groceries 350 USD monthly`. It covers the
+// purpose and everything under it, and only warns. There is no rollover: each month
 // starts at zero, which is why the things that are not monthly have funds.
+//
+// Money sits in accounts. Whom it is paid to is a party, and what it is for is a
+// purpose: there are no income or expense accounts, so a merchant carries the purpose
+// of what it sells, and a payment to no one in particular says its purpose itself.
 
 // ─── Money ──────────────────────────────────────────────────────────────────
 
-account assets/bank/checking : bank
+account checking : bank
 
 /// A plain wallet: what I take from the ATM, and small things paid with cash.
-account assets/cash/wallet : cash
+account wallet : cash
 
 /// One card for everything, paid in full on the 22nd.
-account liabilities/visa : credit-card
+account visa : credit-card
 
 // The funds are money set aside for a bill that comes later. They live in one savings
 // account, each deposit tied to the envelope it is for (`for car-fund`): the money is not
 // available to spend, spending it is a payment straight out of the envelope
-// (`car-fund -> car-repair`), and `axiom available` lists what is held for each.
+// (`car-fund -> kwik-brakes`), and `axiom available` lists what is held for each.
 
 /// Everything set aside: the emergency fund and the funds for the car, the insurance and the trip.
-account assets/bank/savings : bank
+account savings : bank
 
 /// The emergency fund. Untouched.
 entity emergency-fund : envelope
-  via assets/bank/savings
+  via savings
 
 /// 100.00 USD a month, then spent on the car.
 entity car-fund : envelope
-  via assets/bank/savings
+  via savings
 
 /// 100.00 USD a month toward the yearly premium.
 entity insurance-fund : envelope
-  via assets/bank/savings
+  via savings
 
 /// 250.00 USD a month toward the June trip.
 entity trip-fund : envelope
-  via assets/bank/savings
+  via savings
 
 
-// ─── Income and equity ──────────────────────────────────────────────────────
-
-account income/salary    : wages
-account income/freelance
-
-
-// ─── Envelopes ──────────────────────────────────────────────────────────────
+// ─── What money is for ──────────────────────────────────────────────────────
 //
+// std and `us` declare groceries, dining, transport, fun, utilities, rent, phone, insurance, travel and
+// medical. The rest are this book's.
+
+purpose freelance : income
+
+purpose subscriptions : spending
+purpose clothing : spending
+purpose personal-care : spending
+purpose gifts : spending
+purpose car : spending
+purpose car-repair : spending
+purpose student-loan : spending
+purpose fees : spending
+purpose payroll-tax : spending
+/// The health premium comes out of pay before tax (a cafeteria plan): it is pay not received, so it
+/// is counted as pre-tax and taken back out of income.
+purpose pretax-premium : pretax-benefit
+  law pretax-premium
+    on flow
+    count amount as pretax
+    count -amount as total-income
+
 // Monthly envelopes: what I mean to spend in a month, per kind of thing.
 
-account expenses/groceries
-  budget 350 USD monthly
-
-account expenses/dining
-  budget 150 USD monthly
-
-account expenses/transport
-  budget 120 USD monthly
+budget groceries 350 USD monthly
+budget dining 150 USD monthly
+budget transport 120 USD monthly
 
 /// The gym, concerts, the movies.
-account expenses/fun
-  budget 120 USD monthly
+budget fun 120 USD monthly
 
-account expenses/subscriptions
-  budget 90 USD monthly
-
-account expenses/clothing
-  budget 80 USD monthly
-
-account expenses/personal-care
-  budget 40 USD monthly
-
-account expenses/utilities
-  budget 100 USD monthly
+budget subscriptions 90 USD monthly
+budget clothing 80 USD monthly
+budget personal-care 40 USD monthly
+budget utilities 100 USD monthly
 
 // Yearly envelopes: things I only pay a few times a year.
 
-account expenses/gifts
-  budget 500 USD yearly
+budget gifts 500 USD yearly
+budget insurance 1_200 USD yearly
+budget medical 400 USD yearly
 
-account expenses/insurance
-  budget 1_200 USD yearly
-
-account expenses/medical
-  budget 400 USD yearly
-
-// Things with no envelope.
-
-account expenses/rent
-account expenses/phone
-account expenses/car
-account expenses/car-repair
-account expenses/student-loan
-/// The health premium comes out of pay before tax (a cafeteria plan): a place of kind `pretax-benefit` takes it out of income.
-account expenses/health : pretax-benefit
-account expenses/fees
-
-/// The June trip. No envelope of its own: the trip fund pays for it.
-account expenses/travel
-account expenses/taxes/federal : federal-tax
-account expenses/taxes/payroll
+// Things with no envelope: rent, phone, the car, its repairs, the student loan, fees and the trip.
 
 
 // ─── People and merchants ───────────────────────────────────────────────────
 
 entity studio : employer
-  via income/salary
+entity ssa #payroll-tax
+entity health-plan : health-insurer
 
-entity airline : org
-  via expenses/travel
-entity hotel : org
-  via expenses/travel
+entity airline #travel
+entity hotel #travel
 
-entity landlord : org
-  via expenses/rent
-entity metro : org
-  via expenses/transport
-entity gym : org
-  via expenses/fun
-entity power-co : org
-  via expenses/utilities
-entity mint-mobile : org
-  via expenses/phone
-entity netflix : org
-  via expenses/subscriptions
-entity spotify : org
-  via expenses/subscriptions
-entity apple : org
-  via expenses/subscriptions
-entity adobe : org
-  via expenses/subscriptions
-entity hulu : org
-  via expenses/subscriptions
-entity amazon-prime : org
-  via expenses/subscriptions
-entity aldi : org
-  via expenses/groceries
-entity kroger : org
-  via expenses/groceries
-entity trader-joes : org
-  via expenses/groceries
-entity urgent-care : org
-  via expenses/medical
-entity cvs : org
-  via expenses/medical
-entity rideshare : org
-  via expenses/transport
-entity carmax-finance : org
-  via expenses/car
-entity mohela : org
-  via expenses/student-loan
-entity barber : org
-  via expenses/personal-care
-entity kwik-brakes : org
-  via expenses/car-repair
-entity progressive : org
-  via expenses/insurance
-entity jo : org
-  via expenses/fun
-entity food-bank : org
-  via expenses/gifts
-entity corner-cafe : org
-  via income/freelance
-entity first-bank : org
-  via expenses/fees
+entity landlord #rent
+entity metro #transport
+entity gym #fun
+entity power-co #utilities
+entity mint-mobile #phone
+entity netflix #subscriptions
+entity spotify #subscriptions
+entity apple #subscriptions
+entity adobe #subscriptions
+entity hulu #subscriptions
+entity amazon-prime #subscriptions
+entity aldi #groceries
+entity kroger #groceries
+entity trader-joes #groceries
+entity urgent-care #medical
+entity cvs #medical
+entity rideshare #transport
+entity carmax-finance #car
+entity mohela #student-loan
+entity barber #personal-care
+entity kwik-brakes #car-repair
+entity progressive #insurance
+entity jo #fun
+entity food-bank #gifts
+entity corner-cafe #freelance
+entity first-bank #fees
 
 
 // ─── Codes ──────────────────────────────────────────────────────────────────

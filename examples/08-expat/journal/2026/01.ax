@@ -1,4 +1,4 @@
 /// Dana works out the year's tax in January, stacking rule included, and pays what the withholding did not cover:
 /// it is paid in 2026 and it is `for 2025`, so the 2025 return counts it.
-2026-01-05 us-checking -> taxes/federal 1_200.00 USD for 2025
+2026-01-05 us-checking -> irs           1_200.00 USD for 2025
 2026-01-05 us-checking =  18_805.75 USD

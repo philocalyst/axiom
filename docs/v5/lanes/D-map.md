@@ -248,3 +248,30 @@ transfers; `check` on `bench/` 100k is byte-identical (1,022 errors both) and 1m
 
 Item 8, prepared and not done: with `grace 30d` on `manager-fee` (tried on a scratch copy, not in `examples/`) `07-landlord`'s
 `check` goes from 7 errors to 5.
+
+## Item 8, as built (after L1 and K3f merged)
+
+Six commits: `03-violations`, `07-landlord`, `11-sam`, `10-budgeter`, `09-shared`, `08-expat`. Every edit to an example is in its copy in
+`tests/v4-syntax/examples/` too, and `crates/cli/tests/upgrade.rs` passes (5 tests): for the three ports the copy is the hand-ported
+book in v4 spelling, written by a script over the old v3 text and the declarations by hand, and `fmt --upgrade` of it is the example
+byte for byte, so the proof test needs no special case for 08, 09 and 10. Only the goldens of 07 (the grace), 08, 09 and 10 moved; the
+old goldens of the three ports were each 600 lines of the v3 errors. `tests/mistakes` did not move.
+
+What the engine and the language could not say, and what the books do instead (each is also in the README of its book):
+
+| where | the gap | the book writes |
+|---|---|---|
+| 09 | LANGUAGE §3: "a flow to a party with `due`, or `for` a party, is a claim". Only `X owes me`, `me owes X` and a flow with `due` into a declared `receivable` place make one (K3c-map section 1.1) | `ben owes me 1_050.00 USD #rent due ... ^rent-2025-03`, a payment `checking <- ben ... ^rent-2025-03`; the loan to a friend is a flow and a claim |
+| 09 | a tab has no name, so a value cannot be asserted of it (`statement-lowering`: "a value needs an account, asset, code or commodity subject") | the 43 month-end `by-cleo = 95.70 USD` statements are gone; `claims`, the README table and `verify09.py` are the reconciliation |
+| 09 | a write-off is whole (`a full claim write-off cannot include recovery lines`); `#loan` is not a built-in purpose | forgiving 200 of 250 is Riley's payment and a gift of the same money; `purpose loan : transfer` is declared |
+| 09 | a claim on an employer made with `owes me` is a flow *from* the employer, so the party kind's `pays wages` makes it wages; so is the payment | `#job-supplies` on the claim, `#reimbursement` on the payment |
+| 09 | the grant's property is `grant-purpose` (`std.ax:152`); `purpose garden` on the entity is read as the party's own purpose and the `purpose` law says "`grant-purpose` is not set" | `grant-purpose garden`. **`02-household`, `03-violations` and `tests/mistakes/70-grant-wrong-purpose.ax` write `purpose education`, so their grant law has no purpose to test** |
+| 08, 10 | a paystub written as a split through the owner counts as wages only what lands in an account (7,219.80 of a 10,416.67 stub; no `pretax`) | gross wages, then the withholding as outflows (the 05-family pattern); in euros through a clearing account, because the FBAR's `always` law and the currency disposals read every intermediate balance |
+| 08 | a two-amount line whose price does not terminate stays v4 (`warning[v4-syntax]`) | the six-digit price that rounds to the statement's amount |
+| 08 | tallies in a project law must be `value(tally(x), USD)` (type-mismatch otherwise); prices need `=` | written so; the `foreign-wages`, `de-tax` and `student-loan-interest` account kinds are purposes of the systems that count them |
+| 10 | a contract paid `from` an envelope that holds less than it pays is projected without the cap, so `Committed` moves by 500.00 instead of 1,500.00 on the trip (net worth moves by the 3,000.00 either way); the weekly 24.50 of dining paid to `?` is no longer found recurring, so every forecast figure is 490.00 higher | README says both |
+
+Found, not caused and not touched: `07-landlord` has 5 assertion errors at the v5 head (`deposit-bank`, `deposits`, `bills`) with and without `grace 30d`;
+`examples/verify/verify11.py` fails at the head (`straight-line` is no longer in `std-sketch.ax`); the `outputs/` folders of 04 to 10 are recordings of the
+legacy binary and say v3 (`expenses/fun`), so the READMEs name figures, not those files; `contracts` prints "0 kepts"; `check` and `budget` disagree about October's
+fun in 10-budgeter (297.01 in the warning, 323.02 for the month: the warning's figure leaves out the last flow of the month, 26.01 on 10-24).

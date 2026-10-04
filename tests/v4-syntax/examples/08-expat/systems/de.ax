@@ -12,17 +12,18 @@ system de
 use std
 
 
+/// German tax withheld from pay or from interest. What is paid counts as foreign
+/// tax already paid.
+purpose de-tax : tax-paid
+
 /// The German tax authorities.
 entity finanzamt : government
-
-/// German tax withheld from pay or from interest. What arrives counts as foreign
-/// tax already paid.
-kind de-tax : expense
+  purpose de-tax
 
 /// Tax paid to Germany, counted in dollars at the rate of the day.
 ///
-/// To fix: German tax must arrive at a place of kind `de-tax`.
+/// To fix: German tax must be paid to the Finanzamt, or say `#de-tax`.
 law count-de-tax
   on in
-  when to is de-tax
+  when purpose is #de-tax
   count value(amount, USD) as foreign-tax-paid
