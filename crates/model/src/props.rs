@@ -392,9 +392,18 @@ impl<'a, 's> Args<'_, 'a, 's> {
         self.world.place(word)
     }
 
-    fn currency(&mut self) -> Result<Id<Commodity>, Diagnostic> {
-        let word = self.name("a commodity")?;
+    /// One commodity, as a book writes it: a unit, `USD`.
+    fn unit(&mut self, wanted: &str) -> Result<Id<Commodity>, Diagnostic> {
+        let unit = |expr: &Expr<'s>| match expr.kind {
+            ExprKind::Unit(symbol) => Some(Word { text: symbol.0, loc: expr.loc }),
+            _ => None,
+        };
+        let word = self.arg(wanted, unit)?;
         self.world.commodity_of(word)
+    }
+
+    fn currency(&mut self) -> Result<Id<Commodity>, Diagnostic> {
+        self.unit("a commodity such as `USD`")
     }
 
     fn citizens(&mut self) -> Result<Vec<Id<System>>, Diagnostic> {
@@ -468,12 +477,8 @@ impl<'a, 's> Args<'_, 'a, 's> {
             return Ok(Vec::new());
         }
         let mut units = Vec::new();
-        while let Some(expr) = self.peek() {
-            let ExprKind::Unit(symbol) = expr.kind else {
-                return Err(self.wrong(expr, "commodities such as `USD`, or `any`"));
-            };
-            self.next += 1;
-            units.push(self.world.commodity_of(Word { text: symbol.0, loc: expr.loc })?);
+        while self.peek().is_some() {
+            units.push(self.unit("commodities such as `USD`, or `any`")?);
         }
         match units.is_empty() {
             true => Err(Diagnostic::error("property-argument", "`holds` needs commodities or `any`")
